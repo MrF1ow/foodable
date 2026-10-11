@@ -115,6 +115,12 @@ body {
     padding: 14px 16px;
     gap: 12px;
 }
+/* A sub-section stacks its heading, lists and disclosures on the column gap,
+   not flush (Household settings' store and rules blocks had no spacing). */
+.app-main .psec {
+    display: grid;
+    gap: var(--gap-col);
+}
 
 .bottom-nav {
     position: sticky;
@@ -176,10 +182,42 @@ body {
 :where(.native) .btn-sm {
     min-height: 34px;
 }
+
+/* ---- form rhythm ----
+   One spacing scale for every form on every tab:
+     --gap-label  4px   a label to its own control
+     --gap-col    8px   side-by-side fields, and a control beside its button
+     --gap-field 12px   one field (or button, or form) to the next
+   A field is either a wrapping label (<label>Text<input></label>) or a label
+   followed by its control. Every form container stacks its fields on
+   --gap-field; a label that sits right before its control pulls the control up
+   to --gap-label with a negative margin, so both markups read the same. */
+.native {
+    --gap-label: 4px;
+    --gap-col: 8px;
+    --gap-field: 12px;
+}
 :where(.native label) {
     font-size: 12.5px;
     font-weight: 600;
     color: var(--text-dim);
+}
+:where(.native label:has(+ :is(input, select, textarea))) {
+    display: block;
+    margin-bottom: calc(var(--gap-label) - var(--gap-field));
+}
+:where(
+    .native
+        label:has(
+            > :is(
+                input:not([type="checkbox"], [type="radio"]),
+                select,
+                textarea
+            )
+        )
+) {
+    display: grid;
+    gap: var(--gap-label);
 }
 :where(.native label:has(> input[type="checkbox"], > input[type="radio"])) {
     display: flex;
@@ -190,7 +228,18 @@ body {
     font-weight: 500;
     color: var(--text);
 }
+/* Checkboxes stacked straight in a form read as one group: the 36px rows sit
+   flush. (Choice rows in a fieldset wrap side by side and keep their gap.) */
+:where(
+    .native
+        form
+        > label:has(> input[type="checkbox"], > input[type="radio"])
+        + label:has(> input[type="checkbox"], > input[type="radio"])
+) {
+    margin-top: calc(0px - var(--gap-field));
+}
 :where(.native :is(input[type="checkbox"], input[type="radio"])) {
+    flex: none;
     width: 18px;
     height: 18px;
     margin: 0;
@@ -198,12 +247,12 @@ body {
 }
 :where(.native form) {
     display: grid;
-    gap: 8px;
+    gap: var(--gap-field);
     margin: 0;
 }
 :where(.native fieldset) {
     display: grid;
-    gap: 8px;
+    gap: var(--gap-field);
     min-width: 0;
     margin: 0;
     padding: 0;
@@ -321,14 +370,14 @@ body {
     grid-template-rows: auto auto;
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
-    gap: 4px 8px;
+    gap: var(--gap-field) var(--gap-col);
 }
 
 .food-picker,
 .food-picker-panel,
 .food-picker-panel > form {
     display: grid;
-    gap: 8px;
+    gap: var(--gap-field);
 }
 .food-picker-results {
     list-style: none;
@@ -440,7 +489,7 @@ body {
 .row-actions > details[open] {
     flex-basis: 100%;
 }
-.row-actions select {
+.row-actions > select {
     width: auto;
     flex: 1 1 140px;
 }
@@ -478,8 +527,11 @@ details.more > summary::after {
 details.more[open] > summary::after {
     transform: translateY(1px) rotate(-135deg);
 }
-details.more[open] > summary {
-    margin-bottom: 10px;
+/* The opened body: every block below the summary (a form, a picker, a
+   second form such as Delete) starts --gap-field below the one before. Block
+   flow, so a label-then-control pair here collapses to --gap-label. */
+details.more > :not(summary) {
+    margin-top: var(--gap-field);
 }
 details.more > summary:hover {
     border-color: var(--text-dim);
@@ -514,7 +566,7 @@ details.more > summary > :is(h2, h3) {
 
 .grocery-section {
     display: grid;
-    gap: 6px;
+    gap: var(--gap-col);
 }
 .grocery-line-head {
     align-items: center;
@@ -579,14 +631,18 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- compact form layouts ---- */
 
-/* Label on its own line, then the control and its button side by side. */
-.inline-form {
+/* Label on its own line, then the control and its button side by side.
+   Single-field add forms whose class is pinned by tests take the same layout
+   by name. */
+.inline-form,
+.fridge-add-location,
+.grocery-add-store {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 6px 8px;
+    gap: var(--gap-field) var(--gap-col);
 }
-.inline-form > label {
+:is(.inline-form, .fridge-add-location, .grocery-add-store) > label {
     grid-column: 1 / -1;
 }
 
@@ -594,12 +650,8 @@ details.more > summary > :is(h2, h3) {
 .field-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 10px;
+    gap: var(--gap-field) var(--gap-col);
     align-items: end;
-}
-.field-grid > label {
-    display: grid;
-    gap: 4px;
 }
 .field-grid > :is(button, fieldset, .span-2) {
     grid-column: 1 / -1;
@@ -658,16 +710,12 @@ details.more > summary > :is(h2, h3) {
 }
 .meal-items {
     display: grid;
-    gap: 12px;
+    gap: var(--gap-field);
 }
 .meal-item {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 10px;
-}
-.meal-item > label {
-    display: grid;
-    gap: 4px;
+    gap: var(--gap-field) var(--gap-col);
 }
 .meal-item-name,
 .meal-item-results {
@@ -692,10 +740,10 @@ details.more > summary > :is(h2, h3) {
 }
 
 /* Keep a control and its button the same height on one line. */
-.inline-form > button {
+:is(.inline-form, .fridge-add-location, .grocery-add-store) > button {
     min-height: 44px;
 }
-.row-actions select {
+.row-actions > select {
     min-height: 34px;
     padding-top: 4px;
     padding-bottom: 4px;
