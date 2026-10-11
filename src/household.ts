@@ -735,6 +735,7 @@ export function parseMemberInput(raw: unknown): ParseResult<MemberDraft> {
         password?: unknown;
         email?: unknown;
         username?: unknown;
+        login?: unknown;
     };
     if (
         typeof record.display_name !== "string" ||
@@ -742,10 +743,18 @@ export function parseMemberInput(raw: unknown): ParseResult<MemberDraft> {
     ) {
         return { ok: false, error: "Enter a name." };
     }
-    const hasEmail =
-        typeof record.email === "string" && record.email.trim() !== "";
-    const hasUsername =
-        typeof record.username === "string" && record.username.trim() !== "";
+    // The Settings form has one "Email or username" field, like sign-in
+    // (`authEmailForSignIn`): an `@` makes it an email. Two separate fields
+    // read as "fill in both", which this parser has to refuse.
+    const single = typeof record.login === "string" ? record.login.trim() : "";
+    const email = single ? (single.includes("@") ? single : "") : record.email;
+    const username = single
+        ? single.includes("@")
+            ? ""
+            : single
+        : record.username;
+    const hasEmail = typeof email === "string" && email.trim() !== "";
+    const hasUsername = typeof username === "string" && username.trim() !== "";
     if (hasEmail === hasUsername) {
         return { ok: false, error: "Enter an email or username." };
     }
@@ -753,8 +762,8 @@ export function parseMemberInput(raw: unknown): ParseResult<MemberDraft> {
         return { ok: false, error: "Password must be at least 8 characters." };
     }
     const login = hasEmail
-        ? parseEmailLogin(record.email as string)
-        : parseUsernameLogin(record.username as string);
+        ? parseEmailLogin(email as string)
+        : parseUsernameLogin(username as string);
     if (!login.ok) return login;
     return {
         ok: true,

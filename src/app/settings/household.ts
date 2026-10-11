@@ -46,12 +46,11 @@ function addMemberFormHtml(error?: string): string {
 ${banner}
 <label for="add_display_name">Name</label>
 <input id="add_display_name" name="display_name" required maxlength="80" />
+<label for="add_login">Email or username</label>
+<input id="add_login" name="login" required autocomplete="off" autocapitalize="none" spellcheck="false" />
+<p class="hint">A username has no @: 2–31 letters, digits, dots, dashes or underscores. They sign in with it on the same login page.</p>
 <label for="add_password">Password</label>
-<input id="add_password" name="password" type="password" required />
-<label for="add_email">Email</label>
-<input id="add_email" name="email" type="email" />
-<label for="add_username">Username</label>
-<input id="add_username" name="username" autocomplete="username" />
+<input id="add_password" name="password" type="password" required minlength="8" autocomplete="new-password" />
 <button type="submit" class="btn-primary">Add member</button>
 </form>
 </details>`;
