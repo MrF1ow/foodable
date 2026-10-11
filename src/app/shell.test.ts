@@ -96,3 +96,60 @@ test("the appearance form maps System to a cleared preference", () => {
         theme: null,
     });
 });
+
+// The frame-sizing script waits for /app.css; a srcdoc widget frame does not,
+// so it can finish loading and post its first size-changed before the script
+// attaches a listener. Run the real script against a frame that has already
+// loaded and check it is sized without any load event or message.
+function runFrameSizer(contentHeight: number) {
+    const html = comingSoonPage("fridge");
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+    const listeners: Record<string, ((e: unknown) => void)[]> = {};
+    const docEl = {
+        style: { height: "" },
+        getBoundingClientRect: () => ({
+            height: docEl.style.height === "max-content" ? contentHeight : 150,
+        }),
+    };
+    const contentWindow = {};
+    const frame = {
+        style: { height: "" },
+        contentWindow,
+        contentDocument: { documentElement: docEl },
+        addEventListener() {},
+    };
+    const document = { querySelectorAll: () => [frame] };
+    const window = {
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+    };
+    new Function("document", "window", script)(document, window);
+    const post = (source: unknown, height: number) =>
+        listeners.message!.forEach((fn) =>
+            fn({
+                source,
+                data: {
+                    method: "ui/notifications/size-changed",
+                    params: { width: 400, height },
+                },
+            }),
+        );
+    return { frame, docEl, post, contentWindow };
+}
+
+test("widget frames are sized at once, even if they loaded before the script", () => {
+    const { frame, docEl } = runFrameSizer(467);
+    expect(frame.style.height).toBe("467px");
+    // The max-content probe is undone.
+    expect(docEl.style.height).toBe("");
+});
+
+test("a frame still on about:blank is left alone until it reports", () => {
+    const { frame, post, contentWindow } = runFrameSizer(0);
+    expect(frame.style.height).toBe("");
+    post({}, 300);
+    expect(frame.style.height).toBe("");
+    post(contentWindow, 300);
+    expect(frame.style.height).toBe("300px");
+});

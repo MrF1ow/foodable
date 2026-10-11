@@ -328,6 +328,16 @@ function initWidget(config) {
     });
 
     if (seeded) {
+        // The household app grows the frame to the height we report, so the
+        // document never needs to scroll. Left at the default overflow, the
+        // frame's short starting height gives the root a scrollbar, the card
+        // lays out a scrollbar-width narrower, the height is measured at that
+        // width, and Chromium keeps the scrollbar once the frame has grown
+        // (a wider card can be a pixel taller), so the user scrolled inside
+        // every card. Hidden overflow keeps layout at the frame's full width
+        // and makes the measurement exact. Only this branch: chat hosts
+        // never seed data.
+        if (host) document.documentElement.style.overflow = "hidden";
         paint(seeded, false);
         if (typeof config.onReady === "function") {
             try {
