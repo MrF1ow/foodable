@@ -310,7 +310,7 @@ body {
 .member-switch a[aria-current="page"],
 .subnav a[aria-current="page"] {
     background: var(--accent);
-    color: var(--bg);
+    color: var(--on-accent);
 }
 
 /* ---- shared form components ---- */
@@ -566,8 +566,8 @@ details.more > summary > :is(h2, h3) {
     top: 14px;
     width: 6px;
     height: 11px;
-    border-right: 2px solid var(--bg);
-    border-bottom: 2px solid var(--bg);
+    border-right: 2px solid var(--on-accent);
+    border-bottom: 2px solid var(--on-accent);
     transform: rotate(45deg);
 }
 .check-btn:focus-visible {

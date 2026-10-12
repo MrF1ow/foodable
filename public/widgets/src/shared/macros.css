@@ -292,9 +292,9 @@
     outline-offset: -1px;
 }
 /* The open tile's own captions go full-strength. --text-dim over the accent
-   tint measures 4.36:1 in light (5.07:1 on the plain panel), under the 4.5:1
-   floor — and the selected tile reading brighter than its neighbours is the
-   right emphasis anyway. */
+   tint measures 4.6:1 in light (5.07:1 on the plain panel), a hair over the
+   4.5:1 floor and under it for any darker accent — and the selected tile
+   reading brighter than its neighbours is the right emphasis anyway. */
 .mtile.open .mkey,
 .mtile.open .mcap,
 .mtile.open .msub,
