@@ -166,7 +166,7 @@ describe("runtime surfaces that stay", () => {
         const body = await (await app.request("http://x/")).text();
         expect(body).toContain('href="/brand/icon.svg" type="image/svg+xml"');
         expect(body).toContain('rel="apple-touch-icon"');
-        expect(body).toContain('class="auth-mark" src="/brand/icon.svg"');
+        expect(body).toContain('class="auth-mark" src="/brand/mark.svg"');
         expect(body).not.toContain("🍏");
     });
 

@@ -723,12 +723,12 @@ details.more > summary > :is(h2, h3) {
     gap: 6px;
     text-align: center;
 }
-/* The brand tile (/brand/icon.svg), which picks its light or dark variant
-   from the OS theme, as the login page does. */
+/* The bare brand mark (/brand/mark.svg), no tile: the tiles are for
+   favicons and home-screen icons. Brand green reads on both themes. */
 .auth-mark {
     display: block;
-    width: 52px;
-    height: 52px;
+    width: 51px;
+    height: 48px;
 }
 .auth-title {
     margin: 0;

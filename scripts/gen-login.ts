@@ -87,7 +87,7 @@ ${generatedBanner("scripts/gen-login.ts")}
         <main id="main" class="auth-stage native">
             <div class="auth-card panel">
                 <div class="auth-head">
-                    <img class="auth-mark" src="/brand/icon.svg" width="52" height="52" alt="" />
+                    <img class="auth-mark" src="/brand/mark.svg" width="51" height="48" alt="" />
                     <h1 class="auth-title">${esc(doc.title)}</h1>
                     <p class="auth-sub">${esc(doc.subtitle)}</p>
                 </div>
