@@ -723,14 +723,12 @@ details.more > summary > :is(h2, h3) {
     gap: 6px;
     text-align: center;
 }
+/* The brand tile (/brand/icon.svg), which picks its light or dark variant
+   from the OS theme, as the login page does. */
 .auth-mark {
-    display: grid;
-    place-items: center;
+    display: block;
     width: 52px;
     height: 52px;
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-    font-size: 28px;
 }
 .auth-title {
     margin: 0;
