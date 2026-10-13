@@ -32,7 +32,7 @@
 .seg-btn.active,
 .seg-btn[aria-selected="true"] {
     background: var(--accent);
-    color: var(--bg);
+    color: var(--on-accent);
 }
 /* Keyboard focus. form.css declares the same treatment for every control it
    owns, but the two widgets with a range toggle (trends, weight-trends) do not

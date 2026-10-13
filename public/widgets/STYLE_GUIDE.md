@@ -72,7 +72,8 @@ every primary button. `.seg-btn[aria-selected="true"]` is the same state as
 ## Design language
 
 Apple-like and neutral: grays/whites surfaces, one brand **green accent**
-(`--accent`, matching the landing page), **bold** headline weights (800), and
+(`--accent`, the logo green `BRAND_GREEN` in `src/brand.ts`, the same in both
+themes), **bold** headline weights (800), and
 `font-variant-numeric: tabular-nums` on every number so figures don't jitter.
 System font stack only (no web fonts — CSP). Generous radius (`--radius: 18px`),
 soft shadow in light mode, no shadow in dark (the near-black background carries
@@ -95,7 +96,8 @@ theme win in **both** directions (a light host inside a dark OS, and vice-versa)
     --panel: #ffffff;
     --panel-border: #e6e6ea;
     --track: #e6e6ea; /* unfilled gauge/bar/axis grey */
-    --accent: #4a7c59; /* brand green */
+    --accent: #28cf8b; /* brand green, the logo's */
+    --on-accent: #062c1c; /* label on an accent fill; not overridden per theme */
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05);
 
     /* Data-series palette (see the table below). */
@@ -127,7 +129,7 @@ theme win in **both** directions (a light host inside a dark OS, and vice-versa)
         --panel: #1c1c1e;
         --panel-border: #2c2c2e;
         --track: #2c2c2e;
-        --accent: #6ab98a;
+        --accent: #28cf8b;
         --shadow: none;
         --calories: #ffab2e;
         --protein: #a78bfa;
@@ -745,7 +747,7 @@ It is 5.07:1 on `--panel` in light and 5.93:1 in dark, so anything that dims it
 further — an `opacity`, or a tinted surface underneath — drops small text under the
 4.5:1 floor. That is the entire reason `.mtile.open` / `.cal.open` switch their own
 captions (`.mkey`, `.mcap`, `.msub`, `.cal-lab`, `.cal-left`, `.cal-goal`) to
-`var(--text)`: the 12% accent tint behind them costs 4.36:1 in light. The selected
+`var(--text)`: the 12% accent tint behind them leaves 4.6:1 in light, no headroom at all. The selected
 tile reading brighter than its neighbours is the right emphasis anyway. Rank text by
 size and weight, not by fading it — the one `opacity` left in the partial is on
 `.md-unit`, which rides bold, series-coloured text at the top of the contrast range.
@@ -911,9 +913,9 @@ means the same thing in both files.
 ## 7. Component: segmented control (`.seg`)
 
 A pill toggle for switching a view's mode/range (the trends and weight-trends
-7/14/30-day toggles). The **active** label uses `var(--bg)` on the accent fill so it
-stays high-contrast in both themes — off-white on dark-green in light, black on
-light-green in dark — without theme-specific overrides.
+7/14/30-day toggles). The **active** label uses `var(--on-accent)` on the accent fill. The green
+is light in both themes, so a white or `--bg` label would sit near 2:1;
+`--on-accent` holds about 7.5:1 without a theme-specific override.
 
 Two scales:
 
@@ -969,7 +971,7 @@ slicing client-side over re-calling the tool — instant, no host round-trip.
 }
 .seg-btn.active {
     background: var(--accent);
-    color: var(--bg); /* inverted label → high contrast in both themes */
+    color: var(--on-accent); /* dark label on the light green, both themes */
 }
 .seg-btn:focus-visible {
     outline: none;
@@ -1046,9 +1048,9 @@ Three things that are easy to get wrong:
   paints native OS chrome that ignores every token: a `<select>` in a dark widget
   comes out light, and so does its dropdown list. It is set in all four theme blocks
   alongside the custom properties.
-- **`.btn-primary` uses `color: var(--bg)`** on the accent fill, same trick as
-  `.seg-btn.active` — off-white on dark-green in light, black on light-green in
-  dark, no theme-specific override.
+- **`.btn-primary` uses `color: var(--on-accent)`** on the accent fill, same as
+  `.seg-btn.active`. Never put `--bg` or white on the accent: the green is light,
+  so that label falls to about 2:1.
 - **The select chevron is an inlined `data:` SVG** with a literal stroke colour. The
   sandbox CSP allows `img-src data:` only, and `currentColor` does not work inside
   `url()`, so a mid-grey that reads on both themes is used instead.

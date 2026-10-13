@@ -31,7 +31,6 @@ const MARKETING_PATHS = [
     "/api/patreon-posts",
     "/map-data.json",
     "/og.png",
-    "/apple-touch-icon.png",
     "/.well-known/glama.json",
     "/de/login.html",
 ] as const;
@@ -138,6 +137,37 @@ describe("runtime surfaces that stay", () => {
         ]) {
             expect(await Bun.file(file).exists(), file).toBe(false);
         }
+    });
+
+    test("the brand icons are served", async () => {
+        const touch = await app.request("http://x/apple-touch-icon.png");
+        expect(touch.status).toBe(200);
+        expect(touch.headers.get("content-type")).toBe("image/png");
+        for (const file of [
+            "icon.svg",
+            "icon-light.svg",
+            "icon-dark.svg",
+            "mark.svg",
+        ]) {
+            const r = await app.request(`http://x/brand/${file}`);
+            expect(r.status, file).toBe(200);
+            expect(r.headers.get("content-type") ?? "", file).toContain(
+                "image/svg+xml",
+            );
+            expect(await r.text(), file).toStartWith("<svg");
+        }
+        for (const path of ["/brand/nope.svg", "/brand/constructor"]) {
+            const r = await app.request(`http://x${path}`);
+            expect(r.status, path).toBe(404);
+        }
+    });
+
+    test("login HTML links the SVG favicon and the touch icon", async () => {
+        const body = await (await app.request("http://x/")).text();
+        expect(body).toContain('href="/brand/icon.svg" type="image/svg+xml"');
+        expect(body).toContain('rel="apple-touch-icon"');
+        expect(body).toContain('class="auth-mark" src="/brand/mark.svg"');
+        expect(body).not.toContain("🍏");
     });
 
     test("GET /robots.txt disallows crawlers", async () => {

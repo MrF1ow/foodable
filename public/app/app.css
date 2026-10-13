@@ -359,7 +359,7 @@ body {
 .member-switch a[aria-current="page"],
 .subnav a[aria-current="page"] {
     background: var(--accent);
-    color: var(--bg);
+    color: var(--on-accent);
 }
 
 /* ---- shared form components ---- */
@@ -618,8 +618,8 @@ details.more > summary > :is(h2, h3) {
     top: 14px;
     width: 6px;
     height: 11px;
-    border-right: 2px solid var(--bg);
-    border-bottom: 2px solid var(--bg);
+    border-right: 2px solid var(--on-accent);
+    border-bottom: 2px solid var(--on-accent);
     transform: rotate(45deg);
 }
 .check-btn:focus-visible {
@@ -771,14 +771,12 @@ details.more > summary > :is(h2, h3) {
     gap: 6px;
     text-align: center;
 }
+/* The bare brand mark (/brand/mark.svg), no tile: the tiles are for
+   favicons and home-screen icons. Brand green reads on both themes. */
 .auth-mark {
-    display: grid;
-    place-items: center;
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-    font-size: 28px;
+    display: block;
+    width: 51px;
+    height: 48px;
 }
 .auth-title {
     margin: 0;

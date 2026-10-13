@@ -69,7 +69,9 @@ function renderDoc(doc: LoginDoc): string {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${title}</title>
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/favicon.ico" sizes="32x32" />
+        <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
         <!-- No canonical/hreflang: this page has no fixed URL (rendered
@@ -85,7 +87,7 @@ ${generatedBanner("scripts/gen-login.ts")}
         <main id="main" class="auth-stage native">
             <div class="auth-card panel">
                 <div class="auth-head">
-                    <span class="auth-mark" aria-hidden="true">🍏</span>
+                    <img class="auth-mark" src="/brand/mark.svg" width="51" height="48" alt="" />
                     <h1 class="auth-title">${esc(doc.title)}</h1>
                     <p class="auth-sub">${esc(doc.subtitle)}</p>
                 </div>

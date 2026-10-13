@@ -12,6 +12,7 @@ import { startExportCleanup } from "./domain/export.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp } from "./net.js";
 import { getAppCss, warmWidgets } from "./widgets.js";
+import { BRAND_SVGS } from "./brand.js";
 import { clearSiteCookieHeader } from "./site-session.js";
 import { foodsRoutes } from "./web/routes/foods.js";
 import { fridgeRoutes } from "./web/routes/fridge.js";
@@ -230,6 +231,24 @@ app.get("/favicon.ico", async (c) => {
     } catch {
         return c.notFound();
     }
+});
+app.get("/apple-touch-icon.png", async (c) => {
+    const file = Bun.file("./public/apple-touch-icon.png");
+    if (!(await file.exists())) return c.notFound();
+    return c.body(await file.arrayBuffer(), 200, {
+        "Content-Type": "image/png",
+    });
+});
+// Rendered from src/brand.ts, the source the committed public/brand/ files
+// are generated from, so the served SVG cannot lag behind an edit.
+app.get("/brand/:file", (c) => {
+    const render = Object.hasOwn(BRAND_SVGS, c.req.param("file"))
+        ? BRAND_SVGS[c.req.param("file")]
+        : undefined;
+    if (!render) return c.notFound();
+    return c.body(render(), 200, {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+    });
 });
 
 // Health check

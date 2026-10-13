@@ -1,14 +1,19 @@
 :root {
     /* Light theme (default). Dark overridden below.
-                   Apple-like neutral grays/whites with the brand green
-                   accent, matching the landing page's clean section. */
+                   Neutral grays/whites with the brand green accent. The
+                   accent is the logo green (BRAND_GREEN in src/brand.ts) and
+                   is the same in both themes. */
     --text: #1d1d1f;
     --text-dim: #6e6e73;
     --bg: #f5f5f7;
     --panel: #ffffff;
     --panel-border: #e6e6ea;
     --track: #e6e6ea;
-    --accent: #4a7c59;
+    --accent: #28cf8b;
+    /* Text and icons on an accent fill. The green is light, so a light label
+       on it falls to ~2:1; this near-black green holds ~7.5:1 in both themes,
+       which is why no theme block overrides it. */
+    --on-accent: #062c1c;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05);
 
     --calories: #ff9f0a;
@@ -39,7 +44,7 @@
         --panel: #1c1c1e;
         --panel-border: #2c2c2e;
         --track: #2c2c2e;
-        --accent: #6ab98a;
+        --accent: #28cf8b;
         --shadow: none;
         --calories: #ffab2e;
         --protein: #a78bfa;
@@ -64,7 +69,7 @@
     --panel: #ffffff;
     --panel-border: #e6e6ea;
     --track: #e6e6ea;
-    --accent: #4a7c59;
+    --accent: #28cf8b;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05);
     --calories: #ff9f0a;
     --protein: #8b5cf6;
@@ -86,7 +91,7 @@
     --panel: #1c1c1e;
     --panel-border: #2c2c2e;
     --track: #2c2c2e;
-    --accent: #6ab98a;
+    --accent: #28cf8b;
     --shadow: none;
     --calories: #ffab2e;
     --protein: #a78bfa;

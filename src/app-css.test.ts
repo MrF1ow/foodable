@@ -22,7 +22,7 @@ test("app.css inlines each shared partial in full", async () => {
 
 test("app.css carries the widget brand green and none of the old per-form rules", async () => {
     const css = await getAppCss();
-    expect(css).toContain("--accent: #4a7c59");
+    expect(css).toContain("--accent: #28cf8b");
     expect(css).not.toContain("#2f8fd4");
     expect(css).not.toContain(".grocery-add-store button");
     expect(css).not.toContain(".recipe-create input");

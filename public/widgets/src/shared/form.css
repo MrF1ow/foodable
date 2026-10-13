@@ -149,12 +149,12 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
-/* Primary: accent fill. --bg rather than white, matching .seg-btn.active, so the
-   label stays legible when the accent lightens in dark mode. */
+/* Primary: accent fill with an --on-accent label, matching .seg-btn.active.
+   The green is light in both themes, so a white or --bg label is unreadable. */
 .btn-primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--bg);
+    color: var(--on-accent);
 }
 .btn-primary:hover:not(:disabled) {
     opacity: 0.88;
@@ -301,7 +301,7 @@
 }
 .step.active .dot {
     background: var(--accent);
-    color: var(--bg);
+    color: var(--on-accent);
 }
 .step.active {
     color: var(--text);

@@ -149,6 +149,18 @@ function newMcpServer(baseUrl: string): McpServer {
                     src: `${baseUrl}/favicon.ico`,
                     mimeType: "image/x-icon",
                 },
+                {
+                    src: `${baseUrl}/brand/icon-light.svg`,
+                    mimeType: "image/svg+xml",
+                    sizes: ["any"],
+                    theme: "light",
+                },
+                {
+                    src: `${baseUrl}/brand/icon-dark.svg`,
+                    mimeType: "image/svg+xml",
+                    sizes: ["any"],
+                    theme: "dark",
+                },
             ],
         },
         {
