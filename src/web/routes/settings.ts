@@ -156,6 +156,7 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
         password: String(body.password ?? ""),
         email: String(body.email ?? ""),
         username: String(body.username ?? ""),
+        login: String(body.login ?? ""),
     });
     if (!parsed.ok) {
         const page = await renderHouseholdSettingsRoute(userId, {

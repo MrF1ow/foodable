@@ -10,7 +10,11 @@ import { test, expect } from "bun:test";
 const BRIDGE = await Bun.file("./public/widgets/src/shared/bridge.js").text();
 const FOOTER = "You can enable or disable these widgets anytime";
 
-function paintedNotes(seeded: unknown, hasHost: boolean): string[] {
+function paintedNotes(
+    seeded: unknown,
+    hasHost: boolean,
+    docStyle: Record<string, string> = {},
+): string[] {
     const notes: string[] = [];
     const root = {
         innerHTML: "",
@@ -19,7 +23,7 @@ function paintedNotes(seeded: unknown, hasHost: boolean): string[] {
         },
     };
     const docEl = {
-        style: {},
+        style: docStyle,
         setAttribute() {},
         getBoundingClientRect: () => ({ height: 100 }),
     };
@@ -63,4 +67,21 @@ test("the standalone preview still shows the footer", () => {
     expect(
         paintedNotes(undefined, false).some((n) => n.startsWith(FOOTER)),
     ).toBe(true);
+});
+
+// The household app sizes its frames to the reported height, so a seeded
+// widget must never scroll: a transient scrollbar narrows the layout, the
+// height is measured at that width, and Chromium keeps the scrollbar.
+test("a seeded widget in a frame hides overflow; chat hosts are untouched", () => {
+    const seededStyle: Record<string, string> = {};
+    paintedNotes({ locale: "en" }, true, seededStyle);
+    expect(seededStyle.overflow).toBe("hidden");
+
+    const chatStyle: Record<string, string> = {};
+    paintedNotes(undefined, true, chatStyle);
+    expect(chatStyle.overflow).toBeUndefined();
+
+    const standaloneStyle: Record<string, string> = {};
+    paintedNotes(undefined, false, standaloneStyle);
+    expect(standaloneStyle.overflow).toBeUndefined();
 });

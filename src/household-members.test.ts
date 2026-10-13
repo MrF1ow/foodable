@@ -140,6 +140,32 @@ test("email login keeps the real address and rejects a username in the same call
     });
 });
 
+test("the Settings form's single login field is an email when it has an @", () => {
+    expect(
+        parseMemberInput({
+            display_name: "Sam",
+            login: "sam",
+            password: "password1",
+            email: "",
+            username: "",
+        }),
+    ).toEqual({ ok: true, value: usernameDraft() });
+    expect(
+        parseMemberInput({
+            display_name: "Sam",
+            login: " Sam@Example.com ",
+            password: "password1",
+        }),
+    ).toEqual({ ok: true, value: emailDraft() });
+    expect(
+        parseMemberInput({
+            display_name: "Sam",
+            login: "",
+            password: "password1",
+        }),
+    ).toEqual({ ok: false, error: "Enter an email or username." });
+});
+
 test("addHouseholdMember with a username stores only the display name on the member row", async () => {
     const { users, auth } = memoryAuth();
     const { members, rpc } = memoryRpc();
