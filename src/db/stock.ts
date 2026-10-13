@@ -4,7 +4,7 @@ import { getSupabase } from "./client.js";
 const STOCK_COLS =
     "id, household_id, food_id, fridge_item_id, delta, unit, reason, grocery_line_id, recipe_id, meal_id, actor_user_id, created_at";
 
-function movementFromRow(row: {
+export function movementFromRow(row: {
     id: unknown;
     household_id: unknown;
     food_id: unknown;
@@ -77,6 +77,18 @@ export function liveStockStore(): StockStore {
                 );
             }
             return movementFromRow(data);
+        },
+        async linkMeal(householdId, movementId, mealId) {
+            const { error } = await getSupabase()
+                .from("stock_movements")
+                .update({ meal_id: mealId })
+                .eq("household_id", householdId)
+                .eq("id", movementId);
+            if (error) {
+                throw new Error(
+                    `Failed to link stock movement to meal: ${error.message}`,
+                );
+            }
         },
         async listMovements(householdId, foodId) {
             let query = getSupabase()

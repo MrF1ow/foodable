@@ -33,6 +33,7 @@
         "inspect": "bunx @modelcontextprotocol/inspector",
         "harness": "bun run scripts/widget-harness.ts",
         "preview:app": "bun run scripts/app-preview.ts",
+        "e2e:agent": "bun run scripts/e2e-agent.ts",
         "test": "bun test",
         "format": "bunx prettier --write .",
         "format:check": "bunx prettier --check .",

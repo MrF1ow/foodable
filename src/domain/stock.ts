@@ -44,6 +44,14 @@ export type StockMovement = {
 
 export type StockStore = {
     insertMovement(row: StockMovement): Promise<StockMovement>;
+    /** Attach the meal a movement produced. The movement is written first
+     * (the meal's amount depends on what was actually deducted), so the link
+     * is set once the meal exists. */
+    linkMeal(
+        householdId: string,
+        movementId: string,
+        mealId: string,
+    ): Promise<void>;
     listMovements(
         householdId: string,
         foodId?: string,
@@ -112,6 +120,12 @@ export function createMemoryStockStore(): StockStore {
             const saved = { ...row };
             movements.push(saved);
             return { ...saved };
+        },
+        async linkMeal(householdId, movementId, mealId) {
+            const row = movements.find(
+                (m) => m.id === movementId && m.householdId === householdId,
+            );
+            if (row) row.mealId = mealId;
         },
         async listMovements(householdId, foodId) {
             return movements

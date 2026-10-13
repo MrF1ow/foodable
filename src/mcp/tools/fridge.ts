@@ -675,6 +675,11 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 item_digest: itemListDigest(specs),
                             });
                             mealId = meal.id;
+                            await liveStockStore().linkMeal(
+                                householdId,
+                                eaten.movement.id,
+                                meal.id,
+                            );
                         }
                         const payload = {
                             shortfall: eaten.shortfall

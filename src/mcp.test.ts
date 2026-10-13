@@ -269,6 +269,7 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
     foodSearchHits: [] as FoodResult[],
+    foodSearchError: null as Error | null,
 };
 
 mock.module("./db/client.js", () => ({
@@ -570,7 +571,10 @@ mock.module("./foods.js", () => ({
 
 mock.module("./food-search.js", () => ({
     ...actualFoodSearch,
-    searchFoodsByName: async () => db.foodSearchHits,
+    searchFoodsByName: async () => {
+        if (db.foodSearchError) throw db.foodSearchError;
+        return db.foodSearchHits;
+    },
 }));
 
 afterAll(() => {
@@ -632,6 +636,7 @@ beforeEach(() => {
     db.foodsStore = createMemoryFoodsStore();
     db.barcodeFoods = {};
     db.foodSearchHits = [];
+    db.foodSearchError = null;
 });
 
 interface ToolResult {
@@ -3561,6 +3566,43 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("eat_fridge_item links its eat movement to the meal it logs", async () => {
+        db.barcodeFoods[cottage.barcode] = cottage;
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const added = await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id as string,
+                kind: "food",
+                barcode: cottage.barcode,
+                amount: 200,
+            });
+            const eaten = await call("eat_fridge_item", {
+                id: added.structuredContent?.id as string,
+                amount: 50,
+                member_id: alice,
+            });
+            expect(eaten.isError).toBeFalsy();
+            const mealId = eaten.structuredContent?.meal_id as string;
+            expect(mealId).toBeTruthy();
+            const food = (await db.foodsStore.listFoods("hh-1"))[0]!;
+            const movements = await db.stockStore.listMovements(
+                "hh-1",
+                food.id,
+            );
+            const eat = movements.filter((m) => m.reason === "eat");
+            expect(eat).toHaveLength(1);
+            expect(eat[0]!.delta).toBe(-50);
+            expect(eat[0]!.mealId).toBe(mealId);
+            expect(
+                ledgerMatchesStock(
+                    await db.fridgeStore.listItems("hh-1"),
+                    movements,
+                    food,
+                ),
+            ).toBe(true);
+        });
+    });
+
     test("add, update, and delete fridge item write adjust movements", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withPat(async (call) => {
@@ -3757,6 +3799,26 @@ describe("phone-app domain MCP tools", () => {
                 amount: 150,
                 unit: "g",
             });
+        });
+    });
+
+    // Open Food Facts returns 503s at times. The household catalog must still
+    // answer: an agent that gets an error here loses foods it already knows.
+    test("search_food still returns household foods when Open Food Facts fails", async () => {
+        db.foodSearchError = new Error("Open Food Facts request failed: 503");
+        await withPat(async (call) => {
+            const made = await call("upsert_food", { name: "Cottage cheese" });
+            expect(made.isError).toBeFalsy();
+            const r = await call("search_food", { query: "cottage" });
+            expect(r.isError).toBeFalsy();
+            expect(r.structuredContent?.foods).toEqual([
+                expect.objectContaining({
+                    name: "Cottage cheese",
+                    source: "household",
+                }),
+            ]);
+            expect(textOf(r)).toContain("Open Food Facts is unavailable");
+            expect(textOf(r)).toContain("household foods only");
         });
     });
 

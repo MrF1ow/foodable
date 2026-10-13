@@ -242,7 +242,7 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
                     },
                 ],
             });
-            await insertMeal(userId, {
+            const { meal } = await insertMeal(userId, {
                 description: descriptionFromItems(built.items),
                 meal_type: "snack",
                 calories: built.totals.calories ?? undefined,
@@ -258,6 +258,11 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
                 ),
                 item_digest: itemListDigest(specs),
             });
+            await liveStockStore().linkMeal(
+                member.householdId,
+                eaten.movement.id,
+                meal.id,
+            );
         }
     } catch (err) {
         const page = await fridgeFormError(userId, err);
