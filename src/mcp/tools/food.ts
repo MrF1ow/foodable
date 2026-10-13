@@ -5,6 +5,7 @@ import {
     normalizeBarcode,
     lookupBarcode,
     formatFoodResult,
+    type FoodResult,
 } from "../../foods.js";
 import { searchFoodsByName } from "../../food-search.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -257,7 +258,18 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const householdId = await callerHouseholdId();
                     const names = await householdFoodNames(householdId);
-                    const offHits = await searchFoodsByName(args.query, names);
+                    // Open Food Facts is an outside service and goes down
+                    // (503s). The household catalog must still answer, as it
+                    // does in the web app's food search.
+                    let offHits: FoodResult[] = [];
+                    let offError: string | null = null;
+                    try {
+                        offHits = await searchFoodsByName(args.query, names);
+                    } catch (err) {
+                        offError =
+                            err instanceof Error ? err.message : String(err);
+                        console.warn(`[search_food] ${offError}`);
+                    }
                     const foods = await searchFoodCatalog(
                         liveFoodsStore(),
                         householdId,
@@ -270,9 +282,14 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text",
                                 text:
-                                    foods.length === 0
+                                    (foods.length === 0
                                         ? `No foods found for "${args.query}".`
-                                        : foods.map(formatSearchHit).join("\n"),
+                                        : foods
+                                              .map(formatSearchHit)
+                                              .join("\n")) +
+                                    (offError
+                                        ? `\nOpen Food Facts is unavailable (${offError}); these are household foods only.`
+                                        : ""),
                             },
                         ],
                         structuredContent: payload,
