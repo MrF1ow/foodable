@@ -288,3 +288,29 @@ test("cross-dimension stock without a factor is unknown, not zero", () => {
         ),
     ).toBeNull();
 });
+
+test("recipe grocery remainder: total portions override the members' sum", () => {
+    const ingredients = [
+        {
+            identity: cottageBarcode,
+            displayName: "Cottage Cheese",
+            quantity: { amount: 500, unit: "g" },
+        },
+    ];
+    // A 10-portion loaf, two people eating one slice each.
+    const perPeople = recipeToGroceryRemainder({
+        ingredients,
+        yieldPortions: 10,
+        portionCounts: [1, 1],
+        stock: [],
+    });
+    expect(perPeople[0]?.need).toEqual({ amount: 100, unit: "g" });
+    const wholeLoaf = recipeToGroceryRemainder({
+        ingredients,
+        yieldPortions: 10,
+        portionCounts: [1, 1],
+        totalPortions: 10,
+        stock: [],
+    });
+    expect(wholeLoaf[0]?.need).toEqual({ amount: 500, unit: "g" });
+});

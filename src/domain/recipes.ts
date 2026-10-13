@@ -937,6 +937,36 @@ export async function getRecipeView(
     };
 }
 
+/**
+ * How many portions a cook or a grocery run is for. By default it is the sum
+ * of the members' portions: one meal, nothing left over. `total` overrides it
+ * for a whole batch (a loaf, a casserole) or for leftovers ("cook once, eat
+ * twice"). It can exceed the members' sum, never fall below it: the extra is
+ * cooked or bought but not logged as eaten.
+ */
+export function resolveTotalPortions(
+    memberPortions: number,
+    total?: number | null,
+): number {
+    if (total == null) {
+        if (!(memberPortions > 0)) {
+            throw new RecipeInputError(
+                "Select who this is for, or enter total portions.",
+            );
+        }
+        return memberPortions;
+    }
+    if (!Number.isFinite(total) || total <= 0) {
+        throw new RecipeInputError("Enter total portions greater than zero.");
+    }
+    if (total < memberPortions) {
+        throw new RecipeInputError(
+            `Total portions (${total}) can't be less than the portions for people (${memberPortions}).`,
+        );
+    }
+    return total;
+}
+
 export async function addRecipeToGrocery(opts: {
     recipes: RecipesStore;
     grocery: GroceryListStore;
@@ -946,15 +976,19 @@ export async function addRecipeToGrocery(opts: {
     recipeId: string;
     storeId: string;
     portionCounts: number[];
+    /** See resolveTotalPortions. */
+    totalPortions?: number | null;
     foodsById?: ReadonlyMap<string, Food>;
 }): Promise<{
     added: GroceryLine[];
     skipped: RecipeGroceryRemainderLine[];
     plan: RecipeGroceryRemainderLine[];
+    totalPortions: number;
 }> {
-    if (opts.portionCounts.length === 0) {
-        throw new RecipeInputError("Select who this grocery run is for.");
-    }
+    const totalPortions = resolveTotalPortions(
+        opts.portionCounts.reduce((sum, n) => sum + n, 0),
+        opts.totalPortions,
+    );
     const stores = await opts.settings.listStores(opts.householdId);
     if (!stores.some((store) => store.id === opts.storeId)) {
         throw new RecipeInputError("Unknown store.");
@@ -980,6 +1014,7 @@ export async function addRecipeToGrocery(opts: {
         })),
         yieldPortions: recipe.yieldPortions,
         portionCounts: opts.portionCounts,
+        totalPortions,
         stock: opts.fridgeItems,
         foodsById: opts.foodsById,
     });
@@ -1013,7 +1048,7 @@ export async function addRecipeToGrocery(opts: {
         });
         added.push(inserted);
     }
-    return { added, skipped, plan };
+    return { added, skipped, plan, totalPortions };
 }
 
 export function ingredientGaps(

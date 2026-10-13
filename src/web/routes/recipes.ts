@@ -3,7 +3,7 @@ import {
     renderRecipeDetailRoute,
     renderRecipesListPage,
 } from "../dashboard.js";
-import { formAmount, formText } from "../form.js";
+import { formAmount, formOptionalNumber, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { listFridge } from "../../domain/fridge.js";
@@ -21,6 +21,7 @@ import {
     setPersonPortion,
     updateRecipe,
     updateRecipeIngredient,
+    resolveTotalPortions,
 } from "../../domain/recipes.js";
 import { listHouseholdMembers } from "../../db/household.js";
 import { liveFridgeStore } from "../../db/fridge.js";
@@ -191,9 +192,9 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
             if (!Number.isFinite(count) || count <= 0) continue;
             portions.push({ userId: person.userId, portions: count });
         }
-        const totalPortions = portions.reduce(
-            (sum, row) => sum + row.portions,
-            0,
+        const totalPortions = resolveTotalPortions(
+            portions.reduce((sum, row) => sum + row.portions, 0),
+            formOptionalNumber(body, "total_portions"),
         );
         await cookRecipe(
             liveRecipesStore(),
@@ -455,9 +456,6 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
         const householdMembers = await listHouseholdMembers(member.householdId);
         const allowed = new Set(householdMembers.map((row) => row.userId));
         const memberIds = selected.filter((id) => allowed.has(id));
-        if (memberIds.length === 0) {
-            throw new RecipeInputError("Select who this grocery run is for.");
-        }
         const recipes = liveRecipesStore();
         const portionCounts = await Promise.all(
             memberIds.map(async (id) => {
@@ -489,6 +487,10 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             recipeId,
             storeId,
             portionCounts,
+            totalPortions: formOptionalNumber(
+                body as Record<string, string | File>,
+                "total_portions",
+            ),
             foodsById: foods,
         });
     } catch (err) {

@@ -23,6 +23,7 @@ import {
     perPortionAmount,
     RecipeForbiddenError,
     RecipeInputError,
+    resolveTotalPortions,
     removeRecipeIngredient,
     reorderRecipeIngredients,
     setPersonPortion,
@@ -809,4 +810,16 @@ test("importRecipeFromText find-or-creates foods and reports nutrition gaps", as
         { lookup: async () => null },
     );
     expect(again.ingredients[0]?.foodId).toBe(result.ingredients[0]?.foodId);
+});
+
+test("total portions default to the members' sum and may only grow it", () => {
+    expect(resolveTotalPortions(3)).toBe(3);
+    expect(resolveTotalPortions(3, null)).toBe(3);
+    // Whole batch, leftovers, and baking ahead with nobody eating yet.
+    expect(resolveTotalPortions(2, 10)).toBe(10);
+    expect(resolveTotalPortions(0, 10)).toBe(10);
+    expect(() => resolveTotalPortions(0)).toThrow(RecipeInputError);
+    expect(() => resolveTotalPortions(3, 2)).toThrow(/can't be less/);
+    expect(() => resolveTotalPortions(0, 0)).toThrow(RecipeInputError);
+    expect(() => resolveTotalPortions(0, Number.NaN)).toThrow(RecipeInputError);
 });

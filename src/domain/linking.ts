@@ -121,10 +121,15 @@ export function recipeToGroceryRemainder(input: {
     ingredients: RecipeGroceryIngredient[];
     yieldPortions: number;
     portionCounts: number[];
+    /** Overrides the members' sum: the recipe's yield for a whole batch,
+     * more for leftovers. */
+    totalPortions?: number;
     stock: LinkedNeed[];
     foodsById?: ReadonlyMap<string, FoodQuantityFactors>;
 }): RecipeGroceryRemainderLine[] {
-    const portionSum = input.portionCounts.reduce((sum, n) => sum + n, 0);
+    const portionSum =
+        input.totalPortions ??
+        input.portionCounts.reduce((sum, n) => sum + n, 0);
     const scale = portionSum / input.yieldPortions;
     const foodsById = input.foodsById ?? new Map();
     return input.ingredients.map((ingredient) => {
