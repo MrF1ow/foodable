@@ -21,10 +21,13 @@ The goal is one cohesive system. Every pillar refers to the same foods. Buying, 
 | Ledger gap (#50), old-name leftovers (#49), `railway.toml` (#48)                                             | Merged 2026-10-06                                          |
 | One design system for widgets, app and login; one green accent (#52, #53)                                    | Merged                                                     |
 | Audit fixes: OAuth allow-list + PKCE (#55), RPC grants (#56), MCP admin tools removed (#57), hardening (#58) | Merged 2026-10-10; #56 migration applied live (40 total)   |
+| Members: username sign-in, ownership transfer, removal; Docker production mode (#60)                         | Merged 2026-10-10                                          |
+| Repo renamed to `MrF1ow/foodable` (old URL redirects)                                                        | Done by 2026-10-12                                         |
+| Logo as SVG icons, `#28cf8b` accent (#61); add-member, widget-height and form-spacing fixes (#62)            | Open PRs                                                   |
 | Docker build, Railway service, variables, `PUBLIC_ORIGIN`, household sign-in, AI clients, walk, retire old   | Not done                                                   |
 | Phase 8                                                                                                      | Not started                                                |
 
-Deploy day is still ahead. Repo name `MrF1ow/nutrition-mcp` and version `0.1.0` stay until gated decisions say otherwise.
+Deploy day is still ahead. The version stays `0.1.0` until a gated decision says otherwise. The repo is renamed to `MrF1ow/foodable`; the logo is in #61.
 
 Before the fresh start was chosen, the pre-push dry run caught two bugs in the then-unapplied migrations, and both were fixed in place. The backfill copied `food_cache` macros into the per-100 g columns even when Open Food Facts reported them per serving. The fridge-locations copy hit the unique key when a household's array repeated a name. `scripts/migration-dryrun/` holds the fixture that pins both.
 

@@ -6,7 +6,7 @@ Written 2026-10-05. For an agent with access to GitHub, Supabase, and Railway. I
 
 Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status at handoff" section) first. This file does not repeat them.
 
-## Status (2026-10-10)
+## Status (2026-10-12)
 
 **Done**
 
@@ -17,6 +17,14 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 - 2026-10-06: the fridge ledger gap (#50), the old-name leftovers (#49) and `railway.toml` with a Railway section in `docs/self-hosting.md` (#48) are merged.
 - 2026-10-06: the household app and login moved onto the widget design system (#52, #53). There is now one green accent; the sky accent and the marketing CSS, `site.js` and fonts are gone.
 - 2026-10-10: the deployment-audit fixes are merged. #55 adds the OAuth redirect allow-list and required PKCE. #56 revokes `anon` / `authenticated` from the household RPCs, and its migration is applied live, so the project now has **40 migrations**. #57 removes the MCP `add_household_member` / `rotate_household_token` tools (67 tools; membership and the bot token are web-only). #58 adds `SESSION_SECRET`, a Supabase fetch timeout, Bun pinned to 1.4.2, and `docs/deploy-checklist.md`.
+- 2026-10-10: #60 is merged: members sign in by username, login errors are clear, ownership can be transferred and members removed, and the Docker image runs in production mode. #59 cleaned up stale docs.
+- 2026-10-12: the GitHub repo is renamed to `MrF1ow/foodable`; the old `MrF1ow/nutrition-mcp` URL redirects. Repo URLs in `package.json`, `README.md`, `docs/self-hosting.md` and `CLAUDE.md` still name the old repo (see step 8).
+- 2026-10-12: the Foodable logo exists. #61 adds it as SVG icons (favicon, touch icon, MCP server icon, login mark) and makes the logo green `#28cf8b` the one accent.
+
+**Open PRs to merge before deploy day**
+
+- #61: the logo and the `#28cf8b` accent.
+- #62: the add-member form fix (separate Email and Username boxes meant no member could be created from Settings → Household), embedded widget frames that were cut off or scrolled on desktop, and one spacing scale for app forms. Merge this one before the member steps in step 4.
 
 **Not done**
 
@@ -25,7 +33,7 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 - The end-to-end walk (step 5) has not been done.
 - Railway was not created. DNS was not changed. Phase 8 has not started.
 
-**Unchanged gates:** repo name `MrF1ow/nutrition-mcp`, version `0.1.0`, no logo yet.
+**Unchanged gates:** version `0.1.0`. The repo rename and the logo are no longer gates: both are done.
 
 **Deploy day is still ahead.** Follow [deploy-checklist.md](../deploy-checklist.md). This file keeps the detail behind it: the Railway variables (step 3), the walk (step 5) and retiring the old deploy (step 6).
 
@@ -33,7 +41,7 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 
 - **Start fresh.** Delete every user's data. Nothing is migrated, exported, or restored from the current deploy. A new Supabase project replaces the old one.
 - **Host on Railway** for now, from the repo's `Dockerfile`. Supabase cloud stays the database, Auth, and storage.
-- **Unchanged gates.** The repo stays `MrF1ow/nutrition-mcp`. No logo until one exists. The version stays `0.1.0`. Phase 8 waits until this deploy has run for a while.
+- **Unchanged gates.** The version stays `0.1.0`. Phase 8 waits until this deploy has run for a while. The repo is `MrF1ow/foodable` (renamed by 2026-10-12) and the logo exists (#61).
 
 ## Where the code is
 
@@ -50,7 +58,7 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 
 Get these from the user before starting. Do not paste secrets into PRs, commits, or chat logs.
 
-- [ ] GitHub push access to `MrF1ow/nutrition-mcp`.
+- [ ] GitHub push access to `MrF1ow/foodable`.
 - [ ] A Supabase account that can create a project, and a CLI login (`bunx supabase login`).
 - [ ] A Railway account with the GitHub repo connected. Hobby is $5/month including $5 of usage, which a single small Bun service should fit.
 - [ ] The **old** Supabase project ref, and where the **old** server runs, so both can be retired in step 6.
@@ -184,9 +192,9 @@ The decision is to delete all old user data. Confirm with the user once, right b
 ## 8. After launch, in order
 
 1. ~~**Ledger gap.**~~ Done in #50 (2026-10-06).
-2. ~~**Old-name leftovers.**~~ Done in #49 (2026-10-06). Repo URLs still wait on the repo rename.
+2. ~~**Old-name leftovers.**~~ Done in #49 (2026-10-06). The repo is now renamed, so the remaining repo URLs (`package.json` `homepage` / `repository`, the clone commands in `README.md` and `docs/self-hosting.md`, and `CLAUDE.md`) can move to `MrF1ow/foodable`. The old URL redirects, so this is not a deploy blocker.
 3. **Phase 8 (contract)** once the deploy has run stably, after a fresh backup. With a fresh start there is no legacy `identity` data to worry about, only rows written since launch.
-4. **Gated items** when the user decides: the repo rename, the logo, and the optional weekly household digest.
+4. **Gated items** when the user decides: the optional weekly household digest. (The repo rename is done, and the logo is in #61.)
 
 ## Notes on `db:dryrun` from here
 
