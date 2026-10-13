@@ -3802,6 +3802,95 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    // A loaf or a casserole is bought and cooked whole, not per eater.
+    test("add_recipe_to_grocery shops for total_portions without members", async () => {
+        db.barcodeFoods[cottage.barcode] = cottage;
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        await withUser(alice, async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Loaf",
+                yield_portions: 10,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                barcode: cottage.barcode,
+                amount: 500,
+            });
+            const added = await call("add_recipe_to_grocery", {
+                recipe_id: recipeId,
+                store_id: store.id,
+                total_portions: 10,
+            });
+            expect(added.isError).toBeFalsy();
+            expect(added.structuredContent?.total_portions).toBe(10);
+            const remainder = added.structuredContent?.remainder as Array<{
+                remainder: { amount: number; unit: string } | null;
+            }>;
+            expect(remainder[0]?.remainder).toEqual({ amount: 500, unit: "g" });
+
+            const none = await call("add_recipe_to_grocery", {
+                recipe_id: recipeId,
+                store_id: store.id,
+            });
+            expect(none.isError).toBe(true);
+            expect(textOf(none)).toContain("total portions");
+        });
+    });
+
+    test("cook_recipe cooks total_portions but logs only the members' portions", async () => {
+        db.barcodeFoods[cottage.barcode] = cottage;
+        await withUser(alice, async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id,
+                kind: "food",
+                barcode: cottage.barcode,
+                amount: 1000,
+            });
+            const recipe = await call("create_recipe", {
+                name: "Casserole",
+                yield_portions: 4,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: (await db.foodsStore.listFoods("hh-1"))[0]?.id,
+                amount: 400,
+                unit: "g",
+            });
+            const tooFew = await call("cook_recipe", {
+                recipe_id: recipeId,
+                portions_by_member: [
+                    { user_id: alice, portions: 1 },
+                    { user_id: bob, portions: 1 },
+                ],
+                total_portions: 1,
+            });
+            expect(tooFew.isError).toBe(true);
+            expect(textOf(tooFew)).toContain("can't be less");
+
+            // Cook once, eat twice: the whole batch, two portions eaten now.
+            const cooked = await call("cook_recipe", {
+                recipe_id: recipeId,
+                portions_by_member: [
+                    { user_id: alice, portions: 1 },
+                    { user_id: bob, portions: 1 },
+                ],
+                total_portions: 4,
+            });
+            expect(cooked.isError).toBeFalsy();
+            expect(cooked.structuredContent?.total_portions).toBe(4);
+            expect(cooked.structuredContent?.meal_ids).toHaveLength(2);
+            const items = await db.fridgeStore.listItems("hh-1");
+            expect(items[0]?.quantity).toEqual({ amount: 600, unit: "g" });
+        });
+    });
+
     // Open Food Facts returns 503s at times. The household catalog must still
     // answer: an agent that gets an error here loses foods it already knows.
     test("search_food still returns household foods when Open Food Facts fails", async () => {

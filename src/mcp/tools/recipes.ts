@@ -32,6 +32,7 @@ import {
     updateRecipe,
     updateRecipeIngredient,
     type Recipe,
+    resolveTotalPortions,
 } from "../../domain/recipes.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
@@ -487,7 +488,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Recipe to Grocery",
             description:
-                "Add a recipe's remainder to a grocery store after summing the selected members' portions and netting fridge stock. Returns the per-ingredient remainder.",
+                "Add a recipe's remainder to a grocery store, netting fridge stock. Size it with member_ids (the sum of those members' saved portions: one meal, nothing left over) and/or total_portions. For a whole batch (baking a loaf, a casserole) pass total_portions = the recipe's yield_portions; for leftovers (\"cook once, eat twice\") pass more than the members' sum. total_portions may not be less than the members' sum. Returns the per-ingredient remainder.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -497,9 +498,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 recipe_id: z.string(),
                 store_id: z.string(),
-                member_ids: z.array(z.string()).min(1),
+                member_ids: z.array(z.string()).optional(),
+                total_portions: z.coerce.number().optional(),
             }),
             outputSchema: z.object({
+                total_portions: z.number(),
                 remainder: z.array(
                     z.object({
                         display_name: z.string(),
@@ -515,12 +518,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "add_recipe_to_grocery",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    for (const memberId of args.member_ids) {
+                    const memberIds = args.member_ids ?? [];
+                    for (const memberId of memberIds) {
                         await requireHouseholdMemberId(memberId);
                     }
                     const recipes = liveRecipesStore();
                     const portionCounts: number[] = [];
-                    for (const memberId of args.member_ids) {
+                    for (const memberId of memberIds) {
                         const view = await getRecipeView(
                             recipes,
                             householdId,
@@ -559,6 +563,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         recipeId: args.recipe_id,
                         storeId: args.store_id,
                         portionCounts,
+                        totalPortions: args.total_portions,
                         foodsById: foods,
                     });
                     const remainder = result.plan.map((line) => ({
@@ -571,16 +576,20 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: remainder
-                                    .map((line) =>
+                                text: [
+                                    `For ${result.totalPortions} portion${result.totalPortions === 1 ? "" : "s"}:`,
+                                    ...remainder.map((line) =>
                                         line.skipped || line.remainder == null
                                             ? `${line.display_name} skipped`
                                             : `${line.display_name} remainder ${line.remainder.amount} ${line.remainder.unit}`,
-                                    )
-                                    .join("\n"),
+                                    ),
+                                ].join("\n"),
                             },
                         ],
-                        structuredContent: { remainder },
+                        structuredContent: {
+                            total_portions: result.totalPortions,
+                            remainder,
+                        },
                     };
                 },
                 analytics,
@@ -592,7 +601,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Cook Recipe",
             description:
-                "Deduct scaled ingredients from the fridge (cook movements, oldest expiry first) and optionally log one recipe-portion meal per member through log_recipe_portion's meal-items path. Returns shortfalls instead of going negative.",
+                "Deduct scaled ingredients from the fridge (cook movements, oldest expiry first) and optionally log one recipe-portion meal per member through log_recipe_portion's meal-items path. Returns shortfalls instead of going negative. The amount cooked defaults to the sum of portions_by_member (one meal, nothing left over). For a whole batch pass total_portions = the recipe's yield_portions; for leftovers pass more than the members' sum. Only portions_by_member are logged as eaten; the rest is cooked but not logged. total_portions may not be less than the members' sum, and portions_by_member may be empty when nobody eats yet (baking ahead).",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -608,7 +617,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             portions: z.coerce.number(),
                         }),
                     )
-                    .min(1),
+                    .optional(),
+                total_portions: z.coerce.number().optional(),
                 deduct_stock: z.boolean().optional(),
                 log_meals: z.boolean().optional(),
                 meal_type: z
@@ -640,7 +650,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             userId: string;
                             portions: number;
                         }[] = [];
-                        for (const row of args.portions_by_member) {
+                        for (const row of args.portions_by_member ?? []) {
                             const userId = await requireHouseholdMemberId(
                                 row.user_id,
                             );
@@ -655,15 +665,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 portions: row.portions,
                             });
                         }
-                        const totalPortions = portions.reduce(
-                            (sum, row) => sum + row.portions,
-                            0,
+                        const totalPortions = resolveTotalPortions(
+                            portions.reduce(
+                                (sum, row) => sum + row.portions,
+                                0,
+                            ),
+                            args.total_portions,
                         );
-                        if (!(totalPortions > 0)) {
-                            throw new StockInputError(
-                                "Enter portions greater than zero.",
-                            );
-                        }
                         const cooked = await cookRecipe(
                             liveRecipesStore(),
                             liveFridgeStore(),

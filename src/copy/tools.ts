@@ -583,7 +583,8 @@ const TOOLS_BASE: ToolIdentity[] = [
         params: [
             { name: "recipe_id", required: true },
             { name: "store_id", required: true },
-            { name: "member_ids", required: true },
+            { name: "member_ids", required: false },
+            { name: "total_portions", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -593,7 +594,8 @@ const TOOLS_BASE: ToolIdentity[] = [
         badges: ["log"],
         params: [
             { name: "recipe_id", required: true },
-            { name: "portions_by_member", required: true },
+            { name: "portions_by_member", required: false },
+            { name: "total_portions", required: false },
             { name: "deduct_stock", required: false },
             { name: "log_meals", required: false },
             { name: "meal_type", required: false },

@@ -215,6 +215,9 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
 ${renderMemberMultiSelect(view.members, [view.viewerId])}
 <label for="recipe-store">Store</label>
 <select id="recipe-store" name="store_id" required>${storeOptions}</select>
+<label for="recipe-total-portions">Total portions</label>
+<input id="recipe-total-portions" name="total_portions" type="number" min="0" step="any" placeholder="${escapeHtml(String(view.recipe.yieldPortions))} for the whole recipe" />
+<p class="muted">Leave blank to shop for the people above. Enter more for a whole batch or leftovers.</p>
 <button type="submit" class="btn-primary">Add to grocery</button>
 </form>`;
     const recipeId = escapeHtml(view.recipe.id);
@@ -283,6 +286,9 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
 </label>`;
                         })
                         .join("")}
+                    <label>Total portions
+                        <input id="cook-total-portions" name="total_portions" type="number" min="0" step="any" placeholder="${escapeHtml(String(view.recipe.yieldPortions))} for the whole recipe" />
+                    </label>
                     <label>Meal type
                         <select id="cook-meal-type" name="meal_type">
                             <option value="breakfast">Breakfast</option>

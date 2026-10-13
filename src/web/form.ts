@@ -17,6 +17,17 @@ export function formAmount(
     return Number(formText(body, key));
 }
 
+/** A number field the user may leave blank: blank is undefined, anything
+ * else is passed through Number (so junk becomes NaN for the caller to
+ * reject). */
+export function formOptionalNumber(
+    body: Record<string, string | File | (string | File)[]>,
+    key: string,
+): number | undefined {
+    const raw = formText(body, key).trim();
+    return raw === "" ? undefined : Number(raw);
+}
+
 function asStringList(value: unknown): string[] {
     if (Array.isArray(value)) {
         return value.filter((item): item is string => typeof item === "string");
