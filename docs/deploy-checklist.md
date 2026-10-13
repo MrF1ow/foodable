@@ -6,6 +6,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 ## Before deploy day (local)
 
+- [ ] #61 (logo and accent) and #62 (add-member form, widget frame height, form spacing) are merged to `main`. Without #62 no member can be added from Settings → Household.
 - [ ] `docker build -t foodable .` succeeds on the pinned `oven/bun:1.4.2` image, and `docker run --env-file .env -p 8080:8080 foodable` answers `GET /health` with `ok`. Not yet run anywhere.
 - [ ] With the local server up, `bun run inspect` (MCP Inspector) completes OAuth through its loopback callback and lists 67 tools.
 
@@ -29,7 +30,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 ## Railway
 
-- [ ] New project → Deploy from GitHub repo → `MrF1ow/nutrition-mcp`, branch `main`. Region: US East.
+- [ ] New project → Deploy from GitHub repo → `MrF1ow/foodable` (renamed from `nutrition-mcp`), branch `main`. Region: US East.
 - [ ] Variables (do **not** set `PORT`):
       `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (service role), `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`
       (all fresh from `bun run generate-oauth-creds`), `OFF_USER_AGENT=Foodable (<email>)`.
