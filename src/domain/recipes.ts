@@ -16,6 +16,7 @@ import {
 } from "./food-quantity.js";
 import {
     resolveGrocerySectionId,
+    suggestGrocerySection,
     type GroceryLine,
     type GroceryListStore,
 } from "./grocery.js";
@@ -1018,10 +1019,19 @@ export async function addRecipeToGrocery(opts: {
         stock: opts.fridgeItems,
         foodsById: opts.foodsById,
     });
-    const sectionId = await resolveGrocerySectionId(
+    const otherSectionId = await resolveGrocerySectionId(
         opts.settings,
         opts.storeId,
     );
+    const allSections = (
+        await Promise.all(
+            stores.map((store) => opts.settings.listSections(store.id)),
+        )
+    ).flat();
+    const storeSections = allSections.filter(
+        (row) => row.storeId === opts.storeId,
+    );
+    const existingLines = await opts.grocery.listLines(opts.householdId);
     const added: GroceryLine[] = [];
     const skipped: RecipeGroceryRemainderLine[] = [];
     for (const line of plan) {
@@ -1034,16 +1044,26 @@ export async function addRecipeToGrocery(opts: {
                 (line.foodId && row.foodId === line.foodId) ||
                 row.displayName === line.displayName,
         );
+        const kind = ingredient?.kind ?? "food";
+        const foodId = line.foodId ?? ingredient?.foodId ?? null;
+        const section = suggestGrocerySection({
+            sections: storeSections,
+            allSections,
+            lines: existingLines,
+            kind,
+            foodId,
+            displayName: line.displayName,
+        });
         const inserted = await opts.grocery.insertLine({
             id: crypto.randomUUID(),
             householdId: opts.householdId,
             storeId: opts.storeId,
-            sectionId,
-            kind: ingredient?.kind ?? "food",
+            sectionId: section?.id ?? otherSectionId,
+            kind,
             displayName: line.displayName,
             quantity: line.remainder,
             identity: line.identity,
-            foodId: line.foodId ?? ingredient?.foodId ?? null,
+            foodId,
             checked: false,
         });
         added.push(inserted);
