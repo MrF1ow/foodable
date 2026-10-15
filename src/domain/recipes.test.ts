@@ -388,6 +388,10 @@ test("add-to-grocery writes remainder lines and skips full fridge cover", async 
     expect(listed.lines[0]?.quantity).toEqual({ amount: 50, unit: "g" });
     expect(listed.lines[0]?.foodId).toBe(cottageLine?.foodId);
     expect(listed.lines[0]?.identity.via).toBe("catalog");
+    const section = listed.sections.find(
+        (row) => row.id === listed.lines[0]?.sectionId,
+    );
+    expect(section?.name).toBe("Dairy");
 });
 
 test("create recipe requires a name and a positive yield", async () => {

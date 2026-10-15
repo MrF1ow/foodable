@@ -9,6 +9,7 @@ import {
 import { createMemoryFoodsStore } from "./foods.js";
 import {
     addGroceryFoodByBarcode,
+    addGroceryManualFood,
     addGrocerySupply,
     checkGroceryLine,
     clearCheckedLines,
@@ -154,17 +155,99 @@ test("unknown section files the line under Other", async () => {
     expect(await resolveGrocerySectionId(settings, store.id, "")).toBe(
         other.id,
     );
-    const line = await addGrocerySupply(
+    const line = await addGroceryManualFood(
         grocery,
         settings,
         createMemoryFoodsStore(),
         {
             householdId: HH,
             storeId: store.id,
-            name: "Batteries",
-            amount: 4,
-            unit: "each",
+            name: "Zorblax",
+            amount: 1,
         },
+    );
+    expect(line.sectionId).toBe(other.id);
+});
+
+test("a line with no section lands in the aisle its name suggests", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const sections = await settings.listSections(store.id);
+    const named = (id: string) => sections.find((row) => row.id === id)!.name;
+    const cases: [string, string][] = [
+        ["Butter", "Dairy"],
+        ["Eggs", "Dairy"],
+        ["All-purpose flour", "Pantry"],
+        ["Peanut butter", "Pantry"],
+        ["Ripe bananas", "Produce"],
+        ["Chicken broth", "Pantry"],
+        ["Chicken thighs", "Meat & seafood"],
+        ["Frozen peas", "Frozen"],
+        ["Ice cream", "Frozen"],
+    ];
+    for (const [name, section] of cases) {
+        const line = await addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            name,
+            amount: 1,
+        });
+        expect([name, named(line.sectionId)]).toEqual([name, section]);
+    }
+    const supply = await addGrocerySupply(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Batteries",
+        amount: 4,
+        unit: "each",
+    });
+    expect(named(supply.sectionId)).toBe("Household");
+});
+
+test("a food already on the list keeps its section, here and at another store", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const sections = await settings.listSections(store.id);
+    const bakery = sections.find((row) => row.name === "Bakery")!;
+    const first = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: bakery.id,
+        name: "Zorblax",
+        amount: 1,
+    });
+    expect(first.sectionId).toBe(bakery.id);
+    const again = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "zorblax",
+        amount: 2,
+    });
+    expect(again.sectionId).toBe(bakery.id);
+    const costco = await createGroceryStore(settings, HH, "Costco");
+    const costcoBakery = (await settings.listSections(costco.id)).find(
+        (row) => row.name === "Bakery",
+    )!;
+    const there = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: costco.id,
+        name: "Zorblax",
+        amount: 1,
+    });
+    expect(there.sectionId).toBe(costcoBakery.id);
+});
+
+test("hidden sections are never suggested", async () => {
+    const grocery = createMemoryGroceryStore();
+    const { settings, store, dairy, other } = await seedStore();
+    await settings.updateSection({ ...dairy, hidden: true });
+    const line = await addGroceryManualFood(
+        grocery,
+        settings,
+        createMemoryFoodsStore(),
+        { householdId: HH, storeId: store.id, name: "Butter", amount: 1 },
     );
     expect(line.sectionId).toBe(other.id);
 });

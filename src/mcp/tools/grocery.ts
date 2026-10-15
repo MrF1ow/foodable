@@ -203,7 +203,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to a grocery store. Reports already-have when fridge stock matches, and allergen warnings for household members.",
+                "Add a food or supply line to a grocery store. Omit section_id to let the server pick the section: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
