@@ -20,6 +20,7 @@ import { groceryRoutes } from "./web/routes/grocery.js";
 import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
 import { settingsRoutes } from "./web/routes/settings.js";
+import { APP_FONTS } from "./tokens.js";
 
 const app = new Hono();
 
@@ -251,9 +252,10 @@ app.get("/brand/:file", (c) => {
     });
 });
 
-// SPIKE: self-hosted web fonts for the app and login (OFL 1.1). An allowlist,
-// so a stray file in public/fonts never becomes a route.
-const FONTS = new Set(["geist-latin.woff2", "bricolage-latin.woff2"]);
+// Self-hosted web fonts for the app and login (OFL 1.1), listed once in
+// src/tokens.ts. An allowlist, so a stray file in public/fonts never becomes
+// a route.
+const FONTS = new Set<string>(APP_FONTS.map((f) => f.file));
 app.get("/fonts/:file", async (c) => {
     const name = c.req.param("file");
     if (!FONTS.has(name)) return c.notFound();

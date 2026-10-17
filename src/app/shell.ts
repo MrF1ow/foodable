@@ -1,3 +1,5 @@
+import { escapeHtml } from "../html.js";
+import { THEME_COLOR } from "../tokens.js";
 import { tabIcon } from "../web/components/bottom-nav.js";
 
 export const APP_TABS = [
@@ -27,19 +29,12 @@ export type AppChrome = ViewerChrome & {
 
 // The page background (--bg in public/widgets/src/shared/tokens.css), so the
 // mobile browser bar blends into the page.
-const THEME_COLOR = { light: "#fbfaf7", dark: "#0d0f0e" } as const;
 
 export function resolveTheme(theme: string | null | undefined): ThemePref {
     return theme === "light" || theme === "dark" ? theme : "system";
 }
 
-export function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
+export { escapeHtml };
 
 export function bottomNav(active: AppTabId): string {
     const links = APP_TABS.map((tab) => {

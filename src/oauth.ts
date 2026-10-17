@@ -19,6 +19,7 @@ import {
     isAllowedRedirectUri,
     isValidPkceChallenge,
 } from "./oauth-redirect.js";
+import { escapeHtml } from "./html.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -51,14 +52,6 @@ function base64URLEncode(buffer: Buffer): string {
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=/g, "");
-}
-
-function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
 }
 
 export async function renderLoginPage(
