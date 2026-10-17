@@ -267,6 +267,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         trends: await widgetSample("trends"),
         weight: await widgetSample("weight-trends"),
         chrome,
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
     } as never);
     return {
         nutrition,

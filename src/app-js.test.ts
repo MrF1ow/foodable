@@ -105,6 +105,13 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: { theme: "light" },
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
     });
     for (const html of [
         comingSoonPage("fridge"),

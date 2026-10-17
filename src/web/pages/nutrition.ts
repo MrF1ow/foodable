@@ -24,8 +24,26 @@ import {
     resolveTheme,
     type ViewerChrome,
 } from "../shell.js";
-import { disclosure, errorBanner, pageHeader } from "../components/ui.js";
+import {
+    disclosure,
+    errorBanner,
+    modal,
+    modalTrigger,
+    pageHeader,
+    pageLevelErrorBanner,
+} from "../components/ui.js";
 import type { MealFormItem } from "../form.js";
+import type { NutritionCard } from "../../domain/layout.js";
+
+export const NUTRITION_ARRANGE_MODAL_ID = "nutrition-arrange";
+
+const CARD_LABELS: Record<NutritionCard, string> = {
+    log: "Log",
+    "nutrition-summary": "Nutrition summary",
+    "goal-progress": "Goal progress",
+    trends: "Trends",
+    "weight-trends": "Weight trends",
+};
 
 export type NutritionView = {
     access: Extract<DashboardAccess, { ok: true }>;
@@ -35,7 +53,10 @@ export type NutritionView = {
     trends: unknown;
     weight: unknown;
     chrome: ViewerChrome;
+    cardOrder: NutritionCard[];
+    viewMemberId?: string;
     error?: string;
+    openModalId?: string;
 };
 
 export type LogFormResult = { ok: true } | { ok: false; error: string };
@@ -250,15 +271,86 @@ export async function logWeightFromForm(
     return { ok: true };
 }
 
+function memberHiddenField(viewMemberId?: string): string {
+    if (!viewMemberId) return "";
+    return `<input type="hidden" name="member" value="${escapeHtml(viewMemberId)}" />`;
+}
+
+function arrangeMoveForm(
+    key: NutritionCard,
+    direction: "up" | "down",
+    view: NutritionView,
+    disabled: boolean,
+): string {
+    const label = CARD_LABELS[key];
+    const verb = direction === "up" ? "up" : "down";
+    const arrow = direction === "up" ? "↑" : "↓";
+    if (disabled) {
+        return `<button type="button" class="btn-sm" disabled aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>`;
+    }
+    return `<form method="post" action="/nutrition/layout" class="inline-form">
+${memberHiddenField(view.viewMemberId)}
+<input type="hidden" name="card" value="${escapeHtml(key)}" />
+<input type="hidden" name="direction" value="${direction}" />
+<button type="submit" class="btn-sm" aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>
+</form>`;
+}
+
+function arrangeModal(view: NutritionView): string {
+    const order = view.cardOrder;
+    const rows = order
+        .map((key, index) => {
+            const up = arrangeMoveForm(key, "up", view, index === 0);
+            const down = arrangeMoveForm(
+                key,
+                "down",
+                view,
+                index === order.length - 1,
+            );
+            return `<li class="row">
+<span class="row-title">${escapeHtml(CARD_LABELS[key])}</span>
+<span class="row-actions">${up}${down}</span>
+</li>`;
+        })
+        .join("");
+    const modalError =
+        view.error && view.openModalId === NUTRITION_ARRANGE_MODAL_ID
+            ? errorBanner(view.error)
+            : "";
+    return modal({
+        id: NUTRITION_ARRANGE_MODAL_ID,
+        title: "Arrange cards",
+        openOnLoad: view.openModalId === NUTRITION_ARRANGE_MODAL_ID,
+        body: `${modalError}<ul class="list">${rows}</ul>`,
+    });
+}
+
 export async function renderNutritionPage(
     view: NutritionView,
 ): Promise<string> {
-    const cards = await Promise.all([
+    const [summaryCard, goalsCard, trendsCard, weightCard] = await Promise.all([
         widgetCard("nutrition-summary", view.summary, view.chrome),
         widgetCard("goal-progress", view.goals, view.chrome),
         widgetCard("trends", view.trends, view.chrome),
         widgetCard("weight-trends", view.weight, view.chrome),
     ]);
+
+    const logPanel = view.access.mode === "peer" ? "" : logForms();
+    const fragments: Record<NutritionCard, string> = {
+        log: logPanel,
+        "nutrition-summary": summaryCard,
+        "goal-progress": goalsCard,
+        trends: trendsCard,
+        "weight-trends": weightCard,
+    };
+    const orderedCards = view.cardOrder
+        .map((key) => {
+            const html = fragments[key];
+            if (!html) return "";
+            return `<div class="nutrition-card" data-nutrition-card="${escapeHtml(key)}">${html}</div>`;
+        })
+        .filter((html) => html.length > 0)
+        .join("\n");
 
     const memberNav = view.members
         .map((m) => {
@@ -278,17 +370,24 @@ export async function renderNutritionPage(
             ? `<p class="peer-note">Viewing ${escapeHtml(view.access.subject.displayName)}. You can look, not edit. Only they (or a household bot) can change these records.</p>`
             : "";
 
-    const forms = view.access.mode === "peer" ? "" : logForms();
+    const headActions = `${modalTrigger({
+        target: NUTRITION_ARRANGE_MODAL_ID,
+        label: "Arrange",
+        className: "btn-sm",
+    })}
+<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`;
+
+    const pageError = pageLevelErrorBanner(view, [NUTRITION_ARRANGE_MODAL_ID]);
 
     const body = `
         ${pageHeader({
             title: view.access.subject.displayName,
             sub: peerNote || undefined,
-            actions: `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`,
+            actions: headActions,
         })}
-        ${errorBanner(view.error)}
-        ${forms}
-        ${cards.join("\n")}
+        ${pageError}
+        ${orderedCards}
+        ${arrangeModal(view)}
     `;
     return renderAppShell({
         title: "Nutrition",

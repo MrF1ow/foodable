@@ -46,6 +46,7 @@ import {
     RecipeInputError,
     recipeDislikeNote,
 } from "../domain/recipes.js";
+import { orderCards } from "../domain/layout.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -123,6 +124,7 @@ export async function renderDashboardPage(
     viewerUserId: string,
     requestedMember: string | undefined,
     error?: string,
+    openModalId?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -155,6 +157,11 @@ export async function renderDashboardPage(
         getWeightTrendsPayload(access.subject.userId),
     ]);
 
+    const viewMemberId =
+        requestedMember && requestedMember !== viewerUserId
+            ? requestedMember
+            : undefined;
+
     return {
         status: 200,
         html: await renderDashboardHtml({
@@ -165,7 +172,10 @@ export async function renderDashboardPage(
             trends,
             weight,
             chrome: viewerChromeFromProfile(viewerProfile),
+            cardOrder: orderCards(viewerProfile?.nutrition_layout),
+            viewMemberId,
             error,
+            openModalId,
         }),
     };
 }

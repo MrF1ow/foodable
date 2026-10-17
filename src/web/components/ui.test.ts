@@ -230,6 +230,13 @@ test("every page's h1 comes from pageHeader once", async () => {
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome,
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
     });
     const pages: Array<[string, string]> = [
         ["nutrition", nutrition],
@@ -291,6 +298,13 @@ test("every page's h1 comes from pageHeader once", async () => {
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome,
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
         error: "Enter a meal description or add a food.",
     });
     expect(withError.indexOf("<h1>Alice</h1>")).toBeLessThan(

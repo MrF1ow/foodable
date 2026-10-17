@@ -205,6 +205,7 @@ const PROFILE_BASE: actualProfiles.Profile = {
     locale: null,
     theme: null,
     accent_swatch: null,
+    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -5769,6 +5770,73 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(302);
         expect(r.headers.get("location")).toBe("/");
+    });
+
+    test("POST /nutrition/layout moves a card for the signed-in viewer", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const move = await postForm(
+            "/nutrition/layout",
+            alice,
+            "card=goal-progress&direction=up",
+        );
+        expect(move.status).toBe(302);
+        expect(move.headers.get("location")).toBe("/");
+        expect(db.profile?.nutrition_layout).toEqual([
+            "log",
+            "goal-progress",
+            "nutrition-summary",
+            "trends",
+            "weight-trends",
+        ]);
+        const page = await siteApp.request("http://x/", {
+            headers: { cookie: cookieFor(alice) },
+        });
+        const html = await page.text();
+        expect(
+            html.indexOf('data-nutrition-card="goal-progress"'),
+        ).toBeLessThan(html.indexOf('data-nutrition-card="nutrition-summary"'));
+    });
+
+    test("POST /nutrition/layout while viewing a peer saves the viewer layout and returns to peer view", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const move = await postForm(
+            "/nutrition/layout",
+            alice,
+            `card=trends&direction=up&member=${encodeURIComponent(bob)}`,
+        );
+        expect(move.status).toBe(302);
+        expect(move.headers.get("location")).toBe(`/?member=${bob}`);
+        expect(db.profile?.user_id).toBe(alice);
+        expect(db.profile?.nutrition_layout).toEqual([
+            "log",
+            "nutrition-summary",
+            "trends",
+            "goal-progress",
+            "weight-trends",
+        ]);
+    });
+
+    test("POST /nutrition/layout rejects an unknown card", async () => {
+        const r = await postForm(
+            "/nutrition/layout",
+            alice,
+            "card=not-a-card&direction=up",
+        );
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("Unknown card.");
+        expect(html).toMatch(
+            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
+        );
+        expect(db.profilePatches.at(-1)).not.toHaveProperty("nutrition_layout");
     });
 
     test("POST /settings persists dark theme for the next GET", async () => {

@@ -69,6 +69,18 @@ begin
         );
     end if;
 
+    if not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'profiles'
+          and column_name = 'nutrition_layout'
+          and udt_name = '_text'
+          and is_nullable = 'YES'
+    ) then
+        raise exception 'profiles.nutrition_layout missing or not nullable text[]';
+    end if;
+
     if has_function_privilege('anon', 'public.add_household_member(uuid,uuid,text)', 'execute')
        or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute')
        or has_function_privilege('anon', 'public.bootstrap_household(text,text)', 'execute') then
