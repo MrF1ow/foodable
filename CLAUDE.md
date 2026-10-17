@@ -50,6 +50,7 @@ Schema lives only in `supabase/migrations/`. Production applies them with `supab
 - `bun run format:check` - Verify the tree is prettier-clean (CI runs this on every PR)
 - `bun run db:dryrun` - Apply the pending migrations to a throwaway local Postgres and check the backfill (see "Migrations" below)
 - `bun run typecheck` - Typecheck `src/` (CI runs this on every PR; it is scoped to `src/`, so a type error in a test file or under `scripts/` will not be caught)
+- `bun run gen:tokens` - Write `public/widgets/src/shared/tokens.css` from `src/tokens.ts`
 
 The committed tree is kept prettier-clean, so `bun run format` only rewrites files you actually edited. Generated output that must not be formatted goes in `.prettierignore`.
 
@@ -172,7 +173,7 @@ Invariants worth keeping:
 
 Generated public HTML is the OAuth login template: `public/login.html`, written by `scripts/gen-login.ts` from `src/copy/login.ts`. English only. `GET /` without a site session is that login page. `GET /authorize` with a valid OAuth query is the same template. Signed-in `/` is the household web app (nutrition, fridge, grocery, recipes, settings). Do not add marketing routes, and do not restore `gen-index.ts`, `gen-tools.ts`, `gen-legal.ts`, `gen-alternatives.ts`, or `gen-sitemap.ts`.
 
-`package.json` `gen:pages` and `gen:all` run only `gen-login.ts`. `src/public-site.test.ts` fails if those scripts come back or if marketing paths return HTML.
+`package.json` `gen:pages` still runs only `gen-login.ts`. `gen:all` runs `gen:tokens` then `gen:pages`. `src/public-site.test.ts` fails if the marketing generators come back or if marketing paths return HTML.
 
 ### Chrome and assets
 
@@ -190,7 +191,7 @@ The first-user / closed-household flow is documented in `docs/self-hosting.md` (
 
 ## Household app styling
 
-One design system. The widget partials in `public/widgets/src/shared/` (`tokens.css`, `base.css`, `form.css`, `table.css`, `seg.css`) are the source of truth for the in-chat widgets, the household app and the login page. `public/app/app.css` `@include`s them and adds only app layout. `getAppCss()` in `src/widgets.ts` assembles it with the widget resolver, caches it, warms it at boot and serves it at `/app.css`. Editing a partial changes the widgets and the app together; check both (`bun run harness`, `bun run preview:app --shots`).
+One design system. Colours live in `src/tokens.ts`; `bun run gen:tokens` writes `public/widgets/src/shared/tokens.css` from that module (`src/tokens.test.ts` fails if the committed file drifts). The widget partials in `public/widgets/src/shared/` (`tokens.css`, `base.css`, `form.css`, `table.css`, `seg.css`) are the source of truth for the in-chat widgets, the household app and the login page. `public/app/app.css` `@include`s them and adds only app layout. `getAppCss()` in `src/widgets.ts` assembles it with the widget resolver, caches it, warms it at boot and serves it at `/app.css`. Editing a partial changes the widgets and the app together; check both (`bun run harness`, `bun run preview:app --shots`).
 
 - **Plain markup inside `.native`.** App pages render inside `<main class="app-main native">`. `form.css` styles native `input` / `select` / `textarea` / `button` there through `:where(.native …)`, which has zero specificity, so a component class on the same element always wins. Never add a bare `.native button` rule: it outranks `.btn-primary`. App-layer rules in `app.css` follow the same convention.
 - **The vocabulary.** Sections are `.panel` (sub-blocks `.psec`). Lists are `ul.list` of rows: `.row` holding `.row-title` and a right-aligned `.row-meta`, then `.row-actions` (each action is its own POST form, `display: contents`). Secondary forms (edit, add, filter) go behind `<details class="more"><summary>…</summary>`. Buttons: plain = neutral, `.btn-primary` = the one main action, `.btn-danger` = destructive, `.btn-sm` = in-row. Two-column fields: `.field-grid` with `<label>Text<input></label>`. Label + control + button on one line: `.inline-form`. Picker tabs are `.seg` / `.seg-btn` with `aria-selected`.

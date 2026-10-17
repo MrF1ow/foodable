@@ -1,0 +1,192 @@
+// The design tokens: every colour the UI uses, once.
+//
+// scripts/gen-tokens.ts writes public/widgets/src/shared/tokens.css from this
+// module. src/tokens.test.ts fails when the committed file drifts, so a value
+// changes here and nowhere else. --accent is BRAND_GREEN. THEME_COLOR is the
+// neutral page background, the same value the login head and appHead emit.
+//
+// Each theme's values appear twice in the CSS (once under the media query,
+// once under the explicit data-theme override) because an explicit theme must
+// win in both directions. The generator repeats them; nobody types them twice.
+
+import { BRAND_GREEN } from "./brand.js";
+
+type Palette = {
+    text: string;
+    "text-dim": string;
+    bg: string;
+    panel: string;
+    "panel-border": string;
+    track: string;
+};
+
+type Theme = "light" | "dark";
+
+/** Text and icons on an accent fill; the same in both themes. */
+export const ON_ACCENT = "#062c1c";
+
+// Per-metric series colours. Shared by widgets and app alike.
+export const NUTRIENTS: Record<Theme, Record<string, string>> = {
+    light: {
+        calories: "#ff9f0a",
+        protein: "#8b5cf6",
+        carbs: "#10b981",
+        fiber: "#0d9488",
+        sugar: "#65a30d",
+        fat: "#f43f7e",
+        alcohol: "#a21caf",
+        caffeine: "#8b5e34",
+        water: "#0ea5e9",
+        over: "#d0452b",
+        warn: "#b26a00",
+    },
+    dark: {
+        calories: "#ffab2e",
+        protein: "#a78bfa",
+        carbs: "#34d399",
+        fiber: "#14b8a6",
+        sugar: "#a3e635",
+        fat: "#fb7199",
+        alcohol: "#e879f9",
+        caffeine: "#c69a6d",
+        water: "#38bdf8",
+        over: "#ff6b52",
+        warn: "#e0a030",
+    },
+};
+
+/** The widgets' (and today's app's) neutral surfaces. */
+export const NEUTRAL: Record<Theme, Palette & { shadow: string }> = {
+    light: {
+        text: "#1d1d1f",
+        "text-dim": "#6e6e73",
+        bg: "#f5f5f7",
+        panel: "#ffffff",
+        "panel-border": "#e6e6ea",
+        track: "#e6e6ea",
+        shadow: "0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05)",
+    },
+    dark: {
+        text: "#f5f5f7",
+        "text-dim": "#98989d",
+        bg: "#000000",
+        panel: "#1c1c1e",
+        "panel-border": "#2c2c2e",
+        track: "#2c2c2e",
+        shadow: "none",
+    },
+};
+
+/** Browser chrome colour per theme: the page background. */
+export const THEME_COLOR: Record<Theme, string> = {
+    light: NEUTRAL.light.bg,
+    dark: NEUTRAL.dark.bg,
+};
+
+// ---- CSS emitters ----------------------------------------------------------
+
+// Split on commas outside parentheses: the layers of a shadow, say.
+function topLevelParts(value: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < value.length; i++) {
+        const c = value[i];
+        if (c === "(") depth++;
+        else if (c === ")") depth--;
+        else if (c === "," && depth === 0) {
+            parts.push(value.slice(start, i).trim());
+            start = i + 1;
+        }
+    }
+    parts.push(value.slice(start).trim());
+    return parts;
+}
+
+// One declaration, wrapped the way the formatter wraps it, so generated files
+// are already format-clean: a value too long for 80 columns moves to its own
+// lines, layers packed greedily.
+function line(indent: string, key: string, value: string): string {
+    const flat = `${indent}--${key}: ${value};`;
+    if (flat.length <= 80) return flat;
+    const inner = `${indent}    `;
+    const parts = topLevelParts(value);
+    const lines: string[] = [];
+    let current = "";
+    parts.forEach((part, i) => {
+        const piece = i < parts.length - 1 ? `${part},` : `${part};`;
+        const next = current ? `${current} ${piece}` : piece;
+        if (current && (inner + next).length > 80) {
+            lines.push(inner + current);
+            current = piece;
+        } else {
+            current = next;
+        }
+    });
+    lines.push(inner + current);
+    return `${indent}--${key}:\n${lines.join("\n")}`;
+}
+
+const decl = (indent: string, entries: [string, string][]) =>
+    entries.map(([k, v]) => line(indent, k, v)).join("\n");
+
+const neutralSurface = (t: Theme): [string, string][] => {
+    const p = NEUTRAL[t];
+    return [
+        ["text", p.text],
+        ["text-dim", p["text-dim"]],
+        ["bg", p.bg],
+        ["panel", p.panel],
+        ["panel-border", p["panel-border"]],
+        ["track", p.track],
+        ["accent", BRAND_GREEN],
+    ];
+};
+
+const neutralBlock = (t: Theme, indent: string): string =>
+    [
+        decl(indent, neutralSurface(t)),
+        decl(indent, [["shadow", NEUTRAL[t].shadow]]),
+        decl(indent, Object.entries(NUTRIENTS[t])),
+        `${indent}color-scheme: ${t};`,
+    ].join("\n");
+
+/** public/widgets/src/shared/tokens.css */
+export function renderTokensCss(): string {
+    return `:root {
+    /* Light theme (default). Dark overridden below.
+                   Neutral grays/whites with the brand green accent. The
+                   accent is the logo green (BRAND_GREEN in src/brand.ts) and
+                   is the same in both themes. */
+${decl("    ", neutralSurface("light"))}
+    /* Text and icons on an accent fill. The green is light, so a light label
+       on it falls to ~2:1; this near-black green holds ~7.5:1 in both themes,
+       which is why no theme block overrides it. */
+    --on-accent: ${ON_ACCENT};
+${decl("    ", [["shadow", NEUTRAL.light.shadow]])}
+
+${decl("    ", Object.entries(NUTRIENTS.light))}
+
+    /* Native controls (select, input, scrollbars) follow the theme only when
+       color-scheme is declared; without it a dark widget renders light OS
+       chrome that ignores every token. */
+    color-scheme: light;
+
+    --radius: 18px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+${neutralBlock("dark", "        ")}
+    }
+}
+
+/* Explicit host override wins over the media query in both directions. */
+:root[data-theme="light"] {
+${neutralBlock("light", "    ")}
+}
+:root[data-theme="dark"] {
+${neutralBlock("dark", "    ")}
+}
+`;
+}
