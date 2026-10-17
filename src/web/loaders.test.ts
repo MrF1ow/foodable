@@ -162,6 +162,7 @@ test("create-household form posts name fields and has no widgets", () => {
 test("bare pages use the app stylesheet, not the deleted marketing one", () => {
     const html = createHouseholdFormHtml("Enter a household name.");
     expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
+    expect(html).toContain('<script src="/app.js" defer></script>');
     expect(html).not.toContain("/styles.css");
     expect(html).not.toContain("<style>");
     expect(html).toContain('<main class="app-main native">');

@@ -4944,6 +4944,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('class="bottom-nav"');
         expect(html).toContain('href="/fridge"');
         expect(html).toContain('href="/app.css"');
+        expect(html).toContain('src="/app.js"');
     });
 
     test("a member dashboard has no add form", async () => {

@@ -28,6 +28,7 @@ const FIXTURE_MEMBERS = [
 ] as const;
 
 const appDir = join(import.meta.dir, "..");
+const PICKER_JS = readFileSync(join(appDir, "client/food-picker.js"), "utf8");
 
 function stubSource(file: string): string {
     return readFileSync(join(appDir, file), "utf8");
@@ -331,14 +332,6 @@ test("shell re-exports the bottom-nav helper", () => {
     expect(componentBottomNav).toBe(shellBottomNav);
 });
 
-function pickerScript(html: string): string {
-    const match = html.match(
-        /<script>\s*(\(function \(\) \{[\s\S]*?\}\)\(\);)\s*<\/script>\s*$/,
-    );
-    if (!match) throw new Error("picker script missing");
-    return match[1]!;
-}
-
 function searchFormHtml(html: string): string {
     const match = html.match(
         /<form class="food-picker-search"[\s\S]*?<\/form>/,
@@ -395,7 +388,10 @@ test("food picker HTML has barcode, search, and manual tabs", () => {
     expect(html).toContain('data-tab="manual"');
     expect(html).toContain('class="quantity-field"');
     expect(html).toContain('data-lookup-path="lookupBarcode"');
+    expect(html).toContain("data-food-picker");
+    expect(html).toContain('data-hit="text"');
     expect(html).not.toContain("data-demo-foods");
+    expect(html).not.toContain("<script>");
 });
 
 test("post picker search hits submit food_id or barcode with hidden fields and qty", () => {
@@ -414,15 +410,17 @@ test("post picker search hits submit food_id or barcode with hidden fields and q
     expect(form).toContain('name="qty_unit"');
     expect(form).toContain("data-search-results");
     expect(form).not.toContain("data-search-input");
+    expect(html).toContain('data-hit="submit"');
+    expect(html).not.toContain("<script>");
 
-    const script = pickerScript(html);
-    expect(script).toContain("/api/foods/search");
-    expect(script).toContain('type="submit"');
-    expect(script).toContain('name="food_id"');
-    expect(script).toContain("data-default-unit");
-    expect(script).toContain('name="barcode"');
-    expect(script).not.toContain('name="food_name"');
-    expect(script).toContain('searchResults.innerHTML = ""');
+    expect(PICKER_JS).toContain("/api/foods/search");
+    expect(PICKER_JS).toContain('type="submit"');
+    expect(PICKER_JS).toContain('name="food_id"');
+    expect(PICKER_JS).toContain("data-default-unit");
+    expect(PICKER_JS).toContain('name="barcode"');
+    expect(PICKER_JS).not.toContain('name="food_name"');
+    expect(PICKER_JS).toContain('searchResults.innerHTML = ""');
+    expect(PICKER_JS).toContain("[data-food-picker]");
 
     const household = hitHtml("post", {
         food_id: "food-1",
@@ -451,11 +449,12 @@ test("get picker search hits stay non-submitting text", () => {
     const html = renderFoodPicker();
     expect(html).not.toContain('class="food-picker-search"');
     expect(html).not.toContain("data-search-form");
-    const script = pickerScript(html);
-    expect(script).toContain("/api/foods/search");
-    expect(script).toContain('return "<li>" + esc(label) + "</li>"');
-    expect(script).not.toContain('name="food_id"');
-    expect(script).not.toContain('name="food_name"');
+    expect(html).toContain('data-hit="text"');
+    expect(html).not.toContain('data-hit="submit"');
+    expect(html).not.toContain("<script>");
+    expect(PICKER_JS).toContain("/api/foods/search");
+    expect(PICKER_JS).toContain('return "<li>" + esc(label) + "</li>"');
+    expect(PICKER_JS).not.toContain('name="food_name"');
 
     expect(
         hitHtml("get", {
@@ -478,7 +477,8 @@ test("post picker without quantity still posts food_id and hidden fields", () =>
     expect(form).toContain('name="location_id" value="loc-1"');
     expect(form).not.toContain("qty_amount");
     expect(form).not.toContain("qty_unit");
-    expect(pickerScript(html)).toContain('name="food_id"');
+    expect(html).toContain('data-hit="submit"');
+    expect(PICKER_JS).toContain('name="food_id"');
 });
 
 test("member multi-select, already-have, and store sections still render", () => {

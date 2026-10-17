@@ -25,7 +25,7 @@ import {
     viewerChromeFromProfile,
 } from "../src/web/pages/nutrition.js";
 import { createHouseholdFormHtml } from "../src/web/loaders.js";
-import { getAppCss } from "../src/widgets.js";
+import { getAppCss, getAppJs } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4787;
@@ -327,6 +327,11 @@ const server = Bun.serve({
         if (path === "/app.css") {
             return new Response(await getAppCss(), {
                 headers: { "content-type": "text/css; charset=utf-8" },
+            });
+        }
+        if (path === "/app.js") {
+            return new Response(await getAppJs(), {
+                headers: { "content-type": "text/javascript; charset=utf-8" },
             });
         }
         if (path === "/") {

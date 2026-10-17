@@ -74,6 +74,7 @@ describe("marketing HTTP is gone", () => {
         expect(body).not.toContain("Continue with Google");
         expect(body).not.toContain("created automatically");
         expect(body).toContain('<link rel="stylesheet" href="/app.css" />');
+        expect(body).toContain('<script src="/app.js" defer></script>');
         expect(body).not.toContain("/?locale=");
         expect(body).not.toContain("gtag");
         expect(body).not.toContain("googletagmanager");
@@ -118,6 +119,18 @@ describe("runtime surfaces that stay", () => {
         const css = await r.text();
         expect(css).not.toContain("/*@include");
         expect(css).toContain(".bottom-nav");
+    });
+
+    test("GET /app.js serves the assembled app client bundle", async () => {
+        const r = await app.request("http://x/app.js");
+        expect(r.status).toBe(200);
+        expect(r.headers.get("content-type") ?? "").toContain(
+            "text/javascript",
+        );
+        const js = await r.text();
+        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(4);
+        expect(js).toContain('classList.add("fx")');
+        expect(js).toContain("[data-food-picker]");
     });
 
     test("the app serves its fonts from the allowlist; unknown and traversal names are not served", async () => {
@@ -244,6 +257,7 @@ describe("runtime surfaces that stay", () => {
         expect(html).not.toContain('href="/privacy"');
         expect(html).not.toMatch(/<a class="brand"[^>]*href="\/"/);
         expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
+        expect(html).toContain('<script src="/app.js" defer></script>');
         expect(html).not.toContain("gtag");
         expect(html).not.toContain("fonts.googleapis.com");
         expect(html).not.toContain("fonts.gstatic.com");
@@ -267,6 +281,9 @@ describe("runtime surfaces that stay", () => {
         );
         expect(r.headers.get("content-security-policy") ?? "").toContain(
             "img-src 'self' data:",
+        );
+        expect(r.headers.get("content-security-policy") ?? "").toContain(
+            "script-src 'self' 'unsafe-inline'",
         );
     });
 });
