@@ -1,4 +1,4 @@
-import type { AppTabId } from "../../app/shell.js";
+import { APP_TABS, escapeHtml, type AppTabId } from "../shell.js";
 
 const SVG_OPEN =
     '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">';
@@ -29,4 +29,11 @@ export function tabIcon(id: AppTabId): string {
     return TAB_ICONS[id];
 }
 
-export { APP_TABS, bottomNav, type AppTabId } from "../../app/shell.js";
+export function bottomNav(active: AppTabId): string {
+    const links = APP_TABS.map((tab) => {
+        const current = tab.id === active ? ' aria-current="page"' : "";
+        const label = escapeHtml(tab.label);
+        return `<a href="${tab.href}"${current} title="${label}" aria-label="${label}">${tabIcon(tab.id)}</a>`;
+    }).join("");
+    return `<nav class="bottom-nav" aria-label="App">${links}</nav>`;
+}

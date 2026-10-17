@@ -30,7 +30,7 @@ import { renderGroceryPage } from "./pages/grocery.js";
 import { renderRecipeDetailPage, renderRecipesPage } from "./pages/recipes.js";
 import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
-import { renderHouseholdSettingsPage } from "../app/settings/household.js";
+import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { foodsByIds } from "../domain/foods.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
@@ -47,8 +47,8 @@ import {
     renderNutritionPage,
     viewerChromeFromProfile,
     type NutritionView,
-} from "../app/nutrition.js";
-import { appHead, escapeHtml, htmlOpen } from "../app/shell.js";
+} from "./pages/nutrition.js";
+import { appHead, escapeHtml, htmlOpen } from "./shell.js";
 
 function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],

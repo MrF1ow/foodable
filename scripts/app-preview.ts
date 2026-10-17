@@ -17,12 +17,12 @@ import {
 } from "../src/web/pages/recipes.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
-import { renderHouseholdSettingsPage } from "../src/app/settings/household.js";
+import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
-} from "../src/app/nutrition.js";
-import { createHouseholdFormHtml } from "../src/web/dashboard.js";
+} from "../src/web/pages/nutrition.js";
+import { createHouseholdFormHtml } from "../src/web/loaders.js";
 import { getAppCss } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";

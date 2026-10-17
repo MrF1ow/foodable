@@ -1,4 +1,4 @@
-import type { DashboardAccess, HouseholdMember } from "../household.js";
+import type { DashboardAccess, HouseholdMember } from "../../household.js";
 import type {
     MealInput,
     MealInsertResult,
@@ -6,26 +6,26 @@ import type {
     WaterInsertResult,
     WeightInput,
     WeightInsertResult,
-} from "../db/nutrition.js";
-import { snapshotToMealItemWrite } from "../db/nutrition.js";
-import type { FoodsStore } from "../domain/foods.js";
-import type { RecipesStore } from "../domain/recipes.js";
+} from "../../db/nutrition.js";
+import { snapshotToMealItemWrite } from "../../db/nutrition.js";
+import type { FoodsStore } from "../../domain/foods.js";
+import type { RecipesStore } from "../../domain/recipes.js";
 import {
     descriptionFromItems,
     itemListDigest,
     MealItemsError,
     resolveAndBuildMeal,
-} from "../domain/meals.js";
-import { isWeightUnit, toGrams, type WeightUnit } from "../domain/units.js";
-import { getWidgetHtml, withWidgetData } from "../widgets.js";
+} from "../../domain/meals.js";
+import { isWeightUnit, toGrams, type WeightUnit } from "../../domain/units.js";
+import { getWidgetHtml, withWidgetData } from "../../widgets.js";
 import {
     escapeHtml,
     renderAppShell,
     resolveTheme,
     type ViewerChrome,
-} from "./shell.js";
-import { renderErrorBanner } from "../web/components/page-markup.js";
-import type { MealFormItem } from "../web/form.js";
+} from "../shell.js";
+import { renderErrorBanner } from "../components/page-markup.js";
+import type { MealFormItem } from "../form.js";
 
 export type NutritionView = {
     access: Extract<DashboardAccess, { ok: true }>;

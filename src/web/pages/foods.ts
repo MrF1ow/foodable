@@ -1,8 +1,4 @@
-import {
-    escapeHtml,
-    renderAppShell,
-    type ViewerChrome,
-} from "../../app/shell.js";
+import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import type { Food } from "../../domain/foods.js";
 import { renderSettingsNav } from "../components/settings-nav.js";

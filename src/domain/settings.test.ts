@@ -7,7 +7,7 @@ import {
     SettingsInputError,
 } from "./settings.js";
 import { renderSettingsPage } from "../web/pages/settings.js";
-import { renderHouseholdSettingsPage } from "../app/settings/household.js";
+import { renderHouseholdSettingsPage } from "../web/pages/household.js";
 import type { HouseholdMember } from "../household.js";
 
 const HH = "hh-1";

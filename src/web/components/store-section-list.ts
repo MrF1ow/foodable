@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../app/shell.js";
+import { escapeHtml } from "../shell.js";
 import { DEFAULT_STORE_SECTIONS } from "../../domain/settings.js";
 
 export { DEFAULT_STORE_SECTIONS };

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { parseAppearanceInput } from "../../app/shell.js";
+import { parseAppearanceInput } from "../shell.js";
+
 import { parseNutritionPrefsInput } from "../pages/settings.js";
 import {
     createHouseholdFormHtml,
@@ -7,7 +8,7 @@ import {
     renderHouseholdSettingsRoute,
     renderSettingsAccountPage,
     renderSettingsFoodsPage,
-} from "../dashboard.js";
+} from "../loaders.js";
 import { formText } from "../form.js";
 import {
     requireMember,

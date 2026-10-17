@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bottomNav as shellBottomNav } from "../../app/shell.js";
+import { bottomNav as shellBottomNav } from "../shell.js";
 import { bottomNav as componentBottomNav } from "./bottom-nav.js";
 import { renderQuantityField } from "./quantity-field.js";
 import {
@@ -158,7 +158,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     const fridgeSrc = stubSource("pages/fridge.ts");
     const grocerySrc = stubSource("pages/grocery.ts");
     const recipesSrc = stubSource("pages/recipes.ts");
-    const nutritionSrc = stubSource("../app/nutrition.ts");
+    const nutritionSrc = stubSource("pages/nutrition.ts");
 
     expect(helperSrc).toContain('class="error-banner"');
     expect(helperSrc).toContain('class="empty-grocery"');
@@ -327,7 +327,7 @@ test("quantity field food kind lists food units and preselects an explicit unit"
     }
 });
 
-test("bottom-nav re-exports the shell nav helper", () => {
+test("shell re-exports the bottom-nav helper", () => {
     expect(componentBottomNav).toBe(shellBottomNav);
 });
 

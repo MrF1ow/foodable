@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { getAppCss } from "./widgets.js";
-import { comingSoonPage } from "./app/shell.js";
+import { comingSoonPage } from "./web/shell.js";
 
 const SHARED = ["tokens.css", "base.css", "form.css", "table.css", "seg.css"];
 

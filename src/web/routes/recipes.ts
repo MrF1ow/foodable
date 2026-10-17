@@ -1,8 +1,6 @@
 import { Hono } from "hono";
-import {
-    renderRecipeDetailRoute,
-    renderRecipesListPage,
-} from "../dashboard.js";
+import { renderRecipeDetailRoute, renderRecipesListPage } from "../loaders.js";
+
 import { formAmount, formOptionalNumber, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
