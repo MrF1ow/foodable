@@ -3,7 +3,6 @@ import {
     logMealFromForm,
     logWaterFromForm,
     logWeightFromForm,
-    withNutritionError,
 } from "../pages/nutrition.js";
 import { renderDashboardPage } from "../loaders.js";
 
@@ -16,9 +15,9 @@ import { liveRecipesStore } from "../../db/recipes.js";
 export const nutritionRoutes = new Hono();
 
 async function nutritionFormError(userId: string, error: string) {
-    const page = await renderDashboardPage(userId, undefined);
+    const page = await renderDashboardPage(userId, undefined, error);
     return {
-        html: withNutritionError(page.html, error),
+        html: page.html,
         status: 400 as const,
     };
 }

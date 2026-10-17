@@ -6,6 +6,7 @@ import {
     bottomNav,
     comingSoonPage,
     parseAppearanceInput,
+    renderBarePage,
     resolveTheme,
 } from "./shell.js";
 
@@ -89,6 +90,31 @@ test("an explicit theme stamps data-theme on html", () => {
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain('<meta name="theme-color" content="#0d0f0e" />');
     expect(html).not.toContain("--accent");
+});
+
+test("bare pages get the top bar and can stamp a real data-theme", () => {
+    const system = renderBarePage("Household", "<p class='empty'>x</p>");
+    expect(system).toContain(
+        '<header class="app-bar"><a href="/logout">Log out</a></header>',
+    );
+    expect(system).toContain('<main class="app-main native">');
+    expect(system).not.toContain("bottom-nav");
+    expect(system).toContain('<html lang="en">');
+    expect(system).not.toContain("data-theme");
+
+    const light = renderBarePage(
+        "Create household",
+        "<h1>Create household</h1>",
+        "light",
+    );
+    expect(light).toContain('<html lang="en" data-theme="light">');
+    const dark = renderBarePage(
+        "Create household",
+        "<h1>Create household</h1>",
+        "dark",
+    );
+    expect(dark).toContain('<html lang="en" data-theme="dark">');
+    expect(light).not.toBe(dark);
 });
 
 test("the appearance form maps System to a cleared preference", () => {

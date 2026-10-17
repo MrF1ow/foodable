@@ -24,7 +24,7 @@ import {
     resolveTheme,
     type ViewerChrome,
 } from "../shell.js";
-import { renderErrorBanner } from "../components/page-markup.js";
+import { disclosure, errorBanner, pageHeader } from "../components/ui.js";
 import type { MealFormItem } from "../form.js";
 
 export type NutritionView = {
@@ -58,15 +58,6 @@ async function widgetCard(
     return `<iframe class="widget-frame" title="${escapeHtml(key)}" srcdoc="${escapeHtml(html)}"></iframe>`;
 }
 
-export function withNutritionError(html: string, error: string): string {
-    const banner = renderErrorBanner(error);
-    if (!banner || html.includes(banner)) return html;
-    return html.replace(
-        '<header class="dash-head">',
-        `${banner}\n        <header class="dash-head">`,
-    );
-}
-
 function mealTypeSelect(): string {
     return `<label for="log-meal-type">Meal type</label>
             <select id="log-meal-type" name="meal_type">
@@ -79,9 +70,9 @@ function mealTypeSelect(): string {
 
 function logForms(): string {
     return `<section class="panel log-panel" aria-label="Log">
-<details class="more">
-<summary>Log meal</summary>
-<form class="meal-log" method="post" action="/log-meal">
+${disclosure({
+    summary: "Log meal",
+    body: `<form class="meal-log" method="post" action="/log-meal">
 ${mealTypeSelect()}
 <div class="meal-items" data-meal-items>
 <div class="meal-item" data-meal-item>
@@ -109,25 +100,25 @@ ${mealTypeSelect()}
 <label>Fat (g)<input id="log-meal-fat" name="fat_g" type="number" min="0" step="any" inputmode="decimal" /></label>
 </div>
 <button type="submit" class="btn-primary">Log meal</button>
-</form>
-</details>
-<details class="more">
-<summary>Log water</summary>
-<form class="log-water inline-form" method="post" action="/log-water">
+</form>`,
+})}
+${disclosure({
+    summary: "Log water",
+    body: `<form class="log-water inline-form" method="post" action="/log-water">
 <label for="log-water-amount">Water (ml)</label>
 <input id="log-water-amount" name="amount_ml" type="number" step="any" inputmode="decimal" />
 <button type="submit" class="btn-primary">Log water</button>
-</form>
-</details>
-<details class="more">
-<summary>Log weight</summary>
-<form class="log-weight inline-form" method="post" action="/log-weight">
+</form>`,
+})}
+${disclosure({
+    summary: "Log weight",
+    body: `<form class="log-weight inline-form" method="post" action="/log-weight">
 <label for="log-weight-amount">Weight (kg)</label>
 <input id="log-weight-amount" name="weight" type="number" step="any" inputmode="decimal" />
 <input type="hidden" name="unit" value="kg" />
 <button type="submit" class="btn-primary">Log weight</button>
-</form>
-</details>
+</form>`,
+})}
 </section>`;
 }
 
@@ -290,12 +281,12 @@ export async function renderNutritionPage(
     const forms = view.access.mode === "peer" ? "" : logForms();
 
     const body = `
-        ${renderErrorBanner(view.error)}
-        <header class="dash-head">
-            <h1>${escapeHtml(view.access.subject.displayName)}</h1>
-            ${peerNote}
-            <nav class="member-switch" aria-label="Household members">${memberNav}</nav>
-        </header>
+        ${pageHeader({
+            title: view.access.subject.displayName,
+            sub: peerNote || undefined,
+            actions: `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`,
+        })}
+        ${errorBanner(view.error)}
         ${forms}
         ${cards.join("\n")}
     `;

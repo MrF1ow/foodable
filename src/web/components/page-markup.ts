@@ -1,29 +1,5 @@
 import { escapeHtml } from "../shell.js";
-
-export function renderErrorBanner(error?: string): string {
-    return error ? `<p class="error-banner">${escapeHtml(error)}</p>` : "";
-}
-
-export function renderEmptyGrocery(): string {
-    return `<p class="empty-grocery">Add a grocery store in Settings, then add a line.</p>
-<p><a href="/settings/household">Household settings</a></p>`;
-}
-
-export function renderEmptyFridge(): string {
-    return `<p class="empty-fridge">Add a location, then add an item.</p>`;
-}
-
-export function renderEmptyRecipes(): string {
-    return `<p class="empty-recipes">Add a recipe.</p>`;
-}
-
-export function renderEmptyRecipeStore(): string {
-    return `<p class="empty-recipe-store">Add a grocery store in Settings, then add this recipe to the list.</p>`;
-}
-
-export function renderAddItemPrompt(locationName: string): string {
-    return `<p class="add-item-prompt">Add an item to ${escapeHtml(locationName)}.</p>`;
-}
+import { disclosure } from "./ui.js";
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
@@ -87,16 +63,16 @@ export function renderFridgeItemRow(opts: {
 </div>
 <div class="row-actions">
 ${opts.extraActions ?? ""}
-<details class="more">
-<summary>Edit</summary>
-<form class="fridge-item-edit" method="post" action="/fridge/items/${id}">
+${disclosure({
+    summary: "Edit",
+    body: `<form class="fridge-item-edit" method="post" action="/fridge/items/${id}">
 ${opts.editFields}
 <button type="submit" class="btn-primary">Save</button>
 </form>
 <form class="fridge-item-delete" method="post" action="/fridge/items/${id}/delete">
 <button type="submit" class="btn-danger">Delete</button>
-</form>
-</details>
+</form>`,
+})}
 </div>
 </li>`;
 }
@@ -156,16 +132,16 @@ ${note}
 <button type="submit" name="direction" value="up" class="btn-sm" aria-label="Move ${name} up">↑</button>
 <button type="submit" name="direction" value="down" class="btn-sm" aria-label="Move ${name} down">↓</button>
 </form>
-<details class="more">
-<summary>Edit</summary>
-<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeId}/ingredients/${id}">
+${disclosure({
+    summary: "Edit",
+    body: `<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeId}/ingredients/${id}">
 <label for="note-${id}">Note</label>
 <input id="note-${id}" name="note" type="text" maxlength="500" value="${escapeHtml(opts.note ?? "")}" autocomplete="off" />
 <label for="amount-${id}">Amount</label>
 <input id="amount-${id}" name="amount" type="number" min="0" step="any" required value="${escapeHtml(String(opts.totalAmount))}" />
 <button type="submit" class="btn-primary">Save ingredient</button>
-</form>
-</details>
+</form>`,
+})}
 <form class="recipe-ingredient-delete" method="post" action="/recipes/${recipeId}/ingredients/${id}/delete">
 <button type="submit" class="btn-sm btn-danger">Remove</button>
 </form>

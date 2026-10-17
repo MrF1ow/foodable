@@ -8,12 +8,15 @@ import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderQuantityField } from "../components/quantity-field.js";
 import {
-    renderAddItemPrompt,
-    renderEmptyFridge,
-    renderErrorBanner,
     renderExpiringStrip,
     renderFridgeItemRow,
 } from "../components/page-markup.js";
+import {
+    disclosure,
+    emptyState,
+    errorBanner,
+    pageHeader,
+} from "../components/ui.js";
 import { listExpiring } from "../../domain/stock.js";
 
 const SUPPLY_UNITS = [
@@ -114,7 +117,7 @@ function locationSection(
         .join("");
     const empty = items.some((item) => item.locationId === location.id)
         ? ""
-        : renderAddItemPrompt(location.name);
+        : emptyState(`Add an item to ${location.name}.`, "add-item-prompt");
     const pickerId = `picker-${location.id}`;
     return `<section class="fridge-location panel" data-location-id="${escapeHtml(location.id)}">
 <div class="fridge-location-head row">
@@ -125,19 +128,19 @@ function locationSection(
 </div>
 ${empty}
 <ul class="fridge-items list">${rows}</ul>
-<details class="more">
-<summary><h3>Add food</h3></summary>
-${renderFoodPicker({
-    id: pickerId,
-    action: "/fridge/items",
-    method: "post",
-    hiddenFields: { kind: "food", location_id: location.id },
-    includeQuantity: true,
+${disclosure({
+    summary: "<h3>Add food</h3>",
+    body: renderFoodPicker({
+        id: pickerId,
+        action: "/fridge/items",
+        method: "post",
+        hiddenFields: { kind: "food", location_id: location.id },
+        includeQuantity: true,
+    }),
 })}
-</details>
-<details class="more">
-<summary><h3>Add supply</h3></summary>
-<form class="fridge-add-supply" method="post" action="/fridge/items">
+${disclosure({
+    summary: "<h3>Add supply</h3>",
+    body: `<form class="fridge-add-supply" method="post" action="/fridge/items">
 <input type="hidden" name="kind" value="supply" />
 <input type="hidden" name="location_id" value="${escapeHtml(location.id)}" />
 <label for="supply-name-${escapeHtml(location.id)}">Name</label>
@@ -151,14 +154,17 @@ ${renderQuantityField({
     required: true,
 })}
 <button type="submit" class="btn-primary">Add supply</button>
-</form>
-</details>
+</form>`,
+})}
 </section>`;
 }
 
 export function renderFridgePage(view: FridgePageView): string {
-    const error = renderErrorBanner(view.error);
-    const emptyPrompt = view.locations.length === 0 ? renderEmptyFridge() : "";
+    const error = errorBanner(view.error);
+    const emptyPrompt =
+        view.locations.length === 0
+            ? emptyState("Add a location, then add an item.", "empty-fridge")
+            : "";
     const expiring = renderExpiringStrip(
         listExpiring(view.items, 3).map((item) => ({
             id: item.id,
@@ -170,19 +176,20 @@ export function renderFridgePage(view: FridgePageView): string {
         .map((loc) => locationSection(loc, view.items, view.locations))
         .join("");
     const body = `
-        <h1>Fridge</h1>
+        ${pageHeader({ title: "Fridge" })}
         ${error}
         ${emptyPrompt}
         ${expiring}
         ${sections}
-        <details class="more"${view.locations.length === 0 ? " open" : ""}>
-<summary>Add location</summary>
-<form class="fridge-add-location" method="post" action="/fridge/locations">
+        ${disclosure({
+            summary: "Add location",
+            open: view.locations.length === 0,
+            body: `<form class="fridge-add-location" method="post" action="/fridge/locations">
 <label for="location_name">Location name</label>
 <input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add location</button>
-</form>
-</details>
+</form>`,
+        })}
     `;
     return renderAppShell({
         title: "Fridge",

@@ -155,22 +155,25 @@ test("fridge page and grocery page import the same quantity-field and food-picke
 });
 
 test("household pages call shared markup helpers for banners, empty states, and item rows", () => {
+    const uiSrc = stubSource("components/ui.ts");
     const helperSrc = stubSource("components/page-markup.ts");
     const fridgeSrc = stubSource("pages/fridge.ts");
     const grocerySrc = stubSource("pages/grocery.ts");
     const recipesSrc = stubSource("pages/recipes.ts");
     const nutritionSrc = stubSource("pages/nutrition.ts");
+    const settingsSrc = stubSource("pages/settings.ts");
 
-    expect(helperSrc).toContain('class="error-banner"');
-    expect(helperSrc).toContain('class="empty-grocery"');
-    expect(helperSrc).toContain('class="empty-fridge"');
-    expect(helperSrc).toContain('class="empty-recipes"');
+    expect(uiSrc).toContain('class="error-banner"');
+    expect(uiSrc).toContain('class="${className}"');
     expect(helperSrc).toContain('class="grocery-line');
     expect(helperSrc).toContain('class="fridge-item"');
-    expect((helperSrc.match(/class="error-banner"/g) ?? []).length).toBe(1);
+    expect((uiSrc.match(/class="error-banner"/g) ?? []).length).toBe(1);
+    expect(helperSrc).not.toContain('class="error-banner"');
+    expect(settingsSrc).toContain("errorBanner");
+    expect(settingsSrc).not.toContain('class="error-banner"');
 
     for (const src of [fridgeSrc, grocerySrc, recipesSrc, nutritionSrc]) {
-        expect(src).toContain("page-markup.js");
+        expect(src).toContain("ui.js");
         expect(src).not.toContain('class="error-banner"');
         expect(src).not.toContain('class="empty-grocery"');
         expect(src).not.toContain('class="empty-fridge"');
@@ -182,6 +185,10 @@ test("household pages call shared markup helpers for banners, empty states, and 
         expect(src).not.toContain('class="recipe-ingredient"');
         expect(src).not.toMatch(/class="grocery-line[^s]/);
     }
+    expect(fridgeSrc).toContain("page-markup.js");
+    expect(grocerySrc).toContain("page-markup.js");
+    expect(recipesSrc).toContain("page-markup.js");
+    expect(nutritionSrc).not.toContain("page-markup.js");
 
     const fridge = renderFridgePage({
         locations: [

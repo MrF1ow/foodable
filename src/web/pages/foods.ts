@@ -2,6 +2,13 @@ import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import type { Food } from "../../domain/foods.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
+import {
+    disclosure,
+    emptyState,
+    errorBanner,
+    pageHeader,
+    panel,
+} from "../components/ui.js";
 
 export type FoodsSettingsView = {
     chrome: ViewerChrome;
@@ -44,9 +51,9 @@ function foodRow(food: Food & { aliases: string[] }): string {
 <p class="row-title">${escapeHtml(food.name)}${brand}${archivedPill}</p>
 <p class="row-meta">${kcal}</p>
 </div>
-<details class="more">
-<summary>Edit</summary>
-<form method="post" action="/settings/foods/${id}" class="food-edit">
+${disclosure({
+    summary: "Edit",
+    body: `<form method="post" action="/settings/foods/${id}" class="food-edit">
 <input type="hidden" name="food_id" value="${id}" />
 <label for="name-${id}">Name</label>
 <input id="name-${id}" name="name" value="${escapeHtml(food.name)}" required maxlength="120" />
@@ -71,19 +78,18 @@ ${nutrientInput(`caf-${food.id}`, "caffeine_mg", "Caffeine mg", food.caffeineMg)
 <fieldset class="allergens choice-row"><legend>Allergens</legend>${allergenBoxes}</fieldset>
 <label><input type="checkbox" name="archived" value="1"${archived} /> Archived</label>
 <button type="submit" class="btn-primary">Save food</button>
-</form>
-</details>
+</form>`,
+})}
 </li>`;
 }
 
 export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
-    const error = view.error
-        ? `<p class="error-banner">${escapeHtml(view.error)}</p>`
-        : "";
     const list =
         view.foods.length === 0
             ? ""
-            : `<section class="panel"><ul class="food-list list">${view.foods.map(foodRow).join("")}</ul></section>`;
+            : panel({
+                  body: `<ul class="food-list list">${view.foods.map(foodRow).join("")}</ul>`,
+              });
     const options = view.foods
         .map(
             (food) =>
@@ -92,9 +98,9 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
         .join("");
     const merge =
         view.foods.length >= 2
-            ? `<details class="more">
-<summary>Merge foods</summary>
-<form method="post" action="/settings/foods/merge" class="food-merge field-grid">
+            ? disclosure({
+                  summary: "Merge foods",
+                  body: `<form method="post" action="/settings/foods/merge" class="food-merge field-grid">
 <label>Keep
 <select id="keep_id" name="keep_id">${options}</select>
 </label>
@@ -102,14 +108,14 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
 <select id="drop_id" name="drop_id">${options}</select>
 </label>
 <button type="submit" class="btn-danger">Merge</button>
-</form>
-</details>`
+</form>`,
+              })
             : "";
     const body = `
-        <h1>Foods</h1>
+        ${pageHeader({ title: "Foods" })}
+        ${errorBanner(view.error)}
         ${renderSettingsNav("foods")}
-        ${error}
-        ${list || `<p class="empty">No foods in the catalog yet.</p>`}
+        ${list || emptyState("No foods in the catalog yet.")}
         ${merge}
     `;
     return renderAppShell({

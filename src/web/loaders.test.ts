@@ -1,6 +1,10 @@
 import { test, expect } from "bun:test";
 import { withWidgetData } from "../widgets.js";
-import { createHouseholdFormHtml, renderDashboardHtml } from "./loaders.js";
+import {
+    createHouseholdFormHtml,
+    forbiddenDashboardHtml,
+    renderDashboardHtml,
+} from "./loaders.js";
 
 import type { HouseholdMember } from "../household.js";
 
@@ -172,4 +176,23 @@ test("bare pages use the app stylesheet, not the deleted marketing one", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-primary">Create household</button>',
     );
+    expect(html).toContain(
+        '<header class="app-bar"><a href="/logout">Log out</a></header>',
+    );
+    expect(html).toContain('class="error-banner"');
+    expect(html).not.toContain('class="logout"');
+    expect(html).not.toContain("bottom-nav");
+});
+
+test("bare pages stamp data-theme when preview asks, and always show the top bar", () => {
+    const light = createHouseholdFormHtml(undefined, "light");
+    const dark = createHouseholdFormHtml(undefined, "dark");
+    expect(light).toContain('data-theme="light"');
+    expect(dark).toContain('data-theme="dark"');
+    expect(light).not.toBe(dark);
+    const forbidden = forbiddenDashboardHtml("light");
+    expect(forbidden).toContain('<header class="app-bar">');
+    expect(forbidden).toContain('data-theme="light"');
+    expect(forbidden).toContain('class="empty"');
+    expect(forbidden).not.toContain("bottom-nav");
 });
