@@ -192,7 +192,11 @@ export async function renderFridgeInventoryPage(
 
 export async function renderGroceryListPage(
     viewerUserId: string,
-    opts: { error?: string; allergenWarning?: string } = {},
+    opts: {
+        error?: string;
+        allergenWarning?: string;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -283,6 +287,7 @@ export async function renderGroceryListPage(
             error: opts.error,
             allergenWarning: opts.allergenWarning,
             unknownAllergen: unknownAllergen && !opts.allergenWarning,
+            openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({
                 id: loc.id,
                 name: loc.name,

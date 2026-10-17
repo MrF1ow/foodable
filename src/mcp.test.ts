@@ -5543,7 +5543,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Safeway");
         expect(html).toContain("Foil");
         expect(html).toContain('data-checked="true"');
-        expect(html).toContain("<h3>Add food</h3>");
+        expect(html).toContain('commandfor="grocery-clear-checked"');
+        expect(html).toContain("Add food</button>");
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");
         const clear = await siteApp.request("http://x/grocery/clear-checked", {
@@ -5608,7 +5609,7 @@ describe("authenticated dashboard HTTP", () => {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
-        expect(html).toContain("<h2>Corner</h2>");
+        expect(html).toContain('<h2 class="row-title">Corner</h2>');
         expect(html).toContain('class="grocery-add-store"');
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");

@@ -89,8 +89,10 @@ export function confirmModal(opts: {
     confirmLabel: string;
     hiddenFields?: Record<string, string>;
     openOnLoad?: boolean;
+    formClass?: string;
 }): string {
     const id = escapeHtml(opts.id);
+    const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
     const hidden =
         opts.hiddenFields &&
         Object.entries(opts.hiddenFields)
@@ -99,7 +101,7 @@ export function confirmModal(opts: {
                     `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
             )
             .join("\n");
-    const body = `<form class="modal-confirm" method="post" action="${escapeHtml(opts.action)}">
+    const body = `<form class="${formClass}" method="post" action="${escapeHtml(opts.action)}">
 ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
 <div class="modal-actions">
 <button type="button" command="close" commandfor="${id}">Cancel</button>

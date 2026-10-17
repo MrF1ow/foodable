@@ -106,7 +106,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(grocery).toContain('class="quantity-field"');
     expect(fridge).toContain('class="food-picker"');
     expect(grocery).toContain('class="food-picker"');
-    expect(grocery).toContain("<h3>Add food</h3>");
+    expect(grocery).toContain('commandfor="grocery-add-food-st-1"');
     expect(grocery).not.toContain("<h3>Add supply</h3>");
     expect(grocery).not.toContain("grocery-add-supply");
     expect(grocery).not.toContain('name="kind" value="supply"');

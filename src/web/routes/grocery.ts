@@ -31,7 +31,11 @@ import { findFoodById } from "../../domain/foods.js";
 
 export const groceryRoutes = new Hono();
 
-async function groceryFormError(userId: string, err: unknown) {
+async function groceryFormError(
+    userId: string,
+    err: unknown,
+    openModalId?: string,
+) {
     const message =
         err instanceof GroceryInputError
             ? err.message
@@ -42,6 +46,7 @@ async function groceryFormError(userId: string, err: unknown) {
                 : "Could not update the grocery list.";
     const page = await renderGroceryListPage(userId, {
         error: message,
+        openModalId,
     });
     return { html: page.html, status: 400 as const };
 }
@@ -62,7 +67,7 @@ groceryRoutes.post("/grocery/stores", requireOwner, async (c) => {
             formText(body, "name"),
         );
     } catch (err) {
-        const page = await groceryFormError(userId, err);
+        const page = await groceryFormError(userId, err, "grocery-add-store");
         return c.html(page.html, page.status);
     }
     return c.redirect("/grocery");
@@ -121,6 +126,7 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
             if (warning?.blocking && !confirmed) {
                 const page = await renderGroceryListPage(userId, {
                     allergenWarning: warning.text,
+                    openModalId: `grocery-add-food-${storeId}`,
                 });
                 return c.html(page.html, 400);
             }
@@ -160,7 +166,11 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
             }
         }
     } catch (err) {
-        const page = await groceryFormError(userId, err);
+        const page = await groceryFormError(
+            userId,
+            err,
+            `grocery-add-food-${storeId}`,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/grocery");

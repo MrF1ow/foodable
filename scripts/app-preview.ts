@@ -104,6 +104,7 @@ function fridgeView(chrome: unknown) {
 
 function groceryView(chrome: unknown) {
     const section = (
+        storeId: string,
         id: string,
         name: string,
         isOther: boolean,
@@ -111,7 +112,7 @@ function groceryView(chrome: unknown) {
     ) => ({
         id,
         householdId: H,
-        storeId: "s1",
+        storeId,
         name,
         sortOrder: isOther ? 8 : 0,
         hidden: false,
@@ -119,6 +120,8 @@ function groceryView(chrome: unknown) {
         lines,
     });
     const line = (
+        storeId: string,
+        sectionId: string,
         id: string,
         name: string,
         amount: number,
@@ -128,8 +131,8 @@ function groceryView(chrome: unknown) {
     ) => ({
         id,
         householdId: H,
-        storeId: "s1",
-        sectionId: "sec1",
+        storeId,
+        sectionId,
         kind: "food",
         displayName: name,
         quantity: { amount, unit },
@@ -153,16 +156,28 @@ function groceryView(chrome: unknown) {
                 sortOrder: 0,
                 rules: [{ id: "r1", body: "Prefer store brand." }],
                 sections: [
-                    section("sec1", "Produce", false, [
-                        line("g1", "Bananas", 6, "each", false),
-                        line("g2", "Spinach", 300, "g", true),
+                    section("s1", "sec1", "Produce", false, [
+                        line("s1", "sec1", "g1", "Bananas", 6, "each", false),
+                        line("s1", "sec1", "g2", "Spinach", 300, "g", true),
                     ]),
-                    section("sec2", "Other", true, [
-                        line("g3", "Eggs", 12, "each", false, {
+                    section("s1", "sec2", "Other", true, [
+                        line("s1", "sec2", "g3", "Eggs", 12, "each", false, {
                             cover: "partial",
                             have: { amount: 6, unit: "each" },
                             need: { amount: 12, unit: "each" },
                         }),
+                    ]),
+                ],
+            },
+            {
+                id: "s2",
+                householdId: H,
+                name: "Costco",
+                sortOrder: 1,
+                rules: [],
+                sections: [
+                    section("s2", "sec3", "Dairy", false, [
+                        line("s2", "sec3", "g4", "Milk", 2, "l", false),
                     ]),
                 ],
             },

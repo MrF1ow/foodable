@@ -12,9 +12,11 @@ import { renderAlreadyHaveTag } from "../components/already-have-tag.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderGroceryLineRow } from "../components/page-markup.js";
 import {
-    disclosure,
+    confirmModal,
     emptyState,
     errorBanner,
+    modal,
+    modalTrigger,
     pageHeader,
 } from "../components/ui.js";
 
@@ -40,7 +42,11 @@ export type GroceryPageView = {
     error?: string;
     allergenWarning?: string;
     unknownAllergen?: boolean;
+    openModalId?: string;
 };
+
+const ADD_STORE_MODAL_ID = "grocery-add-store";
+const CLEAR_CHECKED_MODAL_ID = "grocery-clear-checked";
 
 function quantityLabel(line: GroceryLine): string {
     if (isQuantityUnit(line.quantity.unit)) {
@@ -50,6 +56,19 @@ function quantityLabel(line: GroceryLine): string {
         });
     }
     return `${line.quantity.amount} ${line.quantity.unit}`;
+}
+
+function modalOpen(view: GroceryPageView, id: string): boolean {
+    return view.openModalId === id;
+}
+
+function hasCheckedLine(stores: GroceryStoreView[]): boolean {
+    for (const store of stores) {
+        for (const section of store.sections) {
+            if (section.lines.some((line) => line.checked)) return true;
+        }
+    }
+    return false;
 }
 
 function storeSectionSelect(store: GroceryStoreView): string {
@@ -107,7 +126,8 @@ function lineRow(
 function storeSection(
     store: GroceryStoreView,
     locations: { id: string; name: string }[],
-): string {
+    view: GroceryPageView,
+): { section: string; modals: string } {
     const rules = store.rules
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
         .join("");
@@ -124,19 +144,18 @@ function storeSection(
         })
         .join("");
     const pickerId = `picker-${store.id}`;
+    const addFoodModalId = `grocery-add-food-${store.id}`;
     const other = store.sections.find((section) => section.isOther);
     const hidden: Record<string, string> = {
         kind: "food",
         store_id: store.id,
     };
     if (other) hidden.section_id = other.id;
-    return `<section class="grocery-store panel" data-store-id="${escapeHtml(store.id)}">
-<h2>${escapeHtml(store.name)}</h2>
-${rules ? `<ul class="store-rule-list muted">${rules}</ul>` : ""}
-${sections}
-${disclosure({
-    summary: "<h3>Add food</h3>",
-    body: `${storeSectionSelect(store)}
+    const addFoodModal = modal({
+        id: addFoodModalId,
+        title: "Add food",
+        openOnLoad: modalOpen(view, addFoodModalId),
+        body: `${storeSectionSelect(store)}
 ${renderFoodPicker({
     id: pickerId,
     action: "/grocery/lines",
@@ -144,8 +163,23 @@ ${renderFoodPicker({
     hiddenFields: hidden,
     includeQuantity: true,
 })}`,
+    });
+    const headActions = `<div class="row-actions">
+${modalTrigger({
+    target: addFoodModalId,
+    label: "Add food",
+    className: "btn-sm",
 })}
+</div>`;
+    const section = `<section class="grocery-store panel" data-store-id="${escapeHtml(store.id)}">
+<div class="grocery-store-head row">
+<h2 class="row-title">${escapeHtml(store.name)}</h2>
+${headActions}
+</div>
+${rules ? `<ul class="store-rule-list muted">${rules}</ul>` : ""}
+${sections}
 </section>`;
+    return { section, modals: addFoodModal };
 }
 
 export function renderGroceryPage(view: GroceryPageView): string {
@@ -160,35 +194,77 @@ export function renderGroceryPage(view: GroceryPageView): string {
             ? `${emptyState("Add a grocery store in Settings, then add a line.", "empty-grocery")}
 <p><a href="/settings/household">Household settings</a></p>`
             : "";
-    const addStore = view.isOwner
-        ? disclosure({
-              summary: "Add store",
-              open: view.stores.length === 0,
-              body: `<form class="grocery-add-store" method="post" action="/grocery/stores">
+    const locations = view.locations ?? [];
+    const storeParts = view.stores.map((store) =>
+        storeSection(store, locations, view),
+    );
+    const stores = storeParts.map((part) => part.section).join("");
+    const storeModals = storeParts.map((part) => part.modals).join("");
+
+    const headerActions: string[] = [];
+    if (view.isOwner) {
+        headerActions.push(
+            modalTrigger({
+                target: ADD_STORE_MODAL_ID,
+                label: "Add store",
+                className: "btn-primary",
+            }),
+        );
+    }
+    if (hasCheckedLine(view.stores)) {
+        headerActions.push(
+            modalTrigger({
+                target: CLEAR_CHECKED_MODAL_ID,
+                label: "Clear checked",
+                className: "btn-danger",
+            }),
+        );
+    }
+
+    const pageModals: string[] = [];
+    if (view.isOwner) {
+        pageModals.push(
+            modal({
+                id: ADD_STORE_MODAL_ID,
+                title: "Add store",
+                openOnLoad:
+                    modalOpen(view, ADD_STORE_MODAL_ID) ||
+                    (view.stores.length === 0 && view.openModalId == null),
+                body: `<form class="grocery-add-store" method="post" action="/grocery/stores">
 <label for="grocery_store_name">Grocery store</label>
 <input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
-          })
-        : "";
-    const clearChecked =
-        view.stores.length === 0
-            ? ""
-            : `<form class="grocery-clear-checked" method="post" action="/grocery/clear-checked">
-<button type="submit" class="btn-sm">Clear checked</button>
-</form>`;
-    const locations = view.locations ?? [];
-    const stores = view.stores
-        .map((store) => storeSection(store, locations))
-        .join("");
+            }),
+        );
+    }
+    if (hasCheckedLine(view.stores)) {
+        pageModals.push(
+            confirmModal({
+                id: CLEAR_CHECKED_MODAL_ID,
+                title: "Clear checked",
+                message: "Remove every checked item from the list?",
+                action: "/grocery/clear-checked",
+                confirmLabel: "Clear checked",
+                formClass: "modal-confirm grocery-clear-checked",
+                openOnLoad: modalOpen(view, CLEAR_CHECKED_MODAL_ID),
+            }),
+        );
+    }
+
     const body = `
-        ${pageHeader({ title: "Groceries" })}
+        ${pageHeader({
+            title: "Groceries",
+            actions: headerActions.length
+                ? headerActions.join("\n")
+                : undefined,
+        })}
         ${error}
         ${allergen}
         ${empty}
         ${stores}
-        ${clearChecked}
-        ${addStore}
+        ${pageModals.join("")}
+        ${storeModals}
     `;
     return renderAppShell({
         title: "Groceries",
