@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { renderFridgeInventoryPage } from "../dashboard.js";
+import { renderFridgeInventoryPage } from "../loaders.js";
+
 import { formAmount, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { lookupBarcode } from "../../foods.js";

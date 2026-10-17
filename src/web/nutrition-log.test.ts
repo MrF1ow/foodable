@@ -11,7 +11,7 @@ import {
     logMealFromForm,
     logWaterFromForm,
     logWeightFromForm,
-} from "./nutrition.js";
+} from "./pages/nutrition.js";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 

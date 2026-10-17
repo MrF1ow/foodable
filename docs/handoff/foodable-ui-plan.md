@@ -316,7 +316,7 @@ Measured during the 2026-10-15 to 2026-10-17 investigation. Repeat a measurement
 
 | Phase | Status      | PR  |
 | ----- | ----------- | --- |
-| U1    | Not started |     |
+| U1    | Done        | #71 |
 | U2    | Not started |     |
 | U3    | Not started |     |
 | U4    | Not started |     |

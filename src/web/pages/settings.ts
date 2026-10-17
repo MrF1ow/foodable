@@ -1,8 +1,4 @@
-import {
-    escapeHtml,
-    renderAppShell,
-    type ViewerChrome,
-} from "../../app/shell.js";
+import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { DRINK_UNITS, isDrinkUnit, type DrinkUnit } from "../../alcohol.js";
 import {
     WEIGHT_UNITS,

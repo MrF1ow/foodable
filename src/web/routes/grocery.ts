@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { groceryAllergenMembers, renderGroceryListPage } from "../dashboard.js";
+import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
+
 import { formAmount, formText } from "../form.js";
 import {
     requireMember,

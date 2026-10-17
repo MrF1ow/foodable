@@ -10,7 +10,7 @@ import {
     type PersonRule,
     type StoreRule,
 } from "../../domain/rules.js";
-import { renderSettingsNav } from "../../web/components/settings-nav.js";
+import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type HouseholdStoreView = GroceryStore & {
     sections: GrocerySection[];

@@ -2,7 +2,7 @@ import {
     FOOD_QUANTITY_UNITS,
     type QuantityUnit,
 } from "../../domain/quantity.js";
-import { escapeHtml } from "../../app/shell.js";
+import { escapeHtml } from "../shell.js";
 
 export type QuantityFieldKind = "food" | "supply";
 

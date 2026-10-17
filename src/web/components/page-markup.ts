@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../app/shell.js";
+import { escapeHtml } from "../shell.js";
 
 export function renderErrorBanner(error?: string): string {
     return error ? `<p class="error-banner">${escapeHtml(error)}</p>` : "";

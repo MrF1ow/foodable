@@ -1,4 +1,6 @@
-import { tabIcon } from "../web/components/bottom-nav.js";
+import { bottomNav } from "./components/bottom-nav.js";
+
+export { bottomNav };
 
 export const APP_TABS = [
     { id: "fridge", href: "/fridge", label: "Fridge" },
@@ -39,15 +41,6 @@ export function escapeHtml(str: string): string {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
-}
-
-export function bottomNav(active: AppTabId): string {
-    const links = APP_TABS.map((tab) => {
-        const current = tab.id === active ? ' aria-current="page"' : "";
-        const label = escapeHtml(tab.label);
-        return `<a href="${tab.href}"${current} title="${label}" aria-label="${label}">${tabIcon(tab.id)}</a>`;
-    }).join("");
-    return `<nav class="bottom-nav" aria-label="App">${links}</nav>`;
 }
 
 /** The `<html>` opener. An explicit theme stamps data-theme, which the token

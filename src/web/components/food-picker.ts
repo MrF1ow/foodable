@@ -4,7 +4,7 @@ import {
     normalizeBarcode,
     type FoodResult,
 } from "../../foods.js";
-import { escapeHtml } from "../../app/shell.js";
+import { escapeHtml } from "../shell.js";
 import { renderQuantityField } from "./quantity-field.js";
 
 type SearchHooks = Parameters<typeof searchFoodsByName>[2];

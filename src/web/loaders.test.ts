@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { withWidgetData } from "../widgets.js";
-import { createHouseholdFormHtml, renderDashboardHtml } from "./dashboard.js";
+import { createHouseholdFormHtml, renderDashboardHtml } from "./loaders.js";
+
 import type { HouseholdMember } from "../household.js";
 
 const alice: HouseholdMember = {

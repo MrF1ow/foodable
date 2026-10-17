@@ -4,8 +4,9 @@ import {
     logWaterFromForm,
     logWeightFromForm,
     withNutritionError,
-} from "../../app/nutrition.js";
-import { renderDashboardPage } from "../dashboard.js";
+} from "../pages/nutrition.js";
+import { renderDashboardPage } from "../loaders.js";
+
 import { formMealItems, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";

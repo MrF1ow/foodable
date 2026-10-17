@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../app/shell.js";
+import { escapeHtml } from "../shell.js";
 
 export type SelectableMember = {
     userId: string;
