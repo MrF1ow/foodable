@@ -352,7 +352,7 @@ if (process.argv.includes("--shots")) {
         process.exit(1);
     }
     for (const name of names) {
-        await Bun.$`${chromium} --headless=new --disable-gpu --hide-scrollbars --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
+        await Bun.$`${chromium} --headless=new --disable-gpu --hide-scrollbars --force-prefers-reduced-motion --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
     }
     server.stop();
