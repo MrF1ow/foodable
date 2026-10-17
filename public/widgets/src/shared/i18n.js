@@ -21,7 +21,9 @@
 // Include this BEFORE shared/macros.js (and before a template's own script)
 // in every widget that uses it — both read WIDGET_STRINGS / T off the
 // widget's global scope, the same "must already be in scope" contract
-// shared/macros.js already has for fmt()/esc().
+// shared/macros.js already has for fmt()/esc() from shared/util.js.
+// tpl() and setLocaleFrom() also live in util.js; templates include that
+// partial directly beside bridge.js. plural() below calls tpl().
 
 // The locale actually in effect for this render, set by setLocale() below.
 // Read by macros.js (and any template) as the ambient "current language" —
@@ -54,26 +56,6 @@ function setLocale(locale) {
         document.documentElement.lang = WIDGET_LOCALE;
     } catch (_) {}
     return T;
-}
-
-// Convenience wrapper combining pickLocale+setLocale for the common "resolve
-// this render's locale from the payload and host context" case every widget
-// template needs.
-function setLocaleFrom(data, api) {
-    return setLocale(
-        pickLocale(
-            data && data.locale,
-            api && api.hostContext ? api.hostContext.locale : null,
-        ),
-    );
-}
-
-// Fill {placeholders} in a translated template string, e.g.
-// tpl(T.macros.byMealTitle, { label: "Protein" }) -> "Protein by meal".
-function tpl(s, vars) {
-    return String(s).replace(/\{(\w+)\}/g, (_, k) =>
-        vars && vars[k] != null ? vars[k] : "",
-    );
 }
 
 // Pick the right grammatical form of a PluralForms value ({ one, other) })
