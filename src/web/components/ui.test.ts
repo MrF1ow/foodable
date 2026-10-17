@@ -2,9 +2,13 @@ import { test, expect } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+    confirmModal,
     disclosure,
     emptyState,
     errorBanner,
+    infoTip,
+    modal,
+    modalTrigger,
     pageHeader,
     panel,
     row,
@@ -106,6 +110,73 @@ test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
     );
     expect(row({ title: "Bob", actions: "<form></form>" })).toContain(
         '<div class="row-actions">\n<form></form>\n</div>',
+    );
+});
+
+test("modal, modalTrigger, confirmModal, and infoTip markup", () => {
+    const m = modal({
+        id: "add-food",
+        title: "Add food",
+        body: "<form></form>",
+        size: "wide",
+    });
+    expect(m).toContain('<dialog class="modal modal--wide" id="add-food"');
+    expect(m).toContain('aria-labelledby="add-food-title"');
+    expect(m).toContain(
+        '<h2 class="modal-title" id="add-food-title">Add food</h2>',
+    );
+    expect(m).toContain(
+        '<button type="button" class="modal-close" command="close" commandfor="add-food"',
+    );
+    expect(m).toContain('<div class="modal-handle" aria-hidden="true"></div>');
+    expect(m).toContain('<div class="modal-body">\n<form></form>\n</div>');
+
+    expect(modal({ id: "x", title: "A & B", body: "<p>y</p>" })).toContain(
+        '<h2 class="modal-title" id="x-title">A &amp; B</h2>',
+    );
+
+    expect(modalTrigger({ target: "add-food", label: "Add food" })).toBe(
+        '<button type="button" class="btn-primary" commandfor="add-food" command="show-modal">Add food</button>',
+    );
+    expect(
+        modalTrigger({
+            target: "del",
+            label: "Remove",
+            className: "btn-sm btn-danger",
+        }),
+    ).toContain('class="btn-sm btn-danger"');
+
+    const confirm = confirmModal({
+        id: "del-item",
+        title: "Delete item?",
+        message: "Remove <b>eggs</b> from the fridge.",
+        action: "/fridge/items/1/delete",
+        confirmLabel: "Delete",
+        hiddenFields: { csrf: "tok" },
+    });
+    expect(confirm).toContain('id="del-item"');
+    expect(confirm).toContain(
+        '<form class="modal-confirm" method="post" action="/fridge/items/1/delete">',
+    );
+    expect(confirm).toContain(
+        '<input type="hidden" name="csrf" value="tok" />',
+    );
+    expect(confirm).toContain(
+        '<p class="modal-message">Remove &lt;b&gt;eggs&lt;/b&gt; from the fridge.</p>',
+    );
+    expect(confirm).toContain(
+        '<button type="button" command="close" commandfor="del-item">Cancel</button>',
+    );
+    expect(confirm).toContain(
+        '<button type="submit" class="btn-danger">Delete</button>',
+    );
+
+    expect(infoTip({ id: "food-tip", text: "Edible items." })).toBe(
+        `<button type="button" class="info-tip-trigger" popovertarget="food-tip" aria-label="More information"><span class="info-tip-icon" aria-hidden="true">i</span></button>
+<div id="food-tip" popover="auto" class="info-tip">Edible items.</div>`,
+    );
+    expect(infoTip({ id: "t", text: "A & B", label: "Help" })).toContain(
+        'aria-label="Help">Help</button>',
     );
 });
 
