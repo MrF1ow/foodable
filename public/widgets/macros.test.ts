@@ -27,9 +27,10 @@ const macrosApi = await (async () => {
     // wiring (guarded by `typeof document`) stays out of the way.
     const factory = new Function(
         "WIDGET_STRINGS",
-        `${utilSrc}\n${i18nSrc}\n${macrosSrc}\nreturn { macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
+        `${utilSrc}\n${i18nSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
     );
     return factory({ en: WIDGET_STRINGS_EN }) as {
+        fmt: (n: number, decimals?: number) => string;
         macroBits: (
             m: Macro,
             vals: Record<string, number>,
@@ -56,6 +57,8 @@ const macrosApi = await (async () => {
         mealList: (m: Macro, meals: unknown[]) => string;
     };
 })();
+
+const fmt = macrosApi.fmt;
 
 const macroOf = (key: string) => {
     const m = macrosApi.MACROS.find((x) => x.key === key);
