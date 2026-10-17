@@ -16,14 +16,14 @@
     gap: 10px;
 }
 .ctitle {
-    font-size: 9.5px;
+    font-size: var(--fs-9-5);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-dim);
 }
 .cmeta {
-    font-size: 10.5px;
+    font-size: var(--fs-10-5);
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
@@ -48,7 +48,7 @@
     justify-content: space-between;
     margin-top: 4px;
     padding: 0 2px;
-    font-size: 10px;
+    font-size: var(--fs-10);
     font-weight: 500;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;

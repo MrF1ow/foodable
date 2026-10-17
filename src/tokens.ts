@@ -1,9 +1,11 @@
-// The design tokens: every colour the UI uses, once.
+// The design tokens: every colour, type size and radius the UI uses, once.
 //
 // scripts/gen-tokens.ts writes public/widgets/src/shared/tokens.css from this
 // module. src/tokens.test.ts fails when the committed file drifts, so a value
 // changes here and nowhere else. --accent is BRAND_GREEN. THEME_COLOR is the
 // neutral page background, the same value the login head and appHead emit.
+// Type (--fs-*) and radius (--r-*) scales are the literals the shared CSS
+// used to write by hand.
 //
 // Each theme's values appear twice in the CSS (once under the media query,
 // once under the explicit data-theme override) because an explicit theme must
@@ -82,6 +84,51 @@ export const THEME_COLOR: Record<Theme, string> = {
     light: NEUTRAL.light.bg,
     dark: NEUTRAL.dark.bg,
 };
+
+// Type and radius scales. Every font-size / border-radius px literal in the
+// shared partials and public/app/app.css is a step here, so substituting
+// var(--fs-*) / var(--r-*) is a no-op on the rendered result. Half-pixel
+// steps use a hyphen in the token name (--fs-11-5) because a dot is not a
+// valid unescaped ident. --radius stays the panel corner, equal to --r-18.
+export const TYPE_SCALE = {
+    "8-5": "8.5px",
+    "9": "9px",
+    "9-5": "9.5px",
+    "10": "10px",
+    "10-5": "10.5px",
+    "11": "11px",
+    "11-5": "11.5px",
+    "12": "12px",
+    "12-5": "12.5px",
+    "13": "13px",
+    "13-5": "13.5px",
+    "14": "14px",
+    "15": "15px",
+    "16": "16px",
+    "18": "18px",
+    "19": "19px",
+    "21": "21px",
+    "24": "24px",
+    "26": "26px",
+} as const;
+
+export const RADIUS_SCALE = {
+    "7": "7px",
+    "8": "8px",
+    "10": "10px",
+    "12": "12px",
+    "18": "18px",
+    "999": "999px",
+} as const;
+
+function scaleDecls(
+    prefix: "fs" | "r",
+    scale: Record<string, string>,
+): [string, string][] {
+    return Object.entries(scale)
+        .sort((a, b) => parseFloat(a[1]) - parseFloat(b[1]))
+        .map(([k, v]) => [`${prefix}-${k}`, v]);
+}
 
 // ---- CSS emitters ----------------------------------------------------------
 
@@ -172,7 +219,9 @@ ${decl("    ", Object.entries(NUTRIENTS.light))}
        chrome that ignores every token. */
     color-scheme: light;
 
-    --radius: 18px;
+${decl("    ", scaleDecls("fs", TYPE_SCALE))}
+${decl("    ", scaleDecls("r", RADIUS_SCALE))}
+    --radius: var(--r-18);
 }
 
 @media (prefers-color-scheme: dark) {
