@@ -158,6 +158,18 @@ function extractShellScript() {
     return comingSoonPage("fridge").match(/<script>([\s\S]*?)<\/script>/)![1]!;
 }
 
+function runShellScript(
+    document: unknown,
+    window: unknown,
+    ElementCtor: unknown = class Element {},
+) {
+    new Function("document", "window", "Element", extractShellScript())(
+        document,
+        window,
+        ElementCtor,
+    );
+}
+
 test("the fx gate is a no-op on a window without matchMedia", () => {
     const html = {
         classList: {
@@ -173,12 +185,7 @@ test("the fx gate is a no-op on a window without matchMedia", () => {
         addEventListener() {},
     };
     const window = { addEventListener() {} };
-    expect(() =>
-        new Function("document", "window", extractShellScript())(
-            document,
-            window,
-        ),
-    ).not.toThrow();
+    expect(() => runShellScript(document, window)).not.toThrow();
     expect(html.classList.added).toEqual([]);
 });
 
@@ -191,7 +198,7 @@ test("html.fx is added on the next frame when reduced motion is not requested", 
             },
         },
     };
-    const raf: FrameRequestCallback[] = [];
+    const raf: Array<(time: number) => void> = [];
     const document = {
         documentElement: html,
         querySelectorAll: () => [],
@@ -202,15 +209,15 @@ test("html.fx is added on the next frame when reduced motion is not requested", 
         matchMedia(_q: string) {
             return { matches: false };
         },
-        requestAnimationFrame(cb: FrameRequestCallback) {
+        requestAnimationFrame(cb: (time: number) => void) {
             raf.push(cb);
             return raf.length;
         },
     };
-    new Function("document", "window", extractShellScript())(document, window);
+    runShellScript(document, window);
     expect(html.classList.added).toEqual([]);
     expect(raf.length).toBe(1);
-    raf[0]!(0 as unknown as DOMHighResTimeStamp);
+    raf[0]!(0);
     expect(html.classList.added).toEqual(["fx"]);
 });
 
@@ -223,7 +230,7 @@ test("html.fx is not added when reduced motion is requested", () => {
             },
         },
     };
-    const raf: FrameRequestCallback[] = [];
+    const raf: Array<(time: number) => void> = [];
     const document = {
         documentElement: html,
         querySelectorAll: () => [],
@@ -234,12 +241,12 @@ test("html.fx is not added when reduced motion is requested", () => {
         matchMedia(q: string) {
             return { matches: q.includes("prefers-reduced-motion: reduce") };
         },
-        requestAnimationFrame(cb: FrameRequestCallback) {
+        requestAnimationFrame(cb: (time: number) => void) {
             raf.push(cb);
             return raf.length;
         },
     };
-    new Function("document", "window", extractShellScript())(document, window);
+    runShellScript(document, window);
     expect(raf).toEqual([]);
     expect(html.classList.added).toEqual([]);
 });
@@ -254,19 +261,20 @@ test("one passive pointermove listener sets --mx and --my on the panel", () => {
         },
         getBoundingClientRect: () => ({ left: 10, top: 20 }),
     };
+    class FakeElement {}
     const target = {
         closest: (sel: string) => (sel === ".app-main .panel" ? panel : null),
     };
-    Object.setPrototypeOf(target, Element.prototype);
-    let pointerOpts: AddEventListenerOptions | boolean | undefined;
-    let pointerFn: ((e: PointerEvent) => void) | undefined;
+    Object.setPrototypeOf(target, FakeElement.prototype);
+    let pointerOpts: { passive?: boolean } | boolean | undefined;
+    let pointerFn: ((e: unknown) => void) | undefined;
     const document = {
         documentElement: { classList: { add() {} } },
         querySelectorAll: () => [],
         addEventListener(
             type: string,
-            fn: (e: PointerEvent) => void,
-            opts?: AddEventListenerOptions | boolean,
+            fn: (e: unknown) => void,
+            opts?: { passive?: boolean } | boolean,
         ) {
             if (type === "pointermove") {
                 pointerFn = fn;
@@ -283,12 +291,12 @@ test("one passive pointermove listener sets --mx and --my on the panel", () => {
             return 0;
         },
     };
-    new Function("document", "window", extractShellScript())(document, window);
+    runShellScript(document, window, FakeElement);
     expect(pointerOpts).toEqual({ passive: true });
     pointerFn!({
         target,
         clientX: 40,
         clientY: 80,
-    } as unknown as PointerEvent);
+    });
     expect(panel.style.props).toEqual({ "--mx": "30px", "--my": "60px" });
 });

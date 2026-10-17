@@ -79,7 +79,7 @@ ${bottomNav(chrome.active)}
 // panels (magic-card) only reads --mx / --my.
 const mq = (q) => typeof window.matchMedia === "function" && window.matchMedia(q).matches;
 if (typeof window.matchMedia === "function" && !mq("(prefers-reduced-motion: reduce)")) {
-    requestAnimationFrame(() => document.documentElement.classList.add("fx"));
+    window.requestAnimationFrame(() => document.documentElement.classList.add("fx"));
 }
 if (mq("(hover: hover) and (pointer: fine)")) {
     document.addEventListener("pointermove", (e) => {
