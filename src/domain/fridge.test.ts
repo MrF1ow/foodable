@@ -395,3 +395,18 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         /<dialog class="modal" id="fridge-delete-it-1"[^>]*data-modal-open-on-load/,
     );
 });
+
+test("fridge still shows a page banner when openModalId does not match a dialog", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+        ],
+        items: [],
+        error: "Unknown item.",
+        openModalId: "fridge-delete-gone",
+    } as never);
+    expect(html).toContain('class="error-banner"');
+    expect(html).toContain("Unknown item.");
+    expect(html).not.toMatch(/data-modal-open-on-load/);
+});

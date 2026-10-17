@@ -1160,8 +1160,8 @@ body.auth {
     background: color-mix(in srgb, var(--over) 55%, transparent);
 }
 .modal-sheet {
-    display: grid;
-    gap: 0;
+    display: flex;
+    flex-direction: column;
     max-height: min(85dvh, 100%);
     border: 1px solid var(--panel-border);
     border-radius: var(--radius);
@@ -1171,8 +1171,10 @@ body.auth {
 }
 .modal-handle {
     display: none;
+    flex: none;
 }
 .modal-head {
+    flex: none;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -1209,8 +1211,11 @@ body.auth {
     color: var(--text);
 }
 .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 16px;
     overflow: auto;
+    overscroll-behavior: contain;
 }
 .modal-message {
     margin: 0 0 16px;
@@ -1288,7 +1293,9 @@ body.auth {
     .modal-sheet {
         max-height: 90dvh;
         border-radius: var(--radius) var(--radius) 0 0;
-        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .modal-body {
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     }
     .modal-handle {
         display: block;

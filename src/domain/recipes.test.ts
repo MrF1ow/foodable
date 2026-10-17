@@ -36,6 +36,7 @@ import {
     renderRecipeDetailPage,
     renderRecipesPage,
 } from "../web/pages/recipes.js";
+import { getAppCss } from "../widgets.js";
 import type { FoodResult } from "../foods.js";
 
 const HH = "hh-1";
@@ -527,7 +528,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
     expect(detail).toContain('id="recipe-add-ingredient-r1"');
 });
 
-test("recipe pages use modals for create and detail actions", () => {
+test("recipe pages use modals for create and detail actions", async () => {
     const recipe = {
         id: "r1",
         householdId: "hh-1",
@@ -559,6 +560,10 @@ test("recipe pages use modals for create and detail actions", () => {
     expect(cardLinks).toHaveLength(1);
     expect(cardLinks[0]!.match(/<a /g)?.length).toBe(1);
     expect(cardLinks[0]).toContain('class="row-title"');
+    const css = await getAppCss();
+    expect(css).toMatch(
+        /\.recipe-card a\.row-title::after[\s\S]*position:\s*absolute;[\s\S]*inset:\s*0;/,
+    );
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
@@ -626,9 +631,13 @@ test("a server error reopens the recipe modal that submitted the form", () => {
         /<dialog class="modal" id="recipe-new"[^>]*data-modal-open-on-load/,
     );
     expect(list).toContain("Enter a recipe name.");
+    expect(list.match(/Enter a recipe name\./g)?.length).toBe(1);
+    const newDialogStart = list.indexOf('id="recipe-new"');
+    const newDialogEnd = list.indexOf("</dialog>", newDialogStart);
     expect(list.indexOf("Enter a recipe name.")).toBeGreaterThan(
-        list.indexOf('id="recipe-new"'),
+        newDialogStart,
     );
+    expect(list.indexOf("Enter a recipe name.")).toBeLessThan(newDialogEnd);
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
@@ -681,9 +690,18 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(detail).toMatch(
         /<dialog class="modal" id="recipe-delete-r1"[^>]*data-modal-open-on-load/,
     );
-    expect(detail).toContain(
-        "Only the creator or household owner can delete this recipe.",
-    );
+    const deleteMsg =
+        "Only the creator or household owner can delete this recipe.";
+    expect(detail).toContain(deleteMsg);
+    expect(
+        detail.match(
+            new RegExp(deleteMsg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+        )?.length,
+    ).toBe(1);
+    const deleteDialogStart = detail.indexOf('id="recipe-delete-r1"');
+    const deleteDialogEnd = detail.indexOf("</dialog>", deleteDialogStart);
+    expect(detail.indexOf(deleteMsg)).toBeGreaterThan(deleteDialogStart);
+    expect(detail.indexOf(deleteMsg)).toBeLessThan(deleteDialogEnd);
 
     const editIng = renderRecipeDetailPage({
         chrome: { theme: "light" },
@@ -736,7 +754,57 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(editIng).toMatch(
         /<dialog class="modal" id="recipe-edit-ingredient-ing1"[^>]*data-modal-open-on-load/,
     );
-    expect(editIng).toContain("Amount must be positive.");
+    const amountMsg = "Amount must be positive.";
+    expect(editIng).toContain(amountMsg);
+    expect(editIng.match(/Amount must be positive\./g)?.length).toBe(1);
+    const editIngDialogStart = editIng.indexOf(
+        'id="recipe-edit-ingredient-ing1"',
+    );
+    const editIngDialogEnd = editIng.indexOf("</dialog>", editIngDialogStart);
+    expect(editIng.indexOf(amountMsg)).toBeGreaterThan(editIngDialogStart);
+    expect(editIng.indexOf(amountMsg)).toBeLessThan(editIngDialogEnd);
+});
+
+test("recipe detail shows a page banner when openModalId does not match a dialog", () => {
+    const html = renderRecipeDetailPage({
+        chrome: { theme: "light" },
+        recipe: {
+            id: "r1",
+            householdId: "hh-1",
+            creatorId: "u1",
+            name: "Mac",
+            yieldPortions: 4,
+            instructions: null,
+            sourceUrl: null,
+            tags: [],
+            notes: null,
+            prepMinutes: null,
+            cookMinutes: null,
+        },
+        ingredients: [],
+        members: [],
+        stores: [],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [],
+        },
+        isOwner: true,
+        error: "Unknown ingredient.",
+        openModalId: "recipe-delete-ingredient-gone",
+    } as never);
+    expect(html).toContain('class="error-banner"');
+    expect(html).toContain("Unknown ingredient.");
+    expect(html).not.toMatch(/data-modal-open-on-load/);
 });
 
 test("updateRecipe writes fuller fields and updateRecipeIngredient stores a note", async () => {

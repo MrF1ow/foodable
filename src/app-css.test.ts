@@ -62,3 +62,13 @@ test("page element defaults never outrank component classes", async () => {
     expect(css).not.toMatch(/^\.app-main (h1|h2|h3|p|a) \{/m);
     expect(css).toContain(":where(.app-main) p {");
 });
+
+test("modal sheet caps height and the body scrolls inside it", async () => {
+    const css = await getAppCss();
+    expect(css).toMatch(
+        /\.modal-sheet\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*max-height:/s,
+    );
+    expect(css).toMatch(
+        /\.modal-body\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s,
+    );
+});

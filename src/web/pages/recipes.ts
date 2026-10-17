@@ -19,6 +19,7 @@ import {
     modal,
     modalTrigger,
     pageHeader,
+    pageLevelErrorBanner,
     panel,
 } from "../components/ui.js";
 
@@ -75,13 +76,6 @@ function modalFormError(
     return "";
 }
 
-function pageError(view: { error?: string; openModalId?: string }): string {
-    if (view.error && !view.openModalId) {
-        return errorBanner(view.error);
-    }
-    return "";
-}
-
 function quantityLabel(amount: number, unit: string): string {
     if (isQuantityUnit(unit)) {
         return formatQuantity({ amount, unit });
@@ -126,7 +120,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
         canMakeNow: false,
         safeFor: "",
     };
-    const error = pageError(view);
+    const error = pageLevelErrorBanner(view, [NEW_RECIPE_MODAL_ID]);
     const empty =
         view.recipes.length === 0
             ? emptyState("Add a recipe.", "empty-recipes")
@@ -283,7 +277,18 @@ function macrosBlock(
 }
 
 export function renderRecipeDetailPage(view: RecipeDetailView): string {
-    const error = pageError(view);
+    const recipeId = view.recipe.id;
+    const renderedModalIds = [
+        editRecipeModalId(recipeId),
+        deleteRecipeModalId(recipeId),
+        addIngredientModalId(recipeId),
+        cookModalId(recipeId),
+        ...view.ingredients.flatMap((ingredient) => [
+            editIngredientModalId(ingredient.id),
+            deleteIngredientModalId(ingredient.id),
+        ]),
+    ];
+    const error = pageLevelErrorBanner(view, renderedModalIds);
     const allergen = view.allergenWarning
         ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
         : "";
@@ -332,7 +337,6 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
 <p class="muted">Leave blank to shop for the people above. Enter more for a whole batch or leftovers.</p>
 <button type="submit" class="btn-primary">Add to grocery</button>
 </form>`;
-    const recipeId = view.recipe.id;
     const recipeIdEsc = escapeHtml(recipeId);
     const personMacros =
         view.portionCount === 1 ? "" : macrosBlock(view.macros, "person");

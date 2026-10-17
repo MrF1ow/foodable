@@ -45,6 +45,17 @@ export function errorBanner(error?: string): string {
     return error ? `<p class="error-banner">${escapeHtml(error)}</p>` : "";
 }
 
+/** Banner when the error is not shown inside a modal (missing or unknown openModalId). */
+export function pageLevelErrorBanner(
+    view: { error?: string; openModalId?: string },
+    renderedModalIds: readonly string[],
+): string {
+    if (!view.error) return "";
+    const openId = view.openModalId;
+    if (openId && renderedModalIds.includes(openId)) return "";
+    return errorBanner(view.error);
+}
+
 export function emptyState(text: string, className = "empty"): string {
     return `<p class="${className}">${escapeHtml(text)}</p>`;
 }
@@ -92,6 +103,7 @@ export function confirmModal(opts: {
     hiddenFields?: Record<string, string>;
     openOnLoad?: boolean;
     formClass?: string;
+    /** Pre-escaped HTML before the confirm form (same contract as {@link modal}'s `body`). */
     bodyPrefix?: string;
 }): string {
     const id = escapeHtml(opts.id);
