@@ -10,7 +10,8 @@
  * here follow the same convention, so any component class wins.
  *
  * The brand layer (palette, fonts, pill controls, glow, wordmark, frosted
- * nav, login hero) is app-only. Chat widgets never include this file.
+ * nav, login hero) and motion.css are app-only. Chat widgets never include
+ * this file.
  */
 
 /*@include shared/tokens.css@*/
@@ -23,9 +24,10 @@
 
 /*@include shared/seg.css@*/
 
-/* App-only brand layer (palette, type). After the shared partials so it wins;
-   never included by a widget, so chat widgets keep the neutral look. */
+/* App-only brand layer (palette, type) and motion primitives. After the shared
+   partials so they win; never included by a widget. */
 /*@include ../../app/brand.css@*/
+/*@include ../../app/motion.css@*/
 
 /* ---- base ---- */
 
@@ -919,6 +921,53 @@ body {
     background: var(--accent-soft);
 }
 
+/* magic-card: a pointer-following glow inside a panel. The shell script sets
+   --mx / --my; touch screens never see it. */
+@media (hover: hover) and (pointer: fine) {
+    .app-main .panel {
+        position: relative;
+        isolation: isolate;
+    }
+    .app-main .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        z-index: -1;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        background: radial-gradient(
+            260px circle at var(--mx, -999px) var(--my, -999px),
+            color-mix(in srgb, var(--accent) 10%, transparent),
+            transparent 70%
+        );
+    }
+    .app-main .panel:hover::before {
+        opacity: 1;
+    }
+}
+
+/* blur-fade: panels arrive once, staggered, only after a frame has ticked. */
+html.fx .app-main > * {
+    animation: fx-blur-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+html.fx .app-main > :nth-child(2) {
+    animation-delay: 0.04s;
+}
+html.fx .app-main > :nth-child(3) {
+    animation-delay: 0.08s;
+}
+html.fx .app-main > :nth-child(4) {
+    animation-delay: 0.12s;
+}
+html.fx .app-main > :nth-child(5) {
+    animation-delay: 0.16s;
+}
+html.fx .app-main > :nth-child(n + 6) {
+    animation-delay: 0.2s;
+}
+
 /* ---- login: the site's hero, scaled down ---- */
 body.auth {
     background:
@@ -940,9 +989,90 @@ body.auth {
     font-weight: 750;
     letter-spacing: -0.04em;
 }
+/* aurora-text, in accent shades only. */
+.auth-title {
+    background: linear-gradient(
+        120deg,
+        var(--text) 0 30%,
+        var(--accent) 45%,
+        color-mix(in srgb, var(--accent) 60%, var(--text)) 60%,
+        var(--text) 75%
+    );
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
 .auth-card {
     position: relative;
     box-shadow:
         var(--shadow),
         0 30px 60px -30px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+    .auth-title {
+        animation: fx-aurora 6s ease-in-out 0.3s both;
+    }
+    /* border-beam around the card: the login page is one bounded screen. */
+    .auth-card::after {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        border-radius: inherit;
+        border: 1.5px solid transparent;
+        pointer-events: none;
+        -webkit-mask:
+            linear-gradient(#000 0 0) padding-box,
+            linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+            linear-gradient(#000 0 0) padding-box exclude,
+            linear-gradient(#000 0 0);
+        background: conic-gradient(
+                from var(--fx-beam-a),
+                transparent 0 82%,
+                var(--accent) 94%,
+                transparent 100%
+            )
+            border-box;
+        animation: fx-beam 6s linear infinite;
+    }
+    /* shimmer-button: a sheen that sweeps the primary action every few
+       seconds. */
+    .auth-form .btn-primary {
+        position: relative;
+        overflow: hidden;
+    }
+    .auth-form .btn-primary::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(
+            100deg,
+            transparent 35%,
+            rgba(255, 255, 255, 0.45) 50%,
+            transparent 65%
+        );
+        transform: translateX(-100%);
+        animation: fx-shimmer 3.2s ease-in-out 1s infinite;
+    }
+}
+@keyframes fx-aurora {
+    from {
+        background-position: 100% 0;
+    }
+    to {
+        background-position: 0 0;
+    }
+}
+@keyframes fx-shimmer {
+    0%,
+    55% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
 }
