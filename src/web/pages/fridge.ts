@@ -144,6 +144,7 @@ ${editFields}
             message: `Remove ${item.displayName} from the fridge?`,
             action: `/fridge/items/${item.id}/delete`,
             confirmLabel: "Delete",
+            openOnLoad: modalOpen(view, deleteId),
         });
     return { row, modals };
 }
@@ -208,6 +209,7 @@ ${renderQuantityField({
             message: `Remove ${location.name} and everything in it?`,
             action: `/fridge/locations/${location.id}/delete`,
             confirmLabel: "Remove",
+            openOnLoad: modalOpen(view, removeModalId),
         });
     const headActions = `<div class="row-actions">
 ${modalTrigger({
@@ -219,7 +221,11 @@ ${modalTrigger({
         target: supplyModalId,
         label: "Add household item",
         className: "btn-sm",
-    })}${infoTip({ id: supplyTipId, text: SUPPLY_HINT })}</span>
+    })}${infoTip({
+        id: supplyTipId,
+        text: SUPPLY_HINT,
+        label: "What is a household item?",
+    })}</span>
 ${modalTrigger({
     target: removeModalId,
     label: "Remove",

@@ -170,13 +170,28 @@ test("modal, modalTrigger, confirmModal, and infoTip markup", () => {
     expect(confirm).toContain(
         '<button type="submit" class="btn-danger">Delete</button>',
     );
+    expect(
+        confirmModal({
+            id: "del-open",
+            title: "Delete?",
+            message: "Sure?",
+            action: "/x",
+            confirmLabel: "Delete",
+            openOnLoad: true,
+        }),
+    ).toMatch(
+        /<dialog class="modal" id="del-open"[^>]*data-modal-open-on-load/,
+    );
 
     expect(infoTip({ id: "food-tip", text: "Edible items." })).toBe(
-        `<button type="button" class="info-tip-trigger" popovertarget="food-tip" aria-label="More information"><span class="info-tip-icon" aria-hidden="true">i</span></button>
-<div id="food-tip" popover="auto" class="info-tip">Edible items.</div>`,
+        `<button type="button" class="info-tip-trigger" popovertarget="food-tip" aria-label="More information" style="anchor-name: --tip-food-tip;"><span class="info-tip-icon" aria-hidden="true">i</span></button>
+<div id="food-tip" popover="auto" class="info-tip" style="position-anchor: --tip-food-tip;">Edible items.</div>`,
     );
     expect(infoTip({ id: "t", text: "A & B", label: "Help" })).toContain(
-        'aria-label="Help">Help</button>',
+        'aria-label="Help"',
+    );
+    expect(infoTip({ id: "t", text: "A & B", label: "Help" })).toContain(
+        'info-tip-icon" aria-hidden="true">i</span>',
     );
 });
 

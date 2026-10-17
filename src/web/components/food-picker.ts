@@ -60,8 +60,8 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
               required: method === "post",
           })
         : "";
-    const barcodePanel = `${id}-barcode`;
-    const searchPanel = `${id}-search`;
+    const barcodePanel = `${id}-barcode-panel`;
+    const searchPanel = `${id}-search-panel`;
     const manualPanel = `${id}-manual`;
     const manualQty = renderQuantityField({
         kind: "food",

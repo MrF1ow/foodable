@@ -98,6 +98,12 @@ function initDialog(dialog) {
             e.target.closest(".modal-handle, .modal-head");
         if (!handle || !(sheet && sheet.contains(handle))) return;
         if (e.button !== 0) return;
+        if (
+            e.target instanceof Element &&
+            e.target.closest("button, a, input, select, textarea, label")
+        ) {
+            return;
+        }
         dragging = true;
         pointerId = e.pointerId;
         startY = e.clientY;

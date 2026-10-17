@@ -14,6 +14,7 @@
  * dark as different bytes.
  * The server never imports this file.
  */
+import { utcTodayFromDate } from "../src/domain/stock.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
@@ -54,7 +55,14 @@ async function widgetSample(key: string): Promise<unknown> {
     return m ? new Function(`return (${m[1]})`)() : { locale: "en" };
 }
 
+function addUtcDays(isoDate: string, days: number): string {
+    const d = new Date(`${isoDate}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
 function fridgeView(chrome: unknown) {
+    const today = utcTodayFromDate();
     const loc = (id: string, name: string, sortOrder: number) => ({
         id,
         householdId: H,
@@ -84,9 +92,12 @@ function fridgeView(chrome: unknown) {
         chrome,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
         items: [
-            item("i1", "l1", "Eggs", 6, "each", "2026-10-08"),
-            item("i2", "l1", "Milk", 1000, "ml", "2026-10-07"),
-            item("i3", "l2", "Paper towels", 3, "roll", null, false),
+            item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
+            item("i2", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
+            item("i3", "l1", "Yogurt", 2, "each", addUtcDays(today, 3)),
+            item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
+            item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
+            item("i6", "l2", "Paper towels", 3, "roll", null, false),
         ],
     };
 }

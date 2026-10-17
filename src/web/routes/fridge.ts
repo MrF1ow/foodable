@@ -86,12 +86,19 @@ fridgeRoutes.post("/fridge/locations", requireMember, async (c) => {
 });
 
 fridgeRoutes.post("/fridge/locations/:id/delete", requireMember, async (c) => {
+    const userId = c.get("userId");
     const member = siteMember(c);
-    await deleteLocation(
-        liveFridgeStore(),
-        member.householdId,
-        c.req.param("id"),
-    );
+    const id = c.req.param("id");
+    try {
+        await deleteLocation(liveFridgeStore(), member.householdId, id);
+    } catch (err) {
+        const page = await fridgeFormError(
+            userId,
+            err,
+            `fridge-remove-location-${id}`,
+        );
+        return c.html(page.html, page.status);
+    }
     return c.redirect("/fridge");
 });
 

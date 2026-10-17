@@ -88,6 +88,7 @@ export function confirmModal(opts: {
     action: string;
     confirmLabel: string;
     hiddenFields?: Record<string, string>;
+    openOnLoad?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const hidden =
@@ -105,7 +106,12 @@ ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message
 <button type="submit" class="btn-danger">${escapeHtml(opts.confirmLabel)}</button>
 </div>
 </form>`;
-    return modal({ id: opts.id, title: opts.title, body });
+    return modal({
+        id: opts.id,
+        title: opts.title,
+        body,
+        openOnLoad: opts.openOnLoad,
+    });
 }
 
 export function infoTip(opts: {
@@ -114,12 +120,11 @@ export function infoTip(opts: {
     label?: string;
 }): string {
     const id = escapeHtml(opts.id);
-    const triggerLabel = opts.label
-        ? escapeHtml(opts.label)
-        : '<span class="info-tip-icon" aria-hidden="true">i</span>';
+    const anchorSafe = opts.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const anchorName = `--tip-${anchorSafe}`;
     const aria = escapeHtml(opts.label ?? "More information");
-    return `<button type="button" class="info-tip-trigger" popovertarget="${id}" aria-label="${aria}">${triggerLabel}</button>
-<div id="${id}" popover="auto" class="info-tip">${escapeHtml(opts.text)}</div>`;
+    return `<button type="button" class="info-tip-trigger" popovertarget="${id}" aria-label="${aria}" style="anchor-name: ${anchorName};"><span class="info-tip-icon" aria-hidden="true">i</span></button>
+<div id="${id}" popover="auto" class="info-tip" style="position-anchor: ${anchorName};">${escapeHtml(opts.text)}</div>`;
 }
 
 export function row(opts: {

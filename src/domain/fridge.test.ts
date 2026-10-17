@@ -352,3 +352,46 @@ test("a server error reopens the modal that submitted the form", () => {
         /<dialog class="modal" id="fridge-add-location"[^>]*data-modal-open-on-load/,
     );
 });
+
+test("a server error reopens delete and remove-location confirm modals only", () => {
+    const base = {
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+        ],
+        items: [
+            {
+                id: "it-1",
+                householdId: HH,
+                locationId: "loc-1",
+                kind: "food",
+                displayName: "Milk",
+                quantity: { amount: 1, unit: "l" },
+                identity: { kind: "food", via: "manual", displayName: "Milk" },
+                foodId: "f-1",
+                expiresOn: null,
+            },
+        ],
+        error: "Cannot remove.",
+    } as const;
+    const deleteHtml = renderFridgePage({
+        ...base,
+        openModalId: "fridge-delete-it-1",
+    } as never);
+    expect(deleteHtml).toMatch(
+        /<dialog class="modal" id="fridge-delete-it-1"[^>]*data-modal-open-on-load/,
+    );
+    expect(deleteHtml).not.toMatch(
+        /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
+    );
+    const removeHtml = renderFridgePage({
+        ...base,
+        openModalId: "fridge-remove-location-loc-1",
+    } as never);
+    expect(removeHtml).toMatch(
+        /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
+    );
+    expect(removeHtml).not.toMatch(
+        /<dialog class="modal" id="fridge-delete-it-1"[^>]*data-modal-open-on-load/,
+    );
+});
