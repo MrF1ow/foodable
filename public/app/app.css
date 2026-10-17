@@ -344,6 +344,34 @@ body {
     display: grid;
     gap: 10px;
 }
+.dash-head .btn-primary {
+    width: fit-content;
+}
+
+.fridge-supply-action {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+details.more > summary .count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.4em;
+    padding: 0 6px;
+    border-radius: var(--r-999);
+    background: var(--track);
+    color: var(--text-dim);
+    font-size: var(--fs-12);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.fridge-item-head .expiry-pill {
+    vertical-align: middle;
+}
 
 /* Member switch (nutrition) and settings sub-navigation: links styled as the
    widgets' segmented control. */

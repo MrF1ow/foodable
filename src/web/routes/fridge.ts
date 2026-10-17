@@ -44,7 +44,11 @@ export async function fridgeBarcodeLookup(barcode: string) {
     }
 }
 
-async function fridgeFormError(userId: string, err: unknown) {
+async function fridgeFormError(
+    userId: string,
+    err: unknown,
+    openModalId?: string,
+) {
     const message =
         err instanceof FridgeInputError
             ? err.message
@@ -55,7 +59,7 @@ async function fridgeFormError(userId: string, err: unknown) {
                 : err instanceof Error
                   ? err.message
                   : "Could not update the fridge.";
-    const page = await renderFridgeInventoryPage(userId, message);
+    const page = await renderFridgeInventoryPage(userId, message, openModalId);
     return { html: page.html, status: 400 as const };
 }
 
@@ -75,7 +79,7 @@ fridgeRoutes.post("/fridge/locations", requireMember, async (c) => {
             formText(body, "name"),
         );
     } catch (err) {
-        const page = await fridgeFormError(userId, err);
+        const page = await fridgeFormError(userId, err, "fridge-add-location");
         return c.html(page.html, page.status);
     }
     return c.redirect("/fridge");
@@ -148,7 +152,11 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             actorUserId: userId,
         });
     } catch (err) {
-        const page = await fridgeFormError(userId, err);
+        const openModalId =
+            kind === "supply"
+                ? `fridge-add-supply-${locationId}`
+                : `fridge-add-food-${locationId}`;
+        const page = await fridgeFormError(userId, err, openModalId);
         return c.html(page.html, page.status);
     }
     return c.redirect("/fridge");
@@ -169,7 +177,11 @@ fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
             },
         );
     } catch (err) {
-        const page = await fridgeFormError(userId, err);
+        const page = await fridgeFormError(
+            userId,
+            err,
+            `fridge-delete-${c.req.param("id")}`,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/fridge");
@@ -208,7 +220,11 @@ fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
             });
         }
     } catch (err) {
-        const page = await fridgeFormError(userId, err);
+        const page = await fridgeFormError(
+            userId,
+            err,
+            `fridge-edit-${itemId}`,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/fridge");

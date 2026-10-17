@@ -170,6 +170,7 @@ export async function renderDashboardPage(
 export async function renderFridgeInventoryPage(
     viewerUserId: string,
     error?: string,
+    openModalId?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -184,6 +185,7 @@ export async function renderFridgeInventoryPage(
             ...snapshot,
             chrome: viewerChromeFromProfile(profile),
             error,
+            openModalId,
         }),
     };
 }

@@ -23,7 +23,9 @@ import {
     createMemoryStockStore,
     deleteFridgeItemAdjust,
     ledgerMatchesStock,
+    expiryLevel,
     listExpiring,
+    utcTodayFromDate,
     putAwayGroceryLines,
     updateFridgeItemQuantityAdjust,
 } from "./stock.js";
@@ -194,6 +196,21 @@ test("ledger sum equals current state across purchases and cooks", async () => {
     expect(items[0]?.quantity).toEqual({ amount: expected, unit: "g" });
     const ledger = movements.reduce((sum, row) => sum + row.delta, 0);
     expect(ledger).toBe(expected);
+});
+
+test("expiryLevel uses UTC-day boundaries", () => {
+    const today = utcTodayFromDate(new Date("2026-10-05T12:00:00.000Z"));
+    expect(today).toBe("2026-10-05");
+    expect(expiryLevel(null, today)).toBe(null);
+    expect(expiryLevel("2026-10-03", today)).toBe("expired");
+    expect(expiryLevel("2026-10-04", today)).toBe("expired");
+    expect(expiryLevel("2026-10-05", today)).toBe("high");
+    expect(expiryLevel("2026-10-06", today)).toBe("high");
+    expect(expiryLevel("2026-10-07", today)).toBe("medium");
+    expect(expiryLevel("2026-10-08", today)).toBe("medium");
+    expect(expiryLevel("2026-10-09", today)).toBe("low");
+    expect(expiryLevel("2026-10-12", today)).toBe("low");
+    expect(expiryLevel("2026-10-13", today)).toBe(null);
 });
 
 test("list_expiring includes items within the window, oldest first", () => {

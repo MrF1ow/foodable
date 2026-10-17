@@ -21,8 +21,16 @@ function initDialog(dialog) {
         dialog.showModal();
     }
 
+    let backdropPointerDown = false;
+    dialog.addEventListener("pointerdown", (e) => {
+        backdropPointerDown = e.target === dialog;
+    });
+    dialog.addEventListener("pointerup", (e) => {
+        if (e.target !== dialog) backdropPointerDown = false;
+    });
     dialog.addEventListener("click", (e) => {
-        if (e.target === dialog) dialog.close();
+        if (e.target === dialog && backdropPointerDown) dialog.close();
+        backdropPointerDown = false;
     });
 
     dialog.addEventListener("toggle", () => {
@@ -32,8 +40,6 @@ function initDialog(dialog) {
         }
         focusFirstField(dialog);
     });
-
-    if (!mq(MQ_SHEET)) return;
 
     let startY = 0;
     let dragY = 0;

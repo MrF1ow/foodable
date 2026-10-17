@@ -12,6 +12,13 @@ import {
 } from "./fridge.js";
 import { createMemoryFoodsStore } from "./foods.js";
 import { renderFridgePage } from "../web/pages/fridge.js";
+import { expiryLevel, utcTodayFromDate } from "./stock.js";
+
+function addUtcDays(isoDate: string, days: number): string {
+    const d = new Date(`${isoDate}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
 
 const HH = "hh-1";
 
@@ -245,7 +252,10 @@ test("fridge page reuses quantity field and food picker", () => {
     expect(html).toContain('action="/fridge/items"');
 });
 
-test("fridge rows show quantity and expiry, with edit and delete behind a disclosure", () => {
+test("fridge rows use modals for edit and delete, with expiry badges", () => {
+    const today = utcTodayFromDate();
+    const expiresOn = addUtcDays(today, 2);
+    const level = expiryLevel(expiresOn, today);
     const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [
@@ -261,32 +271,84 @@ test("fridge rows show quantity and expiry, with edit and delete behind a disclo
                 quantity: { amount: 6, unit: "each" },
                 identity: { kind: "food", via: "manual", displayName: "Eggs" },
                 foodId: "f-1",
-                expiresOn: "2026-10-08",
+                expiresOn,
             },
         ],
     } as never);
     expect(html).toContain('<ul class="fridge-items list">');
-    expect(html).toContain("6 each · exp 2026-10-08");
-    expect(html).toMatch(
-        /<details class="more">\s*<summary>Edit<\/summary>\s*<form class="fridge-item-edit"/,
-    );
-    expect(html).toContain(
-        '<button type="submit" class="btn-danger">Delete</button>',
-    );
+    expect(html).toContain(`6 each · exp ${expiresOn}`);
+    expect(html).toContain(`data-expiry="${level}"`);
+    expect(html).toContain('class="fridge-item-edit"');
+    expect(html).toContain('id="fridge-edit-it-1"');
+    expect(html).toContain('commandfor="fridge-edit-it-1"');
+    expect(html).toContain('id="fridge-delete-it-1"');
+    expect(html).toContain('action="/fridge/items/it-1/delete"');
     expect(html).toContain(
         '<button type="submit" class="btn-sm">Ate it</button>',
     );
-    expect(html).toMatch(/<summary><h3>Add food<\/h3><\/summary>/);
-    expect(html).toMatch(/<summary><h3>Add supply<\/h3><\/summary>/);
+    expect(html).not.toMatch(
+        /<details class="more">\s*<summary>Edit<\/summary>/,
+    );
 });
 
-test("the add-location disclosure starts open only when there are no locations", () => {
-    const empty = renderFridgePage({
+test("location actions and add-location live in the page header and head rows", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: "hh-1", name: "Pantry", sortOrder: 0 },
+        ],
+        items: [],
+    } as never);
+    expect(html).toContain('<header class="dash-head">');
+    expect(html).toContain('commandfor="fridge-add-location"');
+    expect(html).toContain('commandfor="fridge-add-food-loc-1"');
+    expect(html).toContain('commandfor="fridge-add-supply-loc-1"');
+    expect(html).toContain("Add household item");
+    expect(html).toContain("popovertarget=");
+    expect(html).toContain(
+        "Foil, soap, batteries — things you stock but don't eat.",
+    );
+    expect(html).toContain('class="fridge-add-supply"');
+    expect(html).not.toContain("<h3>Add supply</h3>");
+});
+
+test("expiring soon is a closed details block with a count", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
+        ],
+        items: [
+            {
+                id: "it-1",
+                householdId: "hh-1",
+                locationId: "loc-1",
+                kind: "food",
+                displayName: "Milk",
+                quantity: { amount: 1, unit: "l" },
+                identity: { kind: "food", via: "manual", displayName: "Milk" },
+                foodId: "f-1",
+                expiresOn: utcTodayFromDate(),
+            },
+        ],
+    } as never);
+    expect(html).toMatch(
+        /<details class="more">\s*<summary>Expiring soon <span class="count">1<\/span><\/summary>/,
+    );
+    expect(html).not.toMatch(/<details class="more" open>/);
+});
+
+test("a server error reopens the modal that submitted the form", () => {
+    const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [],
         items: [],
+        error: "Enter a location name.",
+        openModalId: "fridge-add-location",
     } as never);
-    expect(empty).toContain(
-        '<details class="more" open>\n<summary>Add location</summary>',
+    expect(html).toContain('id="fridge-add-location"');
+    expect(html).toContain("data-modal-open-on-load");
+    expect(html).toMatch(
+        /<dialog class="modal" id="fridge-add-location"[^>]*data-modal-open-on-load/,
     );
 });

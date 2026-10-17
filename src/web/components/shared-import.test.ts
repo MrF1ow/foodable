@@ -110,7 +110,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(grocery).not.toContain("<h3>Add supply</h3>");
     expect(grocery).not.toContain("grocery-add-supply");
     expect(grocery).not.toContain('name="kind" value="supply"');
-    expect(fridge).toContain("<h3>Add supply</h3>");
+    expect(fridge).toContain("Add household item");
     expect(fridge).toContain("fridge-add-supply");
     const recipes = renderRecipeDetailPage({
         chrome: { theme: "light" },

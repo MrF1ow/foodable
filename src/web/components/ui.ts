@@ -52,11 +52,13 @@ export function modal(opts: {
     title: string;
     body: string;
     size?: string;
+    openOnLoad?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const titleId = `${id}-title`;
     const sizeCls = opts.size ? ` modal--${escapeHtml(opts.size)}` : "";
-    return `<dialog class="modal${sizeCls}" id="${id}" aria-labelledby="${titleId}">
+    const reopen = opts.openOnLoad ? " data-modal-open-on-load" : "";
+    return `<dialog class="modal${sizeCls}" id="${id}" aria-labelledby="${titleId}"${reopen}>
 <div class="modal-sheet">
 <div class="modal-handle" aria-hidden="true"></div>
 <header class="modal-head">
