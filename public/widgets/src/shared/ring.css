@@ -71,19 +71,19 @@
     line-height: 1.05;
 }
 .ring-center .rv {
-    font-size: 19px;
+    font-size: var(--fs-19);
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.03em;
 }
 .ring-center .ru {
-    font-size: 10px;
+    font-size: var(--fs-10);
     font-weight: 500;
     color: var(--text-dim);
     margin-top: 1px;
 }
 .ring-center .rp {
-    font-size: 10.5px;
+    font-size: var(--fs-10-5);
     font-weight: 700;
     margin-top: 2px;
     font-variant-numeric: tabular-nums;

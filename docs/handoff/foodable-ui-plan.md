@@ -320,7 +320,7 @@ Measured during the 2026-10-15 to 2026-10-17 investigation. Repeat a measurement
 | U2    | Done        | #72 |
 | U3    | Not started |     |
 | U4    | Not started |     |
-| U5    | Not started |     |
+| U5    | Done        |     |
 | U6    | Not started |     |
 | U7    | Not started |     |
 | U8    | Ready       | #70 |

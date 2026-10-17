@@ -19,7 +19,7 @@
     min-width: 0;
     max-height: 320px;
     border: 1px solid var(--panel-border);
-    border-radius: 12px;
+    border-radius: var(--r-12);
     background: var(--panel);
     -webkit-overflow-scrolling: touch;
 }
@@ -28,7 +28,7 @@
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-12-5);
     font-variant-numeric: tabular-nums;
 }
 
@@ -51,7 +51,7 @@
     z-index: 1;
     background: var(--panel);
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-11);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -88,8 +88,8 @@
 .pill {
     display: inline-block;
     padding: 1px 7px;
-    border-radius: 999px;
-    font-size: 10.5px;
+    border-radius: var(--r-999);
+    font-size: var(--fs-10-5);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -120,7 +120,7 @@
 /* Row count / truncation footer under a capped preview. */
 .tmore {
     padding: 7px 10px;
-    font-size: 11.5px;
+    font-size: var(--fs-11-5);
     color: var(--text-dim);
     border-top: 1px solid var(--panel-border);
     background: var(--panel);
