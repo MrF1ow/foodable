@@ -408,7 +408,11 @@ settingsRoutes.post(
                 otherLabel: formText(body, "other_label"),
             });
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(
+                userId,
+                err,
+                `household-member-rules-${c.req.param("userId")}`,
+            );
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");
@@ -429,7 +433,11 @@ settingsRoutes.post(
                 displayName: formText(body, "display_name"),
             });
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(
+                userId,
+                err,
+                `household-member-rules-${c.req.param("userId")}`,
+            );
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");
@@ -450,7 +458,11 @@ settingsRoutes.post(
                 body: formText(body, "body"),
             });
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(
+                userId,
+                err,
+                `household-member-rules-${c.req.param("userId")}`,
+            );
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");

@@ -3,6 +3,7 @@ import type { HouseholdMember } from "../household.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
+    householdMemberRulesModalId,
     renderHouseholdSettingsPage,
 } from "../web/pages/household.js";
 
@@ -84,6 +85,79 @@ test("household server error reopens add-member and remove confirm modals", () =
     expect(removeHtml).toMatch(
         /<dialog class="modal" id="household-remove-u2"[^>]*data-modal-open-on-load/,
     );
+});
+
+function expectErrorOnceInModal(
+    html: string,
+    modalId: string,
+    message: string,
+): void {
+    expect(html.match(new RegExp(message, "g"))?.length).toBe(1);
+    const dialog = html.match(
+        new RegExp(`<dialog class="modal" id="${modalId}"[\\s\\S]*?</dialog>`),
+    )?.[0];
+    expect(dialog).toBeDefined();
+    expect(dialog).toContain(message);
+    expect(dialog!.match(/error-banner/g)?.length).toBe(1);
+}
+
+const ownerHouseholdBase = {
+    chrome,
+    householdName: "Home",
+    location: "",
+    members: [alice, bob],
+    stores: [
+        {
+            id: "s1",
+            householdId: "hh-1",
+            name: "Safeway",
+            sortOrder: 0,
+            sections: [],
+            rules: [],
+        },
+    ],
+    memberRules: [{ member: bob, rules: [], allergens: [], dislikes: [] }],
+    isOwner: true,
+} as const;
+
+test("household modal errors render inside the reopening dialog", () => {
+    const addStore = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Enter a store name.",
+        openModalId: HOUSEHOLD_ADD_STORE_MODAL_ID,
+    } as never);
+    expectErrorOnceInModal(
+        addStore,
+        HOUSEHOLD_ADD_STORE_MODAL_ID,
+        "Enter a store name.",
+    );
+    const storeRule = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Enter a store rule.",
+        openModalId: "household-store-rule-s1",
+    } as never);
+    expectErrorOnceInModal(
+        storeRule,
+        "household-store-rule-s1",
+        "Enter a store rule.",
+    );
+    const makeOwner = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Cannot transfer ownership.",
+        openModalId: "household-make-owner-u2",
+    } as never);
+    expectErrorOnceInModal(
+        makeOwner,
+        "household-make-owner-u2",
+        "Cannot transfer ownership.",
+    );
+    const rulesModal = householdMemberRulesModalId("u2");
+    const memberRules = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Enter an allergen.",
+        openModalId: rulesModal,
+    } as never);
+    expectErrorOnceInModal(memberRules, rulesModal, "Enter an allergen.");
 });
 
 test("household page banner when openModalId is unknown", () => {

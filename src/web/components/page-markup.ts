@@ -34,7 +34,7 @@ export function renderExpiringStrip(
     return disclosure({
         summary: `Expiring soon <span class="count">${n}</span>${infoTip({
             id: "fridge-expiring-soon-tip",
-            text: "Lists items expiring within three days (High or Medium urgency). More than seven days out shows no badge on the row.",
+            text: "Items already expired or due within three days.",
             label: "What is Expiring soon?",
         })}`,
         body: `<section class="fridge-expiring panel">

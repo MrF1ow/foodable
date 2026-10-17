@@ -72,7 +72,7 @@ function storeRuleModalId(storeId: string): string {
     return `household-store-rule-${storeId}`;
 }
 
-function memberRulesModalId(userId: string): string {
+export function householdMemberRulesModalId(userId: string): string {
     return `household-member-rules-${userId}`;
 }
 
@@ -140,6 +140,10 @@ ${modalTrigger({
             action: `/settings/household/members/${member.userId}/make-owner`,
             confirmLabel: `Make ${member.displayName} the owner`,
             openOnLoad: modalOpen(view, ownerId),
+            bodyPrefix:
+                view.error && modalOpen(view, ownerId)
+                    ? errorBanner(view.error)
+                    : "",
         }) +
         modal({
             id: removeId,
@@ -183,12 +187,16 @@ function storeCard(
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
         .join("");
     const ruleModalId = storeRuleModalId(store.id);
+    const ruleModalError =
+        view.error && modalOpen(view, ruleModalId)
+            ? errorBanner(view.error)
+            : "";
     const ruleModal = canEdit
         ? modal({
               id: ruleModalId,
               title: "Add store rule",
               openOnLoad: modalOpen(view, ruleModalId),
-              body: `<form method="post" action="/settings/household/stores/${escapeHtml(store.id)}/rules" class="store-rule-form">
+              body: `${ruleModalError}<form method="post" action="/settings/household/stores/${escapeHtml(store.id)}/rules" class="store-rule-form">
 <label for="store-rule-${escapeHtml(store.id)}">Store rule</label>
 <textarea id="store-rule-${escapeHtml(store.id)}" name="body" required maxlength="500"></textarea>
 <button type="submit" class="btn-primary">Save store rule</button>
@@ -242,13 +250,17 @@ function memberRulesCard(
         (code) =>
             `<option value="${code}">${escapeHtml(ALLERGEN_LABELS[code])}</option>`,
     ).join("");
-    const rulesModalId = memberRulesModalId(view.member.userId);
+    const rulesModalId = householdMemberRulesModalId(view.member.userId);
+    const rulesModalError =
+        pageView.error && modalOpen(pageView, rulesModalId)
+            ? errorBanner(pageView.error)
+            : "";
     const rulesModal = canEdit
         ? modal({
               id: rulesModalId,
               title: `Rules for ${view.member.displayName}`,
               openOnLoad: modalOpen(pageView, rulesModalId),
-              body: `<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
+              body: `${rulesModalError}<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
 <label for="allergen-${escapeHtml(view.member.userId)}">Allergen</label>
 <select id="allergen-${escapeHtml(view.member.userId)}" name="allergen">
 ${allergenOptions}
@@ -331,11 +343,11 @@ export function renderHouseholdSettingsPage(
 <input id="household_location" name="location" value="${escapeHtml(view.location)}" maxlength="120" />
 <button type="submit">Save</button>
 </form>
-${modalTrigger({
-    target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
-    label: "Rotate household token",
-    className: "btn-sm",
-})}`
+<div class="row-actions">${modalTrigger({
+              target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+              label: "Rotate household token",
+              className: "btn-sm",
+          })}</div>`
         : `<p class="household-name">${escapeHtml(view.householdName)}</p>
 <p class="household-location muted">${view.location ? escapeHtml(view.location) : "No location set."}</p>`;
     modalIds.push(HOUSEHOLD_ADD_MEMBER_MODAL_ID, HOUSEHOLD_ADD_STORE_MODAL_ID);
@@ -359,7 +371,7 @@ ${modalTrigger({
             const part = memberRulesCard(row, view.isOwner, view);
             rulesModals += part.modals;
             if (view.isOwner) {
-                modalIds.push(memberRulesModalId(row.member.userId));
+                modalIds.push(householdMemberRulesModalId(row.member.userId));
             }
             return part.card;
         })
@@ -388,7 +400,7 @@ ${modalTrigger({
                   id: HOUSEHOLD_ADD_STORE_MODAL_ID,
                   title: "Add store",
                   openOnLoad: modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID),
-                  body: `<form method="post" action="/settings/household/stores" class="add-store">
+                  body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/stores" class="add-store">
 <label for="store_name">Grocery store</label>
 <input id="store_name" name="name" required maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add store</button>

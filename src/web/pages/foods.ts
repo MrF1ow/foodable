@@ -146,7 +146,7 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   id: FOODS_MERGE_MODAL_ID,
                   title: "Merge foods",
                   openOnLoad: modalOpen(view, FOODS_MERGE_MODAL_ID),
-                  body: `<form method="post" action="/settings/foods/merge" class="food-merge field-grid">
+                  body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/foods/merge" class="food-merge field-grid">
 <label>Keep
 <select id="keep_id" name="keep_id">${options}</select>
 </label>

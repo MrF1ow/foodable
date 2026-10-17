@@ -680,6 +680,11 @@ export async function cookRecipe(
     return { totalPortions, shortfalls };
 }
 
+/** Meal logging after an eat movement applies only to catalog foods, not supplies. */
+export function fridgeEatLogsMeal(food: Pick<Food, "kind">): boolean {
+    return food.kind === "food";
+}
+
 export async function eatFridgeItem(
     fridge: FridgeStore,
     stock: StockStore,

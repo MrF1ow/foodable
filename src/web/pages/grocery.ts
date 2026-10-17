@@ -18,6 +18,7 @@ import {
     modal,
     modalTrigger,
     pageHeader,
+    pageLevelErrorBanner,
     infoTip,
 } from "../components/ui.js";
 
@@ -68,6 +69,13 @@ function quantityLabel(line: GroceryLine): string {
 
 function modalOpen(view: GroceryPageView, id: string): boolean {
     return view.openModalId === id;
+}
+
+function modalFormError(view: GroceryPageView, modalId: string): string {
+    if (view.error && modalOpen(view, modalId)) {
+        return errorBanner(view.error);
+    }
+    return "";
 }
 
 function hasCheckedLine(stores: GroceryStoreView[]): boolean {
@@ -175,7 +183,7 @@ function storeSection(
     store: GroceryStoreView,
     locations: { id: string; name: string }[],
     view: GroceryPageView,
-): { section: string; modals: string } {
+): { section: string; modals: string; modalId: string } {
     const rules = store.rules
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
         .join("");
@@ -201,7 +209,7 @@ function storeSection(
         id: addFoodModalId,
         title: "Add food",
         openOnLoad: modalOpen(view, addFoodModalId),
-        body: `${allergenModalBlock(view, store.id, addFoodModalId)}${storeSectionSelect(store)}
+        body: `${modalFormError(view, addFoodModalId)}${allergenModalBlock(view, store.id, addFoodModalId)}${storeSectionSelect(store)}
 ${renderFoodPicker({
     id: pickerId,
     action: "/grocery/lines",
@@ -225,11 +233,10 @@ ${headActions}
 ${rules ? `<ul class="store-rule-list muted">${rules}</ul>` : ""}
 ${sections}
 </section>`;
-    return { section, modals: addFoodModal };
+    return { section, modals: addFoodModal, modalId: addFoodModalId };
 }
 
 export function renderGroceryPage(view: GroceryPageView): string {
-    const error = errorBanner(view.error);
     const allergenInModal =
         view.allergenWarning != null && view.openModalId != null;
     const allergen = allergenInModal
@@ -252,6 +259,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
     );
     const stores = storeParts.map((part) => part.section).join("");
     const storeModals = storeParts.map((part) => part.modals).join("");
+    const modalIds = storeParts.map((part) => part.modalId);
 
     const headerActions: string[] = [];
     if (view.isOwner) {
@@ -275,12 +283,13 @@ export function renderGroceryPage(view: GroceryPageView): string {
 
     const pageModals: string[] = [];
     if (view.isOwner) {
+        modalIds.push(ADD_STORE_MODAL_ID);
         pageModals.push(
             modal({
                 id: ADD_STORE_MODAL_ID,
                 title: "Add store",
                 openOnLoad: modalOpen(view, ADD_STORE_MODAL_ID),
-                body: `<form class="grocery-add-store" method="post" action="/grocery/stores">
+                body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/grocery/stores">
 <label for="grocery_store_name">Grocery store</label>
 <input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add store</button>
@@ -289,6 +298,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
         );
     }
     if (hasCheckedLine(view.stores)) {
+        modalIds.push(CLEAR_CHECKED_MODAL_ID);
         pageModals.push(
             confirmModal({
                 id: CLEAR_CHECKED_MODAL_ID,
@@ -298,6 +308,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
                 confirmLabel: "Clear checked",
                 formClass: "modal-confirm grocery-clear-checked",
                 openOnLoad: modalOpen(view, CLEAR_CHECKED_MODAL_ID),
+                bodyPrefix: modalFormError(view, CLEAR_CHECKED_MODAL_ID),
             }),
         );
     }
@@ -309,7 +320,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
                 ? headerActions.join("\n")
                 : undefined,
         })}
-        ${error}
+        ${pageLevelErrorBanner(view, modalIds)}
         ${allergen}
         ${empty}
         ${stores}

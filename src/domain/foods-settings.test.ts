@@ -46,6 +46,20 @@ test("foods settings use modals for edit and merge", () => {
     expect(html).toContain('action="/settings/foods/merge"');
 });
 
+function expectErrorOnceInModal(
+    html: string,
+    modalId: string,
+    message: string,
+): void {
+    expect(html.match(new RegExp(message, "g"))?.length).toBe(1);
+    const dialog = html.match(
+        new RegExp(`<dialog class="modal" id="${modalId}"[\\s\\S]*?</dialog>`),
+    )?.[0];
+    expect(dialog).toBeDefined();
+    expect(dialog).toContain(message);
+    expect(dialog!.match(/error-banner/g)?.length).toBe(1);
+}
+
 test("foods server error reopens edit and merge modals", () => {
     const editHtml = renderFoodsSettingsPage({
         chrome,
@@ -56,6 +70,7 @@ test("foods server error reopens edit and merge modals", () => {
     expect(editHtml).toMatch(
         /<dialog class="modal" id="food-edit-f1"[^>]*data-modal-open-on-load/,
     );
+    expectErrorOnceInModal(editHtml, "food-edit-f1", "Enter a name.");
     const mergeHtml = renderFoodsSettingsPage({
         chrome,
         foods: [food, { ...food, id: "f2", name: "Milk" }],
@@ -66,5 +81,10 @@ test("foods server error reopens edit and merge modals", () => {
         new RegExp(
             `<dialog class="modal" id="${FOODS_MERGE_MODAL_ID}"[^>]*data-modal-open-on-load`,
         ),
+    );
+    expectErrorOnceInModal(
+        mergeHtml,
+        FOODS_MERGE_MODAL_ID,
+        "Pick two different foods.",
     );
 });

@@ -19,9 +19,11 @@ import {
     deleteFridgeItemAdjust,
     discardFridgeItem,
     eatFridgeItem,
+    fridgeEatLogsMeal,
     StockInputError,
     updateFridgeItemQuantityAdjust,
 } from "../../domain/stock.js";
+import { findFoodById } from "../../domain/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
@@ -252,14 +254,23 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
             },
         );
         const applied = Math.abs(eaten.movement.delta);
-        if (applied > 0 && eaten.itemBefore.foodId) {
+        const foodId = eaten.itemBefore.foodId;
+        if (applied > 0 && foodId) {
+            const food = await findFoodById(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+            );
+            if (!fridgeEatLogsMeal(food)) {
+                return c.redirect("/fridge");
+            }
             const { built, specs } = await resolveAndBuildMeal({
                 householdId: member.householdId,
                 foods: liveFoodsStore(),
                 recipes: liveRecipesStore(),
                 items: [
                     {
-                        foodId: eaten.itemBefore.foodId,
+                        foodId,
                         amount: applied,
                         unit: eaten.itemBefore.quantity.unit,
                         name: eaten.itemBefore.displayName,

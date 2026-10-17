@@ -86,7 +86,7 @@ function fridgeView(chrome: unknown) {
         displayName,
         quantity: { amount, unit },
         identity: {},
-        foodId: food ? `f-${id}` : null,
+        foodId: food ? `f-${id}` : `f-sup-${id}`,
         expiresOn,
     });
     return {

@@ -339,19 +339,62 @@ test("expiring soon is a closed details block with a count", () => {
     expect(html).toContain('id="fridge-expiring-soon-tip"');
 });
 
-test("first fridge location shows ate it vs toss info tip", () => {
+test("first fridge item shows ate it vs toss info tip beside eat action", () => {
     const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
             { id: "loc-2", householdId: HH, name: "Freezer", sortOrder: 1 },
         ],
-        items: [],
+        items: [
+            {
+                id: "it-1",
+                householdId: HH,
+                locationId: "loc-1",
+                kind: "food",
+                displayName: "Milk",
+                quantity: { amount: 1, unit: "l" },
+                identity: { kind: "food", via: "manual", displayName: "Milk" },
+                foodId: "f-1",
+                expiresOn: null,
+            },
+        ],
     } as never);
-    expect(html).toContain('id="fridge-ate-toss-tip"');
-    const freezerStart = html.indexOf('data-location-id="loc-2"');
-    const freezerChunk = html.slice(freezerStart, freezerStart + 800);
-    expect(freezerChunk).not.toContain('id="fridge-ate-toss-tip"');
+    expect(html.match(/id="fridge-ate-toss-tip"/g)?.length).toBe(1);
+    expect(html).toContain('class="fridge-item-eat"');
+    const headStart = html.indexOf("fridge-location-head");
+    const firstItemStart = html.indexOf('data-item-id="it-1"');
+    expect(firstItemStart).toBeGreaterThan(headStart);
+    const itemChunk = html.slice(firstItemStart, firstItemStart + 600);
+    expect(itemChunk).toContain('id="fridge-ate-toss-tip"');
+});
+
+test("supply items show Used it instead of Ate it", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Pantry", sortOrder: 0 },
+        ],
+        items: [
+            {
+                id: "it-sup",
+                householdId: HH,
+                locationId: "loc-1",
+                kind: "supply",
+                displayName: "Paper towels",
+                quantity: { amount: 2, unit: "roll" },
+                identity: {
+                    kind: "supply",
+                    via: "manual",
+                    displayName: "Paper towels",
+                },
+                foodId: "f-sup",
+                expiresOn: null,
+            },
+        ],
+    } as never);
+    expect(html).toContain("Used it");
+    expect(html).not.toContain(">Ate it<");
 });
 
 test("a server error reopens the modal that submitted the form", () => {
@@ -367,6 +410,11 @@ test("a server error reopens the modal that submitted the form", () => {
     expect(html).toMatch(
         /<dialog class="modal" id="fridge-add-location"[^>]*data-modal-open-on-load/,
     );
+    expect(html.match(/Enter a location name./g)?.length).toBe(1);
+    const dialog = html.match(
+        /<dialog class="modal" id="fridge-add-location"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(dialog).toContain("error-banner");
 });
 
 test("a server error reopens delete and remove-location confirm modals only", () => {

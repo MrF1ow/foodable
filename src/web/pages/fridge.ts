@@ -19,6 +19,7 @@ import {
     modal,
     modalTrigger,
     pageHeader,
+    pageLevelErrorBanner,
 } from "../components/ui.js";
 import {
     expiryLevel,
@@ -76,12 +77,17 @@ function modalOpen(view: FridgePageView, id: string): boolean {
     return view.openModalId === id;
 }
 
+function modalError(view: FridgePageView, id: string): string {
+    return view.error && modalOpen(view, id) ? errorBanner(view.error) : "";
+}
+
 function itemRow(
     item: FridgeItem,
     locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
-): { row: string; modals: string } {
+    showEatTossTip: boolean,
+): { row: string; modals: string; modalIds: string[] } {
     const qtyId = `qty-${item.id}`;
     const editId = `fridge-edit-${item.id}`;
     const deleteId = `fridge-delete-${item.id}`;
@@ -109,6 +115,14 @@ function itemRow(
 ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
 <label for="expires-${escapeHtml(item.id)}">Expires</label>
 <input id="expires-${escapeHtml(item.id)}" name="expires_on" type="date" value="${escapeHtml(item.expiresOn ?? "")}" />`;
+    const eatLabel = item.kind === "supply" ? "Used it" : "Ate it";
+    const eatTossTip = showEatTossTip
+        ? infoTip({
+              id: "fridge-ate-toss-tip",
+              text: "Ate it logs the food as a snack. Used it and Toss just remove the item.",
+              label: "Ate it vs Toss",
+          })
+        : "";
     const row = renderFridgeItemRow({
         id: item.id,
         kind: item.kind,
@@ -122,8 +136,8 @@ ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
             item.foodId == null
                 ? ""
                 : `<form class="fridge-item-eat" method="post" action="/fridge/items/${escapeHtml(item.id)}/eat">
-<button type="submit" class="btn-sm">Ate it</button>
-</form>
+<button type="submit" class="btn-sm">${eatLabel}</button>
+</form>${eatTossTip}
 <form class="fridge-item-discard" method="post" action="/fridge/items/${escapeHtml(item.id)}/discard">
 <button type="submit" class="btn-sm">Toss</button>
 </form>`,
@@ -133,7 +147,7 @@ ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
             id: editId,
             title: `Edit ${item.displayName}`,
             openOnLoad: modalOpen(view, editId),
-            body: `<form class="fridge-item-edit" method="post" action="/fridge/items/${escapeHtml(item.id)}">
+            body: `${modalError(view, editId)}<form class="fridge-item-edit" method="post" action="/fridge/items/${escapeHtml(item.id)}">
 ${editFields}
 <button type="submit" class="btn-primary">Save</button>
 </form>`,
@@ -145,8 +159,9 @@ ${editFields}
             action: `/fridge/items/${item.id}/delete`,
             confirmLabel: "Delete",
             openOnLoad: modalOpen(view, deleteId),
+            bodyPrefix: modalError(view, deleteId),
         });
-    return { row, modals };
+    return { row, modals, modalIds: [editId, deleteId] };
 }
 
 function locationSection(
@@ -155,14 +170,21 @@ function locationSection(
     locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
-    showEatTossTip: boolean,
-): { section: string; modals: string } {
+    firstLocation: boolean,
+): { section: string; modals: string; modalIds: string[] } {
     const locItems = items.filter((item) => item.locationId === location.id);
-    const itemParts = locItems.map((item) =>
-        itemRow(item, locations, view, today),
+    const itemParts = locItems.map((item, index) =>
+        itemRow(
+            item,
+            locations,
+            view,
+            today,
+            firstLocation && index === 0 && item.foodId != null,
+        ),
     );
     const rows = itemParts.map((part) => part.row).join("");
     const itemModals = itemParts.map((part) => part.modals).join("");
+    const itemModalIds = itemParts.flatMap((part) => part.modalIds);
     const empty = locItems.length
         ? ""
         : emptyState(`Add an item to ${location.name}.`, "add-item-prompt");
@@ -176,19 +198,19 @@ function locationSection(
             id: foodModalId,
             title: "Add food",
             openOnLoad: modalOpen(view, foodModalId),
-            body: renderFoodPicker({
+            body: `${modalError(view, foodModalId)}${renderFoodPicker({
                 id: pickerId,
                 action: "/fridge/items",
                 method: "post",
                 hiddenFields: { kind: "food", location_id: location.id },
                 includeQuantity: true,
-            }),
+            })}`,
         }) +
         modal({
             id: supplyModalId,
             title: "Add household item",
             openOnLoad: modalOpen(view, supplyModalId),
-            body: `<form class="fridge-add-supply" method="post" action="/fridge/items">
+            body: `${modalError(view, supplyModalId)}<form class="fridge-add-supply" method="post" action="/fridge/items">
 <input type="hidden" name="kind" value="supply" />
 <input type="hidden" name="location_id" value="${escapeHtml(location.id)}" />
 <label for="supply-name-${escapeHtml(location.id)}">Name</label>
@@ -211,14 +233,14 @@ ${renderQuantityField({
             action: `/fridge/locations/${location.id}/delete`,
             confirmLabel: "Remove",
             openOnLoad: modalOpen(view, removeModalId),
+            bodyPrefix: modalError(view, removeModalId),
         });
-    const eatTossTip = showEatTossTip
-        ? infoTip({
-              id: "fridge-ate-toss-tip",
-              text: "Ate it logs a snack meal and removes stock. Toss records discard only.",
-              label: "Ate it vs Toss",
-          })
-        : "";
+    const locationModalIds = [
+        foodModalId,
+        supplyModalId,
+        removeModalId,
+        ...itemModalIds,
+    ];
     const headActions = `<div class="row-actions">
 ${modalTrigger({
     target: foodModalId,
@@ -234,7 +256,6 @@ ${modalTrigger({
         text: SUPPLY_HINT,
         label: "What is a household item?",
     })}</span>
-${eatTossTip}
 ${modalTrigger({
     target: removeModalId,
     label: "Remove",
@@ -249,12 +270,15 @@ ${headActions}
 ${empty}
 <ul class="fridge-items list">${rows}</ul>
 </section>`;
-    return { section, modals: locationModals + itemModals };
+    return {
+        section,
+        modals: locationModals + itemModals,
+        modalIds: locationModalIds,
+    };
 }
 
 export function renderFridgePage(view: FridgePageView): string {
     const today = utcTodayFromDate();
-    const error = errorBanner(view.error);
     const addLocationId = "fridge-add-location";
     const emptyPrompt =
         view.locations.length === 0
@@ -277,13 +301,17 @@ export function renderFridgePage(view: FridgePageView): string {
             index === 0,
         ),
     );
+    const modalIds = [
+        addLocationId,
+        ...locationParts.flatMap((part) => part.modalIds),
+    ];
     const sections = locationParts.map((part) => part.section).join("");
     const modals =
         modal({
             id: addLocationId,
             title: "Add location",
             openOnLoad: modalOpen(view, addLocationId),
-            body: `<form class="fridge-add-location" method="post" action="/fridge/locations">
+            body: `${modalError(view, addLocationId)}<form class="fridge-add-location" method="post" action="/fridge/locations">
 <label for="location_name">Location name</label>
 <input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add location</button>
@@ -298,7 +326,7 @@ export function renderFridgePage(view: FridgePageView): string {
                 className: "btn-primary",
             }),
         })}
-        ${error}
+        ${pageLevelErrorBanner(view, modalIds)}
         ${emptyPrompt}
         ${expiring}
         ${sections}

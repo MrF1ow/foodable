@@ -16,37 +16,37 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "food-vs-household-item",
         title: "Food vs household item",
-        body: "Foods are things you eat and track nutrition for — eggs, milk, rice. Household items are supplies you stock but do not eat: foil, soap, batteries. On the Fridge page, Add food links to your food catalog; Add household item is a free-text supply with no meal logging.",
+        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. Ate it removes a food and logs it as a snack. Used it removes a household item without logging anything. Toss removes either one without logging anything.",
     },
     {
         id: "locations",
         title: "Locations",
-        body: "Locations are where stock lives: fridge, freezer, pantry, and any names you add under Fridge › Add location. Each location is its own panel on the Fridge page. Grocery put-away and manual adds target one location at a time.",
+        body: "A location is a place you keep things, such as Fridge, Freezer or Pantry. Add each one under Fridge › Add location; each gets its own panel. Putting groceries away and adding an item both go into one location.",
     },
     {
         id: "stores-and-sections",
         title: "Stores and sections",
-        body: "Grocery stores group your shopping list. Each store has sections (aisles) such as Produce or Dairy. When you add a line, the Section picker chooses the aisle; the default Other section lets the app guess an aisle from the food name when you leave it on Other.",
+        body: "Grocery stores group your shopping list. Each store has sections (aisles) such as Produce or Dairy. Leave the section on Other and the app picks an aisle: where you already shop for that food, otherwise a guess from its name. If it can't tell, the line stays in Other.",
     },
     {
         id: "expiry-levels",
         title: "Expiry levels",
-        body: "Badges on fridge rows use UTC calendar days until the expiry date: Expired (past date), High (today or tomorrow), Medium (2–3 days), Low (4–7 days). More than seven days out, or no date, shows no badge. Expiring soon lists every item that is High or Medium — the same window as three days or less — and shows the count in its summary.",
+        body: "Badges follow the expiry date: Expired if that day has passed, High for today or tomorrow, Medium in 2–3 days, Low in 4–7 days. Later than that, or no date, shows no badge. Expiring soon lists items already expired or due within three days, and shows that count.",
     },
     {
         id: "put-away",
         title: "Put away",
-        body: "After you check off a grocery line, Put away moves that quantity into a fridge location you pick. It writes a purchase movement and adds or merges stock there, then removes the line from the list.",
+        body: "After you check off a grocery line, Put away moves that amount into the location you pick. If that food is already there with the same expiry, the amounts combine; otherwise it's added as a new item. The line then leaves the grocery list.",
     },
     {
         id: "ate-it-vs-toss",
         title: "Ate it vs Toss",
-        body: "Both reduce stock on the item. Ate it records an eat movement and, for food linked to the catalog, logs a snack meal with the amount removed and links that meal to the movement. Toss records a discard movement only — nothing is added to your nutrition log.",
+        body: "Ate it logs the food as a snack. Used it and Toss just remove the item.",
     },
     {
         id: "recipe-portions",
         title: "Recipe portions",
-        body: "Yield is how many portions the full recipe makes. Ingredient amounts in the recipe are totals for the whole batch; the page shows per-portion and your-portion amounts using that yield. Your portion is saved per person: changing it rescales the amounts shown for you. Cook and Log a portion use your portion (or per-person cook amounts) to scale what is eaten or logged.",
+        body: "Yield is how many portions the whole recipe makes. Ingredient amounts are for the full batch; the page also shows one portion and the amount for the portion size of the person you're viewing. Your portion is saved just for you. Cooked it starts from your portion and 1 for everyone else, and can take the ingredients out of your stock and log a meal for each person. Log a portion only adds a meal — it doesn't change what's in stock.",
     },
     {
         id: "nutrition-arrange",
