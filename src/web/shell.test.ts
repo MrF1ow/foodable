@@ -74,7 +74,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     expect(html).toContain('<html lang="en">');
     expect(html).not.toContain("data-theme");
     expect(html).toContain(
-        '<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />',
+        '<meta name="theme-color" content="#0d0f0e" media="(prefers-color-scheme: dark)" />',
     );
     expect(html).not.toContain("--accent");
 });
@@ -82,7 +82,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
 test("an explicit theme stamps data-theme on html", () => {
     const html = comingSoonPage("settings", { theme: "dark" });
     expect(html).toContain('<html lang="en" data-theme="dark">');
-    expect(html).toContain('<meta name="theme-color" content="#000000" />');
+    expect(html).toContain('<meta name="theme-color" content="#0d0f0e" />');
     expect(html).not.toContain("--accent");
 });
 

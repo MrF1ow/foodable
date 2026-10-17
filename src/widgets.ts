@@ -176,7 +176,29 @@ export async function getAppCss(): Promise<string> {
 
 export type WidgetViewerChrome = {
     theme: "light" | "dark" | "system";
+    // CSS appended as the frame's last <style> (the app's embed skin, see
+    // getEmbedCss). Chat hosts never pass one.
+    skin?: string;
 };
+
+// The skin the household app injects into the widgets it embeds: the app's
+// brand layer (palette, fonts) on top of the widget's own tokens, so an
+// embedded card matches the page while the same widget served over MCP keeps
+// its neutral look. Assembled like app.css, cached and warmed at boot.
+export const EMBED_CSS_SOURCE = "./public/app/embed.css";
+let embedCss: string | undefined;
+
+export async function getEmbedCss(): Promise<string> {
+    if (embedCss !== undefined) return embedCss;
+    const file = Bun.file(EMBED_CSS_SOURCE);
+    if (!(await file.exists())) {
+        throw new Error(`embed skin source not found: ${EMBED_CSS_SOURCE}`);
+    }
+    embedCss = await resolveIncludes(await file.text(), EMBED_CSS_SOURCE, [
+        EMBED_CSS_SOURCE,
+    ]);
+    return embedCss;
+}
 
 // The web app embeds widgets as srcdoc iframes. An explicit viewer theme is
 // stamped on the widget's <html> so it matches the page; "system" leaves the
@@ -201,7 +223,15 @@ export function withWidgetData(
         "<script>",
         `<script>window.__WIDGET_DATA__=${json};`,
     );
-    return chrome ? applyViewerTheme(seeded, chrome) : seeded;
+    if (!chrome) return seeded;
+    // A function replacement, so a `$` in the CSS is never read as a pattern.
+    const skinned = chrome.skin
+        ? seeded.replace(
+              "</head>",
+              () => `<style>${chrome.skin}</style></head>`,
+          )
+        : seeded;
+    return applyViewerTheme(skinned, chrome);
 }
 
 // Assemble every widget and the app stylesheet once, so a broken partial or
@@ -210,5 +240,6 @@ export async function warmWidgets(): Promise<void> {
     await Promise.all([
         ...Object.keys(WIDGET_TEMPLATES).map((key) => getWidgetHtml(key)),
         getAppCss(),
+        getEmbedCss(),
     ]);
 }

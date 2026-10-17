@@ -13,6 +13,7 @@ import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp } from "./net.js";
 import { getAppCss, warmWidgets } from "./widgets.js";
 import { BRAND_SVGS } from "./brand.js";
+import { APP_FONTS } from "./tokens.js";
 import { clearSiteCookieHeader } from "./site-session.js";
 import { foodsRoutes } from "./web/routes/foods.js";
 import { fridgeRoutes } from "./web/routes/fridge.js";
@@ -209,9 +210,10 @@ app.get("/logout", (c) => {
 });
 
 // Static assets. Login and the household app share /app.css (assembled from
-// the widget partials, src/widgets.ts). Marketing HTML, its stylesheet, site.js
-// and the web fonts are gone; leftover files on disk must not become routes (a
-// registered path that reads a missing file 500s).
+// the widget partials, src/widgets.ts). Marketing HTML, its stylesheet and
+// site.js are gone; leftover files on disk must not become routes (a
+// registered path that reads a missing file 500s). App fonts are served from
+// the APP_FONTS allowlist below.
 app.get("/robots.txt", async (c) => {
     return c.body(await Bun.file("./public/robots.txt").text(), 200, {
         "Content-Type": "text/plain",
@@ -248,6 +250,21 @@ app.get("/brand/:file", (c) => {
     if (!render) return c.notFound();
     return c.body(render(), 200, {
         "Content-Type": "image/svg+xml; charset=utf-8",
+    });
+});
+
+// Self-hosted web fonts for the app and login (OFL 1.1), listed once in
+// src/tokens.ts. An allowlist, so a stray file in public/fonts never becomes
+// a route.
+const FONTS = new Set<string>(APP_FONTS.map((f) => f.file));
+app.get("/fonts/:file", async (c) => {
+    const name = c.req.param("file");
+    if (!FONTS.has(name)) return c.notFound();
+    const file = Bun.file(`./public/fonts/${name}`);
+    if (!(await file.exists())) return c.notFound();
+    return c.body(await file.arrayBuffer(), 200, {
+        "Content-Type": "font/woff2",
+        "Cache-Control": "public, max-age=31536000, immutable",
     });
 });
 

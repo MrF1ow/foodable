@@ -120,7 +120,19 @@ describe("runtime surfaces that stay", () => {
         expect(css).toContain(".bottom-nav");
     });
 
-    test("the marketing stylesheet, site script and web fonts are gone", async () => {
+    test("the app serves its fonts from the allowlist; unknown and traversal names are not served", async () => {
+        for (const name of ["geist-latin.woff2", "bricolage-latin.woff2"]) {
+            const r = await app.request(`http://x/fonts/${name}`);
+            expect(r.status, name).toBe(200);
+            expect(r.headers.get("content-type")).toBe("font/woff2");
+        }
+        const stray = await app.request("http://x/fonts/../package.json");
+        expect(stray.status).not.toBe(200);
+        const unknown = await app.request("http://x/fonts/other.woff2");
+        expect(unknown.status).toBe(404);
+    });
+
+    test("the marketing stylesheet, site script and old web fonts are gone", async () => {
         for (const path of [
             "/styles.css",
             "/site.js",

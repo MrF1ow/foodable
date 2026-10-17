@@ -8,6 +8,9 @@
  * App markup is plain HTML inside <main class="native">: form.css styles its
  * controls through zero-specificity :where(.native …) hooks, and the rules
  * here follow the same convention, so any component class wins.
+ *
+ * The brand layer (palette, fonts, pill controls, glow, wordmark, frosted
+ * nav, login hero) is app-only. Chat widgets never include this file.
  */
 
 /*@include shared/tokens.css@*/
@@ -19,6 +22,10 @@
 /*@include shared/table.css@*/
 
 /*@include shared/seg.css@*/
+
+/* App-only brand layer (palette, type). After the shared partials so it wins;
+   never included by a widget, so chat widgets keep the neutral look. */
+/*@include ../../app/brand.css@*/
 
 /* ---- base ---- */
 
@@ -803,4 +810,139 @@ details.more > summary > :is(h2, h3) {
 .auth-foot {
     max-width: 400px;
     font-size: var(--fs-12);
+}
+
+/* ---- brand: the marketing site's look ----
+   App-layer only: widgets never include app.css, so in a chat host none of
+   this applies. Palette and fonts live in brand.css. */
+
+/* Controls: pill buttons like the site's CTAs, softer fields. Same selectors
+   as form.css, so these win by order without raising specificity. */
+:where(
+    .native
+        :is(
+            input:not(
+                [type="checkbox"],
+                [type="radio"],
+                [type="hidden"],
+                [type="file"]
+            ),
+            select,
+            textarea
+        )
+) {
+    border-radius: 12px;
+}
+.btn,
+:where(.native button) {
+    border-radius: 999px;
+}
+.btn-sm {
+    padding: 5px 11px;
+    border-radius: 999px;
+}
+.btn-primary {
+    box-shadow:
+        inset 0 -6px 10px rgba(255, 255, 255, 0.18),
+        0 6px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.btn-primary:hover:not(:disabled) {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 90%, var(--text));
+}
+
+/* The hero's soft green glow, pinned to the top of every page. */
+body {
+    background:
+        radial-gradient(
+            56rem 22rem at 50% -9rem,
+            color-mix(in srgb, var(--accent) 16%, transparent),
+            transparent 70%
+        ),
+        var(--bg);
+    background-repeat: no-repeat;
+}
+::selection {
+    background: color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+:where(.app-main) h1 {
+    font-family: var(--font-heading);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.1;
+}
+:where(.app-main) h2 {
+    font-weight: 650;
+    letter-spacing: -0.015em;
+}
+/* Eyebrows, like the site's "WHY IT EXISTS": a green that passes AA as text. */
+:where(.app-main) h3 {
+    color: var(--accent-ink);
+}
+
+/* Brand mark + wordmark on the left of the top bar, as on the site's nav. */
+.app-bar {
+    justify-content: space-between;
+    align-items: center;
+}
+.app-bar::before {
+    content: "Foodable";
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 26px;
+    min-height: 22px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    background: url("/brand/mark.svg") no-repeat left center / 20px 19px;
+}
+
+/* Frosted bottom nav; the active tab gets the brand-soft pill. */
+.bottom-nav {
+    background: color-mix(in srgb, var(--panel) 78%, transparent);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    backdrop-filter: saturate(1.6) blur(14px);
+    border-top-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
+}
+.bottom-nav a {
+    border-radius: 14px;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
+}
+.bottom-nav a[aria-current="page"] {
+    background: var(--accent-soft);
+}
+
+/* ---- login: the site's hero, scaled down ---- */
+body.auth {
+    background:
+        radial-gradient(
+            40rem 22rem at 50% -4rem,
+            color-mix(in srgb, var(--accent) 20%, transparent),
+            transparent 70%
+        ),
+        radial-gradient(
+                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                transparent 1.2px
+            )
+            0 0 / 18px 18px,
+        var(--bg);
+}
+.auth-title {
+    font-family: var(--font-heading);
+    font-size: 34px;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+}
+.auth-card {
+    position: relative;
+    box-shadow:
+        var(--shadow),
+        0 30px 60px -30px color-mix(in srgb, var(--accent) 35%, transparent);
 }
