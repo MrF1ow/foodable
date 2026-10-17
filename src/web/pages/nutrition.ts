@@ -288,7 +288,7 @@ function arrangeMoveForm(
     if (disabled) {
         return `<button type="button" class="btn-sm" disabled aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>`;
     }
-    return `<form method="post" action="/nutrition/layout" class="inline-form">
+    return `<form method="post" action="/nutrition/layout">
 ${memberHiddenField(view.viewMemberId)}
 <input type="hidden" name="card" value="${escapeHtml(key)}" />
 <input type="hidden" name="direction" value="${direction}" />

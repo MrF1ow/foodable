@@ -122,6 +122,9 @@ test("Arrange modal lists every card with disabled ends", async () => {
         /<button type="button" class="btn-sm" disabled aria-label="Move Weight trends down">↓<\/button>/,
     );
     expect(html).toContain('action="/nutrition/layout"');
+    expect(html).not.toMatch(
+        /<form[^>]*action="\/nutrition\/layout"[^>]*class="[^"]*inline-form/,
+    );
     expect(html).toContain('name="card"');
     expect(html).toContain('name="direction"');
 });

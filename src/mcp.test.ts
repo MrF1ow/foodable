@@ -243,6 +243,7 @@ const db = {
     weightInserted: [] as Record<string, unknown>[],
     weightUpdates: [] as Record<string, unknown>[],
     profilePatches: [] as Record<string, unknown>[],
+    profileUpsertUserIds: [] as string[],
     // Ids the delete stubs consider to exist. Deleting one removes it, so a
     // second delete of the same id reports "not found" like the real table.
     rowIds: new Set<string>(),
@@ -407,8 +408,10 @@ mock.module("./db/profiles.js", () => ({
         db.profile?.preferred_weight_unit ?? null,
     upsertProfile: async (userId: string, patch: Record<string, unknown>) => {
         db.profilePatches.push(patch);
+        db.profileUpsertUserIds.push(userId);
         db.profile = {
             ...(db.profile ?? { ...PROFILE_BASE, user_id: userId }),
+            user_id: userId,
             ...patch,
         } as actualProfiles.Profile;
         return db.profile;
@@ -605,6 +608,7 @@ beforeEach(() => {
     db.weightInserted = [];
     db.weightUpdates = [];
     db.profilePatches = [];
+    db.profileUpsertUserIds = [];
     db.rowIds = new Set<string>();
     db.analyticsRows = [];
     db.accountWipes = 0;
@@ -5814,6 +5818,7 @@ describe("authenticated dashboard HTTP", () => {
         );
         expect(move.status).toBe(302);
         expect(move.headers.get("location")).toBe(`/?member=${bob}`);
+        expect(db.profileUpsertUserIds.at(-1)).toBe(alice);
         expect(db.profile?.user_id).toBe(alice);
         expect(db.profile?.nutrition_layout).toEqual([
             "log",
