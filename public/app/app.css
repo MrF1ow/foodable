@@ -344,7 +344,13 @@ body {
     display: grid;
     gap: 10px;
 }
-.dash-head .btn-primary {
+.page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.page-actions :is(.btn-primary, .btn-danger, button) {
     width: fit-content;
 }
 
@@ -769,11 +775,14 @@ details.more > summary > :is(h2, h3) {
 
 /* Forms that are just one button sit at their natural width instead of
    stretching across the page or card. */
-.grocery-clear-checked,
 .rotate-token,
 .recipe-delete {
     align-self: flex-start;
     justify-items: start;
+}
+.modal .grocery-clear-checked {
+    align-self: stretch;
+    justify-items: stretch;
 }
 
 /* Keep a control and its button the same height on one line. */

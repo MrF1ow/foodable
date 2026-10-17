@@ -43,6 +43,7 @@ test("pageHeader is an h1, wrapped in dash-head when there is a sub or actions",
     });
     expect(withNav).toContain('<header class="dash-head">');
     expect(withNav).toContain("<h1>Alice</h1>");
+    expect(withNav).toContain('<div class="page-actions">');
     expect(withNav).toContain('<nav class="member-switch">x</nav>');
 });
 

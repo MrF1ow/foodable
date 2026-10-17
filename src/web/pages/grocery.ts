@@ -34,6 +34,12 @@ export type GroceryStoreView = GroceryStore & {
     rules: StoreRule[];
 };
 
+/** Fields to replay on "Add anyway" after a blocking allergen warning. */
+export type GroceryAllergenRetry = {
+    storeId: string;
+    fields: Record<string, string>;
+};
+
 export type GroceryPageView = {
     chrome: ViewerChrome;
     stores: GroceryStoreView[];
@@ -41,6 +47,7 @@ export type GroceryPageView = {
     isOwner?: boolean;
     error?: string;
     allergenWarning?: string;
+    allergenRetry?: GroceryAllergenRetry;
     unknownAllergen?: boolean;
     openModalId?: string;
 };
@@ -72,6 +79,10 @@ function hasCheckedLine(stores: GroceryStoreView[]): boolean {
 }
 
 function storeSectionSelect(store: GroceryStoreView): string {
+    const other = store.sections.find((section) => section.isOther);
+    const inferAttr = other
+        ? ` data-infer-section="${escapeHtml(other.id)}"`
+        : "";
     const options = store.sections
         .filter((section) => !section.hidden || section.isOther)
         .map((section) => {
@@ -80,7 +91,34 @@ function storeSectionSelect(store: GroceryStoreView): string {
         })
         .join("");
     return `<label for="section-${escapeHtml(store.id)}">Section</label>
-<select id="section-${escapeHtml(store.id)}" data-grocery-section>${options}</select>`;
+<select id="section-${escapeHtml(store.id)}" data-grocery-section${inferAttr}>${options}</select>`;
+}
+
+function allergenModalBlock(
+    view: GroceryPageView,
+    storeId: string,
+    addFoodModalId: string,
+): string {
+    if (
+        !view.allergenWarning ||
+        view.openModalId !== addFoodModalId ||
+        !view.allergenRetry ||
+        view.allergenRetry.storeId !== storeId
+    ) {
+        return "";
+    }
+    const hidden = Object.entries(view.allergenRetry.fields)
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
+        )
+        .join("\n");
+    return `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>
+<form class="grocery-allergen-override" method="post" action="/grocery/lines">
+${hidden}
+<input type="hidden" name="confirm_allergen" value="1" />
+<button type="submit" class="btn-sm">Add anyway</button>
+</form>`;
 }
 
 function alreadyHaveHtml(tag: AlreadyHaveTag | null): string {
@@ -145,17 +183,15 @@ function storeSection(
         .join("");
     const pickerId = `picker-${store.id}`;
     const addFoodModalId = `grocery-add-food-${store.id}`;
-    const other = store.sections.find((section) => section.isOther);
     const hidden: Record<string, string> = {
         kind: "food",
         store_id: store.id,
     };
-    if (other) hidden.section_id = other.id;
     const addFoodModal = modal({
         id: addFoodModalId,
         title: "Add food",
         openOnLoad: modalOpen(view, addFoodModalId),
-        body: `${storeSectionSelect(store)}
+        body: `${allergenModalBlock(view, store.id, addFoodModalId)}${storeSectionSelect(store)}
 ${renderFoodPicker({
     id: pickerId,
     action: "/grocery/lines",
@@ -184,11 +220,17 @@ ${sections}
 
 export function renderGroceryPage(view: GroceryPageView): string {
     const error = errorBanner(view.error);
-    const allergen = view.allergenWarning
-        ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
-        : view.unknownAllergen
-          ? `<p class="allergen-unknown">unknown allergen data</p>`
-          : "";
+    const allergenInModal =
+        view.allergenWarning != null && view.openModalId != null;
+    const allergen = allergenInModal
+        ? view.unknownAllergen
+            ? `<p class="allergen-unknown">unknown allergen data</p>`
+            : ""
+        : view.allergenWarning
+          ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
+          : view.unknownAllergen
+            ? `<p class="allergen-unknown">unknown allergen data</p>`
+            : "";
     const empty =
         view.stores.length === 0
             ? `${emptyState("Add a grocery store in Settings, then add a line.", "empty-grocery")}
@@ -227,9 +269,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
             modal({
                 id: ADD_STORE_MODAL_ID,
                 title: "Add store",
-                openOnLoad:
-                    modalOpen(view, ADD_STORE_MODAL_ID) ||
-                    (view.stores.length === 0 && view.openModalId == null),
+                openOnLoad: modalOpen(view, ADD_STORE_MODAL_ID),
                 body: `<form class="grocery-add-store" method="post" action="/grocery/stores">
 <label for="grocery_store_name">Grocery store</label>
 <input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />

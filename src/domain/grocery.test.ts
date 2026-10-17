@@ -711,3 +711,112 @@ test("a server error reopens the grocery modal that submitted the form", () => {
         /<dialog class="modal" id="grocery-add-food-st-1"[^>]*data-modal-open-on-load/,
     );
 });
+
+test("add-food modal contains the section select with picker forms", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-produce",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Produce",
+                        sortOrder: 0,
+                        hidden: false,
+                        isOther: false,
+                        lines: [],
+                    },
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+    } as never);
+    const modal = html.match(
+        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(modal).toBeDefined();
+    expect(modal!).toContain("data-grocery-section");
+    expect(modal!).toContain('data-infer-section="sec-other"');
+    expect(modal!).toContain('<label for="section-st-1">');
+    expect(modal!).toContain('class="food-picker"');
+    expect(modal!).toContain('action="/grocery/lines"');
+    expect(modal!).not.toContain('name="section_id"');
+});
+
+test("owner with no stores does not auto-open the add-store modal", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [],
+        isOwner: true,
+    });
+    expect(html).toContain('id="grocery-add-store"');
+    expect(html).not.toMatch(
+        /<dialog class="modal" id="grocery-add-store"[^>]*data-modal-open-on-load/,
+    );
+    expect(html).toContain('commandfor="grocery-add-store"');
+});
+
+test("blocking allergen warning and Add anyway form render inside the reopened add-food modal", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+        allergenWarning: "Peanut allergen for Bob.",
+        openModalId: "grocery-add-food-st-1",
+        allergenRetry: {
+            storeId: "st-1",
+            fields: {
+                kind: "food",
+                store_id: "st-1",
+                food_name: "Peanut Butter",
+                qty_amount: "1",
+                qty_unit: "each",
+            },
+        },
+    } as never);
+    expect(html).not.toMatch(
+        /<header class="dash-head">[\s\S]*class="allergen-warning"/,
+    );
+    const modal = html.match(
+        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(modal).toContain('class="allergen-warning"');
+    expect(modal).toContain('name="confirm_allergen" value="1"');
+    expect(modal).toContain("Add anyway");
+    expect(modal).toContain('name="food_name" value="Peanut Butter"');
+});

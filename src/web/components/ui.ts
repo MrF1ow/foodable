@@ -9,7 +9,9 @@ export function pageHeader(opts: {
     if (!opts.sub && !opts.actions) return h1;
     const parts = [h1];
     if (opts.sub) parts.push(opts.sub);
-    if (opts.actions) parts.push(opts.actions);
+    if (opts.actions) {
+        parts.push(`<div class="page-actions">\n${opts.actions}\n</div>`);
+    }
     return `<header class="dash-head">
 ${parts.join("\n")}
 </header>`;

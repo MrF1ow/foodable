@@ -26,7 +26,10 @@ import { liveRecipesStore } from "../db/recipes.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import { renderFridgePage } from "./pages/fridge.js";
-import { renderGroceryPage } from "./pages/grocery.js";
+import {
+    renderGroceryPage,
+    type GroceryAllergenRetry,
+} from "./pages/grocery.js";
 import { renderRecipeDetailPage, renderRecipesPage } from "./pages/recipes.js";
 import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
@@ -195,6 +198,7 @@ export async function renderGroceryListPage(
     opts: {
         error?: string;
         allergenWarning?: string;
+        allergenRetry?: GroceryAllergenRetry;
         openModalId?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
@@ -286,6 +290,7 @@ export async function renderGroceryListPage(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             allergenWarning: opts.allergenWarning,
+            allergenRetry: opts.allergenRetry,
             unknownAllergen: unknownAllergen && !opts.allergenWarning,
             openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({

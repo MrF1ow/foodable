@@ -5579,6 +5579,14 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("allergen-warning");
         expect(html.toLowerCase()).toContain("peanut");
         expect(html).toContain("Bob");
+        expect(html).toContain('name="confirm_allergen" value="1"');
+        expect(html).toContain("Add anyway");
+        const modal = html.match(
+            new RegExp(
+                `<dialog class="modal" id="grocery-add-food-${store.id}"[\\s\\S]*?</dialog>`,
+            ),
+        )?.[0];
+        expect(modal).toContain("allergen-warning");
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
