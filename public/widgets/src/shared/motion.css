@@ -1,0 +1,129 @@
+/* SPIKE: Magic UI feel in plain CSS. Every animation is gated on html.fx,
+   which motion.js (widgets) or the app shell script sets only when the user
+   allows motion AND a frame has actually ticked, so a host that never runs
+   rAF (hidden iframe, headless screenshot) shows the final state, never a
+   blank card. Only opacity, filter, transform and registered custom
+   properties animate: none of them changes layout, so the ResizeObserver in
+   bridge.js never fires because of an effect. */
+
+/* Registered so the conic-gradient ring can tween its fill (ring.css). */
+@property --p {
+    syntax: "<number>";
+    inherits: true;
+    initial-value: 0;
+}
+
+/* blur-fade: once, on first paint. */
+@keyframes fx-blur-in {
+    from {
+        opacity: 0;
+        filter: blur(4px);
+        transform: translateY(4px);
+    }
+}
+html.fx .fx-enter .panel {
+    animation: fx-blur-in 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+/* Ring sweep: --p tweens from 0, the cap rides along because it reads --p. */
+@keyframes fx-ring-in {
+    from {
+        --p: 0;
+    }
+}
+html.fx .fx-enter .ring {
+    animation: fx-ring-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.1s backwards;
+}
+
+/* Bars grow from the left without touching width. */
+@keyframes fx-bar-in {
+    from {
+        transform: scaleX(0);
+    }
+}
+html.fx .fx-enter .mfill {
+    transform-origin: left center;
+    animation: fx-bar-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s backwards;
+}
+
+/* animated-shiny-text: a sheen across a loading label. */
+@keyframes fx-sheen {
+    from {
+        background-position: -120% 0;
+    }
+    to {
+        background-position: 220% 0;
+    }
+}
+html.fx .fx-sheen {
+    background:
+        linear-gradient(
+                100deg,
+                transparent 40%,
+                color-mix(in srgb, var(--text) 55%, transparent) 50%,
+                transparent 60%
+            )
+            no-repeat 0 0 / 60% 100%,
+        var(--text-dim);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fx-sheen 1.8s linear infinite;
+}
+
+/* border-beam: a short accent arc riding the border. Meant for a bounded
+   "working" state, never a resting card. */
+@property --fx-beam-a {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+}
+@keyframes fx-beam {
+    to {
+        --fx-beam-a: 360deg;
+    }
+}
+.fx-beam {
+    position: relative;
+}
+html.fx .fx-beam::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    border: 1.5px solid transparent;
+    pointer-events: none;
+    -webkit-mask:
+        linear-gradient(#000 0 0) padding-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#000 0 0) padding-box exclude,
+        linear-gradient(#000 0 0);
+    background: conic-gradient(
+            from var(--fx-beam-a),
+            transparent 0 80%,
+            var(--accent) 92%,
+            transparent 100%
+        )
+        border-box;
+    animation: fx-beam 3s linear infinite;
+}
+
+/* dot-pattern: static, so it is not gated. */
+.fx-dots {
+    background-image: radial-gradient(
+        color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+        transparent 1.2px
+    );
+    background-size: 16px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html.fx *,
+    html.fx *::before,
+    html.fx *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}
