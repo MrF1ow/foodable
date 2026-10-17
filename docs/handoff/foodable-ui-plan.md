@@ -1,6 +1,6 @@
 # Foodable UI plan: the site's look in the app, one source for everything
 
-Status: not started. Written 2026-10-17 against `main` at `e0eebaf`. Every phase below is open. A reference implementation of most of it exists on the branch [`spike/magic-ui-fx`](https://github.com/MrF1ow/foodable/tree/spike/magic-ui-fx); see "Reference implementation" before writing code.
+Status: not started. Written 2026-10-17 against `main` at `e0eebaf`; D4 and D5 approved the same day, so no phase is blocked on a decision. Every phase below is open. A reference implementation of most of it exists on the branch [`spike/magic-ui-fx`](https://github.com/MrF1ow/foodable/tree/spike/magic-ui-fx); see "Reference implementation" before writing code.
 
 This plan is for an agent that has not seen the conversation it came from. Read `CLAUDE.md` in full first. Everything here assumes its rules (Bun only, prettier-clean tree, moves before changes, test-pinned class names). Where this plan changes a `CLAUDE.md` rule, the phase that does it says so and updates `CLAUDE.md` in the same PR.
 
@@ -12,17 +12,17 @@ This plan is for an agent that has not seen the conversation it came from. Read 
 
 ## Decisions
 
-| #   | Decision                                                                                                                                                                                  | Status                                                             |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| D1  | Keep MCP Apps widgets. The app gets the new look through an app-only brand layer on top of the shared partials. Dropping the widgets for app-only components was considered and rejected. | Approved 2026-10-17                                                |
-| D2  | Self-host Geist (29 KB) and Bricolage Grotesque (41 KB), both SIL OFL 1.1, for the app and login only. This reverses the "no web fonts" outcome of #53. Widgets never load them.          | Approved 2026-10-17 (owner approved the screenshots)               |
-| D3  | No React, Tailwind, `motion` or new runtime dependency. The Magic UI effects are rebuilt in CSS and a few lines of vanilla JS. Measurements are in "Evidence".                            | Approved 2026-10-17                                                |
-| D4  | Phases U5 and U8 change the bytes of the assembled chat widgets while keeping their rendering pixel-identical.                                                                            | **Open.** Ask the owner before merging U5 or U8.                   |
-| D5  | `trendChart` has two diverged copies (see U9). One look must win.                                                                                                                         | **Open.** Ask the owner before U9. Default if unanswered: skip U9. |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Status                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| D1  | Keep MCP Apps widgets. The app gets the new look through an app-only brand layer on top of the shared partials. Dropping the widgets for app-only components was considered and rejected.                                                                                                                                                                                                                                                                                 | Approved 2026-10-17                                  |
+| D2  | Self-host Geist (29 KB) and Bricolage Grotesque (41 KB), both SIL OFL 1.1, for the app and login only. This reverses the "no web fonts" outcome of #53. Widgets never load them.                                                                                                                                                                                                                                                                                          | Approved 2026-10-17 (owner approved the screenshots) |
+| D3  | No React, Tailwind, `motion` or new runtime dependency. The Magic UI effects are rebuilt in CSS and a few lines of vanilla JS. Measurements are in "Evidence".                                                                                                                                                                                                                                                                                                            | Approved 2026-10-17                                  |
+| D4  | Phases U5 and U8 may change the bytes of the assembled chat widgets, provided every widget renders pixel-identically (AE = 0, both themes) and the harness flows still work. "As they are today" means the same look and behaviour, not the same bytes. The unified `esc` (U8) renders a missing value blank instead of "null" and also escapes `'`; nothing that works today changes.                                                                                    | Approved 2026-10-17                                  |
+| D5  | One `trendChart`: the `trends.html` version (the superset: takes `range` and `logged`; padding 8/8/6/4; dot radius 2.2) with nutrition-summary's dot rule, dots up to 10 days. Both copies draw on the same 480×54 canvas, so the differences are drift, not per-widget tuning. The trends widget stays pixel-identical (its 7/14/30 toggle shows dots on 7 either way). The only visible change is nutrition-summary's chart: 3 px more side padding and dots 2.6 → 2.2. | Approved 2026-10-17                                  |
 
 ## Invariants every phase keeps
 
-- **Chat widgets are byte-identical to `main`** in every phase except U5, U8 and U9, and those need D4 or D5 first. Check this with the widget hash script in "Verification toolkit".
+- **Chat widgets are byte-identical to `main`** in every phase except U5, U8 and U9. Those may change bytes under D4 and D5, and must prove the rendering result instead. Check this with the widget hash script in "Verification toolkit".
 - **The widget iframe CSP is deny-all by default.** There is no `font-src`, and `data:` fonts are blocked too (measured). Widgets never get fonts, `/app.css` or any app-only partial.
 - **Widgets report their height** through `ui/notifications/size-changed` (`public/widgets/src/shared/bridge.js:155`). Nothing may animate layout properties (`width`, `height`, `margin`, `padding`, `top`, `left`, `inset`) or grow a list over time. Animate only `opacity`, `transform`, `filter` and registered custom properties.
 - **Motion respects `prefers-reduced-motion`** everywhere. Entrance animations start only after a frame has actually ticked (the `html.fx` gate), so a renderer that never ticks shows the finished page instead of a blank one.
@@ -111,8 +111,8 @@ public/
   fonts/                   NEW U3: geist-latin.woff2, bricolage-latin.woff2
   widgets/src/shared/
     tokens.css             GENERATED U2 from src/tokens.ts (byte-identical to today)
-    util.js                NEW U8 (needs D4): esc, fmt, tpl, setLocaleFrom
-    trend-chart.js         NEW U9 (needs D5)
+    util.js                NEW U8: esc, fmt, tpl, setLocaleFrom
+    trend-chart.js         NEW U9
 scripts/
   gen-tokens.ts            NEW U2
 ```
@@ -137,11 +137,11 @@ Each phase is one PR, or a small stack of PRs, squash-merged with a `(#N)` subje
 | U2    | Single sources              | No            | No                    | U1         |
 | U3    | App brand layer (the look)  | App + login   | No                    | U2         |
 | U4    | Motion                      | App + login   | No                    | U3         |
-| U5    | Type and radius scale       | No            | Yes, pixel-identical  | U2, **D4** |
+| U5    | Type and radius scale       | No            | Yes, pixel-identical  | U2         |
 | U6    | Page chrome primitives      | App (small)   | No                    | U1, U3     |
 | U7    | One client bundle `/app.js` | No            | No                    | U1, U4     |
-| U8    | Widget helper partial       | No            | Yes, pixel-identical  | **D4**     |
-| U9    | One trend chart             | One widget    | Yes                   | **D5**     |
+| U8    | Widget helper partial       | No            | Yes, pixel-identical  | none       |
+| U9    | One trend chart             | One widget    | Yes                   | none       |
 | U10   | Layout and design polish    | App           | No                    | U6, owner  |
 
 ### U1. Moves: one place for pages (no behaviour change)
@@ -204,7 +204,7 @@ The visible change. Chat widgets stay byte-identical.
 - **Test:** `motion.css` and the brand section animate no layout property (scan the `@keyframes` bodies for `width|height|margin|padding|top|left|inset`); `motion.css` contains the reduced-motion guard.
 - Verify: open the pages with motion on (`bun run preview:app`, real browser) and with reduced motion emulated. Screenshots via `--shots` show no half-finished states.
 
-### U5. Type and radius scale (needs D4)
+### U5. Type and radius scale
 
 - Add a type scale and a radius scale to `src/tokens.ts`, emitted into `tokens.css` as `--fs-*` and `--r-*`. Derive the steps from the 91 `font-size` literals and 28 `border-radius` literals (`grep -rnoE 'font-size: *[0-9.]+px|border-radius: *[0-9]+px' public/widgets/src/shared public/app/app.css`). Keep every existing value representable, so this is a pure substitution.
 - Replace the literals in the shared partials and in `app.css` with the variables. `brand.css` may then override the scale for the app (for example, a larger `h1`).
@@ -230,16 +230,16 @@ The visible change. Chat widgets stay byte-identical.
 - **Keep `script-src 'unsafe-inline'`** in the app CSP. The embedded widget frames are `srcdoc`, inherit the page's policy, and run inline scripts.
 - **Tests:** the shell test (around line 100) extracts the inline script and runs it with `new Function`. Point it at `src/web/client/shell.js`. Add "no app page HTML contains `<script>` with a body except the widget frames" and "the Fridge page ships the picker logic once".
 
-### U8. Widget helper partial (needs D4)
+### U8. Widget helper partial
 
 - Add `public/widgets/src/shared/util.js` with `esc` (the superset: `null` becomes `""`, and it also escapes `'`, as the `import-meals` version does), `fmt`, `tpl` and `setLocaleFrom`.
 - Each template `@include`s it at the top level of its script, beside `bridge.js`, and deletes its local copies. `src/widgets.test.ts` requires each included partial verbatim, so include it directly from each template, never from another partial.
 - Verify: pixel-identical rendering of every widget in both themes (see U5); `bun run harness` flows (import, grocery check) still work.
 
-### U9. One trend chart (needs D5)
+### U9. One trend chart
 
-- The two `trendChart` copies (`nutrition-summary.html`, `trends.html`) differ in padding (5 vs 8), dot radius (2.6 vs 2.2), the dot cut-off (≤10 vs ≤7 days) and the signature (`trends` takes `range` and `logged`). Move the winning version to `public/widgets/src/shared/trend-chart.js`. Expose the differences that are real features (range-aware labels) as options, not copies.
-- This changes how one widget looks. Get D5 answered first and show before and after screenshots in the PR.
+- The two `trendChart` copies (`nutrition-summary.html`, `trends.html`) differ in padding (5 vs 8), dot radius (2.6 vs 2.2), the dot cut-off (≤10 vs ≤7 days) and the signature (`trends` takes `range` and `logged`). Per D5, move the `trends.html` version to `public/widgets/src/shared/trend-chart.js`, change its dot cut-off to `n <= 10`, and keep nutrition-summary's comment explaining the cut-off (at 10 points the dots are ~52 units apart). Both templates `@include` it directly and call it; nutrition-summary passes no `range`/`logged`, so make those optional with the current trends behaviour as the default.
+- Verify: the trends widget is pixel-identical (AE = 0) on all three ranges in both themes. nutrition-summary differs only in its chart (padding and dot size); put before and after screenshots of it in the PR.
 
 ### U10. Layout and design polish (owner input)
 
@@ -320,9 +320,9 @@ Measured during the 2026-10-15 to 2026-10-17 investigation. Repeat a measurement
 | U2    | Not started |     |
 | U3    | Not started |     |
 | U4    | Not started |     |
-| U5    | Blocked: D4 |     |
+| U5    | Not started |     |
 | U6    | Not started |     |
 | U7    | Not started |     |
-| U8    | Blocked: D4 |     |
-| U9    | Blocked: D5 |     |
+| U8    | Not started |     |
+| U9    | Not started |     |
 | U10   | Needs owner |     |
