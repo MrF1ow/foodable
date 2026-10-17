@@ -24,6 +24,7 @@ import {
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
+import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -352,6 +353,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
         } as never),
+        help: renderSettingsHelpPage({ chrome } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };

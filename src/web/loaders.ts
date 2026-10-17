@@ -34,6 +34,7 @@ import { renderRecipeDetailPage, renderRecipesPage } from "./pages/recipes.js";
 import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
 import { renderHouseholdSettingsPage } from "./pages/household.js";
+import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
 import { foodsByIds } from "../domain/foods.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
@@ -345,9 +346,23 @@ export async function renderSettingsAccountPage(
     };
 }
 
+export async function renderSettingsHelpRoute(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    return {
+        status: 200,
+        html: renderSettingsHelpPageHtml({
+            chrome: viewerChromeFromProfile(profile),
+        }),
+    };
+}
+
 export async function renderSettingsFoodsPage(
     viewerUserId: string,
-    error?: string,
+    opts: { error?: string; openModalId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -366,14 +381,19 @@ export async function renderSettingsFoodsPage(
         html: renderFoodsSettingsPage({
             chrome: viewerChromeFromProfile(profile),
             foods: withAliases,
-            error,
+            error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }
 
 export async function renderHouseholdSettingsRoute(
     viewerUserId: string,
-    opts: { error?: string; issuedToken?: string } = {},
+    opts: {
+        error?: string;
+        issuedToken?: string;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -414,6 +434,7 @@ export async function renderHouseholdSettingsRoute(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             issuedToken: opts.issuedToken,
+            openModalId: opts.openModalId,
         }),
     };
 }

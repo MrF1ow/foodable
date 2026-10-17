@@ -1,6 +1,6 @@
 import { escapeHtml } from "../shell.js";
 import type { ExpiryLevel } from "../../domain/stock.js";
-import { disclosure, modalTrigger } from "./ui.js";
+import { disclosure, infoTip, modalTrigger } from "./ui.js";
 
 function expiryPill(level: ExpiryLevel): string {
     const label =
@@ -32,7 +32,11 @@ export function renderExpiringStrip(
         )
         .join("");
     return disclosure({
-        summary: `Expiring soon <span class="count">${n}</span>`,
+        summary: `Expiring soon <span class="count">${n}</span>${infoTip({
+            id: "fridge-expiring-soon-tip",
+            text: "Lists items expiring within three days (High or Medium urgency). More than seven days out shows no badge on the row.",
+            label: "What is Expiring soon?",
+        })}`,
         body: `<section class="fridge-expiring panel">
 <ul class="list">${rows}</ul>
 </section>`,

@@ -131,18 +131,18 @@ scripts/
 
 Each phase is one PR, or a small stack of PRs, squash-merged with a `(#N)` subject like the rest of `main`. Do them in order. Each PR states which phase it is and links this file. Mark the phase done in the status table at the end of this file in the same PR.
 
-| Phase | Theme                       | Changes look? | Changes widget bytes? | Depends on |
-| ----- | --------------------------- | ------------- | --------------------- | ---------- |
-| U1    | Moves: one place for pages  | No            | No                    | none       |
-| U2    | Single sources              | No            | No                    | U1         |
-| U3    | App brand layer (the look)  | App + login   | No                    | U2         |
-| U4    | Motion                      | App + login   | No                    | U3         |
-| U5    | Type and radius scale       | No            | Yes, pixel-identical  | U2         |
-| U6    | Page chrome primitives      | App (small)   | No                    | U1, U3     |
-| U7    | One client bundle `/app.js` | No            | No                    | U1, U4     |
-| U8    | Widget helper partial       | No            | Yes, pixel-identical  | none       |
-| U9    | One trend chart             | One widget    | Yes                   | none       |
-| U10   | Layout and design polish    | App           | No                    | U6, owner  |
+| Phase | Theme                       | Changes look? | Changes widget bytes? | Depends on                             |
+| ----- | --------------------------- | ------------- | --------------------- | -------------------------------------- |
+| U1    | Moves: one place for pages  | No            | No                    | none                                   |
+| U2    | Single sources              | No            | No                    | U1                                     |
+| U3    | App brand layer (the look)  | App + login   | No                    | U2                                     |
+| U4    | Motion                      | App + login   | No                    | U3                                     |
+| U5    | Type and radius scale       | No            | Yes, pixel-identical  | U2                                     |
+| U6    | Page chrome primitives      | App (small)   | No                    | U1, U3                                 |
+| U7    | One client bundle `/app.js` | No            | No                    | U1, U4                                 |
+| U8    | Widget helper partial       | No            | Yes, pixel-identical  | none                                   |
+| U9    | One trend chart             | One widget    | Yes                   | none                                   |
+| U10   | Layout and design polish    | App           | No                    | U6, owner — Done via usability plan P6 |
 
 ### U1. Moves: one place for pages (no behaviour change)
 
@@ -314,15 +314,15 @@ Measured during the 2026-10-15 to 2026-10-17 investigation. Repeat a measurement
 
 ## Status
 
-| Phase | Status      | PR  |
-| ----- | ----------- | --- |
-| U1    | Done        | #71 |
-| U2    | Done        | #72 |
-| U3    | Done        | #75 |
-| U4    | Done        | #76 |
-| U5    | Done        | #73 |
-| U6    | Done        | #78 |
-| U7    | Done        | #77 |
-| U8    | Done        | #70 |
-| U9    | Done        | #74 |
-| U10   | Needs owner |     |
+| Phase | Status                   | PR  |
+| ----- | ------------------------ | --- |
+| U1    | Done                     | #71 |
+| U2    | Done                     | #72 |
+| U3    | Done                     | #75 |
+| U4    | Done                     | #76 |
+| U5    | Done                     | #73 |
+| U6    | Done                     | #78 |
+| U7    | Done                     | #77 |
+| U8    | Done                     | #70 |
+| U9    | Done                     | #74 |
+| U10   | Done (usability plan P6) |     |

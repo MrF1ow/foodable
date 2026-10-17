@@ -155,6 +155,7 @@ function locationSection(
     locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
+    showEatTossTip: boolean,
 ): { section: string; modals: string } {
     const locItems = items.filter((item) => item.locationId === location.id);
     const itemParts = locItems.map((item) =>
@@ -211,6 +212,13 @@ ${renderQuantityField({
             confirmLabel: "Remove",
             openOnLoad: modalOpen(view, removeModalId),
         });
+    const eatTossTip = showEatTossTip
+        ? infoTip({
+              id: "fridge-ate-toss-tip",
+              text: "Ate it logs a snack meal and removes stock. Toss records discard only.",
+              label: "Ate it vs Toss",
+          })
+        : "";
     const headActions = `<div class="row-actions">
 ${modalTrigger({
     target: foodModalId,
@@ -226,6 +234,7 @@ ${modalTrigger({
         text: SUPPLY_HINT,
         label: "What is a household item?",
     })}</span>
+${eatTossTip}
 ${modalTrigger({
     target: removeModalId,
     label: "Remove",
@@ -258,8 +267,15 @@ export function renderFridgePage(view: FridgePageView): string {
             expiresOn: item.expiresOn ?? "",
         })),
     );
-    const locationParts = view.locations.map((loc) =>
-        locationSection(loc, view.items, view.locations, view, today),
+    const locationParts = view.locations.map((loc, index) =>
+        locationSection(
+            loc,
+            view.items,
+            view.locations,
+            view,
+            today,
+            index === 0,
+        ),
     );
     const sections = locationParts.map((part) => part.section).join("");
     const modals =

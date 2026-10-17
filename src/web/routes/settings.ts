@@ -8,6 +8,7 @@ import {
     renderHouseholdSettingsRoute,
     renderSettingsAccountPage,
     renderSettingsFoodsPage,
+    renderSettingsHelpRoute,
 } from "../loaders.js";
 import { formText } from "../form.js";
 import {
@@ -56,17 +57,29 @@ import { liveSettingsStore } from "../../db/settings.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { validateTz } from "../../domain/tz.js";
 import { FoodsInputError, mergeFoods, updateFood } from "../../domain/foods.js";
+import {
+    HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+    HOUSEHOLD_ADD_STORE_MODAL_ID,
+} from "../pages/household.js";
+import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
 
 export const settingsRoutes = new Hono();
 
-async function householdFormError(userId: string, err: unknown) {
+async function householdFormError(
+    userId: string,
+    err: unknown,
+    openModalId?: string,
+) {
     const message =
         err instanceof SettingsInputError || err instanceof RulesInputError
             ? err.message
             : err instanceof Error
               ? err.message
               : "Could not update household settings.";
-    const page = await renderHouseholdSettingsRoute(userId, { error: message });
+    const page = await renderHouseholdSettingsRoute(userId, {
+        error: message,
+        openModalId,
+    });
     return { html: page.html, status: 400 as const };
 }
 
@@ -82,6 +95,11 @@ settingsRoutes.get("/settings/household", requireSiteUser, async (c) => {
 
 settingsRoutes.get("/settings/foods", requireSiteUser, async (c) => {
     const page = await renderSettingsFoodsPage(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
+    const page = await renderSettingsHelpRoute(c.get("userId"));
     return c.html(page.html, page.status);
 });
 
@@ -162,6 +180,7 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
     if (!parsed.ok) {
         const page = await renderHouseholdSettingsRoute(userId, {
             error: parsed.error,
+            openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
         });
         return c.html(page.html, 400);
     }
@@ -172,6 +191,7 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
     if (!added.ok) {
         const page = await renderHouseholdSettingsRoute(userId, {
             error: added.error,
+            openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
         });
         return c.html(page.html, 400);
     }
@@ -234,11 +254,14 @@ settingsRoutes.post(
             c.req.param("userId"),
             owner.householdId,
         );
+        const targetId = c.req.param("userId");
+        const makeOwnerModal = `household-make-owner-${targetId}`;
         const check = checkManagedMember(owner, target, "transfer");
         if (!check.ok) {
             const page = await householdFormError(
                 userId,
                 new Error(check.error),
+                makeOwnerModal,
             );
             return c.html(page.html, page.status);
         }
@@ -249,7 +272,7 @@ settingsRoutes.post(
                 check.target.userId,
             );
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(userId, err, makeOwnerModal);
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");
@@ -270,11 +293,14 @@ settingsRoutes.post(
             c.req.param("userId"),
             owner.householdId,
         );
+        const targetId = c.req.param("userId");
+        const removeModal = `household-remove-${targetId}`;
         const check = checkManagedMember(owner, target, "remove");
         if (!check.ok) {
             const page = await householdFormError(
                 userId,
                 new Error(check.error),
+                removeModal,
             );
             return c.html(page.html, page.status);
         }
@@ -284,13 +310,14 @@ settingsRoutes.post(
                 new Error(
                     `Tick the box to confirm removing ${check.target.displayName}.`,
                 ),
+                removeModal,
             );
             return c.html(page.html, page.status);
         }
         try {
             await deleteAllUserData(check.target.userId);
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");
@@ -308,7 +335,11 @@ settingsRoutes.post("/settings/household/stores", requireOwner, async (c) => {
             formText(body, "name"),
         );
     } catch (err) {
-        const page = await householdFormError(userId, err);
+        const page = await householdFormError(
+            userId,
+            err,
+            HOUSEHOLD_ADD_STORE_MODAL_ID,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/settings/household");
@@ -343,14 +374,19 @@ settingsRoutes.post(
         const userId = c.get("userId");
         const owner = siteMember(c);
         const body = await c.req.parseBody();
+        const storeId = c.req.param("id");
         try {
             await addStoreRule(liveRulesStore(), {
                 householdId: owner.householdId,
-                storeId: c.req.param("id"),
+                storeId,
                 body: formText(body, "body"),
             });
         } catch (err) {
-            const page = await householdFormError(userId, err);
+            const page = await householdFormError(
+                userId,
+                err,
+                `household-store-rule-${storeId}`,
+            );
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household");
@@ -443,14 +479,21 @@ function formOptionalNutrient(
     return Number(raw);
 }
 
-async function foodsFormError(userId: string, err: unknown) {
+async function foodsFormError(
+    userId: string,
+    err: unknown,
+    openModalId?: string,
+) {
     const message =
         err instanceof FoodsInputError
             ? err.message
             : err instanceof Error
               ? err.message
               : "Could not update foods.";
-    const page = await renderSettingsFoodsPage(userId, message);
+    const page = await renderSettingsFoodsPage(userId, {
+        error: message,
+        openModalId,
+    });
     return { html: page.html, status: 400 as const };
 }
 
@@ -466,7 +509,7 @@ settingsRoutes.post("/settings/foods/merge", requireMember, async (c) => {
             formText(body, "drop_id"),
         );
     } catch (err) {
-        const page = await foodsFormError(userId, err);
+        const page = await foodsFormError(userId, err, FOODS_MERGE_MODAL_ID);
         return c.html(page.html, page.status);
     }
     return c.redirect("/settings/foods");
@@ -505,7 +548,11 @@ settingsRoutes.post("/settings/foods/:id", requireMember, async (c) => {
             },
         );
     } catch (err) {
-        const page = await foodsFormError(userId, err);
+        const page = await foodsFormError(
+            userId,
+            err,
+            `food-edit-${c.req.param("id")}`,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/settings/foods");

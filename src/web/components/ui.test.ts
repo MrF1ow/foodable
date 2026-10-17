@@ -19,6 +19,7 @@ import { renderRecipesPage } from "../pages/recipes.js";
 import { renderSettingsPage } from "../pages/settings.js";
 import { renderFoodsSettingsPage } from "../pages/foods.js";
 import { renderHouseholdSettingsPage } from "../pages/household.js";
+import { renderSettingsHelpPage } from "../pages/settings-help.js";
 import { renderNutritionPage } from "../pages/nutrition.js";
 import { comingSoonPage } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
@@ -276,6 +277,7 @@ test("every page's h1 comes from pageHeader once", async () => {
                 isOwner: true,
             }),
         ],
+        ["help", renderSettingsHelpPage({ chrome })],
         ["create-household", createHouseholdFormHtml()],
         ["coming-soon", comingSoonPage("fridge")],
     ];

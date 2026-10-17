@@ -333,9 +333,25 @@ test("expiring soon is a closed details block with a count", () => {
         ],
     } as never);
     expect(html).toMatch(
-        /<details class="more">\s*<summary>Expiring soon <span class="count">1<\/span><\/summary>/,
+        /<details class="more">\s*<summary>Expiring soon <span class="count">1<\/span>/,
     );
     expect(html).not.toMatch(/<details class="more" open>/);
+    expect(html).toContain('id="fridge-expiring-soon-tip"');
+});
+
+test("first fridge location shows ate it vs toss info tip", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+            { id: "loc-2", householdId: HH, name: "Freezer", sortOrder: 1 },
+        ],
+        items: [],
+    } as never);
+    expect(html).toContain('id="fridge-ate-toss-tip"');
+    const freezerStart = html.indexOf('data-location-id="loc-2"');
+    const freezerChunk = html.slice(freezerStart, freezerStart + 800);
+    expect(freezerChunk).not.toContain('id="fridge-ate-toss-tip"');
 });
 
 test("a server error reopens the modal that submitted the form", () => {

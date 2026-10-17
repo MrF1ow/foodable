@@ -5154,6 +5154,9 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("Password must be at least 8 characters.");
         expect(html).toContain('action="/settings/household"');
+        expect(html).toMatch(
+            /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
+        );
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
@@ -5732,8 +5735,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
-        expect(html).not.toContain("Add household member");
+        expect(html).not.toContain('commandfor="household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
+    });
+
+    test("GET /settings/help is available to members", async () => {
+        const r = await siteApp.request("http://x/settings/help", {
+            headers: { cookie: cookieFor(alice) },
+        });
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain("<h1>Help</h1>");
+        expect(html).toContain('href="/settings/help" aria-current="page"');
+        expect(html).toContain('id="food-vs-household-item"');
     });
 
     test("POST /settings/household/stores seeds default sections", async () => {
