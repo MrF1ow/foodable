@@ -1,20 +1,25 @@
 :root {
     /* Light theme (default). Dark overridden below.
-                   Neutral grays/whites with the brand green accent. The
+                   SPIKE: the marketing site's palette: warm off-white, green-
+                   tinted neutrals (oklch hue 160), near-black dark mode. The
                    accent is the logo green (BRAND_GREEN in src/brand.ts) and
                    is the same in both themes. */
-    --text: #1d1d1f;
-    --text-dim: #6e6e73;
-    --bg: #f5f5f7;
+    --text: oklch(0.2 0.01 160);
+    --text-dim: oklch(0.5 0.015 160);
+    --bg: #fbfaf7;
     --panel: #ffffff;
-    --panel-border: #e6e6ea;
-    --track: #e6e6ea;
+    --panel-border: oklch(0.91 0.008 160);
+    --track: oklch(0.94 0.008 160);
     --accent: #28cf8b;
+    --accent-soft: #e6f9f0;
+    --accent-ink: #12875a;
     /* Text and icons on an accent fill. The green is light, so a light label
        on it falls to ~2:1; this near-black green holds ~7.5:1 in both themes,
        which is why no theme block overrides it. */
     --on-accent: #062c1c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05);
+    --shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.05),
+        0 12px 24px rgba(0, 0, 0, 0.05);
 
     --calories: #ff9f0a;
     --protein: #8b5cf6;
@@ -33,19 +38,29 @@
        chrome that ignores every token. */
     color-scheme: light;
 
-    --radius: 18px;
+    --radius: 16px;
+
+    /* SPIKE: the marketing site's type. Geist and Bricolage are only loaded
+       by /app.css (app + login); inside a chat host they are absent and the
+       stack falls through to the host's own system font. */
+    --font-sans:
+        "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+    --font-heading: "Bricolage Grotesque", var(--font-sans);
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --text: #f5f5f7;
-        --text-dim: #98989d;
-        --bg: #000000;
-        --panel: #1c1c1e;
-        --panel-border: #2c2c2e;
-        --track: #2c2c2e;
+        --text: oklch(0.97 0.005 160);
+        --text-dim: oklch(0.7 0.012 160);
+        --bg: #0d0f0e;
+        --panel: #151817;
+        --panel-border: oklch(1 0 0 / 10%);
+        --track: oklch(0.27 0.008 160);
         --accent: #28cf8b;
-        --shadow: none;
+        --accent-soft: #0f2a1f;
+        --accent-ink: #3ddc9a;
+        --shadow: inset 0 -20px 80px -20px #ffffff14;
         --calories: #ffab2e;
         --protein: #a78bfa;
         --carbs: #34d399;
@@ -63,14 +78,18 @@
 
 /* Explicit host override wins over the media query in both directions. */
 :root[data-theme="light"] {
-    --text: #1d1d1f;
-    --text-dim: #6e6e73;
-    --bg: #f5f5f7;
+    --text: oklch(0.2 0.01 160);
+    --text-dim: oklch(0.5 0.015 160);
+    --bg: #fbfaf7;
     --panel: #ffffff;
-    --panel-border: #e6e6ea;
-    --track: #e6e6ea;
+    --panel-border: oklch(0.91 0.008 160);
+    --track: oklch(0.94 0.008 160);
     --accent: #28cf8b;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.05);
+    --accent-soft: #e6f9f0;
+    --accent-ink: #12875a;
+    --shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.05),
+        0 12px 24px rgba(0, 0, 0, 0.05);
     --calories: #ff9f0a;
     --protein: #8b5cf6;
     --carbs: #10b981;
@@ -85,14 +104,16 @@
     color-scheme: light;
 }
 :root[data-theme="dark"] {
-    --text: #f5f5f7;
-    --text-dim: #98989d;
-    --bg: #000000;
-    --panel: #1c1c1e;
-    --panel-border: #2c2c2e;
-    --track: #2c2c2e;
+    --text: oklch(0.97 0.005 160);
+    --text-dim: oklch(0.7 0.012 160);
+    --bg: #0d0f0e;
+    --panel: #151817;
+    --panel-border: oklch(1 0 0 / 10%);
+    --track: oklch(0.27 0.008 160);
     --accent: #28cf8b;
-    --shadow: none;
+    --accent-soft: #0f2a1f;
+    --accent-ink: #3ddc9a;
+    --shadow: inset 0 -20px 80px -20px #ffffff14;
     --calories: #ffab2e;
     --protein: #a78bfa;
     --carbs: #34d399;

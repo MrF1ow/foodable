@@ -805,3 +805,244 @@ details.more > summary > :is(h2, h3) {
     max-width: 400px;
     font-size: 12px;
 }
+
+/* ==== SPIKE: the marketing site's look, app + login only ==================
+   Everything below is app-layer: widgets never include app.css, so in a chat
+   host none of it applies. Fonts are self-hosted (CSP font-src 'self'). */
+
+@font-face {
+    font-family: "Geist";
+    src: url("/fonts/geist-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Bricolage Grotesque";
+    src: url("/fonts/bricolage-latin.woff2") format("woff2");
+    font-weight: 200 800;
+    font-display: swap;
+}
+
+/* The hero's soft green glow, pinned to the top of every page. */
+body {
+    background:
+        radial-gradient(
+            56rem 22rem at 50% -9rem,
+            color-mix(in srgb, var(--accent) 16%, transparent),
+            transparent 70%
+        ),
+        var(--bg);
+    background-repeat: no-repeat;
+}
+::selection {
+    background: color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+:where(.app-main) h1 {
+    font-family: var(--font-heading);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.1;
+}
+:where(.app-main) h2 {
+    font-weight: 650;
+    letter-spacing: -0.015em;
+}
+/* Eyebrows, like the site's "WHY IT EXISTS": a green that passes AA as text. */
+:where(.app-main) h3 {
+    color: var(--accent-ink);
+}
+
+/* Brand mark + wordmark on the left of the top bar, as on the site's nav. */
+.app-bar {
+    justify-content: space-between;
+    align-items: center;
+}
+.app-bar::before {
+    content: "Foodable";
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 26px;
+    min-height: 22px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    background: url("/brand/mark.svg") no-repeat left center / 20px 19px;
+}
+
+/* Frosted bottom nav; the active tab gets the brand-soft pill. */
+.bottom-nav {
+    background: color-mix(in srgb, var(--panel) 78%, transparent);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    backdrop-filter: saturate(1.6) blur(14px);
+    border-top-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
+}
+.bottom-nav a {
+    border-radius: 14px;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
+}
+.bottom-nav a[aria-current="page"] {
+    background: var(--accent-soft);
+}
+
+/* magic-card: a pointer-following glow inside a panel. The shell script sets
+   --mx / --my; touch screens never see it. */
+@media (hover: hover) and (pointer: fine) {
+    .app-main .panel {
+        position: relative;
+        isolation: isolate;
+    }
+    .app-main .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        z-index: -1;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        background: radial-gradient(
+            260px circle at var(--mx, -999px) var(--my, -999px),
+            color-mix(in srgb, var(--accent) 10%, transparent),
+            transparent 70%
+        );
+    }
+    .app-main .panel:hover::before {
+        opacity: 1;
+    }
+}
+
+/* blur-fade: panels arrive once, staggered, only after a frame has ticked. */
+html.fx .app-main > * {
+    animation: fx-blur-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+html.fx .app-main > :nth-child(2) {
+    animation-delay: 0.04s;
+}
+html.fx .app-main > :nth-child(3) {
+    animation-delay: 0.08s;
+}
+html.fx .app-main > :nth-child(4) {
+    animation-delay: 0.12s;
+}
+html.fx .app-main > :nth-child(5) {
+    animation-delay: 0.16s;
+}
+html.fx .app-main > :nth-child(n + 6) {
+    animation-delay: 0.2s;
+}
+
+/* ---- login: the site's hero, scaled down ---- */
+body.auth {
+    background:
+        radial-gradient(
+            40rem 22rem at 50% -4rem,
+            color-mix(in srgb, var(--accent) 20%, transparent),
+            transparent 70%
+        ),
+        radial-gradient(
+                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                transparent 1.2px
+            )
+            0 0 / 18px 18px,
+        var(--bg);
+}
+.auth-title {
+    font-family: var(--font-heading);
+    font-size: 34px;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+}
+/* aurora-text, in accent shades only. */
+.auth-title {
+    background: linear-gradient(
+        120deg,
+        var(--text) 0 30%,
+        var(--accent) 45%,
+        color-mix(in srgb, var(--accent) 60%, var(--text)) 60%,
+        var(--text) 75%
+    );
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.auth-card {
+    position: relative;
+    box-shadow:
+        var(--shadow),
+        0 30px 60px -30px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+    .auth-title {
+        animation: fx-aurora 6s ease-in-out 0.3s both;
+    }
+    /* border-beam around the card: the login page is one bounded screen. */
+    .auth-card::after {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        border-radius: inherit;
+        border: 1.5px solid transparent;
+        pointer-events: none;
+        -webkit-mask:
+            linear-gradient(#000 0 0) padding-box,
+            linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+            linear-gradient(#000 0 0) padding-box exclude,
+            linear-gradient(#000 0 0);
+        background: conic-gradient(
+                from var(--fx-beam-a),
+                transparent 0 82%,
+                var(--accent) 94%,
+                transparent 100%
+            )
+            border-box;
+        animation: fx-beam 6s linear infinite;
+    }
+    /* shimmer-button: a sheen that sweeps the primary action every few
+       seconds. */
+    .auth-form .btn-primary {
+        position: relative;
+        overflow: hidden;
+    }
+    .auth-form .btn-primary::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(
+            100deg,
+            transparent 35%,
+            rgba(255, 255, 255, 0.45) 50%,
+            transparent 65%
+        );
+        transform: translateX(-100%);
+        animation: fx-shimmer 3.2s ease-in-out 1s infinite;
+    }
+}
+@keyframes fx-aurora {
+    from {
+        background-position: 100% 0;
+    }
+    to {
+        background-position: 0 0;
+    }
+}
+@keyframes fx-shimmer {
+    0%,
+    55% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}

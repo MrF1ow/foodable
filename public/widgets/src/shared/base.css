@@ -9,15 +9,7 @@ body {
 body {
     color: var(--text);
     background: var(--bg);
-    font-family:
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        "Segoe UI",
-        Roboto,
-        Helvetica,
-        Arial,
-        sans-serif;
+    font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;

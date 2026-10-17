@@ -251,6 +251,20 @@ app.get("/brand/:file", (c) => {
     });
 });
 
+// SPIKE: self-hosted web fonts for the app and login (OFL 1.1). An allowlist,
+// so a stray file in public/fonts never becomes a route.
+const FONTS = new Set(["geist-latin.woff2", "bricolage-latin.woff2"]);
+app.get("/fonts/:file", async (c) => {
+    const name = c.req.param("file");
+    if (!FONTS.has(name)) return c.notFound();
+    const file = Bun.file(`./public/fonts/${name}`);
+    if (!(await file.exists())) return c.notFound();
+    return c.body(await file.arrayBuffer(), 200, {
+        "Content-Type": "font/woff2",
+        "Cache-Control": "public, max-age=31536000, immutable",
+    });
+});
+
 // Health check
 app.get("/health", (c) => c.text("ok"));
 

@@ -27,7 +27,7 @@ export type AppChrome = ViewerChrome & {
 
 // The page background (--bg in public/widgets/src/shared/tokens.css), so the
 // mobile browser bar blends into the page.
-const THEME_COLOR = { light: "#f5f5f7", dark: "#000000" } as const;
+const THEME_COLOR = { light: "#fbfaf7", dark: "#0d0f0e" } as const;
 
 export function resolveTheme(theme: string | null | undefined): ThemePref {
     return theme === "light" || theme === "dark" ? theme : "system";
@@ -88,6 +88,23 @@ ${appHead(chrome.title, chrome.theme)}
 <main class="app-main native">${chrome.body}</main>
 ${bottomNav(chrome.active)}
 <script>
+// SPIKE: motion is opt-in per frame. html.fx is set inside a frame, so a
+// renderer that never ticks (a virtual-time screenshot) keeps the static page,
+// and never under prefers-reduced-motion. The pointer glow on panels
+// (magic-card) only reads --mx / --my.
+const mq = (q) => typeof window.matchMedia === "function" && window.matchMedia(q).matches;
+if (typeof window.matchMedia === "function" && !mq("(prefers-reduced-motion: reduce)")) {
+    requestAnimationFrame(() => document.documentElement.classList.add("fx"));
+}
+if (mq("(hover: hover) and (pointer: fine)")) {
+    document.addEventListener("pointermove", (e) => {
+        const panel = e.target instanceof Element && e.target.closest(".app-main .panel");
+        if (!panel) return;
+        const r = panel.getBoundingClientRect();
+        panel.style.setProperty("--mx", e.clientX - r.left + "px");
+        panel.style.setProperty("--my", e.clientY - r.top + "px");
+    }, { passive: true });
+}
 document.querySelectorAll(".widget-frame").forEach((frame) => {
     // Same max-content measure as the bridge's size-changed report.
     // scrollHeight never drops below the frame's own height, so it could
