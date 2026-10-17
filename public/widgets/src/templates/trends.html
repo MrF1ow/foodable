@@ -165,78 +165,10 @@
             // averaging loop reads. Requires fmt + esc above.
             /*@include shared/macros.js@*/
 
-            // Calories-per-day trend: SVG area + line that scales to any range
-            // (7 to 30 days). Compact — a 54-unit-tall viewBox sitting inside
-            // the widget's panel, not a card of its own. Uniform scaling — no
-            // preserveAspectRatio distortion — so it keeps its aspect ratio at
-            // any container width.
-            function trendChart(days, goal, range, logged) {
-                const W = 480,
-                    H = 54,
-                    padL = 8,
-                    padR = 8,
-                    padT = 6,
-                    padB = 4;
-                const n = days.length;
-                const vals = days.map((d) => d.calories || 0);
-                const maxV = Math.max(...vals, goal || 0, 1) * 1.15;
-                const plotW = W - padL - padR;
-                const plotH = H - padT - padB;
-                const base = padT + plotH;
-                const x = (i) =>
-                    n === 1 ? padL + plotW / 2 : padL + (plotW * i) / (n - 1);
-                const y = (v) => padT + plotH - (v / maxV) * plotH;
-                const pts = vals.map((v, i) => [x(i), y(v)]);
-
-                const line = pts
-                    .map(
-                        (p, i) =>
-                            `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`,
-                    )
-                    .join(" ");
-                const area =
-                    `M${pts[0][0].toFixed(1)} ${base} ` +
-                    pts
-                        .map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`)
-                        .join(" ") +
-                    ` L${pts[n - 1][0].toFixed(1)} ${base} Z`;
-
-                const goalLine =
-                    goal && goal > 0
-                        ? `<line class="goalline" x1="${padL}" y1="${y(goal).toFixed(1)}" x2="${W - padR}" y2="${y(goal).toFixed(1)}"/>`
-                        : "";
-                // Point markers only on the shortest range: at 14 and 30 days
-                // they crowd the line at this height and read as noise.
-                const dots =
-                    n <= 7
-                        ? pts
-                              .map(
-                                  (p) =>
-                                      `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.2" fill="var(--calories)"/>`,
-                              )
-                              .join("")
-                        : "";
-                const md = (d) => esc(d.date.slice(5)); // MM-DD
-
-                return `
-          <div class="chart">
-            <div class="chead">
-              <span class="ctitle">${esc(T.nutritionSummary.caloriesPerDay)}</span>
-              <span class="cmeta">${tpl(T.trends.loggedOfTotal, { logged, total: n })}</span>
-            </div>
-            <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tpl(T.trends.caloriesOverRange, { range }))}">
-              <line class="axis" x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}"/>
-              ${goalLine}
-              <path d="${area}" fill="var(--calories)" opacity="0.16"/>
-              <path d="${line}" fill="none" stroke="var(--calories)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-              ${dots}
-            </svg>
-            <div class="tdates">
-              <span>${md(days[0])}</span>
-              <span>${md(days[n - 1])}</span>
-            </div>
-          </div>`;
-            }
+            // Calories-per-day trend chart. Shared with nutrition-summary.html
+            // (plan D5). range and logged are passed so the chead and date row
+            // stay the trends chrome.
+            /*@include shared/trend-chart.js@*/
 
             // ---- State + rendering ---------------------------------------------
             const STATE = { data: null, range: 30 };

@@ -324,5 +324,5 @@ Measured during the 2026-10-15 to 2026-10-17 investigation. Repeat a measurement
 | U6    | Not started |     |
 | U7    | Not started |     |
 | U8    | Ready       | #70 |
-| U9    | Not started |     |
+| U9    | Done        |     |
 | U10   | Needs owner |     |
