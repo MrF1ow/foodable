@@ -9,6 +9,7 @@ import {
     registerClient,
 } from "./db/tokens.js";
 import { signUpUser, signInUser, authUserCount } from "./db/client.js";
+import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
 import { rateLimitAuth } from "./middleware.js";
 import { LOGIN, LOGIN_ERRORS } from "./copy/login.js";
@@ -51,14 +52,6 @@ function base64URLEncode(buffer: Buffer): string {
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=/g, "");
-}
-
-function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
 }
 
 export async function renderLoginPage(

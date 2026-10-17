@@ -12,7 +12,9 @@
  */
 
 import { HTML_LANG } from "../src/routes.js";
-import { esc, generatedBanner } from "./site-partials.js";
+import { generatedBanner } from "./site-partials.js";
+import { escapeHtml as esc } from "../src/html.js";
+import { appHead } from "../src/web/shell.js";
 import { LOGIN, type LoginDoc } from "../src/copy/login.js";
 import { rm } from "node:fs/promises";
 
@@ -53,7 +55,11 @@ async function removeStaleMarketingHtml(): Promise<void> {
 await removeStaleMarketingHtml();
 
 function renderDoc(doc: LoginDoc): string {
-    const title = `${esc(doc.title)} — ${esc(doc.subtitle)}`;
+    // appHead escapes the title itself.
+    const head = appHead(`${doc.title} — ${doc.subtitle}`, "system")
+        .split("\n")
+        .map((line) => `        ${line}`)
+        .join("\n");
 
     // Legal HTML is gone. Keep the consent sentence, but the {terms}/
     // {privacy} tokens are the localized names as text, not anchors.
@@ -61,26 +67,19 @@ function renderDoc(doc: LoginDoc): string {
         .replace("{terms}", esc(doc.termsLinkText))
         .replace("{privacy}", esc(doc.privacyLinkText));
 
-    // Styled by /app.css, the household app's stylesheet. No data-theme on
-    // <html>: login always follows the OS theme.
+    // Styled by /app.css, the household app's stylesheet, with the app's own
+    // <head> (appHead). No data-theme on <html>: login always follows the OS
+    // theme.
     return `<!doctype html>
 <html lang="${HTML_LANG.en}">
     <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>${title}</title>
-        <link rel="icon" href="/favicon.ico" sizes="32x32" />
-        <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+${head}
         <!-- No canonical/hreflang: this page has no fixed URL (rendered
              per in-flight OAuth session via GET /authorize, not routed by
              path — see src/copy/login.ts). noindex is a defensive
              belt-and-suspenders in case a stray link to /authorize is ever
              crawled. -->
         <meta name="robots" content="noindex, nofollow" />
-        <link rel="stylesheet" href="/app.css" />
     </head>
     <body class="auth">
 ${generatedBanner("scripts/gen-login.ts")}

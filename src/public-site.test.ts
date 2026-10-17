@@ -260,12 +260,16 @@ describe("runtime surfaces that stay", () => {
 });
 
 describe("cannot republish the marketing site", () => {
-    test("gen:all is login-only and the marketing generators are gone", async () => {
+    test("gen:all builds the tokens and login only; the marketing generators are gone", async () => {
         const pkg = (await Bun.file("./package.json").json()) as {
             scripts: Record<string, string>;
         };
         expect(pkg.scripts["gen:pages"]).toBe("bun run scripts/gen-login.ts");
-        expect(pkg.scripts["gen:all"]).toBe("bun run gen:pages");
+        expect(pkg.scripts["gen:tokens"]).toBe("bun run scripts/gen-tokens.ts");
+        // Tokens first: the login head reads the theme colours from them.
+        expect(pkg.scripts["gen:all"]).toBe(
+            "bun run gen:tokens && bun run gen:pages",
+        );
         for (const path of MARKETING_GENERATORS) {
             expect(await Bun.file(path).exists(), path).toBe(false);
         }

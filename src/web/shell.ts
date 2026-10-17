@@ -1,6 +1,8 @@
+import { escapeHtml } from "../html.js";
+import { THEME_COLOR } from "../tokens.js";
 import { bottomNav } from "./components/bottom-nav.js";
 
-export { bottomNav };
+export { bottomNav, escapeHtml };
 
 export const APP_TABS = [
     { id: "fridge", href: "/fridge", label: "Fridge" },
@@ -27,20 +29,8 @@ export type AppChrome = ViewerChrome & {
     body: string;
 };
 
-// The page background (--bg in public/widgets/src/shared/tokens.css), so the
-// mobile browser bar blends into the page.
-const THEME_COLOR = { light: "#f5f5f7", dark: "#000000" } as const;
-
 export function resolveTheme(theme: string | null | undefined): ThemePref {
     return theme === "light" || theme === "dark" ? theme : "system";
-}
-
-export function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
 }
 
 /** The `<html>` opener. An explicit theme stamps data-theme, which the token
@@ -51,6 +41,8 @@ export function htmlOpen(theme: ThemePref): string {
     return `<html lang="en"${attr}>`;
 }
 
+// THEME_COLOR is the page background (--bg), so the mobile browser bar
+// blends into the page.
 function themeColorMeta(theme: ThemePref): string {
     if (theme !== "system") {
         return `<meta name="theme-color" content="${THEME_COLOR[theme]}" />`;
