@@ -92,6 +92,7 @@ export function confirmModal(opts: {
     hiddenFields?: Record<string, string>;
     openOnLoad?: boolean;
     formClass?: string;
+    bodyPrefix?: string;
 }): string {
     const id = escapeHtml(opts.id);
     const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
@@ -113,7 +114,7 @@ ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message
     return modal({
         id: opts.id,
         title: opts.title,
-        body,
+        body: `${opts.bodyPrefix ?? ""}${body}`,
         openOnLoad: opts.openOnLoad,
     });
 }

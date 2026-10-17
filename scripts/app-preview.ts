@@ -199,6 +199,20 @@ const RECIPE = {
     cookMinutes: 20,
 };
 
+const RECIPE_TWO = {
+    id: "r2",
+    householdId: H,
+    creatorId: "u1",
+    name: "Oatmeal",
+    yieldPortions: 2,
+    instructions: "Simmer oats.",
+    sourceUrl: null,
+    tags: ["breakfast"],
+    notes: null,
+    prepMinutes: 5,
+    cookMinutes: 10,
+};
+
 const MACROS = {
     calories: 320,
     protein_g: 18,
@@ -260,7 +274,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         grocery: renderGroceryPage(groceryView(chrome) as never),
         recipes: renderRecipesPage({
             chrome,
-            recipes: [RECIPE],
+            recipes: [RECIPE, RECIPE_TWO],
             members: [ME, SAM],
             viewerId: "u1",
         } as never),

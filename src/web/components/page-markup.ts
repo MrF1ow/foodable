@@ -141,6 +141,8 @@ export function renderRecipeIngredientRow(opts: {
     personAmount: number;
     totalAmount: number;
     note?: string | null;
+    editModalId: string;
+    deleteModalId: string;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
@@ -161,19 +163,16 @@ ${note}
 <button type="submit" name="direction" value="up" class="btn-sm" aria-label="Move ${name} up">↑</button>
 <button type="submit" name="direction" value="down" class="btn-sm" aria-label="Move ${name} down">↓</button>
 </form>
-${disclosure({
-    summary: "Edit",
-    body: `<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeId}/ingredients/${id}">
-<label for="note-${id}">Note</label>
-<input id="note-${id}" name="note" type="text" maxlength="500" value="${escapeHtml(opts.note ?? "")}" autocomplete="off" />
-<label for="amount-${id}">Amount</label>
-<input id="amount-${id}" name="amount" type="number" min="0" step="any" required value="${escapeHtml(String(opts.totalAmount))}" />
-<button type="submit" class="btn-primary">Save ingredient</button>
-</form>`,
+${modalTrigger({
+    target: opts.editModalId,
+    label: "Edit",
+    className: "btn-sm",
 })}
-<form class="recipe-ingredient-delete" method="post" action="/recipes/${recipeId}/ingredients/${id}/delete">
-<button type="submit" class="btn-sm btn-danger">Remove</button>
-</form>
+${modalTrigger({
+    target: opts.deleteModalId,
+    label: "Remove",
+    className: "btn-sm btn-danger",
+})}
 </div>
 </li>`;
 }

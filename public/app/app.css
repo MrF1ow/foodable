@@ -702,8 +702,39 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- recipes ---- */
 
+.recipe-card {
+    position: relative;
+    cursor: pointer;
+    border-radius: var(--r-md);
+    transition: background-color 0.15s ease;
+}
+.recipe-card:hover {
+    background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+}
+.recipe-card:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.recipe-card a.row-title::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
 .recipe-card .row-title {
     color: var(--text);
+}
+.recipe-panel-head {
+    align-items: center;
+    margin-bottom: var(--gap-col);
+}
+.recipe-panel-head .row-title {
+    margin: 0;
+    font-size: var(--fs-18);
+    font-weight: 650;
+}
+.recipe-ingredient .row-actions {
+    position: relative;
+    z-index: 1;
 }
 .recipe-tags {
     display: flex;
@@ -775,8 +806,7 @@ details.more > summary > :is(h2, h3) {
 
 /* Forms that are just one button sit at their natural width instead of
    stretching across the page or card. */
-.rotate-token,
-.recipe-delete {
+.rotate-token {
     align-self: flex-start;
     justify-items: start;
 }

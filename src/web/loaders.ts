@@ -410,13 +410,16 @@ export async function renderHouseholdSettingsRoute(
 
 export async function renderRecipesListPage(
     viewerUserId: string,
-    error?: string,
-    filter: {
+    opts: {
+        error?: string;
+        openModalId?: string;
         tag?: string;
         canMakeNow?: boolean;
         safeFor?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
+    const filter = opts;
+    const error = opts.error;
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
@@ -476,6 +479,7 @@ export async function renderRecipesListPage(
                 safeFor: safeForId,
             },
             error,
+            openModalId: opts.openModalId,
         }),
     };
 }
@@ -483,7 +487,11 @@ export async function renderRecipesListPage(
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
-    opts: { member?: string; error?: string } = {},
+    opts: {
+        member?: string;
+        error?: string;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -504,7 +512,9 @@ export async function renderRecipeDetailRoute(
         );
     } catch (err) {
         if (err instanceof RecipeInputError) {
-            const page = await renderRecipesListPage(viewerUserId, err.message);
+            const page = await renderRecipesListPage(viewerUserId, {
+                error: err.message,
+            });
             return { status: 404, html: page.html };
         }
         throw err;
@@ -572,6 +582,7 @@ export async function renderRecipeDetailRoute(
                 : undefined,
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }

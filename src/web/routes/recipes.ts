@@ -57,7 +57,7 @@ async function recipeFormError(
     userId: string,
     recipeId: string | null,
     err: unknown,
-    member?: string,
+    opts: { member?: string; openModalId?: string } = {},
 ) {
     const message =
         err instanceof RecipeForbiddenError || err instanceof RecipeInputError
@@ -67,19 +67,23 @@ async function recipeFormError(
               : "Could not update the recipe.";
     if (recipeId) {
         const page = await renderRecipeDetailRoute(userId, recipeId, {
-            member,
+            member: opts.member,
             error: message,
+            openModalId: opts.openModalId,
         });
         const status =
             err instanceof RecipeForbiddenError ? 403 : (400 as const);
         return { html: page.html, status: status as 400 | 403 };
     }
-    const page = await renderRecipesListPage(userId, message);
+    const page = await renderRecipesListPage(userId, {
+        error: message,
+        openModalId: opts.openModalId,
+    });
     return { html: page.html, status: 400 as const };
 }
 
 recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
-    const page = await renderRecipesListPage(c.get("userId"), undefined, {
+    const page = await renderRecipesListPage(c.get("userId"), {
         tag: c.req.query("tag") ?? "",
         canMakeNow: c.req.query("can_make_now") === "1",
         safeFor: c.req.query("safe_for") ?? "",
@@ -100,7 +104,9 @@ recipesRoutes.post("/recipes", requireMember, async (c) => {
         });
         return c.redirect(`/recipes/${recipe.id}`);
     } catch (err) {
-        const page = await recipeFormError(userId, null, err);
+        const page = await recipeFormError(userId, null, err, {
+            openModalId: "recipe-new",
+        });
         return c.html(page.html, page.status);
     }
 });
@@ -159,7 +165,7 @@ recipesRoutes.post("/recipes/:id/log-portion", requireMember, async (c) => {
             userId,
             recipeId,
             err instanceof MealItemsError ? err : err,
-            formText(body, "member") || undefined,
+            { member: formText(body, "member") || undefined },
         );
         return c.html(page.html, page.status);
     }
@@ -235,7 +241,9 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
         }
         return c.redirect(`/recipes/${recipeId}`);
     } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err);
+        const page = await recipeFormError(userId, recipeId, err, {
+            openModalId: `recipe-cook-${recipeId}`,
+        });
         return c.html(page.html, page.status);
     }
 });
@@ -259,7 +267,9 @@ recipesRoutes.post("/recipes/:id", requireMember, async (c) => {
             cookMinutes: cookRaw === "" ? null : Number(cookRaw),
         });
     } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err);
+        const page = await recipeFormError(userId, recipeId, err, {
+            openModalId: `recipe-edit-${recipeId}`,
+        });
         return c.html(page.html, page.status);
     }
     return c.redirect(`/recipes/${recipeId}`);
@@ -280,7 +290,9 @@ recipesRoutes.post(
                 c.req.param("ingredientId"),
             );
         } catch (err) {
-            const page = await recipeFormError(userId, recipeId, err);
+            const page = await recipeFormError(userId, recipeId, err, {
+                openModalId: `recipe-delete-ingredient-${c.req.param("ingredientId")}`,
+            });
             return c.html(page.html, page.status);
         }
         return c.redirect(`/recipes/${recipeId}`);
@@ -349,7 +361,9 @@ recipesRoutes.post(
                 },
             );
         } catch (err) {
-            const page = await recipeFormError(userId, recipeId, err);
+            const page = await recipeFormError(userId, recipeId, err, {
+                openModalId: `recipe-edit-ingredient-${c.req.param("ingredientId")}`,
+            });
             return c.html(page.html, page.status);
         }
         return c.redirect(`/recipes/${recipeId}`);
@@ -366,7 +380,9 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
             isOwner: member.role === "owner",
         });
     } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err);
+        const page = await recipeFormError(userId, recipeId, err, {
+            openModalId: `recipe-delete-${recipeId}`,
+        });
         return c.html(page.html, page.status);
     }
     return c.redirect("/recipes");
@@ -418,7 +434,9 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
             );
         }
     } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err);
+        const page = await recipeFormError(userId, recipeId, err, {
+            openModalId: `recipe-add-ingredient-${recipeId}`,
+        });
         return c.html(page.html, page.status);
     }
     return c.redirect(`/recipes/${recipeId}`);
