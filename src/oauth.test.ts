@@ -109,6 +109,7 @@ test("renderLoginPage has no language switcher or translation notice", async () 
 test("generated login uses the shared app stylesheet and no web fonts", async () => {
     const html = await renderLoginPage("s1", fakeSession());
     expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
+    expect(html).toContain('<script src="/app.js" defer></script>');
     expect(html).toContain('class="auth-stage native"');
     expect(html).toContain('class="btn-primary"');
     expect(html).not.toContain("/styles.css");

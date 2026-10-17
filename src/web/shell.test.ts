@@ -1,4 +1,6 @@
 import { test, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
     APP_TABS,
     bottomNav,
@@ -6,6 +8,8 @@ import {
     parseAppearanceInput,
     resolveTheme,
 } from "./shell.js";
+
+const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");
 
 test("bottom nav hrefs and tab order", () => {
     expect(APP_TABS.map((tab) => tab.id)).toEqual([
@@ -67,6 +71,7 @@ test("fridge stub uses the shell and marks Fridge active", () => {
     expect(html).toContain('href="/fridge" aria-current="page"');
     expect(html).toContain('href="/logout"');
     expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
+    expect(html).toContain('<script src="/app.js" defer></script>');
 });
 
 test("system theme leaves data-theme off and offers both theme colors", () => {
@@ -97,13 +102,13 @@ test("the appearance form maps System to a cleared preference", () => {
     });
 });
 
-// The frame-sizing script waits for /app.css; a srcdoc widget frame does not,
-// so it can finish loading and post its first size-changed before the script
-// attaches a listener. Run the real script against a frame that has already
-// loaded and check it is sized without any load event or message.
+// The frame-sizing script lives in src/web/client/shell.js (served as /app.js
+// with defer). A srcdoc widget frame does not wait for /app.css, so it can
+// finish loading and post its first size-changed before the script attaches
+// a listener. Run the real script against a frame that has already loaded
+// and check it is sized without any load event or message.
 function runFrameSizer(contentHeight: number) {
-    const html = comingSoonPage("fridge");
-    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+    const script = SHELL_JS;
     const listeners: Record<string, ((e: unknown) => void)[]> = {};
     const docEl = {
         style: { height: "" },
@@ -154,16 +159,12 @@ test("a frame still on about:blank is left alone until it reports", () => {
     expect(frame.style.height).toBe("300px");
 });
 
-function extractShellScript() {
-    return comingSoonPage("fridge").match(/<script>([\s\S]*?)<\/script>/)![1]!;
-}
-
 function runShellScript(
     document: unknown,
     window: unknown,
     ElementCtor: unknown = class Element {},
 ) {
-    new Function("document", "window", "Element", extractShellScript())(
+    new Function("document", "window", "Element", SHELL_JS)(
         document,
         window,
         ElementCtor,

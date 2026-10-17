@@ -11,7 +11,7 @@ import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp } from "./net.js";
-import { getAppCss, warmWidgets } from "./widgets.js";
+import { getAppCss, getAppJs, warmWidgets } from "./widgets.js";
 import { BRAND_SVGS } from "./brand.js";
 import { APP_FONTS } from "./tokens.js";
 import { clearSiteCookieHeader } from "./site-session.js";
@@ -65,6 +65,8 @@ app.use("*", async (c, next) => {
     if (!c.res.headers.get("Content-Security-Policy")) {
         // img-src data: — form.css draws the <select> chevron as an inline
         // SVG data URI; srcdoc widget frames inherit this policy too.
+        // script-src keeps 'unsafe-inline' because those same srcdoc frames
+        // inherit this policy and run the assembled widget's inline script.
         c.header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
@@ -210,10 +212,11 @@ app.get("/logout", (c) => {
 });
 
 // Static assets. Login and the household app share /app.css (assembled from
-// the widget partials, src/widgets.ts). Marketing HTML, its stylesheet and
-// site.js are gone; leftover files on disk must not become routes (a
-// registered path that reads a missing file 500s). App fonts are served from
-// the APP_FONTS allowlist below.
+// the widget partials, src/widgets.ts) and /app.js (the client bundle from
+// src/web/client/). Marketing HTML, its stylesheet and site.js are gone;
+// leftover files on disk must not become routes (a registered path that
+// reads a missing file 500s). App fonts are served from the APP_FONTS
+// allowlist below.
 app.get("/robots.txt", async (c) => {
     return c.body(await Bun.file("./public/robots.txt").text(), 200, {
         "Content-Type": "text/plain",
@@ -222,6 +225,11 @@ app.get("/robots.txt", async (c) => {
 app.get("/app.css", async (c) => {
     return c.body(await getAppCss(), 200, {
         "Content-Type": "text/css; charset=utf-8",
+    });
+});
+app.get("/app.js", async (c) => {
+    return c.body(await getAppJs(), 200, {
+        "Content-Type": "text/javascript; charset=utf-8",
     });
 });
 app.get("/favicon.ico", async (c) => {

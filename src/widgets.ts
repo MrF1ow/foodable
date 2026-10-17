@@ -174,6 +174,31 @@ export async function getAppCss(): Promise<string> {
     return appCss;
 }
 
+// The household web app's client bundle, served at /app.js. Each file is
+// plain browser JS with no imports; getAppJs wraps one IIFE per file so
+// they cannot leak into each other. Cached and warmed like getAppCss.
+export const APP_JS_SOURCES = [
+    "./src/web/client/shell.js",
+    "./src/web/client/food-picker.js",
+    "./src/web/client/nutrition-log.js",
+    "./src/web/client/grocery.js",
+] as const;
+let appJs: string | undefined;
+
+export async function getAppJs(): Promise<string> {
+    if (appJs !== undefined) return appJs;
+    const parts: string[] = [];
+    for (const path of APP_JS_SOURCES) {
+        const file = Bun.file(path);
+        if (!(await file.exists())) {
+            throw new Error(`app client source not found: ${path}`);
+        }
+        parts.push(`(function () {\n${(await file.text()).trim()}\n})();`);
+    }
+    appJs = parts.join("\n");
+    return appJs;
+}
+
 export type WidgetViewerChrome = {
     theme: "light" | "dark" | "system";
     // CSS appended as the frame's last <style> (the app's embed skin, see
@@ -234,12 +259,14 @@ export function withWidgetData(
     return applyViewerTheme(skinned, chrome);
 }
 
-// Assemble every widget and the app stylesheet once, so a broken partial or
-// marker fails fast at startup rather than on a client's first request.
+// Assemble every widget, the app stylesheet, the embed skin, and the app
+// client bundle once, so a broken partial or marker fails fast at startup
+// rather than on a client's first request.
 export async function warmWidgets(): Promise<void> {
     await Promise.all([
         ...Object.keys(WIDGET_TEMPLATES).map((key) => getWidgetHtml(key)),
         getAppCss(),
         getEmbedCss(),
+        getAppJs(),
     ]);
 }
