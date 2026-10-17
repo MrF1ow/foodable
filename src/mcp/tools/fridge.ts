@@ -598,7 +598,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Eat Fridge Item",
             description:
-                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal.",
+                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal. Household supplies (kind 'supply') are deducted as used and log no meal (meal_id null).",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
