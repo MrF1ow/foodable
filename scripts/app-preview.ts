@@ -6,9 +6,12 @@
  *   bun run preview:app            # writes tmp/app-preview/*.html, serves :4787
  *   bun run preview:app --shots    # also writes a 430px-wide PNG per page, then exits
  *
- * --shots needs Chromium on PATH (chromium, chromium-browser or google-chrome).
- * Shots pass --force-prefers-reduced-motion so --virtual-time-budget does not
- * freeze page entrances half-done.
+ * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
+ * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
+ * profile). Shots pass --force-prefers-reduced-motion so --virtual-time-budget
+ * does not freeze page entrances half-done, a throwaway --user-data-dir, and
+ * an emulated prefers-color-scheme so bare pages (OS theme) render light and
+ * dark as different bytes.
  * The server never imports this file.
  */
 import { renderFridgePage } from "../src/web/pages/fridge.js";
@@ -24,7 +27,10 @@ import {
     renderNutritionPage,
     viewerChromeFromProfile,
 } from "../src/web/pages/nutrition.js";
-import { createHouseholdFormHtml } from "../src/web/loaders.js";
+import {
+    createHouseholdFormHtml,
+    forbiddenDashboardHtml,
+} from "../src/web/loaders.js";
 import { getAppCss, getAppJs } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -299,12 +305,30 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
         } as never),
-        "create-household": createHouseholdFormHtml(),
+        "create-household": createHouseholdFormHtml(undefined, theme),
+        forbidden: forbiddenDashboardHtml(theme),
     };
 }
 
 function findChromium(): string | null {
-    for (const bin of ["chromium", "chromium-browser", "google-chrome"]) {
+    // Prefer the real binary. PATH `google-chrome` is often a wrapper that
+    // pins --user-data-dir to the GUI profile and hangs headless shots.
+    for (const bin of [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ]) {
+        if (bin.startsWith("/")) {
+            try {
+                if (Bun.file(bin).size > 0) return bin;
+            } catch {
+                // missing
+            }
+            continue;
+        }
         const path = Bun.which(bin);
         if (path) return path;
     }
@@ -359,7 +383,13 @@ if (process.argv.includes("--shots")) {
         process.exit(1);
     }
     for (const name of names) {
-        await Bun.$`${chromium} --headless=new --disable-gpu --hide-scrollbars --force-prefers-reduced-motion --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
+        const theme = name.endsWith("-dark") ? "dark" : "light";
+        const dataDir = `${OUT}/chrome-${name}`;
+        // Bare pages follow the OS; headless Chromium defaults to dark, so
+        // emulate the shot's colour scheme. --user-data-dir is throwaway so
+        // the GUI profile is never touched.
+        const colorScheme = theme === "dark" ? 2 : 1;
+        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
     }
     server.stop();

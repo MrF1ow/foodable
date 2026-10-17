@@ -8,12 +8,16 @@ import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderMemberMultiSelect } from "../components/member-multi-select.js";
 import {
-    renderEmptyRecipeStore,
-    renderEmptyRecipes,
-    renderErrorBanner,
     renderRecipeCard,
     renderRecipeIngredientRow,
 } from "../components/page-markup.js";
+import {
+    disclosure,
+    emptyState,
+    errorBanner,
+    pageHeader,
+    panel,
+} from "../components/ui.js";
 
 export type RecipeMember = { userId: string; displayName: string };
 export type RecipeStoreOption = { id: string; name: string };
@@ -63,8 +67,11 @@ export function renderRecipesPage(view: RecipesPageView): string {
         canMakeNow: false,
         safeFor: "",
     };
-    const error = renderErrorBanner(view.error);
-    const empty = view.recipes.length === 0 ? renderEmptyRecipes() : "";
+    const error = errorBanner(view.error);
+    const empty =
+        view.recipes.length === 0
+            ? emptyState("Add a recipe.", "empty-recipes")
+            : "";
     const cards = view.recipes
         .map((recipe) =>
             renderRecipeCard({
@@ -87,13 +94,16 @@ export function renderRecipesPage(view: RecipesPageView): string {
     const list =
         view.recipes.length === 0
             ? ""
-            : `<section class="panel"><ul class="recipe-list list">${cards}</ul></section>`;
+            : panel({
+                  body: `<ul class="recipe-list list">${cards}</ul>`,
+              });
     const body = `
-        <h1>Recipes</h1>
+        ${pageHeader({ title: "Recipes" })}
         ${error}
-        <details class="more"${filtering ? " open" : ""}>
-            <summary>Filter</summary>
-            <form class="recipe-list-filters" method="get" action="/recipes">
+        ${disclosure({
+            summary: "Filter",
+            open: filtering,
+            body: `<form class="recipe-list-filters" method="get" action="/recipes">
                 <label for="recipe-tag">Tag</label>
                 <input id="recipe-tag" name="tag" type="text" value="${escapeHtml(filter.tag)}" autocomplete="off" />
                 <label class="recipe-filter-check">
@@ -103,20 +113,21 @@ export function renderRecipesPage(view: RecipesPageView): string {
                 <label for="recipe-safe-for">Safe for</label>
                 <select id="recipe-safe-for" name="safe_for">${memberOptions}</select>
                 <button type="submit" class="btn-primary">Filter</button>
-            </form>
-        </details>
+            </form>`,
+        })}
         ${empty}
         ${list}
-        <details class="more"${view.recipes.length === 0 ? " open" : ""}>
-            <summary>New recipe</summary>
-            <form class="recipe-create" method="post" action="/recipes">
+        ${disclosure({
+            summary: "New recipe",
+            open: view.recipes.length === 0,
+            body: `<form class="recipe-create" method="post" action="/recipes">
                 <label for="recipe-name">Name</label>
                 <input id="recipe-name" name="name" type="text" required maxlength="80" autocomplete="off" />
                 <label for="recipe-yield">Yield</label>
                 <input id="recipe-yield" name="yield_portions" type="number" min="0" step="any" required value="4" />
                 <button type="submit" class="btn-primary">Create recipe</button>
-            </form>
-        </details>
+            </form>`,
+        })}
     `;
     return renderAppShell({
         title: "Recipes",
@@ -174,7 +185,7 @@ function macrosBlock(
 }
 
 export function renderRecipeDetailPage(view: RecipeDetailView): string {
-    const error = renderErrorBanner(view.error);
+    const error = errorBanner(view.error);
     const allergen = view.allergenWarning
         ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
         : "";
@@ -206,7 +217,10 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
         .join("");
     const grocery =
         view.stores.length === 0
-            ? renderEmptyRecipeStore()
+            ? emptyState(
+                  "Add a grocery store in Settings, then add this recipe to the list.",
+                  "empty-recipe-store",
+              )
             : `<form class="recipe-add-grocery" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/add-to-grocery">
 ${renderMemberMultiSelect(view.members, [view.viewerId])}
 <label for="recipe-store">Store</label>
@@ -223,38 +237,38 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
     const tagsValue = escapeHtml(view.recipe.tags.join(", "));
     const body = `
         <p class="recipe-back"><a href="/recipes">← Recipes</a></p>
-        <h1>${escapeHtml(view.recipe.name)}</h1>
+        ${pageHeader({ title: view.recipe.name })}
         ${error}
         ${allergen}
         ${dislike}
         <p class="recipe-yield muted" data-yield="${escapeHtml(String(view.recipe.yieldPortions))}">Yield ${escapeHtml(String(view.recipe.yieldPortions))}</p>
-        <section class="panel">
-            <h2>Nutrition</h2>
-            <form class="recipe-filter inline-form" method="get" action="/recipes/${recipeId}" data-filter-member="${escapeHtml(view.filterUserId)}">
+        ${panel({
+            title: "Nutrition",
+            body: `<form class="recipe-filter inline-form" method="get" action="/recipes/${recipeId}" data-filter-member="${escapeHtml(view.filterUserId)}">
                 <label for="recipe-member">Filter by person</label>
                 <select id="recipe-member" name="member">${memberOptions}</select>
                 <button type="submit">View</button>
             </form>
             ${portion}
             ${macrosBlock(perPortion, "portion")}
-            ${personMacros}
-        </section>
-        <section class="panel">
-            <h2>Ingredients</h2>
-            <ul class="recipe-ingredients list">${rows}</ul>
-            <details class="more">
-                <summary>Add ingredient</summary>
-                ${renderFoodPicker({
+            ${personMacros}`,
+        })}
+        ${panel({
+            title: "Ingredients",
+            body: `<ul class="recipe-ingredients list">${rows}</ul>
+            ${disclosure({
+                summary: "Add ingredient",
+                body: renderFoodPicker({
                     id: "recipe-picker",
                     action: `/recipes/${view.recipe.id}/ingredients`,
                     method: "post",
                     includeQuantity: true,
-                })}
-            </details>
-        </section>
-        <section class="panel">
-            <h2>Cook and log</h2>
-            <form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeId}/log-portion">
+                }),
+            })}`,
+        })}
+        ${panel({
+            title: "Cook and log",
+            body: `<form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeId}/log-portion">
                 <label>Portions
                     <input id="log-portion-count" name="portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />
                 </label>
@@ -268,9 +282,9 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                 </label>
                 <button type="submit" class="btn-primary">Log a portion</button>
             </form>
-            <details class="more">
-                <summary>Cooked it</summary>
-                <form class="recipe-cook field-grid" method="post" action="/recipes/${recipeId}/cook">
+            ${disclosure({
+                summary: "Cooked it",
+                body: `<form class="recipe-cook field-grid" method="post" action="/recipes/${recipeId}/cook">
                     ${view.members
                         .map((member) => {
                             const value =
@@ -299,16 +313,16 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                         <label><input type="checkbox" name="log_meals" value="1" checked /> Log meals</label>
                     </fieldset>
                     <button type="submit" class="btn-primary">Cooked it</button>
-                </form>
-            </details>
-        </section>
-        <section class="panel">
-            <h2>Groceries</h2>
-            ${grocery}
-        </section>
-        <details class="more">
-            <summary>Edit recipe</summary>
-            <form class="recipe-edit" method="post" action="/recipes/${recipeId}">
+                </form>`,
+            })}`,
+        })}
+        ${panel({
+            title: "Groceries",
+            body: grocery,
+        })}
+        ${disclosure({
+            summary: "Edit recipe",
+            body: `<form class="recipe-edit" method="post" action="/recipes/${recipeId}">
                 <label for="edit-name">Name</label>
                 <input id="edit-name" name="name" type="text" required maxlength="80" value="${escapeHtml(view.recipe.name)}" />
                 <label for="edit-yield">Yield</label>
@@ -326,8 +340,8 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                 <label for="edit-notes">Notes</label>
                 <textarea id="edit-notes" name="notes" rows="3">${escapeHtml(view.recipe.notes ?? "")}</textarea>
                 <button type="submit" class="btn-primary">Save recipe</button>
-            </form>
-        </details>
+            </form>`,
+        })}
         <form class="recipe-delete" method="post" action="/recipes/${recipeId}/delete">
             <button type="submit" class="btn-danger">Delete recipe</button>
         </form>

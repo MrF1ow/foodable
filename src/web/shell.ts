@@ -1,6 +1,7 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR } from "../tokens.js";
 import { bottomNav } from "./components/bottom-nav.js";
+import { pageHeader } from "./components/ui.js";
 
 export { bottomNav, escapeHtml };
 
@@ -77,6 +78,26 @@ ${bottomNav(chrome.active)}
 </html>`;
 }
 
+/** Create-household and forbidden: same top bar as the app, no bottom nav.
+ *  There is no saved theme yet, so production leaves it as "system". Preview
+ *  stamps light/dark so a shot of each is not the same bytes. */
+export function renderBarePage(
+    title: string,
+    body: string,
+    theme: ThemePref = "system",
+): string {
+    return `<!doctype html>
+${htmlOpen(theme)}
+<head>
+${appHead(title, theme)}
+</head>
+<body>
+<header class="app-bar"><a href="/logout">Log out</a></header>
+<main class="app-main native">${body}</main>
+</body>
+</html>`;
+}
+
 /** The settings form posts theme=system|light|dark. System, or anything
  *  unrecognised, clears the preference (null) rather than pinning light. */
 export function parseAppearanceInput(input: { theme?: unknown }): {
@@ -99,6 +120,6 @@ export function comingSoonPage(
         title: label,
         active: tab,
         theme: chrome.theme,
-        body: `<h1>${escapeHtml(label)}</h1><p class="coming-soon">Coming soon.</p>`,
+        body: `${pageHeader({ title: label })}<p class="coming-soon">Coming soon.</p>`,
     });
 }

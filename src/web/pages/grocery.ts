@@ -10,11 +10,13 @@ import type { AlreadyHaveTag } from "../../domain/linking.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderAlreadyHaveTag } from "../components/already-have-tag.js";
 import { renderFoodPicker } from "../components/food-picker.js";
+import { renderGroceryLineRow } from "../components/page-markup.js";
 import {
-    renderEmptyGrocery,
-    renderErrorBanner,
-    renderGroceryLineRow,
-} from "../components/page-markup.js";
+    disclosure,
+    emptyState,
+    errorBanner,
+    pageHeader,
+} from "../components/ui.js";
 
 export type GroceryLineView = GroceryLine & {
     alreadyHave: AlreadyHaveTag | null;
@@ -132,37 +134,42 @@ function storeSection(
 <h2>${escapeHtml(store.name)}</h2>
 ${rules ? `<ul class="store-rule-list muted">${rules}</ul>` : ""}
 ${sections}
-<details class="more">
-<summary><h3>Add food</h3></summary>
-${storeSectionSelect(store)}
+${disclosure({
+    summary: "<h3>Add food</h3>",
+    body: `${storeSectionSelect(store)}
 ${renderFoodPicker({
     id: pickerId,
     action: "/grocery/lines",
     method: "post",
     hiddenFields: hidden,
     includeQuantity: true,
+})}`,
 })}
-</details>
 </section>`;
 }
 
 export function renderGroceryPage(view: GroceryPageView): string {
-    const error = renderErrorBanner(view.error);
+    const error = errorBanner(view.error);
     const allergen = view.allergenWarning
         ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
         : view.unknownAllergen
           ? `<p class="allergen-unknown">unknown allergen data</p>`
           : "";
-    const empty = view.stores.length === 0 ? renderEmptyGrocery() : "";
+    const empty =
+        view.stores.length === 0
+            ? `${emptyState("Add a grocery store in Settings, then add a line.", "empty-grocery")}
+<p><a href="/settings/household">Household settings</a></p>`
+            : "";
     const addStore = view.isOwner
-        ? `<details class="more"${view.stores.length === 0 ? " open" : ""}>
-<summary>Add store</summary>
-<form class="grocery-add-store" method="post" action="/grocery/stores">
+        ? disclosure({
+              summary: "Add store",
+              open: view.stores.length === 0,
+              body: `<form class="grocery-add-store" method="post" action="/grocery/stores">
 <label for="grocery_store_name">Grocery store</label>
 <input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add store</button>
-</form>
-</details>`
+</form>`,
+          })
         : "";
     const clearChecked =
         view.stores.length === 0
@@ -175,7 +182,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
         .map((store) => storeSection(store, locations))
         .join("");
     const body = `
-        <h1>Groceries</h1>
+        ${pageHeader({ title: "Groceries" })}
         ${error}
         ${allergen}
         ${empty}

@@ -1,4 +1,5 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import { errorBanner, pageHeader } from "../components/ui.js";
 import { DRINK_UNITS, isDrinkUnit, type DrinkUnit } from "../../alcohol.js";
 import {
     WEIGHT_UNITS,
@@ -90,15 +91,12 @@ export function renderSettingsPage(view: SettingsPageView): string {
         const checked = view.chrome.theme === value ? " checked" : "";
         return `<label><input type="radio" name="theme" value="${value}"${checked} /> ${label}</label>`;
     }).join("");
-    const error = view.error
-        ? `<p class="error-banner">${escapeHtml(view.error)}</p>`
-        : "";
     const widgetsChecked = view.widgetsEnabled ? " checked" : "";
     const alcoholChecked = view.alcoholTrackingEnabled ? " checked" : "";
     const body = `
-        <h1>Settings</h1>
+        ${pageHeader({ title: "Settings" })}
+        ${errorBanner(view.error)}
         ${renderSettingsNav("account")}
-        ${error}
         <form method="POST" action="/settings" class="appearance panel">
             <input type="hidden" name="group" value="account" />
             <h2>Account</h2>

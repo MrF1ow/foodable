@@ -48,7 +48,8 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
-import { appHead, escapeHtml, htmlOpen } from "./shell.js";
+import { errorBanner, emptyState, pageHeader } from "./components/ui.js";
+import { renderBarePage, type ThemePref } from "./shell.js";
 
 function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],
@@ -59,33 +60,33 @@ function alcoholOf(
 
 export type DashboardView = NutritionView;
 
-export function forbiddenDashboardHtml(): string {
-    return renderBare(
+export function forbiddenDashboardHtml(theme: ThemePref = "system"): string {
+    return renderBarePage(
         "Household",
-        '<p class="empty">You need a household membership to view this dashboard.</p>',
+        emptyState("You need a household membership to view this dashboard."),
+        theme,
     );
 }
 
-function formErrorHtml(error?: string): string {
-    return error ? `<div class="error-banner">${escapeHtml(error)}</div>` : "";
-}
-
-export function createHouseholdFormHtml(error?: string): string {
-    return renderBare(
+export function createHouseholdFormHtml(
+    error?: string,
+    theme: ThemePref = "system",
+): string {
+    return renderBarePage(
         "Create household",
-        `<header class="dash-head">
-            <h1>Create household</h1>
-            <p class="muted">Name the household. Everyone else is added from Settings.</p>
-        </header>
+        `${pageHeader({
+            title: "Create household",
+            sub: `<p class="muted">Name the household. Everyone else is added from Settings.</p>`,
+        })}
+        ${errorBanner(error)}
         <form method="POST" action="/create-household" class="create-household panel">
-            ${formErrorHtml(error)}
             <label for="household_name">Household name</label>
             <input id="household_name" name="household_name" required maxlength="80" />
             <label for="display_name">Your name</label>
             <input id="display_name" name="display_name" required maxlength="80" />
             <button type="submit" class="btn-primary">Create household</button>
-        </form>
-        <p class="logout"><a href="/logout">Log out</a></p>`,
+        </form>`,
+        theme,
     );
 }
 
@@ -118,6 +119,7 @@ async function memberGate(viewerUserId: string): Promise<MemberGate> {
 export async function renderDashboardPage(
     viewerUserId: string,
     requestedMember: string | undefined,
+    error?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -160,6 +162,7 @@ export async function renderDashboardPage(
             trends,
             weight,
             chrome: viewerChromeFromProfile(viewerProfile),
+            error,
         }),
     };
 }
@@ -559,21 +562,4 @@ export async function renderRecipeDetailRoute(
             error: opts.error,
         }),
     };
-}
-
-// Pages shown before the viewer has a household (create, forbidden). Same
-// stylesheet as the app, no bottom nav, and no saved theme to read yet, so
-// they follow the OS.
-function renderBare(title: string, body: string): string {
-    return `<!doctype html>
-${htmlOpen("system")}
-<head>
-${appHead(title, "system")}
-</head>
-<body>
-<main class="app-main native">
-${body}
-</main>
-</body>
-</html>`;
 }
