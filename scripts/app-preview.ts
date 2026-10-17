@@ -7,6 +7,8 @@
  *   bun run preview:app --shots    # also writes a 430px-wide PNG per page, then exits
  *
  * --shots needs Chromium on PATH (chromium, chromium-browser or google-chrome).
+ * Shots pass --force-prefers-reduced-motion so --virtual-time-budget does not
+ * freeze page entrances half-done.
  * The server never imports this file.
  */
 import { renderFridgePage } from "../src/web/pages/fridge.js";
@@ -352,7 +354,7 @@ if (process.argv.includes("--shots")) {
         process.exit(1);
     }
     for (const name of names) {
-        await Bun.$`${chromium} --headless=new --disable-gpu --hide-scrollbars --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
+        await Bun.$`${chromium} --headless=new --disable-gpu --hide-scrollbars --force-prefers-reduced-motion --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
     }
     server.stop();

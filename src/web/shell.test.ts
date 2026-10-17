@@ -153,3 +153,150 @@ test("a frame still on about:blank is left alone until it reports", () => {
     post(contentWindow, 300);
     expect(frame.style.height).toBe("300px");
 });
+
+function extractShellScript() {
+    return comingSoonPage("fridge").match(/<script>([\s\S]*?)<\/script>/)![1]!;
+}
+
+function runShellScript(
+    document: unknown,
+    window: unknown,
+    ElementCtor: unknown = class Element {},
+) {
+    new Function("document", "window", "Element", extractShellScript())(
+        document,
+        window,
+        ElementCtor,
+    );
+}
+
+test("the fx gate is a no-op on a window without matchMedia", () => {
+    const html = {
+        classList: {
+            added: [] as string[],
+            add(c: string) {
+                this.added.push(c);
+            },
+        },
+    };
+    const document = {
+        documentElement: html,
+        querySelectorAll: () => [],
+        addEventListener() {},
+    };
+    const window = { addEventListener() {} };
+    expect(() => runShellScript(document, window)).not.toThrow();
+    expect(html.classList.added).toEqual([]);
+});
+
+test("html.fx is added on the next frame when reduced motion is not requested", () => {
+    const html = {
+        classList: {
+            added: [] as string[],
+            add(c: string) {
+                this.added.push(c);
+            },
+        },
+    };
+    const raf: Array<(time: number) => void> = [];
+    const document = {
+        documentElement: html,
+        querySelectorAll: () => [],
+        addEventListener() {},
+    };
+    const window = {
+        addEventListener() {},
+        matchMedia(_q: string) {
+            return { matches: false };
+        },
+        requestAnimationFrame(cb: (time: number) => void) {
+            raf.push(cb);
+            return raf.length;
+        },
+    };
+    runShellScript(document, window);
+    expect(html.classList.added).toEqual([]);
+    expect(raf.length).toBe(1);
+    raf[0]!(0);
+    expect(html.classList.added).toEqual(["fx"]);
+});
+
+test("html.fx is not added when reduced motion is requested", () => {
+    const html = {
+        classList: {
+            added: [] as string[],
+            add(c: string) {
+                this.added.push(c);
+            },
+        },
+    };
+    const raf: Array<(time: number) => void> = [];
+    const document = {
+        documentElement: html,
+        querySelectorAll: () => [],
+        addEventListener() {},
+    };
+    const window = {
+        addEventListener() {},
+        matchMedia(q: string) {
+            return { matches: q.includes("prefers-reduced-motion: reduce") };
+        },
+        requestAnimationFrame(cb: (time: number) => void) {
+            raf.push(cb);
+            return raf.length;
+        },
+    };
+    runShellScript(document, window);
+    expect(raf).toEqual([]);
+    expect(html.classList.added).toEqual([]);
+});
+
+test("one passive pointermove listener sets --mx and --my on the panel", () => {
+    const panel = {
+        style: {
+            props: {} as Record<string, string>,
+            setProperty(k: string, v: string) {
+                this.props[k] = v;
+            },
+        },
+        getBoundingClientRect: () => ({ left: 10, top: 20 }),
+    };
+    class FakeElement {}
+    const target = {
+        closest: (sel: string) => (sel === ".app-main .panel" ? panel : null),
+    };
+    Object.setPrototypeOf(target, FakeElement.prototype);
+    let pointerOpts: { passive?: boolean } | boolean | undefined;
+    let pointerFn: ((e: unknown) => void) | undefined;
+    const document = {
+        documentElement: { classList: { add() {} } },
+        querySelectorAll: () => [],
+        addEventListener(
+            type: string,
+            fn: (e: unknown) => void,
+            opts?: { passive?: boolean } | boolean,
+        ) {
+            if (type === "pointermove") {
+                pointerFn = fn;
+                pointerOpts = opts;
+            }
+        },
+    };
+    const window = {
+        addEventListener() {},
+        matchMedia(q: string) {
+            return { matches: q.includes("hover: hover") };
+        },
+        requestAnimationFrame() {
+            return 0;
+        },
+    };
+    runShellScript(document, window, FakeElement);
+    expect(pointerOpts).toEqual({ passive: true });
+    pointerFn!({
+        target,
+        clientX: 40,
+        clientY: 80,
+    });
+    expect(panel.style.props).toEqual({ "--mx": "30px", "--my": "60px" });
+});

@@ -1,0 +1,34 @@
+/* App-only motion primitives (Magic UI's blur-fade and border-beam, in CSS).
+ *
+ * Entrances are gated on html.fx, which the shell script sets inside a frame
+ * and never under prefers-reduced-motion, so a renderer that never ticks
+ * shows the static page instead of a blank one. Only opacity, filter,
+ * transform and registered properties animate: nothing here moves layout. */
+
+@keyframes fx-blur-in {
+    from {
+        opacity: 0;
+        filter: blur(4px);
+        transform: translateY(4px);
+    }
+}
+
+@property --fx-beam-a {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+}
+@keyframes fx-beam {
+    to {
+        --fx-beam-a: 360deg;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}
