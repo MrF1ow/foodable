@@ -7,7 +7,7 @@
 // matter only that widget has (a chart, a range toggle, a weight line). Pairs
 // with shared/macros.css (layout) and shared/ring.css (the gauge).
 //
-// Requires fmt(n, decimals) and esc(s) to already be defined in the widget scope.
+// Requires fmt(n, decimals) and esc(s) from shared/util.js to already be in scope.
 //
 // Data contract: `vals` and `goal` are plain objects keyed by macro
 // (`calories`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g`, `sugar_g`,

@@ -87,6 +87,8 @@
 
             /*@include shared/bridge.js@*/
 
+            /*@include shared/util.js@*/
+
             const SAMPLE = {
                 locale: "en",
                 stores: [
@@ -144,29 +146,6 @@
 
             let __widgetApi = null;
             let __data = null;
-
-            function esc(s) {
-                return String(s)
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/"/g, "&quot;");
-            }
-
-            function tpl(template, vars) {
-                return String(template).replace(/\{(\w+)\}/g, (_, k) =>
-                    vars[k] == null ? "" : String(vars[k]),
-                );
-            }
-
-            function setLocaleFrom(data, api) {
-                setLocale(
-                    pickLocale(
-                        data && data.locale,
-                        api && api.hostContext && api.hostContext.locale,
-                    ),
-                );
-            }
 
             function lineCount(stores) {
                 let n = 0;

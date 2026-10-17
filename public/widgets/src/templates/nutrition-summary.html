@@ -44,6 +44,8 @@
 
             /*@include shared/bridge.js@*/
 
+            /*@include shared/util.js@*/
+
             // ---- Sample data so the file renders on its own (browser preview) ----
             const SAMPLE = {
                 start_date: "2026-07-05",
@@ -263,24 +265,6 @@
                     },
                 ],
             };
-
-            function fmt(n, decimals) {
-                if (n == null || isNaN(n)) return "0";
-                const r = decimals ? n.toFixed(decimals) : Math.round(n);
-                return Number(r).toLocaleString();
-            }
-            function esc(s) {
-                return String(s).replace(
-                    /[&<>"]/g,
-                    (c) =>
-                        ({
-                            "&": "&amp;",
-                            "<": "&lt;",
-                            ">": "&gt;",
-                            '"': "&quot;",
-                        })[c],
-                );
-            }
 
             /*@include shared/macros.js@*/
 

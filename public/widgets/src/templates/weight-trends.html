@@ -124,6 +124,8 @@
 
             /*@include shared/bridge.js@*/
 
+            /*@include shared/util.js@*/
+
             const RANGES = [7, 14, 30];
 
             function shiftDate(date, delta) {
@@ -167,18 +169,6 @@
             }
             const SAMPLE = buildSample();
 
-            function esc(s) {
-                return String(s).replace(
-                    /[&<>"]/g,
-                    (c) =>
-                        ({
-                            "&": "&amp;",
-                            "<": "&lt;",
-                            ">": "&gt;",
-                            '"': "&quot;",
-                        })[c],
-                );
-            }
             // Every weight on screen carries exactly one decimal — 77.0, not
             // 77. This widget has no whole-number figures at all, so it uses
             // this instead of the usual fmt(): rounding away a trailing zero

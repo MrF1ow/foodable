@@ -2,42 +2,35 @@
 // widget's alcohol gate.
 //
 // Widget code is inline template JS, so it has no import surface: `macros.js` is
-// evaluated here the way the assembler splices it into a page — with the fmt/esc
-// helpers each template supplies — and the caption strings are asserted against
-// real values. Without this the wording is pinned by nothing at all.
+// evaluated here the way the assembler splices it into a page — with util.js
+// (fmt/esc/tpl) and i18n.js, in the same order every template includes them —
+// and the caption strings are asserted against real values. Without this the
+// wording is pinned by nothing at all.
 import { test, expect } from "bun:test";
 import { WIDGET_STRINGS_EN } from "../../src/copy/widgets";
 
 const SRC = "./public/widgets/src";
 
-// The same fmt/esc every template defines before including macros.js.
-function fmt(n: number, decimals?: number) {
-    if (n == null || isNaN(n)) return "0";
-    const r = decimals ? n.toFixed(decimals) : Math.round(n);
-    return Number(r).toLocaleString();
-}
-const esc = (s: unknown) => String(s);
-
 type Bits = { goalLine: string; over: boolean; pct: number | null };
 type Macro = { key: string; direction?: string };
 type Vals = Record<string, number | null>;
 const macrosApi = await (async () => {
-    // shared/i18n.js before shared/macros.js, exactly as every template
-    // orders its includes — macros.js reads T/tpl/plural from it. Only the
-    // "en" dictionary is wired in (WIDGET_STRINGS = { en: ... }): these
-    // tests assert English wording, and macroLabel()/T.macros.* fall back to
+    // shared/util.js then shared/i18n.js then shared/macros.js — util.js
+    // supplies fmt/esc/tpl, i18n.js supplies T/plural. Only the "en"
+    // dictionary is wired in (WIDGET_STRINGS = { en: ... }): these tests
+    // assert English wording, and macroLabel()/T.macros.* fall back to
     // English by construction whenever a locale is missing.
+    const utilSrc = await Bun.file(`${SRC}/shared/util.js`).text();
     const i18nSrc = await Bun.file(`${SRC}/shared/i18n.js`).text();
     const macrosSrc = await Bun.file(`${SRC}/shared/macros.js`).text();
     // `document`/`window` are left undefined so the partial's delegated event
     // wiring (guarded by `typeof document`) stays out of the way.
     const factory = new Function(
-        "fmt",
-        "esc",
         "WIDGET_STRINGS",
-        `${i18nSrc}\n${macrosSrc}\nreturn { macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
+        `${utilSrc}\n${i18nSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
     );
-    return factory(fmt, esc, { en: WIDGET_STRINGS_EN }) as {
+    return factory({ en: WIDGET_STRINGS_EN }) as {
+        fmt: (n: number, decimals?: number) => string;
         macroBits: (
             m: Macro,
             vals: Record<string, number>,
@@ -64,6 +57,8 @@ const macrosApi = await (async () => {
         mealList: (m: Macro, meals: unknown[]) => string;
     };
 })();
+
+const fmt = macrosApi.fmt;
 
 const macroOf = (key: string) => {
     const m = macrosApi.MACROS.find((x) => x.key === key);

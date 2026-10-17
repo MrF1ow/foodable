@@ -113,6 +113,8 @@
 
             /*@include shared/bridge.js@*/
 
+            /*@include shared/util.js@*/
+
             // The real, unit-tested CSV parser (src/domain/csv.ts + src/domain/csv.test.ts).
             /*@inlinets src/domain/csv.ts@*/
 
@@ -488,14 +490,6 @@
                 result: null, // aggregate of every chunk
             };
 
-            function esc(s) {
-                return String(s == null ? "" : s)
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/"/g, "&quot;")
-                    .replace(/'/g, "&#39;");
-            }
             // Escapes a translated "{n} rows"-style string, then bolds the
             // digit run wherever it landed — robust to word order, unlike
             // hardcoding "<b>N</b> rows" around a fixed English shape.

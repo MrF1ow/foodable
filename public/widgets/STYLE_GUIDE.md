@@ -22,7 +22,7 @@ warmed in `src/index.ts`). Nothing generated is committed.
 
 - **Sources** live in `public/widgets/src/`: shared partials in `shared/`
   (`tokens.css`, `base.css`, `ring.css`, `macros.css`, `trend.css`, `seg.css`,
-  `form.css`, `table.css`, `macros.js`, `bridge.js`) and one template per widget
+  `form.css`, `table.css`, `macros.js`, `bridge.js`, `util.js`) and one template per widget
   in `templates/`.
 - **Include marker** — a partial is inlined with a comment that is valid CSS _and_
   JS, so a template still parses on its own:

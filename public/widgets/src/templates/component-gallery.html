@@ -61,24 +61,7 @@
 
             /*@include shared/bridge.js@*/
 
-            // macros.js needs these two in scope (same contract as every widget).
-            function fmt(n, decimals) {
-                if (n == null || isNaN(n)) return "0";
-                const r = decimals ? n.toFixed(decimals) : Math.round(n);
-                return Number(r).toLocaleString();
-            }
-            function esc(s) {
-                return String(s).replace(
-                    /[&<>"]/g,
-                    (c) =>
-                        ({
-                            "&": "&amp;",
-                            "<": "&lt;",
-                            ">": "&gt;",
-                            '"': "&quot;",
-                        })[c],
-                );
-            }
+            /*@include shared/util.js@*/
 
             /*@include shared/macros.js@*/
 

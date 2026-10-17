@@ -66,6 +66,8 @@
 
             /*@include shared/bridge.js@*/
 
+            /*@include shared/util.js@*/
+
             const RANGES = [7, 14, 30];
 
             // ---- Sample data so the file renders on its own (browser preview) ----
@@ -132,23 +134,6 @@
             }
             const SAMPLE = buildSample();
 
-            function fmt(n, decimals) {
-                if (n == null || isNaN(n)) return "0";
-                const r = decimals ? n.toFixed(decimals) : Math.round(n);
-                return Number(r).toLocaleString();
-            }
-            function esc(s) {
-                return String(s).replace(
-                    /[&<>"]/g,
-                    (c) =>
-                        ({
-                            "&": "&amp;",
-                            "<": "&lt;",
-                            ">": "&gt;",
-                            '"': "&quot;",
-                        })[c],
-                );
-            }
             // Trailing average over the days that actually carry this key:
             // sum / count of non-null days — matches computeTrends'
             // coveredSeries (src/insights.ts), which is where the tool's text
