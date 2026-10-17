@@ -37,10 +37,19 @@ document.querySelectorAll(".nutrition-arrange-form").forEach((form) => {
             list.insertBefore(sibling, row);
         }
         syncDisabled();
-        const focusBtn = row.querySelector(
+        const primary = row.querySelector(
             direction === "up" ? ".arrange-up" : ".arrange-down",
         );
-        if (focusBtn && typeof focusBtn.focus === "function") focusBtn.focus();
+        const alternate = row.querySelector(
+            direction === "up" ? ".arrange-down" : ".arrange-up",
+        );
+        const focusBtn =
+            primary instanceof HTMLButtonElement && !primary.disabled
+                ? primary
+                : alternate instanceof HTMLButtonElement && !alternate.disabled
+                  ? alternate
+                  : null;
+        if (focusBtn) focusBtn.focus();
     };
 
     list.addEventListener("click", (e) => {

@@ -16,7 +16,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "food-vs-household-item",
         title: "Food vs household item",
-        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. On a food row, the fork logs it as eaten (a snack). The trash removes an item without logging anything. Household items only show edit and trash.",
+        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. On a food row, the fork logs it as eaten (a snack). The trash asks to confirm, then removes it without logging anything. Household items only show edit and trash.",
     },
     {
         id: "locations",

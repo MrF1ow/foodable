@@ -3,6 +3,7 @@ import {
     NUTRITION_ARRANGE_MODAL_ID,
     renderNutritionPage,
 } from "../web/pages/nutrition.js";
+import { assertNoNestedForms } from "../web/components/ui.test.js";
 import type { NutritionCard } from "./layout.js";
 
 const member = {
@@ -141,6 +142,25 @@ test("Arrange modal lists every card with disabled ends", async () => {
     ]);
     expect(html).toContain('name="card"');
     expect(html).toContain('name="direction"');
+    assertNoNestedForms(arrangeModal!);
+    expect(arrangeModal).toContain('id="nutrition-arrange-save"');
+    expect(arrangeModal).toMatch(
+        /<button type="submit" class="btn-primary">Save<\/button>/,
+    );
+    expect(arrangeModal).toMatch(
+        /<button type="button" class="arrange-reset" command="close" commandfor="nutrition-arrange">Cancel<\/button>/,
+    );
+    for (const key of orderInputs) {
+        expect(arrangeModal).toContain(
+            `<input type="hidden" name="order" value="${key}" />`,
+        );
+    }
+    expect(arrangeModal!.indexOf('id="nutrition-arrange-save"')).toBeLessThan(
+        arrangeModal!.indexOf('name="order"'),
+    );
+    expect(arrangeModal!.lastIndexOf("</form>")).toBeGreaterThan(
+        arrangeModal!.lastIndexOf('class="btn-primary">Save</button>'),
+    );
 });
 
 test("a layout error reopens the Arrange modal only", async () => {

@@ -23,6 +23,23 @@ import { renderNutritionPage } from "../pages/nutrition.js";
 import { comingSoonPage } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
 
+/** Fails when any `<form>` opens before its parent form closes. */
+export function assertNoNestedForms(html: string): void {
+    const tagRe = /<\/?form\b/gi;
+    let depth = 0;
+    for (const match of html.matchAll(tagRe)) {
+        const isClose = match[0].startsWith("</");
+        if (isClose) {
+            depth -= 1;
+            expect(depth).toBeGreaterThanOrEqual(0);
+        } else {
+            expect(depth, "nested <form>").toBe(0);
+            depth += 1;
+        }
+    }
+    expect(depth).toBe(0);
+}
+
 const pagesDir = join(import.meta.dir, "../pages");
 
 test("pageHeader is an h1, wrapped in dash-head when there is a sub or actions", () => {
@@ -290,6 +307,7 @@ test("every page's h1 comes from pageHeader once", async () => {
         const headings = html.match(/<h1>.*?<\/h1>/g) ?? [];
         expect(headings, name).toHaveLength(1);
         expect(html, name).toContain(headings[0]!);
+        assertNoNestedForms(html);
     }
     expect(nutrition).toContain(pageHeader({ title: "Alice" }));
     const withError = await renderNutritionPage({

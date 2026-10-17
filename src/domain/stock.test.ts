@@ -22,6 +22,7 @@ import {
     cookRecipe,
     createMemoryStockStore,
     deleteFridgeItemAdjust,
+    discardFridgeItem,
     eatFridgeItem,
     fridgeEatLogsMeal,
     ledgerMatchesStock,
@@ -340,6 +341,34 @@ test("manual update writes an adjust movement and the ledger matches stock", asy
 test("fridgeEatLogsMeal is false for household supplies", () => {
     expect(fridgeEatLogsMeal({ kind: "supply" })).toBe(false);
     expect(fridgeEatLogsMeal({ kind: "food" })).toBe(true);
+});
+
+test("discardFridgeItem writes a discard movement and the ledger matches", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const yogurt = await findOrCreateManualFood(foods, HH, "food", "Yogurt");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: yogurt.id,
+        amount: 3,
+        unit: "g",
+        locationId: loc.id,
+    });
+    const tossed = await discardFridgeItem(fridge, stock, foods, {
+        householdId: HH,
+        itemId: added.item!.id,
+        amount: 2,
+        actorUserId: "u1",
+    });
+    expect(tossed.movement.reason).toBe("discard");
+    expect(tossed.movement.delta).toBe(-2);
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(1);
+    const movements = await stock.listMovements(HH, yogurt.id);
+    expect(ledgerMatchesStock(items, movements, yogurt)).toBe(true);
+    expect(fridgeEatLogsMeal(yogurt)).toBe(true);
 });
 
 test("eatFridgeItem on a supply writes an eat movement and the ledger matches", async () => {

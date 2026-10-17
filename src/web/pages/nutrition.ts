@@ -276,24 +276,40 @@ function memberHiddenField(viewMemberId?: string): string {
     return `<input type="hidden" name="member" value="${escapeHtml(viewMemberId)}" />`;
 }
 
+function arrangeLegacyMoveFormId(
+    key: NutritionCard,
+    direction: "up" | "down",
+): string {
+    return `nutrition-arrange-move-${key}-${direction}`;
+}
+
+function arrangeLegacyMoveButton(
+    key: NutritionCard,
+    direction: "up" | "down",
+): string {
+    const label = CARD_LABELS[key];
+    const verb = direction === "up" ? "up" : "down";
+    const arrow = direction === "up" ? "↑" : "↓";
+    const formId = arrangeLegacyMoveFormId(key, direction);
+    return `<button type="submit" class="btn-sm arrange-legacy-move" form="${formId}" aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>`;
+}
+
 function arrangeLegacyMoveForm(
     key: NutritionCard,
     direction: "up" | "down",
     view: NutritionView,
 ): string {
-    const label = CARD_LABELS[key];
-    const verb = direction === "up" ? "up" : "down";
-    const arrow = direction === "up" ? "↑" : "↓";
-    return `<form class="arrange-legacy-move" method="post" action="/nutrition/layout">
+    const formId = arrangeLegacyMoveFormId(key, direction);
+    return `<form id="${formId}" class="arrange-legacy-move-form" method="post" action="/nutrition/layout">
 ${memberHiddenField(view.viewMemberId)}
 <input type="hidden" name="card" value="${escapeHtml(key)}" />
 <input type="hidden" name="direction" value="${direction}" />
-<button type="submit" class="btn-sm" aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>
 </form>`;
 }
 
 function arrangeModal(view: NutritionView): string {
     const order = view.cardOrder;
+    const legacyForms: string[] = [];
     const rows = order
         .map((key, index) => {
             const label = CARD_LABELS[key];
@@ -303,8 +319,14 @@ function arrangeModal(view: NutritionView): string {
             const downBtn = `<button type="button" class="btn-sm arrange-down" aria-label="Move ${escapeHtml(label)} down"${downDisabled ? " disabled" : ""}>↓</button>`;
             const legacy =
                 !upDisabled || !downDisabled
-                    ? `${upDisabled ? "" : arrangeLegacyMoveForm(key, "up", view)}${downDisabled ? "" : arrangeLegacyMoveForm(key, "down", view)}`
+                    ? `${upDisabled ? "" : arrangeLegacyMoveButton(key, "up")}${downDisabled ? "" : arrangeLegacyMoveButton(key, "down")}`
                     : "";
+            if (!upDisabled) {
+                legacyForms.push(arrangeLegacyMoveForm(key, "up", view));
+            }
+            if (!downDisabled) {
+                legacyForms.push(arrangeLegacyMoveForm(key, "down", view));
+            }
             return `<li class="row arrange-row" data-card="${escapeHtml(key)}">
 <input type="hidden" name="order" value="${escapeHtml(key)}" />
 <span class="row-title">${escapeHtml(label)}</span>
@@ -316,14 +338,14 @@ function arrangeModal(view: NutritionView): string {
         view.error && view.openModalId === NUTRITION_ARRANGE_MODAL_ID
             ? errorBanner(view.error)
             : "";
-    const body = `${modalError}<form class="nutrition-arrange-form" method="post" action="/nutrition/layout">
+    const body = `${modalError}<form id="nutrition-arrange-save" class="nutrition-arrange-form" method="post" action="/nutrition/layout">
 ${memberHiddenField(view.viewMemberId)}
 <ul class="list nutrition-arrange-list">${rows}</ul>
 <div class="modal-actions">
-<button type="button" class="arrange-reset">Cancel</button>
+<button type="button" class="arrange-reset" command="close" commandfor="${NUTRITION_ARRANGE_MODAL_ID}">Cancel</button>
 <button type="submit" class="btn-primary">Save</button>
 </div>
-</form>`;
+</form>${legacyForms.join("")}`;
     return modal({
         id: NUTRITION_ARRANGE_MODAL_ID,
         title: "Arrange cards",
