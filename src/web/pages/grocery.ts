@@ -19,7 +19,6 @@ import {
     modalTrigger,
     pageHeader,
     pageLevelErrorBanner,
-    infoTip,
 } from "../components/ui.js";
 
 export type GroceryLineView = GroceryLine & {
@@ -99,11 +98,7 @@ function storeSectionSelect(store: GroceryStoreView): string {
             return `<option value="${escapeHtml(section.id)}"${sel}>${escapeHtml(section.name)}</option>`;
         })
         .join("");
-    return `<label for="section-${escapeHtml(store.id)}">Section${infoTip({
-        id: `grocery-section-tip-${store.id}`,
-        text: "Pick an aisle, or leave Other to let the app guess from the food name.",
-        label: "What is Section?",
-    })}</label>
+    return `<label for="section-${escapeHtml(store.id)}">Section</label>
 <select id="section-${escapeHtml(store.id)}" data-grocery-section${inferAttr}>${options}</select>`;
 }
 
@@ -161,11 +156,6 @@ function lineRow(
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
 <button type="submit" class="btn-sm btn-primary">Put away</button>
-${infoTip({
-    id: `put-away-tip-${line.id}`,
-    text: "Moves this checked line into the fridge location you pick.",
-    label: "What is Put away?",
-})}
 </form>`;
     }
     return renderGroceryLineRow({

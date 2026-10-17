@@ -1,6 +1,6 @@
 import { escapeHtml } from "../shell.js";
 import type { ExpiryLevel } from "../../domain/stock.js";
-import { disclosure, infoTip, modalTrigger } from "./ui.js";
+import { disclosure, modalTrigger } from "./ui.js";
 
 function expiryPill(level: ExpiryLevel): string {
     const label =
@@ -32,11 +32,7 @@ export function renderExpiringStrip(
         )
         .join("");
     return disclosure({
-        summary: `Expiring soon <span class="count">${n}</span>${infoTip({
-            id: "fridge-expiring-soon-tip",
-            text: "Items already expired or due within three days.",
-            label: "What is Expiring soon?",
-        })}`,
+        summary: `Expiring soon <span class="count">${n}</span>`,
         body: `<section class="fridge-expiring panel">
 <ul class="list">${rows}</ul>
 </section>`,
@@ -76,9 +72,7 @@ export function renderFridgeItemRow(opts: {
     quantityLabel: string;
     expiresOn?: string | null;
     expiryLevel?: ExpiryLevel | null;
-    editModalId: string;
-    deleteModalId: string;
-    extraActions?: string;
+    rowActions: string;
 }): string {
     const id = escapeHtml(opts.id);
     const expires = opts.expiresOn
@@ -95,17 +89,7 @@ export function renderFridgeItemRow(opts: {
 <p class="fridge-item-qty row-meta">${escapeHtml(opts.quantityLabel)}${expires}</p>
 </div>
 <div class="row-actions">
-${opts.extraActions ?? ""}
-${modalTrigger({
-    target: opts.editModalId,
-    label: "Edit",
-    className: "btn-sm",
-})}
-${modalTrigger({
-    target: opts.deleteModalId,
-    label: "Delete",
-    className: "btn-sm btn-danger",
-})}
+${opts.rowActions}
 </div>
 </li>`;
 }

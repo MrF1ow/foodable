@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import {
     moveCard,
     NUTRITION_CARDS,
+    nutritionLayoutOrderErrorMessage,
     orderCards,
+    validateNutritionLayoutOrder,
     type NutritionCard,
 } from "./layout.js";
 
@@ -55,6 +57,44 @@ test("moveCard swaps adjacent entries", () => {
         "goal-progress",
         "weight-trends",
     ]);
+});
+
+test("validateNutritionLayoutOrder accepts a full permutation once each", () => {
+    const order: NutritionCard[] = [
+        "weight-trends",
+        "log",
+        "nutrition-summary",
+        "goal-progress",
+        "trends",
+    ];
+    expect(validateNutritionLayoutOrder(order)).toEqual(order);
+});
+
+test("validateNutritionLayoutOrder rejects unknown, duplicate, and partial lists", () => {
+    expect(
+        validateNutritionLayoutOrder([
+            "log",
+            "bogus",
+            "trends",
+            "goal-progress",
+            "weight-trends",
+        ]),
+    ).toBe("unknown-card");
+    expect(nutritionLayoutOrderErrorMessage("unknown-card")).toBe(
+        "Unknown card.",
+    );
+    expect(
+        validateNutritionLayoutOrder([
+            "log",
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+        ]),
+    ).toBe("duplicate-card");
+    expect(validateNutritionLayoutOrder(["log", "nutrition-summary"])).toBe(
+        "wrong-length",
+    );
 });
 
 test("moveCard is a no-op at the ends and for unknown keys", () => {

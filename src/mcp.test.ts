@@ -5858,6 +5858,37 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.profilePatches.at(-1)).not.toHaveProperty("nutrition_layout");
     });
 
+    test("POST /nutrition/layout saves a full order list", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const order =
+            "order=weight-trends&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+        const save = await postForm("/nutrition/layout", alice, order);
+        expect(save.status).toBe(302);
+        expect(db.profile?.nutrition_layout).toEqual([
+            "weight-trends",
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+        ]);
+    });
+
+    test("POST /nutrition/layout rejects an invalid full order", async () => {
+        const bad =
+            "order=log&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+        const r = await postForm("/nutrition/layout", alice, bad);
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("Duplicate card in order.");
+        expect(html).toMatch(
+            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
+        );
+    });
+
     test("POST /settings persists dark theme for the next GET", async () => {
         const save = await siteApp.request("http://x/settings", {
             method: "POST",

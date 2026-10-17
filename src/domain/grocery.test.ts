@@ -507,7 +507,7 @@ test("grocery lines are rows with a labelled round check button", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-sm btn-primary">Put away</button>',
     );
-    expect(html).toMatch(/id="put-away-tip-/);
+    expect(html).not.toMatch(/id="put-away-tip-/);
     expect(html).toContain('commandfor="grocery-add-food-st-1"');
     expect(html).toContain('id="grocery-add-food-st-1"');
     expect(html).toContain('commandfor="grocery-clear-checked"');
@@ -754,7 +754,7 @@ test("add-food modal contains the section select with picker forms", () => {
     expect(modal).toBeDefined();
     expect(modal!).toContain("data-grocery-section");
     expect(modal!).toContain('data-infer-section="sec-other"');
-    expect(modal!).toContain('id="grocery-section-tip-st-1"');
+    expect(modal!).not.toContain("popovertarget=");
     expect(modal!).toContain('<label for="section-st-1">');
     expect(modal!).toContain('class="food-picker"');
     expect(modal!).toContain('action="/grocery/lines"');

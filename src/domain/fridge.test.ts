@@ -283,9 +283,20 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     expect(html).toContain('commandfor="fridge-edit-it-1"');
     expect(html).toContain('id="fridge-delete-it-1"');
     expect(html).toContain('action="/fridge/items/it-1/delete"');
-    expect(html).toContain(
-        '<button type="submit" class="btn-sm">Ate it</button>',
-    );
+    expect(html).toContain('class="fridge-item-eat"');
+    expect(html).toContain('aria-label="Eat Eggs"');
+    expect(html).toContain("btn-icon");
+    expect(html).not.toContain(">Ate it<");
+    expect(html).not.toContain(">Toss<");
+    const listStart = html.indexOf('<ul class="fridge-items list">');
+    const actionsStart = html.indexOf('data-item-id="it-1"', listStart);
+    const actionsEnd = html.indexOf("</li>", actionsStart);
+    const itemChunk = html.slice(actionsStart, actionsEnd);
+    const editPos = itemChunk.indexOf('commandfor="fridge-edit-it-1"');
+    const eatPos = itemChunk.indexOf('class="fridge-item-eat"');
+    const deletePos = itemChunk.indexOf('commandfor="fridge-delete-it-1"');
+    expect(editPos).toBeLessThan(eatPos);
+    expect(eatPos).toBeLessThan(deletePos);
     expect(html).not.toMatch(
         /<details class="more">\s*<summary>Edit<\/summary>/,
     );
@@ -304,10 +315,7 @@ test("location actions and add-location live in the page header and head rows", 
     expect(html).toContain('commandfor="fridge-add-food-loc-1"');
     expect(html).toContain('commandfor="fridge-add-supply-loc-1"');
     expect(html).toContain("Add household item");
-    expect(html).toContain("popovertarget=");
-    expect(html).toContain(
-        "Foil, soap, batteries — things you stock but don't eat.",
-    );
+    expect(html).not.toContain("popovertarget=");
     expect(html).toContain('class="fridge-add-supply"');
     expect(html).not.toContain("<h3>Add supply</h3>");
 });
@@ -336,40 +344,9 @@ test("expiring soon is a closed details block with a count", () => {
         /<details class="more">\s*<summary>Expiring soon <span class="count">1<\/span>/,
     );
     expect(html).not.toMatch(/<details class="more" open>/);
-    expect(html).toContain('id="fridge-expiring-soon-tip"');
 });
 
-test("first fridge item shows ate it vs toss info tip beside eat action", () => {
-    const html = renderFridgePage({
-        chrome: { theme: "light" },
-        locations: [
-            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
-            { id: "loc-2", householdId: HH, name: "Freezer", sortOrder: 1 },
-        ],
-        items: [
-            {
-                id: "it-1",
-                householdId: HH,
-                locationId: "loc-1",
-                kind: "food",
-                displayName: "Milk",
-                quantity: { amount: 1, unit: "l" },
-                identity: { kind: "food", via: "manual", displayName: "Milk" },
-                foodId: "f-1",
-                expiresOn: null,
-            },
-        ],
-    } as never);
-    expect(html.match(/id="fridge-ate-toss-tip"/g)?.length).toBe(1);
-    expect(html).toContain('class="fridge-item-eat"');
-    const headStart = html.indexOf("fridge-location-head");
-    const firstItemStart = html.indexOf('data-item-id="it-1"');
-    expect(firstItemStart).toBeGreaterThan(headStart);
-    const itemChunk = html.slice(firstItemStart, firstItemStart + 600);
-    expect(itemChunk).toContain('id="fridge-ate-toss-tip"');
-});
-
-test("supply items show Used it instead of Ate it", () => {
+test("supply items omit the eat icon action", () => {
     const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [
@@ -393,8 +370,9 @@ test("supply items show Used it instead of Ate it", () => {
             },
         ],
     } as never);
-    expect(html).toContain("Used it");
-    expect(html).not.toContain(">Ate it<");
+    expect(html).not.toContain('class="fridge-item-eat"');
+    expect(html).toContain('commandfor="fridge-edit-it-sup"');
+    expect(html).toContain('commandfor="fridge-delete-it-sup"');
 });
 
 test("a server error reopens the modal that submitted the form", () => {

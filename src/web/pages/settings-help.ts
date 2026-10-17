@@ -16,7 +16,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "food-vs-household-item",
         title: "Food vs household item",
-        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. Ate it removes a food and logs it as a snack. Used it removes a household item without logging anything. Toss removes either one without logging anything.",
+        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. On a food row, the fork logs it as eaten (a snack). The trash removes an item without logging anything. Household items only show edit and trash.",
     },
     {
         id: "locations",
@@ -39,9 +39,9 @@ const GLOSSARY: GlossaryEntry[] = [
         body: "After you check off a grocery line, Put away moves that amount into the location you pick. If that food is already there with the same expiry, the amounts combine; otherwise it's added as a new item. The line then leaves the grocery list.",
     },
     {
-        id: "ate-it-vs-toss",
-        title: "Ate it vs Toss",
-        body: "Ate it logs the food as a snack. Used it and Toss just remove the item.",
+        id: "fridge-row-actions",
+        title: "Fridge row icons",
+        body: "The pencil edits quantity, location and expiry. The fork logs a food as eaten (a snack). The trash opens a confirm to remove the item without logging anything.",
     },
     {
         id: "recipe-portions",
@@ -51,7 +51,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "nutrition-arrange",
         title: "Arranging the Nutrition page",
-        body: "Arrange opens a modal with up and down controls for each card. Order is stored on your profile only — each household member can order their own Nutrition page, including when viewing someone else's data.",
+        body: "Arrange opens a modal with up and down controls for each card. Tap Save to store the order once. Order is stored on your profile only — each household member can order their own Nutrition page, including when viewing someone else's data.",
     },
 ];
 

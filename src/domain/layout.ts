@@ -32,6 +32,44 @@ export function orderCards(
     return out;
 }
 
+export type NutritionLayoutOrderError =
+    "missing-card" | "unknown-card" | "duplicate-card" | "wrong-length";
+
+export function validateNutritionLayoutOrder(
+    submitted: readonly string[],
+): NutritionCard[] | NutritionLayoutOrderError {
+    if (submitted.length !== NUTRITION_CARDS.length) {
+        return "wrong-length";
+    }
+    const seen = new Set<NutritionCard>();
+    const out: NutritionCard[] = [];
+    for (const key of submitted) {
+        if (!isNutritionCard(key)) return "unknown-card";
+        if (seen.has(key)) return "duplicate-card";
+        seen.add(key);
+        out.push(key);
+    }
+    for (const key of NUTRITION_CARDS) {
+        if (!seen.has(key)) return "missing-card";
+    }
+    return out;
+}
+
+export function nutritionLayoutOrderErrorMessage(
+    err: NutritionLayoutOrderError,
+): string {
+    switch (err) {
+        case "unknown-card":
+            return "Unknown card.";
+        case "duplicate-card":
+            return "Duplicate card in order.";
+        case "missing-card":
+            return "Missing card in order.";
+        case "wrong-length":
+            return "Invalid card order.";
+    }
+}
+
 export function moveCard(
     order: readonly NutritionCard[],
     key: NutritionCard,

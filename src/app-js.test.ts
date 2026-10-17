@@ -20,9 +20,10 @@ test("getAppJs concatenates the client files as one IIFE each", async () => {
         "./src/web/client/nutrition-log.js",
         "./src/web/client/grocery.js",
         "./src/web/client/modal.js",
+        "./src/web/client/arrange.js",
     ]);
     const js = await getAppJs();
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(5);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
     for (const path of APP_JS_SOURCES) {
         const src = (await Bun.file(path).text()).trim();
         expect(js).toContain(`(function () {\n${src}\n})();`);
@@ -32,6 +33,7 @@ test("getAppJs concatenates the client files as one IIFE each", async () => {
     expect(js).toContain("[data-meal-items]");
     expect(js).toContain("[data-grocery-section]");
     expect(js).toContain("dialog.modal");
+    expect(js).toContain(".nutrition-arrange-form");
     expect(() =>
         new Bun.Transpiler({ loader: "js" }).transformSync(js),
     ).not.toThrow();

@@ -89,9 +89,14 @@ export function modalTrigger(opts: {
     target: string;
     label: string;
     className?: string;
+    /** When set, used as button inner HTML (label still drives aria-label / title). */
+    icon?: string;
 }): string {
     const cls = opts.className ?? "btn-primary";
-    return `<button type="button" class="${escapeHtml(cls)}" commandfor="${escapeHtml(opts.target)}" command="show-modal">${escapeHtml(opts.label)}</button>`;
+    const aria = escapeHtml(opts.label);
+    const inner = opts.icon ?? escapeHtml(opts.label);
+    const title = opts.icon ? ` title="${aria}" aria-label="${aria}"` : "";
+    return `<button type="button" class="${escapeHtml(cls)}" commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}>${inner}</button>`;
 }
 
 export function confirmModal(opts: {
@@ -129,19 +134,6 @@ ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message
         body: `${opts.bodyPrefix ?? ""}${body}`,
         openOnLoad: opts.openOnLoad,
     });
-}
-
-export function infoTip(opts: {
-    id: string;
-    text: string;
-    label?: string;
-}): string {
-    const id = escapeHtml(opts.id);
-    const anchorSafe = opts.id.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const anchorName = `--tip-${anchorSafe}`;
-    const aria = escapeHtml(opts.label ?? "More information");
-    return `<button type="button" class="info-tip-trigger" popovertarget="${id}" aria-label="${aria}" style="anchor-name: ${anchorName};"><span class="info-tip-icon" aria-hidden="true">i</span></button>
-<div id="${id}" popover="auto" class="info-tip" style="position-anchor: ${anchorName};">${escapeHtml(opts.text)}</div>`;
 }
 
 export function row(opts: {

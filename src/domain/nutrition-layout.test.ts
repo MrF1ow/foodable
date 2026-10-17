@@ -116,15 +116,29 @@ test("Arrange modal lists every card with disabled ends", async () => {
     expect(html).toContain('aria-label="Move Log up"');
     expect(html).toContain('aria-label="Move Weight trends down"');
     expect(html).toMatch(
-        /<button type="button" class="btn-sm" disabled aria-label="Move Log up">↑<\/button>/,
+        /<button type="button" class="btn-sm arrange-up" aria-label="Move Log up" disabled>↑<\/button>/,
     );
     expect(html).toMatch(
-        /<button type="button" class="btn-sm" disabled aria-label="Move Weight trends down">↓<\/button>/,
+        /<button type="button" class="btn-sm arrange-down" aria-label="Move Weight trends down" disabled>↓<\/button>/,
     );
-    expect(html).toContain('action="/nutrition/layout"');
-    expect(html).not.toMatch(
-        /<form[^>]*action="\/nutrition\/layout"[^>]*class="[^"]*inline-form/,
-    );
+    expect(html).toContain('class="nutrition-arrange-form"');
+    expect(html).toContain('name="order"');
+    expect(html).toContain('type="button" class="btn-sm arrange-up"');
+    expect(html).toContain('class="btn-primary">Save</button>');
+    const arrangeModal = html.match(
+        /<dialog class="modal" id="nutrition-arrange"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(arrangeModal).toBeDefined();
+    const orderInputs = [
+        ...(arrangeModal!.matchAll(/name="order" value="([^"]+)"/g) ?? []),
+    ].map((m) => m[1]);
+    expect(orderInputs).toEqual([
+        "log",
+        "nutrition-summary",
+        "goal-progress",
+        "trends",
+        "weight-trends",
+    ]);
     expect(html).toContain('name="card"');
     expect(html).toContain('name="direction"');
 });

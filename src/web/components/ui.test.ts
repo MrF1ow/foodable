@@ -6,7 +6,6 @@ import {
     disclosure,
     emptyState,
     errorBanner,
-    infoTip,
     modal,
     modalTrigger,
     pageHeader,
@@ -115,7 +114,7 @@ test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
     );
 });
 
-test("modal, modalTrigger, confirmModal, and infoTip markup", () => {
+test("modal, modalTrigger, and confirmModal markup", () => {
     const m = modal({
         id: "add-food",
         title: "Add food",
@@ -185,16 +184,22 @@ test("modal, modalTrigger, confirmModal, and infoTip markup", () => {
         /<dialog class="modal" id="del-open"[^>]*data-modal-open-on-load/,
     );
 
-    expect(infoTip({ id: "food-tip", text: "Edible items." })).toBe(
-        `<button type="button" class="info-tip-trigger" popovertarget="food-tip" aria-label="More information" style="anchor-name: --tip-food-tip;"><span class="info-tip-icon" aria-hidden="true">i</span></button>
-<div id="food-tip" popover="auto" class="info-tip" style="position-anchor: --tip-food-tip;">Edible items.</div>`,
-    );
-    expect(infoTip({ id: "t", text: "A & B", label: "Help" })).toContain(
-        'aria-label="Help"',
-    );
-    expect(infoTip({ id: "t", text: "A & B", label: "Help" })).toContain(
-        'info-tip-icon" aria-hidden="true">i</span>',
-    );
+    expect(
+        modalTrigger({
+            target: "edit-1",
+            label: "Edit Eggs",
+            className: "btn-sm btn-icon",
+            icon: "<svg></svg>",
+        }),
+    ).toContain('aria-label="Edit Eggs"');
+    expect(
+        modalTrigger({
+            target: "edit-1",
+            label: "Edit Eggs",
+            className: "btn-sm btn-icon",
+            icon: "<svg></svg>",
+        }),
+    ).toContain("<svg></svg>");
 });
 
 test("no page module contains a raw <h1", () => {

@@ -12,7 +12,13 @@ import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { getProfile, setNutritionLayout } from "../../db/profiles.js";
-import { isNutritionCard, moveCard, orderCards } from "../../domain/layout.js";
+import {
+    isNutritionCard,
+    moveCard,
+    nutritionLayoutOrderErrorMessage,
+    orderCards,
+    validateNutritionLayoutOrder,
+} from "../../domain/layout.js";
 import { NUTRITION_ARRANGE_MODAL_ID } from "../pages/nutrition.js";
 
 export const nutritionRoutes = new Hono();
@@ -115,13 +121,40 @@ nutritionRoutes.get("/nutrition", requireSiteUser, async (c) => {
     return c.redirect("/");
 });
 
+function formOrderList(
+    body: Record<string, string | File | (string | File)[]>,
+): string[] {
+    const raw = body.order;
+    if (raw == null) return [];
+    if (Array.isArray(raw)) {
+        return raw.map((v) => (typeof v === "string" ? v : ""));
+    }
+    return typeof raw === "string" ? [raw] : [];
+}
+
 nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.parseBody();
-    const card = formText(body, "card");
-    const direction = formText(body, "direction");
+    const body = await c.req.parseBody({ all: true });
     const member = formText(body, "member");
+    const orderSubmitted = formOrderList(body);
     try {
+        if (orderSubmitted.length > 0) {
+            const validated = validateNutritionLayoutOrder(orderSubmitted);
+            if (!Array.isArray(validated)) {
+                const page = await nutritionFormError(
+                    userId,
+                    nutritionLayoutOrderErrorMessage(validated),
+                    member,
+                    NUTRITION_ARRANGE_MODAL_ID,
+                );
+                return c.html(page.html, page.status);
+            }
+            await setNutritionLayout(userId, [...validated]);
+            return c.redirect(nutritionReturnPath(member));
+        }
+
+        const card = formText(body, "card");
+        const direction = formText(body, "direction");
         if (!isNutritionCard(card)) {
             const page = await nutritionFormError(
                 userId,

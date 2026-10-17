@@ -11,11 +11,11 @@ import {
     renderExpiringStrip,
     renderFridgeItemRow,
 } from "../components/page-markup.js";
+import { iconFork, iconPencil, iconTrash } from "../components/icons.js";
 import {
     confirmModal,
     emptyState,
     errorBanner,
-    infoTip,
     modal,
     modalTrigger,
     pageHeader,
@@ -39,8 +39,6 @@ const SUPPLY_UNITS = [
     "fl oz",
     "cup",
 ] as const;
-
-const SUPPLY_HINT = "Foil, soap, batteries — things you stock but don't eat.";
 
 export type FridgePageView = FridgeSnapshot & {
     chrome: ViewerChrome;
@@ -86,7 +84,6 @@ function itemRow(
     locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
-    showEatTossTip: boolean,
 ): { row: string; modals: string; modalIds: string[] } {
     const qtyId = `qty-${item.id}`;
     const editId = `fridge-edit-${item.id}`;
@@ -115,14 +112,24 @@ function itemRow(
 ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
 <label for="expires-${escapeHtml(item.id)}">Expires</label>
 <input id="expires-${escapeHtml(item.id)}" name="expires_on" type="date" value="${escapeHtml(item.expiresOn ?? "")}" />`;
-    const eatLabel = item.kind === "supply" ? "Used it" : "Ate it";
-    const eatTossTip = showEatTossTip
-        ? infoTip({
-              id: "fridge-ate-toss-tip",
-              text: "Ate it logs the food as a snack. Used it and Toss just remove the item.",
-              label: "Ate it vs Toss",
-          })
-        : "";
+    const name = escapeHtml(item.displayName);
+    const eatAction =
+        item.kind === "food" && item.foodId != null
+            ? `<form class="fridge-item-eat" method="post" action="/fridge/items/${escapeHtml(item.id)}/eat">
+<button type="submit" class="btn-sm btn-icon" aria-label="Eat ${name}" title="Eat ${name}">${iconFork()}</button>
+</form>`
+            : "";
+    const rowActions = `${modalTrigger({
+        target: editId,
+        label: `Edit ${item.displayName}`,
+        className: "btn-sm btn-icon",
+        icon: iconPencil(),
+    })}${eatAction}${modalTrigger({
+        target: deleteId,
+        label: `Delete ${item.displayName}`,
+        className: "btn-sm btn-icon btn-danger",
+        icon: iconTrash(),
+    })}`;
     const row = renderFridgeItemRow({
         id: item.id,
         kind: item.kind,
@@ -130,17 +137,7 @@ ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
         quantityLabel: quantityLabel(item),
         expiresOn: item.expiresOn,
         expiryLevel: expiryLevel(item.expiresOn, today),
-        editModalId: editId,
-        deleteModalId: deleteId,
-        extraActions:
-            item.foodId == null
-                ? ""
-                : `<form class="fridge-item-eat" method="post" action="/fridge/items/${escapeHtml(item.id)}/eat">
-<button type="submit" class="btn-sm">${eatLabel}</button>
-</form>${eatTossTip}
-<form class="fridge-item-discard" method="post" action="/fridge/items/${escapeHtml(item.id)}/discard">
-<button type="submit" class="btn-sm">Toss</button>
-</form>`,
+        rowActions,
     });
     const modals =
         modal({
@@ -170,17 +167,10 @@ function locationSection(
     locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
-    firstLocation: boolean,
 ): { section: string; modals: string; modalIds: string[] } {
     const locItems = items.filter((item) => item.locationId === location.id);
-    const itemParts = locItems.map((item, index) =>
-        itemRow(
-            item,
-            locations,
-            view,
-            today,
-            firstLocation && index === 0 && item.foodId != null,
-        ),
+    const itemParts = locItems.map((item) =>
+        itemRow(item, locations, view, today),
     );
     const rows = itemParts.map((part) => part.row).join("");
     const itemModals = itemParts.map((part) => part.modals).join("");
@@ -192,7 +182,6 @@ function locationSection(
     const foodModalId = `fridge-add-food-${location.id}`;
     const supplyModalId = `fridge-add-supply-${location.id}`;
     const removeModalId = `fridge-remove-location-${location.id}`;
-    const supplyTipId = `supply-tip-${location.id}`;
     const locationModals =
         modal({
             id: foodModalId,
@@ -251,10 +240,6 @@ ${modalTrigger({
         target: supplyModalId,
         label: "Add household item",
         className: "btn-sm",
-    })}${infoTip({
-        id: supplyTipId,
-        text: SUPPLY_HINT,
-        label: "What is a household item?",
     })}</span>
 ${modalTrigger({
     target: removeModalId,
@@ -291,15 +276,8 @@ export function renderFridgePage(view: FridgePageView): string {
             expiresOn: item.expiresOn ?? "",
         })),
     );
-    const locationParts = view.locations.map((loc, index) =>
-        locationSection(
-            loc,
-            view.items,
-            view.locations,
-            view,
-            today,
-            index === 0,
-        ),
+    const locationParts = view.locations.map((loc) =>
+        locationSection(loc, view.items, view.locations, view, today),
     );
     const modalIds = [
         addLocationId,
