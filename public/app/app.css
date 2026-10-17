@@ -13,13 +13,17 @@
 /*@include shared/tokens.css@*/
 
 /*@include shared/base.css@*/
-/*@include shared/motion.css@*/
 
 /*@include shared/form.css@*/
 
 /*@include shared/table.css@*/
 
 /*@include shared/seg.css@*/
+
+/* App-only brand layer (palette, type). After the shared partials so it wins;
+   never included by a widget, so chat widgets keep the neutral look. */
+/*@include ../../app/brand.css@*/
+/*@include ../../app/motion.css@*/
 
 /* ---- base ---- */
 
@@ -806,21 +810,43 @@ details.more > summary > :is(h2, h3) {
     font-size: 12px;
 }
 
-/* ==== SPIKE: the marketing site's look, app + login only ==================
-   Everything below is app-layer: widgets never include app.css, so in a chat
-   host none of it applies. Fonts are self-hosted (CSP font-src 'self'). */
+/* ---- brand: the marketing site's look ----
+   App-layer only: widgets never include app.css, so in a chat host none of
+   this applies. Palette and fonts live in brand.css. */
 
-@font-face {
-    font-family: "Geist";
-    src: url("/fonts/geist-latin.woff2") format("woff2");
-    font-weight: 100 900;
-    font-display: swap;
+/* Controls: pill buttons like the site's CTAs, softer fields. Same selectors
+   as form.css, so these win by order without raising specificity. */
+:where(
+    .native
+        :is(
+            input:not(
+                [type="checkbox"],
+                [type="radio"],
+                [type="hidden"],
+                [type="file"]
+            ),
+            select,
+            textarea
+        )
+) {
+    border-radius: 12px;
 }
-@font-face {
-    font-family: "Bricolage Grotesque";
-    src: url("/fonts/bricolage-latin.woff2") format("woff2");
-    font-weight: 200 800;
-    font-display: swap;
+.btn,
+:where(.native button) {
+    border-radius: 999px;
+}
+.btn-sm {
+    padding: 5px 11px;
+    border-radius: 999px;
+}
+.btn-primary {
+    box-shadow:
+        inset 0 -6px 10px rgba(255, 255, 255, 0.18),
+        0 6px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.btn-primary:hover:not(:disabled) {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 90%, var(--text));
 }
 
 /* The hero's soft green glow, pinned to the top of every page. */

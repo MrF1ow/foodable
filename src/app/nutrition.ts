@@ -17,7 +17,7 @@ import {
     resolveAndBuildMeal,
 } from "../domain/meals.js";
 import { isWeightUnit, toGrams, type WeightUnit } from "../domain/units.js";
-import { getWidgetHtml, withWidgetData } from "../widgets.js";
+import { getEmbedCss, getWidgetHtml, withWidgetData } from "../widgets.js";
 import {
     escapeHtml,
     renderAppShell,
@@ -53,6 +53,7 @@ async function widgetCard(
 ): Promise<string> {
     const html = withWidgetData(await getWidgetHtml(key), data, {
         theme: chrome.theme,
+        skin: await getEmbedCss(),
     });
     return `<iframe class="widget-frame" title="${escapeHtml(key)}" srcdoc="${escapeHtml(html)}"></iframe>`;
 }

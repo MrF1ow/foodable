@@ -71,9 +71,6 @@ function initWidget(config) {
         config.render(data);
         painted = true;
         const el = root();
-        // motion.js is optional: present when the template includes it.
-        if (typeof fxEnter === "function" && el && el.innerHTML.trim() !== "")
-            fxEnter(el);
         if (withFooter === false || !el || el.innerHTML.trim() === "") return;
         const foot = document.createElement("div");
         foot.textContent =

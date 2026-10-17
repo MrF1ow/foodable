@@ -1,0 +1,92 @@
+/* The household app's brand layer: palette and type, app-only.
+ *
+ * The in-chat widgets keep the neutral look in shared/tokens.css, because
+ * they render inside someone else's product. The app and login are ours, so
+ * they carry the marketing site's look. This file is included twice, never
+ * by a widget template:
+ *   - by public/app/app.css, after shared/tokens.css, for every app page;
+ *   - by public/app/embed.css, the skin withWidgetData() injects into the
+ *     widgets the app embeds, so those cards match the page around them.
+ *
+ * Each block mirrors a tokens.css block with the same selector, so it wins
+ * in both the system-theme and explicit-theme cases by coming later. Only
+ * surfaces and type change: the accent and every nutrient colour stay as
+ * tokens.css defines them. Fonts are self-hosted (CSP font-src 'self'); a
+ * srcdoc frame inherits the app's policy, so embedded cards load them too. */
+
+@font-face {
+    font-family: "Geist";
+    src: url("/fonts/geist-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Bricolage Grotesque";
+    src: url("/fonts/bricolage-latin.woff2") format("woff2");
+    font-weight: 200 800;
+    font-display: swap;
+}
+
+:root {
+    --text: oklch(0.2 0.01 160);
+    --text-dim: oklch(0.5 0.015 160);
+    --bg: #fbfaf7;
+    --panel: #ffffff;
+    --panel-border: oklch(0.91 0.008 160);
+    --track: oklch(0.94 0.008 160);
+    --shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.05),
+        0 12px 24px rgba(0, 0, 0, 0.05);
+    /* A pale accent wash for active states, and an accent that passes AA as
+       text on --bg (the logo green itself is ~2:1 on white). */
+    --accent-soft: #e6f9f0;
+    --accent-ink: #12875a;
+    --radius: 16px;
+    --font-sans:
+        "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+    --font-heading: "Bricolage Grotesque", var(--font-sans);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --text: oklch(0.97 0.005 160);
+        --text-dim: oklch(0.7 0.012 160);
+        --bg: #0d0f0e;
+        --panel: #151817;
+        --panel-border: oklch(1 0 0 / 10%);
+        --track: oklch(0.27 0.008 160);
+        --shadow: inset 0 -20px 80px -20px #ffffff14;
+        --accent-soft: #0f2a1f;
+        --accent-ink: #3ddc9a;
+    }
+}
+
+:root[data-theme="light"] {
+    --text: oklch(0.2 0.01 160);
+    --text-dim: oklch(0.5 0.015 160);
+    --bg: #fbfaf7;
+    --panel: #ffffff;
+    --panel-border: oklch(0.91 0.008 160);
+    --track: oklch(0.94 0.008 160);
+    --shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.05),
+        0 12px 24px rgba(0, 0, 0, 0.05);
+    --accent-soft: #e6f9f0;
+    --accent-ink: #12875a;
+}
+:root[data-theme="dark"] {
+    --text: oklch(0.97 0.005 160);
+    --text-dim: oklch(0.7 0.012 160);
+    --bg: #0d0f0e;
+    --panel: #151817;
+    --panel-border: oklch(1 0 0 / 10%);
+    --track: oklch(0.27 0.008 160);
+    --shadow: inset 0 -20px 80px -20px #ffffff14;
+    --accent-soft: #0f2a1f;
+    --accent-ink: #3ddc9a;
+}
+
+body {
+    font-family: var(--font-sans);
+}
