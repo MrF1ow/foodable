@@ -1189,8 +1189,10 @@ body.auth {
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
+    /* :where(.native button) sets a 44px min-height that would beat height. */
+    min-height: 0;
     padding: 1px;
     border: 1px solid var(--panel-border);
     border-radius: var(--r-999);
