@@ -18,7 +18,9 @@ jobs:
                   fetch-depth: 0
 
             - name: Fetch base branch
-              run: git fetch --no-tags origin "${{ github.base_ref }}"
+              env:
+                  BASE_REF: ${{ github.base_ref }}
+              run: git fetch --no-tags origin "$BASE_REF"
 
             - name: Set up Bun
               uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
