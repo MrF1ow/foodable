@@ -58,7 +58,8 @@ body {
 }
 
 /* Page glow: a body background layer (not a 100vw pseudo) so scrollWidth stays
-   equal to clientWidth when a classic scrollbar is present. */
+   equal to clientWidth when a classic scrollbar is present. Default attachment
+   is scroll (iOS ignores fixed); glow moves with content like desktop today. */
 body:not(.auth) {
     background-image: radial-gradient(
         ellipse min(60vw, 28rem) 18rem at 50% 0,
@@ -74,6 +75,21 @@ body:not(.auth) {
             color-mix(in srgb, var(--accent) 16%, transparent),
             transparent 65%
         );
+    }
+}
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
+    body:not(.auth) {
+        background-image:
+            radial-gradient(
+                ellipse 45vw 40vh at 0% 42%,
+                color-mix(in srgb, var(--accent) 14%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                ellipse 45vw 40vh at 100% 48%,
+                color-mix(in srgb, var(--accent) 14%, transparent),
+                transparent 68%
+            );
     }
 }
 
@@ -1093,18 +1109,54 @@ html:has(body.auth) {
     background: var(--bg);
 }
 body.auth {
+    position: relative;
     background:
         radial-gradient(
             40rem 22rem at 50% calc(-4rem + env(safe-area-inset-top, 0px)),
             color-mix(in srgb, var(--accent) 20%, transparent),
             transparent 70%
         ),
-        radial-gradient(
-                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
-                transparent 1.2px
-            )
-            0 0 / 18px 18px,
         var(--bg);
+}
+body.auth::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background: radial-gradient(
+            color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+            transparent 1.2px
+        )
+        0 0 / 18px 18px;
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(env(safe-area-inset-top, 0px) + 8px),
+        #000 calc(env(safe-area-inset-top, 0px) + 140px)
+    );
+    mask-image: linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(env(safe-area-inset-top, 0px) + 8px),
+        #000 calc(env(safe-area-inset-top, 0px) + 140px)
+    );
+}
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
+    body.auth {
+        background:
+            radial-gradient(
+                ellipse 45vw 40vh at 0% 42%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                ellipse 45vw 40vh at 100% 48%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            var(--bg);
+    }
 }
 .auth-title {
     font-family: var(--font-heading);
