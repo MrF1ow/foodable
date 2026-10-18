@@ -59,3 +59,54 @@ jobs:
 
             - name: Build image
               run: docker build .
+
+    migrations:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+              with:
+                  persist-credentials: false
+                  fetch-depth: 0
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.2
+
+            - name: Check migrations
+              env:
+                  BASE_REF: ${{ github.base_ref }}
+                  EVENT_NAME: ${{ github.event_name }}
+                  BEFORE: ${{ github.event.before }}
+              run: |
+                  set -euo pipefail
+                  if [ "$EVENT_NAME" = "pull_request" ]; then
+                    git fetch --no-tags origin "$BASE_REF"
+                    base="origin/$BASE_REF"
+                  else
+                    base="$BEFORE"
+                    if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+                      exit 0
+                    fi
+                  fi
+                  git cat-file -e "${base}^{commit}"
+                  changed="$(git diff --name-only -M "$base" -- supabase/migrations)"
+                  if [ -z "$changed" ]; then
+                    echo "no migration changes"
+                    exit 0
+                  fi
+                  bun run scripts/migration-safety.ts --base "$base"
+                  echo "postgresql binaries:"
+                  ls /usr/lib/postgresql || true
+                  shopt -s nullglob
+                  bins=(/usr/lib/postgresql/*/bin/initdb)
+                  if [ ${#bins[@]} -eq 0 ]; then
+                    sudo apt-get update
+                    sudo apt-get install -y postgresql
+                    bins=(/usr/lib/postgresql/*/bin/initdb)
+                  fi
+                  PG_BIN=$(dirname "${bins[0]}")
+                  export PG_BIN
+                  bun install --frozen-lockfile
+                  bun run db:dryrun
