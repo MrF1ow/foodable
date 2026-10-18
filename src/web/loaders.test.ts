@@ -59,7 +59,7 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
         cardOrder: defaultCardOrder,
     });
     expect(html).toContain("<h1>Alice</h1>");
-    expect(html).not.toContain('class="peer-note"');
+    expect(html).not.toContain('class="peer-view-tag"');
     expect(html).not.toContain('class="facts"');
     expect(html).not.toContain('action="/add-household-member"');
     expect(html).toContain('title="nutrition-summary"');
@@ -78,7 +78,7 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     expect(html).not.toContain('class="error-banner"');
 });
 
-test("self dashboard logs through one compact panel of disclosures", async () => {
+test("self dashboard logs through header modals", async () => {
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice],
@@ -89,18 +89,15 @@ test("self dashboard logs through one compact panel of disclosures", async () =>
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });
-    expect(html).toContain(
-        '<section class="panel log-panel" aria-label="Log">',
-    );
-    expect(html).toContain("<summary>Log meal</summary>");
-    expect(html).toContain("<summary>Log water</summary>");
-    expect(html).toContain("<summary>Log weight</summary>");
+    expect(html).toContain('commandfor="nutrition-log-meal"');
+    expect(html).toContain('commandfor="nutrition-log-water"');
+    expect(html).toContain('commandfor="nutrition-log-weight"');
+    expect(html).toContain('id="nutrition-log-meal"');
     expect(html).toContain(
         '<label class="meal-item-name">Food<input name="item_name" type="text" autocomplete="off" data-meal-item-name /></label>',
     );
     expect(html).not.toContain("fridge-add-supply");
-    // The log panel sits above the first widget.
-    expect(html.indexOf("log-panel")).toBeLessThan(
+    expect(html.indexOf("nutrition-log-meal")).toBeLessThan(
         html.indexOf("widget-frame"),
     );
 });
@@ -150,7 +147,8 @@ test("peer dashboard is read-only", async () => {
     });
     expect(html).toContain("<h1>Bob</h1>");
     expect(html).toContain("Viewing Bob");
-    expect(html).toContain("You can look, not edit");
+    expect(html).toContain('class="peer-view-tag"');
+    expect(html).not.toContain("You can look, not edit");
     expect(html).toContain('href="/"');
     expect(html).toContain(`aria-current="page"`);
     expect(html).not.toContain('action="/approve"');

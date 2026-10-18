@@ -24,8 +24,8 @@ import {
     resolveTheme,
     type ViewerChrome,
 } from "../shell.js";
+import { iconEye } from "../components/icons.js";
 import {
-    disclosure,
     errorBanner,
     modal,
     modalTrigger,
@@ -36,9 +36,11 @@ import type { MealFormItem } from "../form.js";
 import type { NutritionCard } from "../../domain/layout.js";
 
 export const NUTRITION_ARRANGE_MODAL_ID = "nutrition-arrange";
+export const NUTRITION_LOG_MEAL_MODAL_ID = "nutrition-log-meal";
+export const NUTRITION_LOG_WATER_MODAL_ID = "nutrition-log-water";
+export const NUTRITION_LOG_WEIGHT_MODAL_ID = "nutrition-log-weight";
 
 const CARD_LABELS: Record<NutritionCard, string> = {
-    log: "Log",
     "nutrition-summary": "Nutrition summary",
     "goal-progress": "Goal progress",
     trends: "Trends",
@@ -89,11 +91,8 @@ function mealTypeSelect(): string {
             </select>`;
 }
 
-function logForms(): string {
-    return `<section class="panel log-panel" aria-label="Log">
-${disclosure({
-    summary: "Log meal",
-    body: `<form class="meal-log" method="post" action="/log-meal">
+function logMealFormBody(): string {
+    return `<form class="meal-log" method="post" action="/log-meal">
 ${mealTypeSelect()}
 <div class="meal-items" data-meal-items>
 <div class="meal-item" data-meal-item>
@@ -121,26 +120,79 @@ ${mealTypeSelect()}
 <label>Fat (g)<input id="log-meal-fat" name="fat_g" type="number" min="0" step="any" inputmode="decimal" /></label>
 </div>
 <button type="submit" class="btn-primary">Log meal</button>
-</form>`,
-})}
-${disclosure({
-    summary: "Log water",
-    body: `<form class="log-water inline-form" method="post" action="/log-water">
+</form>`;
+}
+
+function logWaterFormBody(): string {
+    return `<form class="log-water inline-form" method="post" action="/log-water">
 <label for="log-water-amount">Water (ml)</label>
 <input id="log-water-amount" name="amount_ml" type="number" step="any" inputmode="decimal" />
 <button type="submit" class="btn-primary">Log water</button>
-</form>`,
-})}
-${disclosure({
-    summary: "Log weight",
-    body: `<form class="log-weight inline-form" method="post" action="/log-weight">
+</form>`;
+}
+
+function logWeightFormBody(): string {
+    return `<form class="log-weight inline-form" method="post" action="/log-weight">
 <label for="log-weight-amount">Weight (kg)</label>
 <input id="log-weight-amount" name="weight" type="number" step="any" inputmode="decimal" />
 <input type="hidden" name="unit" value="kg" />
 <button type="submit" class="btn-primary">Log weight</button>
-</form>`,
+</form>`;
+}
+
+function modalFormError(view: NutritionView, modalId: string): string {
+    if (view.error && view.openModalId === modalId) {
+        return errorBanner(view.error);
+    }
+    return "";
+}
+
+function logModals(view: NutritionView): string {
+    if (view.access.mode === "peer") return "";
+    return [
+        modal({
+            id: NUTRITION_LOG_MEAL_MODAL_ID,
+            title: "Log meal",
+            openOnLoad: view.openModalId === NUTRITION_LOG_MEAL_MODAL_ID,
+            body: `${modalFormError(view, NUTRITION_LOG_MEAL_MODAL_ID)}${logMealFormBody()}`,
+        }),
+        modal({
+            id: NUTRITION_LOG_WATER_MODAL_ID,
+            title: "Log water",
+            openOnLoad: view.openModalId === NUTRITION_LOG_WATER_MODAL_ID,
+            body: `${modalFormError(view, NUTRITION_LOG_WATER_MODAL_ID)}${logWaterFormBody()}`,
+        }),
+        modal({
+            id: NUTRITION_LOG_WEIGHT_MODAL_ID,
+            title: "Log weight",
+            openOnLoad: view.openModalId === NUTRITION_LOG_WEIGHT_MODAL_ID,
+            body: `${modalFormError(view, NUTRITION_LOG_WEIGHT_MODAL_ID)}${logWeightFormBody()}`,
+        }),
+    ].join("");
+}
+
+function logTriggers(): string {
+    return `${modalTrigger({
+        target: NUTRITION_LOG_MEAL_MODAL_ID,
+        label: "Log meal",
+        className: "btn-primary",
+    })}
+${modalTrigger({
+    target: NUTRITION_LOG_WATER_MODAL_ID,
+    label: "Log water",
+    className: "btn-sm",
 })}
-</section>`;
+${modalTrigger({
+    target: NUTRITION_LOG_WEIGHT_MODAL_ID,
+    label: "Log weight",
+    className: "btn-sm",
+})}`;
+}
+
+function peerViewTag(displayName: string): string {
+    const name = escapeHtml(displayName);
+    const aria = escapeHtml(`Viewing ${displayName}'s nutrition (read-only)`);
+    return `<p class="peer-view-tag" role="status" aria-label="${aria}"><span class="peer-view-tag-inner">${iconEye()} Viewing ${name}</span></p>`;
 }
 
 const MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
@@ -364,9 +416,7 @@ export async function renderNutritionPage(
         widgetCard("weight-trends", view.weight, view.chrome),
     ]);
 
-    const logPanel = view.access.mode === "peer" ? "" : logForms();
     const fragments: Record<NutritionCard, string> = {
-        log: logPanel,
         "nutrition-summary": summaryCard,
         "goal-progress": goalsCard,
         trends: trendsCard,
@@ -394,29 +444,44 @@ export async function renderNutritionPage(
         })
         .join("");
 
-    const peerNote =
-        view.access.mode === "peer"
-            ? `<p class="peer-note">Viewing ${escapeHtml(view.access.subject.displayName)}. You can look, not edit. Only they (or a household bot) can change these records.</p>`
-            : "";
+    const isPeer = view.access.mode === "peer";
+    const peerTag = isPeer ? peerViewTag(view.access.subject.displayName) : "";
 
-    const headActions = `${modalTrigger({
-        target: NUTRITION_ARRANGE_MODAL_ID,
-        label: "Arrange",
-        className: "btn-sm",
-    })}
-<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`;
+    const selfActions: string[] = [];
+    if (!isPeer) {
+        selfActions.push(logTriggers());
+        selfActions.push(
+            modalTrigger({
+                target: NUTRITION_ARRANGE_MODAL_ID,
+                label: "Arrange",
+                className: "btn-sm",
+            }),
+        );
+    }
+    selfActions.push(
+        `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`,
+    );
 
-    const pageError = pageLevelErrorBanner(view, [NUTRITION_ARRANGE_MODAL_ID]);
+    const headActions = selfActions.join("\n");
+
+    const modalIds = [
+        NUTRITION_LOG_MEAL_MODAL_ID,
+        NUTRITION_LOG_WATER_MODAL_ID,
+        NUTRITION_LOG_WEIGHT_MODAL_ID,
+        ...(isPeer ? [] : [NUTRITION_ARRANGE_MODAL_ID]),
+    ];
+    const pageError = pageLevelErrorBanner(view, modalIds);
 
     const body = `
         ${pageHeader({
             title: view.access.subject.displayName,
-            sub: peerNote || undefined,
+            sub: peerTag || undefined,
             actions: headActions,
         })}
         ${pageError}
         ${orderedCards}
-        ${arrangeModal(view)}
+        ${isPeer ? "" : arrangeModal(view)}
+        ${logModals(view)}
     `;
     return renderAppShell({
         title: "Nutrition",

@@ -467,6 +467,44 @@ try {
         { orderBefore, orderAfter, orderFields, ex: drain() },
     );
 
+    await control("post=fail&modal=nutrition-log-meal&reset=posts&delay=0");
+    await goto("/");
+    await setMarker();
+    const hrefBeforeMeal = (await snap()).href;
+    await clickSel('button[commandfor="nutrition-log-meal"]');
+    await sleep(40);
+    await clickSel("#nutrition-log-meal button[type='submit']");
+    await sleep(500);
+    const badMeal = await snap();
+    record(
+        "nutrition log meal invalid 400",
+        badMeal.marker === "stay" &&
+            badMeal.href === hrefBeforeMeal &&
+            badMeal.open.includes("nutrition-log-meal") &&
+            badMeal.error === "Name is required",
+        { badMeal, hrefBeforeMeal, ex: drain() },
+    );
+
+    await control("post=ok&reset=posts&delay=0");
+    await goto("/");
+    await setMarker();
+    await clickSel('button[commandfor="nutrition-log-water"]');
+    await sleep(40);
+    await ev(`(() => {
+        const input = document.querySelector("#nutrition-log-water input[name='amount_ml']");
+        if (input) input.value = "250";
+    })()`);
+    await clickSel("#nutrition-log-water button[type='submit']");
+    await sleep(500);
+    const okWater = await snap();
+    record(
+        "nutrition log water valid 303",
+        okWater.marker === "stay" &&
+            okWater.open.length === 0 &&
+            okWater.href.endsWith("/"),
+        { okWater, ex: drain() },
+    );
+
     await control("reset=approve");
     await goto("/login-test");
     await ev(`window.__marker = "stay"`);

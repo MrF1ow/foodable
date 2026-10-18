@@ -19,7 +19,12 @@ import {
     orderCards,
     validateNutritionLayoutOrder,
 } from "../../domain/layout.js";
-import { NUTRITION_ARRANGE_MODAL_ID } from "../pages/nutrition.js";
+import {
+    NUTRITION_ARRANGE_MODAL_ID,
+    NUTRITION_LOG_MEAL_MODAL_ID,
+    NUTRITION_LOG_WATER_MODAL_ID,
+    NUTRITION_LOG_WEIGHT_MODAL_ID,
+} from "../pages/nutrition.js";
 
 export const nutritionRoutes = new Hono();
 
@@ -78,7 +83,12 @@ nutritionRoutes.post("/log-meal", requireMember, async (c) => {
         },
     );
     if (!result.ok) {
-        const page = await nutritionFormError(userId, result.error);
+        const page = await nutritionFormError(
+            userId,
+            result.error,
+            undefined,
+            NUTRITION_LOG_MEAL_MODAL_ID,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/", 303);
@@ -93,7 +103,12 @@ nutritionRoutes.post("/log-water", requireMember, async (c) => {
         insertWater,
     );
     if (!result.ok) {
-        const page = await nutritionFormError(userId, result.error);
+        const page = await nutritionFormError(
+            userId,
+            result.error,
+            undefined,
+            NUTRITION_LOG_WATER_MODAL_ID,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/", 303);
@@ -111,7 +126,12 @@ nutritionRoutes.post("/log-weight", requireMember, async (c) => {
         insertWeight,
     );
     if (!result.ok) {
-        const page = await nutritionFormError(userId, result.error);
+        const page = await nutritionFormError(
+            userId,
+            result.error,
+            undefined,
+            NUTRITION_LOG_WEIGHT_MODAL_ID,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/", 303);
@@ -136,6 +156,14 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
     const userId = c.get("userId");
     const body = await c.req.parseBody({ all: true });
     const member = formText(body, "member");
+    if (member?.trim() && member.trim() !== userId) {
+        const page = await nutritionFormError(
+            userId,
+            "You can only arrange your own nutrition dashboard.",
+            member,
+        );
+        return c.html(page.html, 403);
+    }
     const orderSubmitted = formOrderList(body);
     try {
         if (orderSubmitted.length > 0) {

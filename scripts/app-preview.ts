@@ -26,6 +26,9 @@ import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
+    NUTRITION_LOG_MEAL_MODAL_ID,
+    NUTRITION_LOG_WATER_MODAL_ID,
+    NUTRITION_LOG_WEIGHT_MODAL_ID,
     renderNutritionPage,
     viewerChromeFromProfile,
 } from "../src/web/pages/nutrition.js";
@@ -276,15 +279,31 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         weight: await widgetSample("weight-trends"),
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
             "weight-trends",
         ],
     } as never);
+    const nutritionPeer = await renderNutritionPage({
+        access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        viewMemberId: SAM.userId,
+    } as never);
     return {
         nutrition,
+        "nutrition-peer": nutritionPeer,
         fridge: renderFridgePage(fridgeView(chrome) as never),
         grocery: renderGroceryPage(groceryView(chrome) as never),
         recipes: renderRecipesPage({
@@ -417,12 +436,48 @@ function findChromium(): string | null {
     return null;
 }
 
+async function nutritionWithModal(
+    theme: "light" | "dark",
+    openModalId: string,
+): Promise<string> {
+    const chrome = viewerChromeFromProfile({ theme });
+    return renderNutritionPage({
+        access: { ok: true, mode: "self", viewer: ME, subject: ME },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        openModalId,
+    } as never);
+}
+
 const names: string[] = [];
+const modalShotPages: string[] = [];
 for (const theme of ["light", "dark"] as const) {
     for (const [name, html] of Object.entries(await pages(theme))) {
         const file = `${name}-${theme}`;
         await Bun.write(`${OUT}/${file}.html`, html);
         names.push(file);
+    }
+    for (const [slug, modalId] of [
+        ["log-meal", NUTRITION_LOG_MEAL_MODAL_ID],
+        ["log-water", NUTRITION_LOG_WATER_MODAL_ID],
+        ["log-weight", NUTRITION_LOG_WEIGHT_MODAL_ID],
+    ] as const) {
+        const file = `nutrition-${slug}-${theme}`;
+        await Bun.write(
+            `${OUT}/${file}.html`,
+            await nutritionWithModal(theme, modalId),
+        );
+        modalShotPages.push(file);
     }
 }
 
@@ -472,6 +527,13 @@ if (process.argv.includes("--shots")) {
         // the GUI profile is never touched.
         const colorScheme = theme === "dark" ? 2 : 1;
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
+        console.log(`${OUT}/${name}.png`);
+    }
+    for (const name of modalShotPages) {
+        const theme = name.endsWith("-dark") ? "dark" : "light";
+        const dataDir = `${OUT}/chrome-${name}`;
+        const colorScheme = theme === "dark" ? 2 : 1;
+        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=4000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
     }
     server.stop();

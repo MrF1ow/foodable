@@ -278,15 +278,31 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         weight: await widgetSample("weight-trends"),
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
             "weight-trends",
         ],
     } as never);
+    const nutritionPeer = await renderNutritionPage({
+        access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        viewMemberId: SAM.userId,
+    } as never);
     return {
         nutrition,
+        "nutrition-peer": nutritionPeer,
         fridge: renderFridgePage(fridgeView(chrome) as never),
         grocery: renderGroceryPage(groceryView(chrome) as never),
         recipes: renderRecipesPage({

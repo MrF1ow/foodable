@@ -152,7 +152,6 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         weight: { locale: "en" },
         chrome: { theme: "light" },
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",

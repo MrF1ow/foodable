@@ -254,7 +254,6 @@ test("every page's h1 comes from pageHeader once", async () => {
         weight: { locale: "en" },
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
@@ -324,13 +323,13 @@ test("every page's h1 comes from pageHeader once", async () => {
         weight: { locale: "en" },
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
             "weight-trends",
         ],
         error: "Enter a meal description or add a food.",
+        openModalId: "nutrition-log-meal",
     });
     expect(withError.indexOf("<h1>Alice</h1>")).toBeLessThan(
         withError.indexOf("error-banner"),

@@ -1,6 +1,8 @@
 # Foodable usability plan: actions up top, modals instead of disclosures
 
-Status: P8 done. Written 2026-10-17 against `main` at `d5b91ef`. This is the owner-input phase U10 of `docs/handoff/foodable-ui-plan.md`. It touches the household app only; the in-chat widgets stay byte-identical to `main`.
+Status: P8 done; P8.2 (part B) done on `usability/p8-2-nutrition`. Written 2026-10-17 against `main` at `d5b91ef`. This is the owner-input phase U10 of `docs/handoff/foodable-ui-plan.md`. It touches the household app only; the in-chat widgets stay byte-identical to `main`.
+
+**P8.2 (part B).** Nutrition log forms (meal, water, weight) use header `modalTrigger` + `modal` like Grocery/Fridge; validation errors reopen the matching modal via `openModalId`. The obsolete `log` arrange card is dropped from `NUTRITION_CARDS` (saved layouts still carrying `log` are ignored). Peer view shows a compact `--warn` eye tag instead of the long read-only note; log and Arrange UI are hidden on peer view, and `POST /nutrition/layout` with another member’s `member` field returns **403** with a page banner and saves nothing.
 
 Read `CLAUDE.md` in full first. Every rule there holds: Bun only, prettier-clean tree, test-pinned class names stay, expand-only migrations, every PR passes `bun run gen:all`, `bun run format:check`, `bun run typecheck` and `bun test`.
 

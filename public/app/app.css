@@ -403,7 +403,6 @@ html:has(dialog.modal[open]) {
 /* Empty states and secondary text. The empty-* classes are pinned by tests,
    so they are listed here rather than given a second class in markup. */
 .muted,
-.peer-note,
 .empty-fridge,
 .empty-grocery,
 .empty-recipes,
@@ -894,15 +893,26 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- nutrition log ---- */
 
-/* Three disclosure pills in a row; the opened one moves to the top of the
-   card and takes its full width. */
-.log-panel {
-    flex-direction: row;
-    flex-wrap: wrap;
+.peer-view-tag {
+    margin: 0;
 }
-.log-panel > details[open] {
-    flex-basis: 100%;
-    order: -1;
+.peer-view-tag-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+    border-radius: var(--r-999);
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn);
+    font-size: var(--fs-12);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.peer-view-tag-inner svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 .meal-items {
     display: grid;

@@ -66,7 +66,8 @@ function initMealLog(root) {
         if (mealItemsInit.has(mealRoot)) return;
         mealItemsInit.add(mealRoot);
         mealRoot.querySelectorAll("[data-meal-item]").forEach(bindMealRow);
-        var add = root.querySelector("[data-add-meal-item]");
+        var form = mealRoot.closest("form");
+        var add = form && form.querySelector("[data-add-meal-item]");
         if (add && !mealAddInit.has(add)) {
             mealAddInit.add(add);
             add.addEventListener("click", function () {
