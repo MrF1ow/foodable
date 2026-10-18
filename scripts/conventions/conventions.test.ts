@@ -47,7 +47,13 @@ describe("classifyPath mapped", () => {
         const proc = Bun.spawn(["git", "ls-files"], {
             cwd: import.meta.dir + "/../..",
             stdout: "pipe",
+            stderr: "pipe",
         });
+        const code = await proc.exited;
+        if (code !== 0) {
+            const err = await new Response(proc.stderr).text();
+            throw new Error(`git ls-files failed: ${err}`);
+        }
         const text = await new Response(proc.stdout).text();
         const paths = text
             .split("\n")
@@ -69,7 +75,7 @@ describe("parseTitle", () => {
         const r = parseTitle('Revert "feat(fridge): show expiry"');
         expect("error" in r).toBe(false);
         if (!("error" in r)) {
-            expect(r.type).toBe("revert");
+            expect(r.type).toBe("feat");
             expect(r.scope).toBe("fridge");
             expect(r.subject).toBe("show expiry");
         }
@@ -90,6 +96,11 @@ describe("checkBranch", () => {
 
     test("wip has a finding", () => {
         expect(checkBranch("wip").length).toBeGreaterThan(0);
+    });
+
+    test("rejects scope without slug", () => {
+        expect(checkBranch("feat/fridge").length).toBeGreaterThan(0);
+        expect(checkBranch("feat/fridge-").length).toBeGreaterThan(0);
     });
 });
 
@@ -163,6 +174,38 @@ describe("lintPr", () => {
         });
         expect(r.findings).toEqual([]);
         expect(r.floor).toBe("medium");
+    });
+
+    test("empty Migrations section is a finding", () => {
+        const r = lintPr({
+            title: "feat(fridge): show expiry",
+            branch: "feat/fridge-show",
+            body: [
+                "## Summary",
+                "x",
+                "## Blast radius",
+                "Level: medium",
+                "Rollback: revert-safe",
+                "## Changes",
+                "x",
+                "## Migrations",
+                "",
+                "## Contracts",
+                "None",
+                "## Testing",
+                "bun test",
+                "## Links",
+                "",
+            ].join("\n"),
+            files: ["src/domain/fridge.ts"],
+        });
+        expect(
+            r.findings.some(
+                (f) =>
+                    f.rule === "body" &&
+                    f.message === "Migrations section must not be empty",
+            ),
+        ).toBe(true);
     });
 
     test("missing Testing section", () => {

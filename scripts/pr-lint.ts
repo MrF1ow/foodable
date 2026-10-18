@@ -39,7 +39,6 @@ async function main(): Promise<void> {
         author = event.pull_request.user.login;
         branch = event.pull_request.head.ref;
         const baseRef = event.pull_request.base.ref;
-        await git(["fetch", "origin", baseRef]);
         const diff = await git([
             "diff",
             "--name-only",

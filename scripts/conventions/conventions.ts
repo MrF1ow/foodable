@@ -47,15 +47,17 @@ export const GRANDFATHERED_BRANCHES = [
     "cursor/",
 ] as const;
 
-export type BlastLevel = "low" | "medium" | "high";
+export type Level = "low" | "medium" | "high";
+export type BlastLevel = Level;
 
 export type Finding = { rule: string; message: string };
 
-type ClassifyResult = {
-    level: BlastLevel;
+export type Classified = {
+    level: Level;
     area: string;
     mapped: boolean;
 };
+type ClassifyResult = Classified;
 
 const HIGH_EXACT = new Set([
     "package.json",
@@ -329,7 +331,7 @@ export function parseTitle(title: string): ParsedTitle | { error: string } {
         if ("error" in inner) {
             return inner;
         }
-        return { ...inner, type: "revert" };
+        return inner;
     }
 
     if (title.length > 72) {
@@ -391,11 +393,11 @@ export function checkBranch(name: string): Finding[] {
             },
         ];
     }
-    if (slug !== "" && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    if (!slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
         return [
             {
                 rule: "branch",
-                message: `Branch slug must be [a-z0-9]+(-[a-z0-9]+)*, got ${slug}`,
+                message: `Branch slug must be [a-z0-9]+(-[a-z0-9]+)*, got ${slug ?? ""}`,
             },
         ];
     }
@@ -539,23 +541,20 @@ export function lintPr(input: {
             });
         }
         const migrations = sections["Migrations"];
-        if (hasMigrationFiles && sectionIsNone(migrations)) {
-            findings.push({
-                rule: "migrations",
-                message:
-                    "Migrations section must describe changes when migration files are present",
-            });
-        } else if (
-            migrations !== undefined &&
-            sectionIsNone(migrations) &&
-            !hasMigrationFiles
-        ) {
-            // None allowed when no migrations
-        } else if (migrations !== undefined && migrations.trim() === "") {
-            findings.push({
-                rule: "body",
-                message: "Migrations section must not be empty",
-            });
+        if (migrations !== undefined) {
+            const mt = migrations.trim();
+            if (mt === "") {
+                findings.push({
+                    rule: "body",
+                    message: "Migrations section must not be empty",
+                });
+            } else if (hasMigrationFiles && mt.toLowerCase() === "none") {
+                findings.push({
+                    rule: "migrations",
+                    message:
+                        "Migrations section must describe changes when migration files are present",
+                });
+            }
         }
 
         const contracts = sections["Contracts"];
