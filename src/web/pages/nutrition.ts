@@ -25,6 +25,7 @@ import {
     type ViewerChrome,
 } from "../shell.js";
 import { iconEye } from "../components/icons.js";
+import { quantityUnitOptionLabel } from "../display-quantity.js";
 import {
     errorBanner,
     modal,
@@ -91,25 +92,34 @@ function mealTypeSelect(): string {
             </select>`;
 }
 
-function logMealFormBody(): string {
-    return `<form class="meal-log" method="post" action="/log-meal">
-${mealTypeSelect()}
-<div class="meal-items" data-meal-items>
-<div class="meal-item" data-meal-item>
+const MEAL_ITEM_UNITS = ["g", "each", "oz", "ml", "cup"] as const;
+
+function mealItemUnitOptions(selected: string): string {
+    return MEAL_ITEM_UNITS.map((unit) => {
+        const sel = unit === selected ? " selected" : "";
+        const label = quantityUnitOptionLabel(unit);
+        return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
+    }).join("");
+}
+
+function mealItemRowHtml(): string {
+    return `<div class="meal-item" data-meal-item>
 <label class="meal-item-name">Food<input name="item_name" type="text" autocomplete="off" data-meal-item-name /></label>
 <ul class="food-picker-results meal-item-results" data-meal-item-results></ul>
 <input name="item_food_id" type="hidden" data-meal-item-food-id />
 <label>Amount<input name="item_amount" type="number" min="0" step="any" inputmode="decimal" /></label>
-<label>Unit<select name="item_unit">
-<option value="g">g</option>
-<option value="each" selected>each</option>
-<option value="oz">oz</option>
-<option value="ml">ml</option>
-<option value="cup">cup</option>
-</select></label>
-</div>
-</div>
+<label>Unit<select name="item_unit">${mealItemUnitOptions("each")}</select></label>
+<button type="button" class="btn-sm meal-item-remove" data-meal-item-remove aria-label="Remove food" hidden>Remove</button>
+</div>`;
+}
+
+function logMealFormBody(): string {
+    return `<form class="meal-log" method="post" action="/log-meal">
+${mealTypeSelect()}
+<div class="meal-items" data-meal-items>
+${mealItemRowHtml()}
 <button type="button" class="btn-sm" data-add-meal-item>Add another food</button>
+</div>
 <p class="muted">Or describe it</p>
 <label for="log-meal-description">Description</label>
 <input id="log-meal-description" name="description" type="text" autocomplete="off" />

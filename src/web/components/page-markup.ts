@@ -69,15 +69,16 @@ export function renderFridgeItemRow(opts: {
     const id = escapeHtml(opts.id);
     const expired = opts.expiryLevel === "expired";
     const expiryAttr = expired ? ` data-expiry="expired"` : "";
-    const pill = expired ? ` ${expiryPillExpired()}` : "";
+    const pill = expired ? expiryPillExpired() : "";
     const expiryText = opts.expiresOn
         ? `Expires ${escapeHtml(opts.expiresOn)}`
         : "No expiry";
     const meta = `${escapeHtml(opts.quantityLabel)} · ${expiryText}`;
+    const titleLine = `<div class="row-title-line"><p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}</p>${pill}</div>`;
     return `<li class="fridge-item" data-item-id="${id}" data-kind="${opts.kind}"${expiryAttr}>
 <div class="list-row fridge-item-row">
 <div class="list-row-main">
-<p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}${pill}</p>
+${titleLine}
 <p class="fridge-item-qty row-meta">${meta}</p>
 </div>
 <div class="row-actions">

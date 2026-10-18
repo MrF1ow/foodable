@@ -487,6 +487,43 @@ try {
 
     await control("post=ok&reset=posts&delay=0");
     await goto("/");
+    await clickSel('button[commandfor="nutrition-log-meal"]');
+    await sleep(40);
+    await ev(`(() => {
+        const root = document.querySelector("#nutrition-log-meal [data-meal-items]");
+        if (!root) return;
+        root.querySelector("[data-add-meal-item]")?.click();
+    })()`);
+    await sleep(40);
+    await ev(`(() => {
+        const names = document.querySelectorAll("#nutrition-log-meal [data-meal-item-name]");
+        if (names[0]) names[0].value = "Apple";
+        if (names[1]) names[1].value = "Banana";
+    })()`);
+    await ev(`(() => {
+        const rows = document.querySelectorAll("#nutrition-log-meal [data-meal-item]");
+        const second = rows[1];
+        if (second) second.querySelector("[data-meal-item-remove]")?.click();
+    })()`);
+    await sleep(40);
+    await clickSel("#nutrition-log-meal button[type='submit']");
+    await sleep(500);
+    const mealPosts = await stats();
+    const mealPost = mealPosts.posts.find((p) => p.path === "/log-meal");
+    const itemNames =
+        mealPost?.entries
+            .filter(([k]) => k === "item_name")
+            .map(([, v]) => v) ?? [];
+    record(
+        "nutrition log meal add remove row",
+        mealPost !== undefined &&
+            itemNames.length === 1 &&
+            itemNames[0] === "Apple",
+        { itemNames, mealPost, ex: drain() },
+    );
+
+    await control("post=ok&reset=posts&delay=0");
+    await goto("/");
     await setMarker();
     await clickSel('button[commandfor="nutrition-log-water"]');
     await sleep(40);

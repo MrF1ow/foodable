@@ -63,7 +63,7 @@ function foodEditForm(
 <label for="unit-${id}">Default unit</label>
 <input id="unit-${id}" name="default_unit" value="${escapeHtml(food.defaultUnit)}" />
 <div class="field-grid">
-${nutrientInput(`each-${food.id}`, "grams_per_each", "Grams per each", food.gramsPerEach)}
+${nutrientInput(`each-${food.id}`, "grams_per_each", "Grams per item", food.gramsPerEach)}
 ${nutrientInput(`ml-${food.id}`, "grams_per_ml", "Grams per millilitre", food.gramsPerMl)}
 ${nutrientInput(`cal-${food.id}`, "calories", "Calories / 100 g", food.calories)}
 ${nutrientInput(`pro-${food.id}`, "protein_g", "Protein g", food.proteinG)}

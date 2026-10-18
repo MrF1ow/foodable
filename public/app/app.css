@@ -490,10 +490,6 @@ details.more > summary .count {
     font-variant-numeric: tabular-nums;
 }
 
-.fridge-item-name .expiry-pill {
-    vertical-align: middle;
-}
-
 /* ---- P8.2a: list rows (title + meta left, actions right) ---- */
 
 .list-row {
@@ -508,7 +504,19 @@ details.more > summary .count {
     display: grid;
     gap: 2px;
 }
-.list-row-main .row-title {
+.list-row-main .row-title-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+.list-row-main .row-title-line .expiry-pill {
+    flex: none;
+    align-self: center;
+}
+.list-row-main .row-title-line .row-title {
+    flex: 1 1 auto;
+    min-width: 0;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
@@ -949,6 +957,13 @@ details.more > summary > :is(h2, h3) {
 .meal-item-results {
     grid-column: 1 / -1;
 }
+.meal-item-remove {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+.meal-item-remove[hidden] {
+    display: none;
+}
 
 /* ---- polish ---- */
 
@@ -1353,10 +1368,10 @@ body.auth {
 .modal-head {
     flex: none;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px 8px;
+    padding: var(--gap-field) 16px 10px;
     border-bottom: 1px solid var(--panel-border);
 }
 .modal-title {
@@ -1371,10 +1386,12 @@ body.auth {
     flex-shrink: 0;
     display: grid;
     place-items: center;
+    min-height: 0;
     width: 36px;
     height: 36px;
-    margin: -4px -6px 0 0;
+    margin: 0 -6px 0 0;
     padding: 0;
+    align-self: center;
     border: none;
     border-radius: var(--r-12);
     background: transparent;
