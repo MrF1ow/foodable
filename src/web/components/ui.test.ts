@@ -54,14 +54,25 @@ test("pageHeader is an h1, wrapped in dash-head when there is a sub or actions",
 <h1>Create household</h1>
 <p class="muted">Name it.</p>
 </header>`);
+    const withTitleActions = pageHeader({
+        title: "Fridge",
+        titleActions: `<button type="button" class="btn-sm btn-primary">Add</button>`,
+    });
+    expect(withTitleActions).toContain('<header class="dash-head">');
+    expect(withTitleActions).toContain('<div class="dash-head-title-row">');
+    expect(withTitleActions).toContain("<h1>Fridge</h1>");
+    expect(withTitleActions).toContain('<div class="dash-head-title-actions">');
+    expect(withTitleActions).not.toContain('<div class="page-actions">');
     const withNav = pageHeader({
         title: "Alice",
-        actions: `<nav class="member-switch">x</nav>`,
+        titleActions: `<nav class="member-switch">x</nav>`,
+        actions: `<button type="button" class="btn-sm">Log meal</button>`,
     });
     expect(withNav).toContain('<header class="dash-head">');
     expect(withNav).toContain("<h1>Alice</h1>");
     expect(withNav).toContain('<div class="page-actions">');
     expect(withNav).toContain('<nav class="member-switch">x</nav>');
+    expect(withNav).toContain("Log meal");
 });
 
 test("errorBanner, emptyState, disclosure, panel, and row markup", () => {

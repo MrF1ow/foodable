@@ -565,8 +565,9 @@ test("grocery header actions and modals match fridge patterns", () => {
     expect(html).toContain('commandfor="grocery-add-store"');
     expect(html).toContain('commandfor="grocery-clear-checked"');
     expect(html).toMatch(
-        /<button type="button" class="btn-danger" commandfor="grocery-clear-checked"/,
+        /<button type="button" class="btn-sm btn-danger" commandfor="grocery-clear-checked"/,
     );
+    expect(html).toContain('<div class="grocery-line-put-away">');
     expect(html).toContain("Remove every checked item from the list?");
     expect(html).toContain('commandfor="grocery-add-food-st-1"');
     expect(html).toContain('<form class="grocery-put-away row-actions"');

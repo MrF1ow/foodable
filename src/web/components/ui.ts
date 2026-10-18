@@ -3,11 +3,21 @@ import { escapeHtml } from "../../html.js";
 export function pageHeader(opts: {
     title: string;
     sub?: string;
+    /** Controls on the same line as the page title (wrap under on narrow screens). */
+    titleActions?: string;
     actions?: string;
 }): string {
     const h1 = `<h1>${escapeHtml(opts.title)}</h1>`;
-    if (!opts.sub && !opts.actions) return h1;
-    const parts = [h1];
+    const titleBlock = opts.titleActions
+        ? `<div class="dash-head-title-row">
+${h1}
+<div class="dash-head-title-actions">
+${opts.titleActions}
+</div>
+</div>`
+        : h1;
+    if (!opts.sub && !opts.titleActions && !opts.actions) return h1;
+    const parts = [titleBlock];
     if (opts.sub) parts.push(opts.sub);
     if (opts.actions) {
         parts.push(`<div class="page-actions">\n${opts.actions}\n</div>`);

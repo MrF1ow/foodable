@@ -51,8 +51,8 @@ export function renderGroceryLineRow(opts: {
 <div class="list-row-main">
 <p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
 <p class="grocery-line-meta row-meta">${meta}</p>
+${opts.putAwayHtml ? `<div class="grocery-line-put-away">${opts.putAwayHtml}</div>` : ""}
 </div>
-${opts.putAwayHtml ? `<div class="row-actions">${opts.putAwayHtml}</div>` : ""}
 </div>
 </li>`;
 }

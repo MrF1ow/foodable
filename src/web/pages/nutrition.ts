@@ -185,7 +185,7 @@ function logTriggers(): string {
     return `${modalTrigger({
         target: NUTRITION_LOG_MEAL_MODAL_ID,
         label: "Log meal",
-        className: "btn-primary",
+        className: "btn-sm",
     })}
 ${modalTrigger({
     target: NUTRITION_LOG_WATER_MODAL_ID,
@@ -457,10 +457,11 @@ export async function renderNutritionPage(
     const isPeer = view.access.mode === "peer";
     const peerTag = isPeer ? peerViewTag(view.access.subject.displayName) : "";
 
-    const selfActions: string[] = [];
+    const memberSwitch = `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`;
+    const pageActions: string[] = [];
     if (!isPeer) {
-        selfActions.push(logTriggers());
-        selfActions.push(
+        pageActions.push(logTriggers());
+        pageActions.push(
             modalTrigger({
                 target: NUTRITION_ARRANGE_MODAL_ID,
                 label: "Arrange",
@@ -468,11 +469,6 @@ export async function renderNutritionPage(
             }),
         );
     }
-    selfActions.push(
-        `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`,
-    );
-
-    const headActions = selfActions.join("\n");
 
     const modalIds = [
         NUTRITION_LOG_MEAL_MODAL_ID,
@@ -485,8 +481,9 @@ export async function renderNutritionPage(
     const body = `
         ${pageHeader({
             title: view.access.subject.displayName,
+            titleActions: memberSwitch,
             sub: peerTag || undefined,
-            actions: headActions,
+            actions: pageActions.length ? pageActions.join("\n") : undefined,
         })}
         ${pageError}
         ${orderedCards}

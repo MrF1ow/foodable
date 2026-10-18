@@ -162,10 +162,10 @@ export function renderRecipesPage(view: RecipesPageView): string {
     const body = `
         ${pageHeader({
             title: "Recipes",
-            actions: modalTrigger({
+            titleActions: modalTrigger({
                 target: NEW_RECIPE_MODAL_ID,
                 label: "New recipe",
-                className: "btn-primary",
+                className: "btn-sm btn-primary",
             }),
         })}
         ${error}

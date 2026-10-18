@@ -259,7 +259,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
             modalTrigger({
                 target: ADD_STORE_MODAL_ID,
                 label: "Add store",
-                className: "btn-primary",
+                className: "btn-sm btn-primary",
             }),
         );
     }
@@ -268,7 +268,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
             modalTrigger({
                 target: CLEAR_CHECKED_MODAL_ID,
                 label: "Clear checked",
-                className: "btn-danger",
+                className: "btn-sm btn-danger",
             }),
         );
     }
@@ -308,7 +308,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
     const body = `
         ${pageHeader({
             title: "Groceries",
-            actions: headerActions.length
+            titleActions: headerActions.length
                 ? headerActions.join("\n")
                 : undefined,
         })}

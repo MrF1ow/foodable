@@ -285,10 +285,10 @@ export function renderFridgePage(view: FridgePageView): string {
     const body = `
         ${pageHeader({
             title: "Fridge",
-            actions: modalTrigger({
+            titleActions: modalTrigger({
                 target: addLocationId,
                 label: "Add location",
-                className: "btn-primary",
+                className: "btn-sm btn-primary",
             }),
         })}
         ${pageLevelErrorBanner(view, modalIds)}

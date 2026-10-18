@@ -213,9 +213,9 @@ html:has(dialog.modal[open]) {
 }
 :where(.app-main) h2 {
     margin: 0;
-    font-size: var(--fs-15);
-    font-weight: 800;
-    letter-spacing: -0.01em;
+    font-size: var(--fs-19);
+    font-weight: 700;
+    letter-spacing: -0.02em;
 }
 :where(.app-main) h3 {
     margin: 0;
@@ -459,6 +459,26 @@ html:has(dialog.modal[open]) {
     display: grid;
     gap: 10px;
 }
+.dash-head-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    min-width: 0;
+}
+.dash-head-title-row h1 {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.dash-head-title-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.dash-head-title-actions .member-switch {
+    flex: 0 1 auto;
+}
 .page-actions {
     display: flex;
     flex-wrap: wrap;
@@ -515,13 +535,17 @@ details.more > summary .count {
     align-self: center;
 }
 .list-row-main .row-title-line .row-title {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     overflow: hidden;
     overflow-wrap: anywhere;
+}
+.list-row-main .row-title {
+    font-size: var(--fs-16);
+    font-weight: 600;
 }
 .list-row-main .row-meta {
     margin-left: 0;
@@ -777,6 +801,21 @@ details.more > summary > :is(h2, h3) {
     color: var(--text-dim);
     text-decoration: line-through;
 }
+.grocery-line-put-away {
+    min-width: 0;
+}
+.grocery-line-put-away .grocery-put-away {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+.grocery-line-put-away .grocery-put-away select {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+}
 .store-rule-list {
     margin: 0;
     padding-left: 1.1em;
@@ -884,8 +923,8 @@ details.more > summary > :is(h2, h3) {
 }
 .recipe-panel-head .row-title {
     margin: 0;
-    font-size: var(--fs-18);
-    font-weight: 650;
+    font-size: inherit;
+    font-weight: inherit;
 }
 .recipe-tags {
     display: flex;
@@ -1108,7 +1147,6 @@ details.more > summary > :is(h2, h3) {
     line-height: 1.1;
 }
 :where(.app-main) h2 {
-    font-weight: 650;
     letter-spacing: -0.015em;
 }
 /* Eyebrows, like the site's "WHY IT EXISTS": a green that passes AA as text. */
