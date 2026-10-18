@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR } from "../tokens.js";
+import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut } from "./components/icons.js";
 import { pageHeader } from "./components/ui.js";
@@ -54,19 +55,21 @@ function themeColorMeta(theme: ThemePref): string {
 }
 
 export function appBar(): string {
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-logout" href="/logout" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-logout" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
 }
 
 export function appHead(title: string, theme: ThemePref): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="turbo-refresh-method" content="morph" />
+<meta name="turbo-refresh-scroll" content="preserve" />
 ${themeColorMeta(theme)}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
-<link rel="icon" href="/brand/icon.svg" type="image/svg+xml" />
+<link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-<link rel="stylesheet" href="/app.css" />
-<script src="/app.js" defer></script>`;
+<link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
+<script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }
 
 export function renderAppShell(chrome: AppChrome): string {

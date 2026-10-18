@@ -15,6 +15,7 @@ import { HTML_LANG } from "../src/routes.js";
 import { generatedBanner } from "./site-partials.js";
 import { escapeHtml as esc } from "../src/html.js";
 import { appHead } from "../src/web/shell.js";
+import { getAppCss, getAppJs } from "../src/widgets.js";
 import { LOGIN, type LoginDoc } from "../src/copy/login.js";
 import { rm } from "node:fs/promises";
 
@@ -53,10 +54,18 @@ async function removeStaleMarketingHtml(): Promise<void> {
 }
 
 await removeStaleMarketingHtml();
+await getAppCss();
+await getAppJs();
+
+function loginAppHead(title: string): string {
+    return appHead(title, "system")
+        .replace(/href="[^"]*app\.css[^"]*"/, 'href="{{APP_CSS_HREF}}"')
+        .replace(/src="[^"]*app\.js[^"]*"/, 'src="{{APP_JS_HREF}}"');
+}
 
 function renderDoc(doc: LoginDoc): string {
     // appHead escapes the title itself.
-    const head = appHead(`${doc.title} — ${doc.subtitle}`, "system")
+    const head = loginAppHead(`${doc.title} — ${doc.subtitle}`)
         .split("\n")
         .map((line) => `        ${line}`)
         .join("\n");
@@ -80,6 +89,7 @@ ${head}
              belt-and-suspenders in case a stray link to /authorize is ever
              crawled. -->
         <meta name="robots" content="noindex, nofollow" />
+        <meta name="turbo-visit-control" content="reload" />
     </head>
     <body class="auth">
 ${generatedBanner("scripts/gen-login.ts")}
@@ -94,7 +104,7 @@ ${generatedBanner("scripts/gen-login.ts")}
                 {{CONNECT_HINT}}
                 {{ERROR}}
 
-                <form method="POST" action="/approve" class="auth-form">
+                <form method="POST" action="/approve" class="auth-form" data-turbo="false">
                     <input type="hidden" name="session_id" value="{{SESSION_ID}}" />
                     <label for="email">${esc(doc.emailLabel)}</label>
                     <input type="text" id="email" name="email" required autocomplete="username" autocapitalize="none" spellcheck="false" />

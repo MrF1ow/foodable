@@ -1,0 +1,704 @@
+/**
+ * Renders every household-app page with fixture data, in light and dark, and
+ * serves the result next to the real /app.css so the pages can be looked at
+ * without Supabase. The widget equivalent is scripts/widget-harness.ts.
+ *
+ *   bun run scripts/nav-check-fixture.ts   # fixture server for check:nav (:4791)
+ *
+ * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
+ * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
+ * profile). Shots pass --force-prefers-reduced-motion so --virtual-time-budget
+ * does not freeze page entrances half-done, a throwaway --user-data-dir, and
+ * an emulated prefers-color-scheme so bare pages (OS theme) render light and
+ * dark as different bytes.
+ * The server never imports this file.
+ */
+import { utcTodayFromDate } from "../src/domain/stock.js";
+import { renderFridgePage } from "../src/web/pages/fridge.js";
+import { renderGroceryPage } from "../src/web/pages/grocery.js";
+import {
+    renderRecipeDetailPage,
+    renderRecipesPage,
+} from "../src/web/pages/recipes.js";
+import { renderSettingsPage } from "../src/web/pages/settings.js";
+import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
+import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
+import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
+import {
+    renderNutritionPage,
+    viewerChromeFromProfile,
+} from "../src/web/pages/nutrition.js";
+import {
+    createHouseholdFormHtml,
+    forbiddenDashboardHtml,
+} from "../src/web/loaders.js";
+import { getAppCss, getAppJs } from "../src/widgets.js";
+
+const OUT = "./tmp/app-preview";
+const PORT = 4791;
+const H = "hh-1";
+const ME = {
+    householdId: H,
+    userId: "u1",
+    role: "owner",
+    displayName: "Ethan",
+};
+const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+
+// The widget templates carry a SAMPLE payload for standalone preview; reuse it
+// so the nutrition page shows real cards.
+async function widgetSample(key: string): Promise<unknown> {
+    const src = await Bun.file(
+        `./public/widgets/src/templates/${key}.html`,
+    ).text();
+    const m = src.match(/const SAMPLE = (\{[\s\S]*?\n {12}\});/);
+    return m ? new Function(`return (${m[1]})`)() : { locale: "en" };
+}
+
+function addUtcDays(isoDate: string, days: number): string {
+    const d = new Date(`${isoDate}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
+function fridgeView(chrome: unknown) {
+    const today = utcTodayFromDate();
+    const loc = (id: string, name: string, sortOrder: number) => ({
+        id,
+        householdId: H,
+        name,
+        sortOrder,
+    });
+    const item = (
+        id: string,
+        locationId: string,
+        displayName: string,
+        amount: number,
+        unit: string,
+        expiresOn: string | null,
+        food = true,
+    ) => ({
+        id,
+        householdId: H,
+        locationId,
+        kind: food ? "food" : "supply",
+        displayName,
+        quantity: { amount, unit },
+        identity: {},
+        foodId: food ? `f-${id}` : `f-sup-${id}`,
+        expiresOn,
+    });
+    return {
+        chrome,
+        locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
+        items: [
+            item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
+            item("i2", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
+            item("i3", "l1", "Yogurt", 2, "each", addUtcDays(today, 3)),
+            item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
+            item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
+            item("i6", "l2", "Paper towels", 3, "roll", null, false),
+            ...Array.from({ length: 42 }, (_, i) =>
+                item(
+                    `i-scroll-${i}`,
+                    "l2",
+                    `Pantry filler ${i + 1}`,
+                    1,
+                    "each",
+                    addUtcDays(today, 30 + (i % 14)),
+                ),
+            ),
+        ],
+    };
+}
+
+function groceryView(chrome: unknown) {
+    const section = (
+        storeId: string,
+        id: string,
+        name: string,
+        isOther: boolean,
+        lines: unknown[],
+    ) => ({
+        id,
+        householdId: H,
+        storeId,
+        name,
+        sortOrder: isOther ? 8 : 0,
+        hidden: false,
+        isOther,
+        lines,
+    });
+    const line = (
+        storeId: string,
+        sectionId: string,
+        id: string,
+        name: string,
+        amount: number,
+        unit: string,
+        checked: boolean,
+        alreadyHave: unknown = null,
+    ) => ({
+        id,
+        householdId: H,
+        storeId,
+        sectionId,
+        kind: "food",
+        displayName: name,
+        quantity: { amount, unit },
+        identity: {},
+        foodId: `f-${id}`,
+        checked,
+        alreadyHave,
+    });
+    return {
+        chrome,
+        isOwner: true,
+        locations: [
+            { id: "l1", name: "Fridge" },
+            { id: "l2", name: "Pantry" },
+        ],
+        stores: [
+            {
+                id: "s1",
+                householdId: H,
+                name: "Safeway",
+                sortOrder: 0,
+                rules: [{ id: "r1", body: "Prefer store brand." }],
+                sections: [
+                    section("s1", "sec1", "Produce", false, [
+                        line("s1", "sec1", "g1", "Bananas", 6, "each", false),
+                        line("s1", "sec1", "g2", "Spinach", 300, "g", true),
+                    ]),
+                    section("s1", "sec2", "Other", true, [
+                        line("s1", "sec2", "g3", "Eggs", 12, "each", false, {
+                            cover: "partial",
+                            have: { amount: 6, unit: "each" },
+                            need: { amount: 12, unit: "each" },
+                        }),
+                    ]),
+                ],
+            },
+            {
+                id: "s2",
+                householdId: H,
+                name: "Costco",
+                sortOrder: 1,
+                rules: [],
+                sections: [
+                    section("s2", "sec3", "Dairy", false, [
+                        line("s2", "sec3", "g4", "Milk", 2, "l", false),
+                    ]),
+                ],
+            },
+        ],
+    };
+}
+
+const RECIPE = {
+    id: "r1",
+    householdId: H,
+    creatorId: "u1",
+    name: "Shakshuka",
+    yieldPortions: 4,
+    instructions: "Simmer tomatoes, crack eggs, cover.",
+    sourceUrl: null,
+    tags: ["dinner", "vegetarian"],
+    notes: null,
+    prepMinutes: 10,
+    cookMinutes: 20,
+};
+
+const RECIPE_TWO = {
+    id: "r2",
+    householdId: H,
+    creatorId: "u1",
+    name: "Oatmeal",
+    yieldPortions: 2,
+    instructions: "Simmer oats.",
+    sourceUrl: null,
+    tags: ["breakfast"],
+    notes: null,
+    prepMinutes: 5,
+    cookMinutes: 10,
+};
+
+const MACROS = {
+    calories: 320,
+    protein_g: 18,
+    carbs_g: 22,
+    fat_g: 17,
+    fiber_g: 5,
+    sugar_g: 9,
+    alcohol_g: 0,
+    incomplete: false,
+    incompleteReasons: [],
+};
+
+function food(id: string, name: string, calories: number | null) {
+    return {
+        id,
+        householdId: H,
+        kind: "food",
+        name,
+        normalizedName: name.toLowerCase(),
+        brand: null,
+        defaultUnit: "g",
+        gramsPerEach: null,
+        gramsPerMl: null,
+        calories,
+        proteinG: null,
+        carbsG: null,
+        fatG: null,
+        fiberG: null,
+        sugarG: null,
+        alcoholG: null,
+        caffeineMg: null,
+        nutritionSource: null,
+        allergens: [],
+        offSourceId: null,
+        createdBy: null,
+        archivedAt: null,
+        createdAt: "2026-10-01T00:00:00Z",
+        updatedAt: "2026-10-01T00:00:00Z",
+        aliases: [],
+    };
+}
+
+// Views are cast with `as never`: this script is not typechecked (CI's
+// typecheck covers src/ only) and the fixtures only carry what renderers read.
+async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
+    const chrome = viewerChromeFromProfile({ theme });
+    const nutrition = await renderNutritionPage({
+        access: { ok: true, mode: "self", viewer: ME, subject: ME },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+    } as never);
+    return {
+        nutrition,
+        fridge: renderFridgePage(fridgeView(chrome) as never),
+        grocery: renderGroceryPage(groceryView(chrome) as never),
+        recipes: renderRecipesPage({
+            chrome,
+            recipes: [RECIPE, RECIPE_TWO],
+            members: [ME, SAM],
+            viewerId: "u1",
+        } as never),
+        recipe: renderRecipeDetailPage({
+            chrome,
+            recipe: RECIPE,
+            ingredients: [
+                {
+                    id: "ing1",
+                    recipeId: "r1",
+                    foodId: "f1",
+                    displayName: "Eggs",
+                    quantity: { amount: 6, unit: "each" },
+                    note: "large",
+                    sortOrder: 0,
+                    perPortionAmount: 1.5,
+                    personAmount: 1.5,
+                },
+            ],
+            members: [ME, SAM],
+            stores: [{ id: "s1", name: "Safeway" }],
+            viewerId: "u1",
+            filterUserId: "u1",
+            portionCount: 1,
+            macros: MACROS,
+            isOwner: true,
+        } as never),
+        settings: renderSettingsPage({
+            chrome,
+            displayName: "Ethan",
+            timezone: "America/Los_Angeles",
+            weightUnit: "kg",
+            widgetsEnabled: true,
+            alcoholTrackingEnabled: false,
+            drinkUnit: "",
+        } as never),
+        household: renderHouseholdSettingsPage({
+            chrome,
+            householdName: "Flow house",
+            location: "Portland",
+            members: [ME, SAM],
+            stores: [
+                {
+                    id: "s1",
+                    householdId: H,
+                    name: "Safeway",
+                    sortOrder: 0,
+                    sections: [
+                        {
+                            id: "sec1",
+                            householdId: H,
+                            storeId: "s1",
+                            name: "Produce",
+                            sortOrder: 0,
+                            hidden: false,
+                            isOther: false,
+                        },
+                    ],
+                    rules: [{ id: "r1", body: "Prefer store brand." }],
+                },
+            ],
+            memberRules: [
+                { member: ME, rules: [], allergens: [], dislikes: [] },
+            ],
+            isOwner: true,
+        } as never),
+        foods: renderFoodsSettingsPage({
+            chrome,
+            foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
+        } as never),
+        help: renderSettingsHelpPage({ chrome } as never),
+        "create-household": createHouseholdFormHtml(undefined, theme),
+        forbidden: forbiddenDashboardHtml(theme),
+    };
+}
+
+function findChromium(): string | null {
+    // Prefer the real binary. PATH `google-chrome` is often a wrapper that
+    // pins --user-data-dir to the GUI profile and hangs headless shots.
+    for (const bin of [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ]) {
+        if (bin.startsWith("/")) {
+            try {
+                if (Bun.file(bin).size > 0) return bin;
+            } catch {
+                // missing
+            }
+            continue;
+        }
+        const path = Bun.which(bin);
+        if (path) return path;
+    }
+    return null;
+}
+
+const names: string[] = [];
+for (const theme of ["light", "dark"] as const) {
+    for (const [name, html] of Object.entries(await pages(theme))) {
+        const file = `${name}-${theme}`;
+        await Bun.write(`${OUT}/${file}.html`, html);
+        names.push(file);
+    }
+}
+
+const ROUTES: Record<string, string> = {
+    "/": "nutrition-light.html",
+    "/fridge": "fridge-light.html",
+    "/grocery": "grocery-light.html",
+    "/recipes": "recipes-light.html",
+    "/settings": "settings-light.html",
+    "/settings/help": "help-light.html",
+    "/settings/household": "household-light.html",
+    "/settings/foods": "foods-light.html",
+    "/create-household": "create-household-light.html",
+};
+
+let stallMs = 0;
+let postMode = "ok";
+let modalId = "";
+let loginPath = "";
+let postDelay = 0;
+let sessionMode: "app" | "guest" = "app";
+const posts: { path: string; entries: [string, string][] }[] = [];
+const gets: { path: string; n: number }[] = [];
+const getCounts = new Map<string, number>();
+const searchHits: string[] = [];
+let approveCount = 0;
+const pending = new Map<string, { html: string; status: number }>();
+
+function sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
+}
+
+function stamp(html: string, path: string) {
+    const n = (getCounts.get(path) || 0) + 1;
+    getCounts.set(path, n);
+    gets.push({ path, n });
+    if (!html.includes('class="app-main')) return html;
+    return html.replace(
+        '<main class="app-main native">',
+        `<main class="app-main native"><p id="p8-rev" data-rev="${n}" hidden></p>`,
+    );
+}
+
+async function fileHtml(file: string, path: string) {
+    const raw = await Bun.file(`${OUT}/${file}`).text();
+    return stamp(raw, path);
+}
+
+async function loginDocument() {
+    const raw = await Bun.file("./public/login.html").text();
+    return raw
+        .replaceAll("{{SESSION_ID}}", "sess-p8")
+        .replaceAll("{{ERROR}}", "")
+        .replaceAll("{{CONNECT_HINT}}", "");
+}
+
+function injectModal(html: string, id: string) {
+    if (!id) return html;
+    const re = new RegExp(`(<dialog\\b[^>]*\\bid="${id}"[^>]*)>`);
+    return html
+        .replace(re, (_full, openTag) => {
+            const cleaned = String(openTag).replace(
+                /\sdata-modal-open-on-load/g,
+                "",
+            );
+            return `${cleaned} data-modal-open-on-load>`;
+        })
+        .replace(
+            new RegExp(
+                `(<dialog\\b[^>]*\\bid="${id}"[^>]*>\\s*<div class="modal-sheet">)`,
+            ),
+            `$1<p class="error-banner" id="p8-error">Name is required</p>`,
+        );
+}
+
+function stripItem(html: string, id: string) {
+    const re = new RegExp(
+        `<li\\b[^>]*class="[^"]*fridge-item[^"]*"[^>]*data-item-id="${id}"[\\s\\S]*?</li>`,
+    );
+    if (!re.test(html)) {
+        const re2 = new RegExp(
+            `<li\\b[^>]*data-item-id="${id}"[^>]*>[\\s\\S]*?</li>`,
+        );
+        return html.replace(re2, `<p id="done">Item removed</p>`);
+    }
+    return html.replace(re, `<p id="done">Item removed</p>`);
+}
+
+const server = Bun.serve({
+    port: PORT,
+    async fetch(req) {
+        const url = new URL(req.url);
+        const path = url.pathname;
+        if (path === "/__stats") {
+            return Response.json({
+                gets,
+                posts,
+                searchHits,
+                approveCount,
+                stallMs,
+                postMode,
+                modalId,
+                loginPath,
+                postDelay,
+                sessionMode,
+                counts: Object.fromEntries(getCounts),
+            });
+        }
+        if (path === "/__control") {
+            if (url.searchParams.has("stall"))
+                stallMs = Number(url.searchParams.get("stall"));
+            if (url.searchParams.has("post"))
+                postMode = url.searchParams.get("post") || "ok";
+            if (url.searchParams.has("modal"))
+                modalId = url.searchParams.get("modal") || "";
+            if (url.searchParams.has("loginpath"))
+                loginPath = url.searchParams.get("loginpath") || "";
+            if (url.searchParams.has("delay"))
+                postDelay = Number(url.searchParams.get("delay"));
+            if (url.searchParams.get("reset") === "posts") posts.length = 0;
+            if (url.searchParams.get("reset") === "search")
+                searchHits.length = 0;
+            if (url.searchParams.get("reset") === "approve") approveCount = 0;
+            if (url.searchParams.has("session")) {
+                const mode = url.searchParams.get("session");
+                sessionMode = mode === "guest" ? "guest" : "app";
+            }
+            return Response.json({
+                ok: true,
+                stallMs,
+                postMode,
+                modalId,
+                loginPath,
+                postDelay,
+                sessionMode,
+            });
+        }
+        if (path === "/app.css" || path === "/app.js") {
+            const css = path === "/app.css";
+            const body = css ? await getAppCss() : await getAppJs();
+            const { appScriptHref, appStylesheetHref } =
+                await import("../src/widgets.js");
+            const href = css ? appStylesheetHref() : appScriptHref();
+            const v = url.searchParams.get("v");
+            const expected = new URL(`http://x${href}`).searchParams.get("v");
+            const cache =
+                v && expected && v === expected
+                    ? "public, max-age=31536000, immutable"
+                    : "no-cache";
+            return new Response(body, {
+                headers: {
+                    "content-type": css
+                        ? "text/css; charset=utf-8"
+                        : "text/javascript; charset=utf-8",
+                    "cache-control": cache,
+                },
+            });
+        }
+        if (path === "/api/foods/search") {
+            searchHits.push(url.search);
+            return Response.json({
+                foods: [
+                    {
+                        food_id: "f1",
+                        name: "Eggs",
+                        brand: "Farm",
+                        default_unit: "each",
+                    },
+                ],
+            });
+        }
+        if (path === "/logout") {
+            return new Response(null, {
+                status: 302,
+                headers: { Location: "/logged-out" },
+            });
+        }
+        if (path === "/logged-out") {
+            return new Response(
+                `<!doctype html><html><head><title>Logged out</title></head><body><p id="out">logged out</p></body></html>`,
+                {
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                },
+            );
+        }
+        if (path === "/login-test") {
+            const html = await loginDocument();
+            return new Response(html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        if (path === "/approve" && req.method === "POST") {
+            approveCount += 1;
+            if (approveCount === 1) {
+                return new Response(null, {
+                    status: 302,
+                    headers: { Location: "/after-login" },
+                });
+            }
+            return Response.json({ error: "session_expired" }, { status: 400 });
+        }
+        if (path === "/after-login") {
+            const html = await fileHtml("nutrition-light.html", "/after-login");
+            return new Response(html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        if (req.method === "POST") {
+            const form = await req.formData();
+            const entries: [string, string][] = [];
+            for (const [k, v] of form.entries()) entries.push([k, String(v)]);
+            posts.push({ path, entries });
+            if (postDelay) await sleep(postDelay);
+            const referer =
+                req.headers.get("referer") || "http://127.0.0.1:4791/fridge";
+            const dest = new URL(referer);
+            const destKey = dest.pathname + dest.search;
+            const file = ROUTES[dest.pathname] || ROUTES["/fridge"];
+            let html = await fileHtml(file!, destKey + "#post");
+            if (postMode === "json") {
+                return Response.json({ error: "nope" }, { status: 500 });
+            }
+            if (postMode === "login") {
+                const login = await loginDocument();
+                return new Response(login, {
+                    status: 401,
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                });
+            }
+            const item = path.split("/")[3] || "";
+            if (postMode === "fail" || postMode === "modal") {
+                html = injectModal(html, modalId);
+                html = html.replace(
+                    "</main>",
+                    `<script>window.__xss=1</script></main>`,
+                );
+                return new Response(html, {
+                    status: 400,
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                });
+            }
+            if (path.includes("/delete") && item) html = stripItem(html, item);
+            html = html.replace("</main>", `<p id="done">saved</p></main>`);
+            pending.set(destKey, { html, status: 200 });
+            return new Response(null, {
+                status: 303,
+                headers: { Location: destKey },
+            });
+        }
+        if (pending.has(path + url.search)) {
+            const hit = pending.get(path + url.search)!;
+            pending.delete(path + url.search);
+            return new Response(hit.html, {
+                status: hit.status,
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        if (path === "/session-login") {
+            const login = await loginDocument();
+            return new Response(login, {
+                status: req.method === "GET" ? 200 : 401,
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        if (loginPath && path === loginPath) {
+            loginPath = "";
+            const login = await loginDocument();
+            return new Response(login, {
+                status: 200,
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        if (path.startsWith("/recipes/")) {
+            if (stallMs) await sleep(stallMs);
+            const html = await fileHtml("recipe-light.html", path);
+            return new Response(html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        const mapped = ROUTES[path];
+        if (mapped) {
+            if (sessionMode === "guest") {
+                const login = await loginDocument();
+                return new Response(login, {
+                    status: 200,
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                });
+            }
+            if (stallMs) await sleep(stallMs);
+            const html = await fileHtml(mapped, path + url.search);
+            return new Response(html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
+        const file = Bun.file(`${OUT}${path}`);
+        if (await file.exists()) return new Response(file);
+        const pub = Bun.file(`./public${path}`);
+        return (await pub.exists())
+            ? new Response(pub)
+            : new Response("not found", { status: 404 });
+    },
+});
+console.log(`p8 preview: http://127.0.0.1:${server.port}/`);

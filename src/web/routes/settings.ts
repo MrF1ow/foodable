@@ -129,7 +129,7 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
-        return c.redirect("/settings");
+        return c.redirect("/settings", 303);
     }
     const appearance = parseAppearanceInput({ theme: body.theme });
     await upsertProfile(userId, appearance);
@@ -137,7 +137,7 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);
     }
-    return c.redirect("/settings");
+    return c.redirect("/settings", 303);
 });
 
 settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
@@ -163,7 +163,7 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
                 : "Could not create the household.";
         return c.html(createHouseholdFormHtml(message), 400);
     }
-    return c.redirect("/");
+    return c.redirect("/", 303);
 });
 
 settingsRoutes.post("/settings/household", requireOwner, async (c) => {
@@ -195,7 +195,7 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
         });
         return c.html(page.html, 400);
     }
-    return c.redirect("/settings/household");
+    return c.redirect("/settings/household", 303);
 });
 
 settingsRoutes.post("/settings/household/name", requireOwner, async (c) => {
@@ -211,7 +211,7 @@ settingsRoutes.post("/settings/household/name", requireOwner, async (c) => {
     }
     const config = await getHouseholdConfig(owner.householdId);
     await updateHouseholdConfig(owner.householdId, { ...config, name });
-    return c.redirect("/settings/household");
+    return c.redirect("/settings/household", 303);
 });
 
 settingsRoutes.post("/settings/household/location", requireOwner, async (c) => {
@@ -222,7 +222,7 @@ settingsRoutes.post("/settings/household/location", requireOwner, async (c) => {
         owner.householdId,
         formText(body, "location"),
     );
-    return c.redirect("/settings/household");
+    return c.redirect("/settings/household", 303);
 });
 
 settingsRoutes.post(
@@ -275,7 +275,7 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err, makeOwnerModal);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -320,7 +320,7 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -342,7 +342,7 @@ settingsRoutes.post("/settings/household/stores", requireOwner, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/household");
+    return c.redirect("/settings/household", 303);
 });
 
 settingsRoutes.post(
@@ -363,7 +363,7 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -389,7 +389,7 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -415,7 +415,7 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -440,7 +440,7 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -465,7 +465,7 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household");
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -524,7 +524,7 @@ settingsRoutes.post("/settings/foods/merge", requireMember, async (c) => {
         const page = await foodsFormError(userId, err, FOODS_MERGE_MODAL_ID);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/foods");
+    return c.redirect("/settings/foods", 303);
 });
 
 settingsRoutes.post("/settings/foods/:id", requireMember, async (c) => {
@@ -567,5 +567,5 @@ settingsRoutes.post("/settings/foods/:id", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/foods");
+    return c.redirect("/settings/foods", 303);
 });

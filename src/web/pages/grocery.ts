@@ -86,6 +86,16 @@ function hasCheckedLine(stores: GroceryStoreView[]): boolean {
     return false;
 }
 
+function grocerySectionFieldHtml(store: GroceryStoreView): string {
+    const other = store.sections.find((section) => section.isOther);
+    if (other) return "";
+    const sec =
+        store.sections.find((section) => !section.hidden && !section.isOther) ??
+        store.sections[0];
+    if (!sec) return "";
+    return `<input type="hidden" name="section_id" value="${escapeHtml(sec.id)}" data-grocery-section-field />`;
+}
+
 function storeSectionSelect(store: GroceryStoreView): string {
     const other = store.sections.find((section) => section.isOther);
     const inferAttr = other
@@ -205,6 +215,7 @@ ${renderFoodPicker({
     action: "/grocery/lines",
     method: "post",
     hiddenFields: hidden,
+    formExtras: grocerySectionFieldHtml(store),
     includeQuantity: true,
 })}`,
     });

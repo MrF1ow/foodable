@@ -102,7 +102,7 @@ recipesRoutes.post("/recipes", requireMember, async (c) => {
             name: formText(body, "name"),
             yieldPortions: formAmount(body, "yield_portions"),
         });
-        return c.redirect(`/recipes/${recipe.id}`);
+        return c.redirect(`/recipes/${recipe.id}`, 303);
     } catch (err) {
         const page = await recipeFormError(userId, null, err, {
             openModalId: "recipe-new",
@@ -159,7 +159,7 @@ recipesRoutes.post("/recipes/:id/log-portion", requireMember, async (c) => {
             ),
             item_digest: itemListDigest(specs),
         });
-        return c.redirect("/");
+        return c.redirect("/", 303);
     } catch (err) {
         const page = await recipeFormError(
             userId,
@@ -239,7 +239,7 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
                 });
             }
         }
-        return c.redirect(`/recipes/${recipeId}`);
+        return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-cook-${recipeId}`,
@@ -272,7 +272,7 @@ recipesRoutes.post("/recipes/:id", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return c.redirect(`/recipes/${recipeId}`);
+    return c.redirect(`/recipes/${recipeId}`, 303);
 });
 
 recipesRoutes.post(
@@ -295,7 +295,7 @@ recipesRoutes.post(
             });
             return c.html(page.html, page.status);
         }
-        return c.redirect(`/recipes/${recipeId}`);
+        return c.redirect(`/recipes/${recipeId}`, 303);
     },
 );
 
@@ -321,7 +321,7 @@ recipesRoutes.post(
             const direction = formText(body, "direction");
             const swapWith = direction === "up" ? index - 1 : index + 1;
             if (swapWith < 0 || swapWith >= ingredients.length) {
-                return c.redirect(`/recipes/${recipeId}`);
+                return c.redirect(`/recipes/${recipeId}`, 303);
             }
             const ids = ingredients.map((row) => row.id);
             const tmp = ids[index]!;
@@ -337,7 +337,7 @@ recipesRoutes.post(
             const page = await recipeFormError(userId, recipeId, err);
             return c.html(page.html, page.status);
         }
-        return c.redirect(`/recipes/${recipeId}`);
+        return c.redirect(`/recipes/${recipeId}`, 303);
     },
 );
 
@@ -366,7 +366,7 @@ recipesRoutes.post(
             });
             return c.html(page.html, page.status);
         }
-        return c.redirect(`/recipes/${recipeId}`);
+        return c.redirect(`/recipes/${recipeId}`, 303);
     },
 );
 
@@ -385,7 +385,7 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return c.redirect("/recipes");
+    return c.redirect("/recipes", 303);
 });
 
 recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
@@ -439,7 +439,7 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return c.redirect(`/recipes/${recipeId}`);
+    return c.redirect(`/recipes/${recipeId}`, 303);
 });
 
 recipesRoutes.post("/recipes/:id/portions", requireMember, async (c) => {
@@ -458,7 +458,7 @@ recipesRoutes.post("/recipes/:id/portions", requireMember, async (c) => {
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect(`/recipes/${recipeId}`);
+    return c.redirect(`/recipes/${recipeId}`, 303);
 });
 
 recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
@@ -513,5 +513,5 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });

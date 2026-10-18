@@ -20,6 +20,12 @@ import {
     isAllowedRedirectUri,
     isValidPkceChallenge,
 } from "./oauth-redirect.js";
+import {
+    appScriptHref,
+    appStylesheetHref,
+    getAppCss,
+    getAppJs,
+} from "./widgets.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -59,6 +65,8 @@ export async function renderLoginPage(
     session: OAuthSession,
     error?: string,
 ): Promise<string> {
+    await getAppCss();
+    await getAppJs();
     const template = await Bun.file("./public/login.html").text();
     const errorHtml = error
         ? `<div class="error-banner">${escapeHtml(error)}</div>`
@@ -75,7 +83,9 @@ export async function renderLoginPage(
     return template
         .replaceAll("{{SESSION_ID}}", escapeHtml(sessionId))
         .replaceAll("{{ERROR}}", errorHtml)
-        .replaceAll("{{CONNECT_HINT}}", connectHint);
+        .replaceAll("{{CONNECT_HINT}}", connectHint)
+        .replaceAll("{{APP_CSS_HREF}}", appStylesheetHref())
+        .replaceAll("{{APP_JS_HREF}}", appScriptHref());
 }
 
 async function finishAuthorization(
@@ -473,8 +483,6 @@ export async function beginSiteLogin(
         session,
         expiresAt: Date.now() + SESSION_TTL_MS,
     });
-    return c.html(
-        await renderLoginPage(sessionId, session, error),
-        error ? 400 : 200,
-    );
+    const status = error ? 400 : c.req.method === "GET" ? 200 : 401;
+    return c.html(await renderLoginPage(sessionId, session, error), status);
 }

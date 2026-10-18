@@ -44,6 +44,8 @@ export type FoodPickerOptions = {
     action?: string;
     method?: "get" | "post";
     hiddenFields?: Record<string, string>;
+    /** Extra HTML inserted inside each POST form (after hidden fields). */
+    formExtras?: string;
     includeQuantity?: boolean;
 };
 
@@ -51,7 +53,8 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
     const id = opts.id ?? "food-picker";
     const action = opts.action ?? "#";
     const method = opts.method ?? "get";
-    const extras = hiddenInputs(opts.hiddenFields ?? {});
+    const extras =
+        hiddenInputs(opts.hiddenFields ?? {}) + (opts.formExtras ?? "");
     const qty = opts.includeQuantity
         ? renderQuantityField({
               kind: "food",

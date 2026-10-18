@@ -73,8 +73,12 @@ describe("marketing HTTP is gone", () => {
         expect(body).not.toContain("/authorize/google");
         expect(body).not.toContain("Continue with Google");
         expect(body).not.toContain("created automatically");
-        expect(body).toContain('<link rel="stylesheet" href="/app.css" />');
-        expect(body).toContain('<script src="/app.js" defer></script>');
+        expect(body).toMatch(
+            /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
+        );
+        expect(body).toMatch(
+            /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+        );
         expect(body).not.toContain("/?locale=");
         expect(body).not.toContain("gtag");
         expect(body).not.toContain("googletagmanager");
@@ -116,6 +120,7 @@ describe("runtime surfaces that stay", () => {
         const r = await app.request("http://x/app.css");
         expect(r.status).toBe(200);
         expect(r.headers.get("content-type") ?? "").toContain("text/css");
+        expect(r.headers.get("cache-control")).toBe("no-cache");
         const css = await r.text();
         expect(css).not.toContain("/*@include");
         expect(css).toContain(".bottom-nav");
@@ -127,10 +132,26 @@ describe("runtime surfaces that stay", () => {
         expect(r.headers.get("content-type") ?? "").toContain(
             "text/javascript",
         );
+        expect(r.headers.get("cache-control")).toBe("no-cache");
         const js = await r.text();
         expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
         expect(js).toContain('classList.add("fx")');
         expect(js).toContain("[data-food-picker]");
+    });
+
+    test("versioned app assets are immutable when the query matches", async () => {
+        const { appStylesheetHref, appScriptHref } =
+            await import("./widgets.js");
+        const cssV = appStylesheetHref();
+        const jsV = appScriptHref();
+        const css = await app.request(`http://x${cssV}`);
+        expect(css.headers.get("cache-control")).toBe(
+            "public, max-age=31536000, immutable",
+        );
+        const js = await app.request(`http://x${jsV}`);
+        expect(js.headers.get("cache-control")).toBe(
+            "public, max-age=31536000, immutable",
+        );
     });
 
     test("the app serves its fonts from the allowlist; unknown and traversal names are not served", async () => {
@@ -256,8 +277,12 @@ describe("runtime surfaces that stay", () => {
         expect(html).not.toContain('href="/terms"');
         expect(html).not.toContain('href="/privacy"');
         expect(html).not.toMatch(/<a class="brand"[^>]*href="\/"/);
-        expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
-        expect(html).toContain('<script src="/app.js" defer></script>');
+        expect(html).toMatch(
+            /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
+        );
+        expect(html).toMatch(
+            /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+        );
         expect(html).not.toContain("gtag");
         expect(html).not.toContain("fonts.googleapis.com");
         expect(html).not.toContain("fonts.gstatic.com");

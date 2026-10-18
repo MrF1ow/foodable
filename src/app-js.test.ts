@@ -13,7 +13,7 @@ function scriptBodies(html: string): string[] {
         .filter((body) => body.length > 0);
 }
 
-test("getAppJs concatenates the client files as one IIFE each", async () => {
+test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     expect([...APP_JS_SOURCES]).toEqual([
         "./src/web/client/shell.js",
         "./src/web/client/food-picker.js",
@@ -23,19 +23,63 @@ test("getAppJs concatenates the client files as one IIFE each", async () => {
         "./src/web/client/arrange.js",
     ]);
     const js = await getAppJs();
+    expect(js).toContain("Turbo");
+    expect(js).toContain("FoodableApp.onLoad");
     expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
     for (const path of APP_JS_SOURCES) {
         const src = (await Bun.file(path).text()).trim();
         expect(js).toContain(`(function () {\n${src}\n})();`);
     }
     expect(js).toContain('classList.add("fx")');
-    expect(js).toContain("[data-food-picker]");
-    expect(js).toContain("[data-meal-items]");
-    expect(js).toContain("[data-grocery-section]");
-    expect(js).toContain("dialog.modal");
-    expect(js).toContain(".nutrition-arrange-form");
     expect(() =>
         new Bun.Transpiler({ loader: "js" }).transformSync(js),
+    ).not.toThrow();
+});
+
+test("getAppJs client IIFEs evaluate without ReferenceError when stubbed", async () => {
+    const js = await getAppJs();
+    const turboEnd = js.indexOf("(function () {");
+    expect(turboEnd).toBeGreaterThan(0);
+    const clientJs = js.slice(turboEnd);
+    const html = {
+        classList: { add() {} },
+    };
+    const document = {
+        documentElement: html,
+        body: { style: {} },
+        querySelectorAll: () => [],
+        addEventListener() {},
+        querySelector: () => null,
+    };
+    const window = {
+        FoodableApp: undefined,
+        addEventListener() {},
+        matchMedia: () => ({ matches: false }),
+        requestAnimationFrame: () => 0,
+        scrollY: 0,
+        pageYOffset: 0,
+        scrollTo() {},
+    };
+    class HTMLElement {}
+    class HTMLFormElement extends HTMLElement {}
+    class HTMLIFrameElement extends HTMLElement {}
+    expect(() =>
+        new Function(
+            "document",
+            "window",
+            "Element",
+            "HTMLElement",
+            "HTMLFormElement",
+            "HTMLIFrameElement",
+            clientJs,
+        )(
+            document,
+            window,
+            HTMLElement,
+            HTMLElement,
+            HTMLFormElement,
+            HTMLIFrameElement,
+        ),
     ).not.toThrow();
 });
 
@@ -122,7 +166,9 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         recipes,
         nutrition,
     ]) {
-        expect(html).toContain('<script src="/app.js" defer></script>');
+        expect(html).toMatch(
+            /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+        );
         expect(scriptBodies(html)).toEqual([]);
     }
     expect(nutrition).toContain("widget-frame");

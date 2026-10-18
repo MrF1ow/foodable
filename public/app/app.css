@@ -1350,6 +1350,10 @@ body.auth {
     }
 }
 
+.turbo-progress-bar {
+    background: var(--accent);
+}
+
 @keyframes modal-in {
     from {
         opacity: 0;

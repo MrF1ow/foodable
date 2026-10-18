@@ -81,7 +81,7 @@ nutritionRoutes.post("/log-meal", requireMember, async (c) => {
         const page = await nutritionFormError(userId, result.error);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/");
+    return c.redirect("/", 303);
 });
 
 nutritionRoutes.post("/log-water", requireMember, async (c) => {
@@ -96,7 +96,7 @@ nutritionRoutes.post("/log-water", requireMember, async (c) => {
         const page = await nutritionFormError(userId, result.error);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/");
+    return c.redirect("/", 303);
 });
 
 nutritionRoutes.post("/log-weight", requireMember, async (c) => {
@@ -114,11 +114,11 @@ nutritionRoutes.post("/log-weight", requireMember, async (c) => {
         const page = await nutritionFormError(userId, result.error);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/");
+    return c.redirect("/", 303);
 });
 
 nutritionRoutes.get("/nutrition", requireSiteUser, async (c) => {
-    return c.redirect("/");
+    return c.redirect("/", 303);
 });
 
 function formOrderList(
@@ -150,7 +150,7 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
                 return c.html(page.html, page.status);
             }
             await setNutritionLayout(userId, [...validated]);
-            return c.redirect(nutritionReturnPath(member));
+            return c.redirect(nutritionReturnPath(member), 303);
         }
 
         const card = formText(body, "card");
@@ -177,7 +177,7 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
         const order = orderCards(profile?.nutrition_layout);
         const next = moveCard(order, card, direction);
         await setNutritionLayout(userId, [...next]);
-        return c.redirect(nutritionReturnPath(member));
+        return c.redirect(nutritionReturnPath(member), 303);
     } catch (err) {
         const message =
             err instanceof Error ? err.message : "Could not save card order.";
