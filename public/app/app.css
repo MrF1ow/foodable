@@ -1109,41 +1109,23 @@ html:has(body.auth) {
     background: var(--bg);
 }
 body.auth {
-    position: relative;
     background:
         radial-gradient(
             40rem 22rem at 50% calc(-4rem + env(safe-area-inset-top, 0px)),
             color-mix(in srgb, var(--accent) 20%, transparent),
             transparent 70%
         ),
+        radial-gradient(
+                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                transparent 1.2px
+            )
+            0 0 / 18px 18px,
         var(--bg);
-}
-body.auth::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: -1;
-    background: radial-gradient(
-            color-mix(in srgb, var(--accent) 22%, transparent) 1px,
-            transparent 1.2px
-        )
-        0 0 / 18px 18px;
-    -webkit-mask-image: linear-gradient(
-        to bottom,
-        transparent 0,
-        transparent calc(env(safe-area-inset-top, 0px) + 8px),
-        #000 calc(env(safe-area-inset-top, 0px) + 140px)
-    );
-    mask-image: linear-gradient(
-        to bottom,
-        transparent 0,
-        transparent calc(env(safe-area-inset-top, 0px) + 8px),
-        #000 calc(env(safe-area-inset-top, 0px) + 140px)
-    );
 }
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
     body.auth {
+        position: relative;
+        isolation: isolate;
         background:
             radial-gradient(
                 ellipse 45vw 40vh at 0% 42%,
@@ -1156,6 +1138,30 @@ body.auth::before {
                 transparent 68%
             ),
             var(--bg);
+    }
+    body.auth::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -1;
+        background: radial-gradient(
+                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                transparent 1.2px
+            )
+            0 0 / 18px 18px;
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 140px)
+        );
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 140px)
+        );
     }
 }
 .auth-title {
