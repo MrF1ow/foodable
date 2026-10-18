@@ -1,4 +1,4 @@
-import { formatQuantity, isQuantityUnit } from "../../domain/quantity.js";
+import { formatQuantityDisplayParts } from "../display-quantity.js";
 import type {
     FridgeItem,
     FridgeLocation,
@@ -11,7 +11,7 @@ import {
     renderExpiringStrip,
     renderFridgeItemRow,
 } from "../components/page-markup.js";
-import { iconFork, iconPencil, iconTrash } from "../components/icons.js";
+import { iconPencil, iconTrash } from "../components/icons.js";
 import {
     confirmModal,
     emptyState,
@@ -47,13 +47,7 @@ export type FridgePageView = FridgeSnapshot & {
 };
 
 function quantityLabel(item: FridgeItem): string {
-    if (isQuantityUnit(item.quantity.unit)) {
-        return formatQuantity({
-            amount: item.quantity.amount,
-            unit: item.quantity.unit,
-        });
-    }
-    return `${item.quantity.amount} ${item.quantity.unit}`;
+    return formatQuantityDisplayParts(item.quantity.amount, item.quantity.unit);
 }
 
 function locationSelect(
@@ -112,19 +106,12 @@ function itemRow(
 ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
 <label for="expires-${escapeHtml(item.id)}">Expires</label>
 <input id="expires-${escapeHtml(item.id)}" name="expires_on" type="date" value="${escapeHtml(item.expiresOn ?? "")}" />`;
-    const name = escapeHtml(item.displayName);
-    const eatAction =
-        item.kind === "food" && item.foodId != null
-            ? `<form class="fridge-item-eat" method="post" action="/fridge/items/${escapeHtml(item.id)}/eat">
-<button type="submit" class="btn-sm btn-icon" aria-label="Eat ${name}" title="Eat ${name}">${iconFork()}</button>
-</form>`
-            : "";
     const rowActions = `${modalTrigger({
         target: editId,
         label: `Edit ${item.displayName}`,
         className: "btn-sm btn-icon",
         icon: iconPencil(),
-    })}${eatAction}${modalTrigger({
+    })}${modalTrigger({
         target: deleteId,
         label: `Delete ${item.displayName}`,
         className: "btn-sm btn-icon btn-danger",
@@ -298,10 +285,10 @@ export function renderFridgePage(view: FridgePageView): string {
     const body = `
         ${pageHeader({
             title: "Fridge",
-            actions: modalTrigger({
+            titleActions: modalTrigger({
                 target: addLocationId,
                 label: "Add location",
-                className: "btn-primary",
+                className: "btn-sm btn-primary",
             }),
         })}
         ${pageLevelErrorBanner(view, modalIds)}

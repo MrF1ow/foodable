@@ -1,5 +1,5 @@
 import { escapeHtml } from "../html.js";
-import { THEME_COLOR } from "../tokens.js";
+import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut } from "./components/icons.js";
@@ -44,26 +44,38 @@ export function htmlOpen(theme: ThemePref): string {
     return `<html lang="en"${attr}>`;
 }
 
-// THEME_COLOR is the page background (--bg), so the mobile browser bar
-// blends into the page.
-function themeColorMeta(theme: ThemePref): string {
+export type ThemeChromeKind = "page" | "nav";
+
+/** Browser chrome meta tags. Tabbed app pages use the bottom-nav surface; login
+ *  and bare pages use the page background (--bg). */
+export function themeColorMeta(
+    theme: ThemePref,
+    kind: ThemeChromeKind = "nav",
+): string {
+    const colors = kind === "nav" ? THEME_NAV_COLOR : THEME_COLOR;
     if (theme !== "system") {
-        return `<meta name="theme-color" content="${THEME_COLOR[theme]}" />`;
+        return `<meta name="theme-color" content="${colors[theme]}" />`;
     }
-    return `<meta name="theme-color" content="${THEME_COLOR.light}" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="${THEME_COLOR.dark}" media="(prefers-color-scheme: dark)" />`;
+    return `<meta name="theme-color" content="${colors.light}" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="${colors.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
 export function appBar(): string {
     return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-logout" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
 }
 
-export function appHead(title: string, theme: ThemePref): string {
+export function appHead(
+    title: string,
+    theme: ThemePref,
+    themeChrome: ThemeChromeKind = "nav",
+): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="foodable-theme" content="${theme}" />
+<meta name="foodable-theme-chrome" content="${themeChrome}" />
 <meta name="turbo-refresh-method" content="morph" />
 <meta name="turbo-refresh-scroll" content="preserve" />
-${themeColorMeta(theme)}
+${themeColorMeta(theme, themeChrome)}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
 <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
@@ -78,7 +90,7 @@ ${htmlOpen(chrome.theme)}
 <head>
 ${appHead(chrome.title, chrome.theme)}
 </head>
-<body>
+<body class="has-bottom-nav">
 ${appBar()}
 <main class="app-main native">${chrome.body}</main>
 ${bottomNav(chrome.active)}
@@ -97,7 +109,7 @@ export function renderBarePage(
     return `<!doctype html>
 ${htmlOpen(theme)}
 <head>
-${appHead(title, theme)}
+${appHead(title, theme, "page")}
 </head>
 <body>
 ${appBar()}

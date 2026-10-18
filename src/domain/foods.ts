@@ -719,7 +719,7 @@ function parsePositiveFactor(value: number | null | undefined): number | null {
     if (value == null) return null;
     if (!Number.isFinite(value) || value <= 0) {
         throw new FoodsInputError(
-            "Grams per each and grams per millilitre must be greater than zero.",
+            "Grams per item and grams per millilitre must be greater than zero.",
         );
     }
     return value;

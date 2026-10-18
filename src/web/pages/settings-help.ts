@@ -16,7 +16,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "food-vs-household-item",
         title: "Food vs household item",
-        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. On a food row, the fork logs it as eaten (a snack). The trash asks to confirm, then removes it without logging anything. Household items only show edit and trash.",
+        body: "Foods are things you eat, like eggs, milk and rice. Household items are supplies you stock but don't eat, like foil, soap and batteries. Add food picks from your foods; Add household item just asks for a name. On both food and household rows, the pencil edits and the trash asks to confirm, then removes the item without logging anything.",
     },
     {
         id: "locations",
@@ -31,7 +31,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "expiry-levels",
         title: "Expiry levels",
-        body: "Badges follow the expiry date: Expired if that day has passed, High for today or tomorrow, Medium in 2–3 days, Low in 4–7 days. Later than that, or no date, shows no badge. Expiring soon lists items already expired or due within three days, and shows that count.",
+        body: "Only expired items show an Expired badge on the row. Later dates and items with no expiry date show no badge. Expiring soon lists items already expired or due within three days, and shows that count.",
     },
     {
         id: "put-away",
@@ -41,7 +41,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "fridge-row-actions",
         title: "Fridge row icons",
-        body: "The pencil edits quantity, location and expiry. The fork logs a food as eaten (a snack). The trash opens a confirm to remove the item without logging anything.",
+        body: "The pencil edits quantity, location and expiry. The trash opens a confirm to remove the item without logging anything.",
     },
     {
         id: "recipe-portions",
@@ -51,7 +51,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "nutrition-arrange",
         title: "Arranging the Nutrition page",
-        body: "Arrange opens a modal with up and down controls for each card. Tap Save to store the order once. Order is stored on your profile only — each household member can order their own Nutrition page, including when viewing someone else's data.",
+        body: "Arrange opens a modal with up and down controls for each card. Tap Save to store the order once. Order is stored on your profile only and applies to your own Nutrition page view. Arrange is not available while you are viewing someone else's data.",
     },
 ];
 
@@ -60,7 +60,7 @@ function glossaryHtml(): string {
         (
             entry,
         ) => `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
-<h3>${escapeHtml(entry.title)}</h3>
+<h3 class="subsection-title">${escapeHtml(entry.title)}</h3>
 <p>${escapeHtml(entry.body)}</p>
 </section>`,
     ).join("");

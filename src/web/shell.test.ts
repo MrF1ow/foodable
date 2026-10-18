@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     APP_TABS,
+    appHead,
     bottomNav,
     comingSoonPage,
     parseAppearanceInput,
     renderBarePage,
     resolveTheme,
+    themeColorMeta,
 } from "./shell.js";
+import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 
 const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");
 
@@ -90,17 +93,52 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     const html = comingSoonPage("fridge");
     expect(html).toContain('<html lang="en">');
     expect(html).not.toContain("data-theme");
+    expect(html).toContain('<meta name="foodable-theme" content="system" />');
     expect(html).toContain(
-        '<meta name="theme-color" content="#0d0f0e" media="(prefers-color-scheme: dark)" />',
+        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
     );
+    expect(html).toContain(
+        '<meta name="foodable-theme-chrome" content="nav" />',
+    );
+    expect(html).toContain('class="has-bottom-nav"');
     expect(html).not.toContain("--accent");
 });
 
 test("an explicit theme stamps data-theme on html", () => {
     const html = comingSoonPage("settings", { theme: "dark" });
     expect(html).toContain('<html lang="en" data-theme="dark">');
-    expect(html).toContain('<meta name="theme-color" content="#0d0f0e" />');
+    expect(html).toContain(
+        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,
+    );
+    expect(html).toContain('<meta name="foodable-theme" content="dark" />');
     expect(html).not.toContain("--accent");
+});
+
+test("themeColorMeta uses page bg on bare pages and nav chrome on tabs", () => {
+    expect(themeColorMeta("dark", "page")).toContain(THEME_COLOR.dark);
+    expect(themeColorMeta("dark", "nav")).toContain(THEME_NAV_COLOR.dark);
+    expect(themeColorMeta("system", "nav")).toContain(THEME_NAV_COLOR.light);
+    expect(themeColorMeta("system", "page")).toContain(THEME_COLOR.light);
+});
+
+test("bare pages stamp page chrome and omit the bottom nav", () => {
+    const html = renderBarePage("Household", "<p>x</p>", "dark");
+    expect(html).toContain(
+        '<meta name="foodable-theme-chrome" content="page" />',
+    );
+    expect(html).toContain(
+        `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
+    );
+    expect(html).not.toContain("has-bottom-nav");
+});
+
+test("appHead emits foodable-theme for every preference", () => {
+    expect(appHead("T", "light")).toContain(
+        '<meta name="foodable-theme" content="light" />',
+    );
+    expect(appHead("T", "system")).toContain(
+        '<meta name="foodable-theme" content="system" />',
+    );
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {
@@ -290,6 +328,106 @@ test("html.fx is not added when reduced motion is requested", () => {
     runShellScript(document, window);
     expect(raf).toEqual([]);
     expect(html.classList.added).toEqual([]);
+});
+
+test("foodable-theme meta syncs html data-theme before turbo body paint", () => {
+    const THEME_NAV_BG = { light: "#fefefd", dark: "#131615" };
+    const htmlEl = {
+        attrs: { "data-theme": "light" } as Record<string, string>,
+        setAttribute(k: string, v: string) {
+            this.attrs[k] = v;
+        },
+        getAttribute(k: string) {
+            return this.attrs[k] ?? null;
+        },
+        removeAttribute(k: string) {
+            delete this.attrs[k];
+        },
+    };
+    let themeContent = "light";
+    const themeMeta = {
+        getAttribute(n: string) {
+            return n === "content" ? themeContent : null;
+        },
+    };
+    const chromeMeta = {
+        getAttribute(n: string) {
+            return n === "content" ? "nav" : null;
+        },
+    };
+    function metaEl(initial: Record<string, string | null>) {
+        const attrs = { ...initial };
+        return {
+            getAttribute(n: string) {
+                return attrs[n] ?? null;
+            },
+            setAttribute(k: string, v: string) {
+                attrs[k] = v;
+            },
+            removeAttribute(k: string) {
+                delete attrs[k];
+            },
+        };
+    }
+    const colorMetas = [
+        metaEl({ content: THEME_NAV_BG.light, name: "theme-color" }),
+    ];
+    const listeners: Record<string, ((e: unknown) => void)[]> = {};
+    const document = {
+        documentElement: htmlEl,
+        head: {
+            appendChild(el: (typeof colorMetas)[number]) {
+                colorMetas.push(el);
+            },
+        },
+        querySelector(sel: string) {
+            if (sel.includes("foodable-theme-chrome")) return chromeMeta;
+            if (sel.includes("foodable-theme")) return themeMeta;
+            return null;
+        },
+        querySelectorAll(sel: string) {
+            return sel.includes("theme-color") ? colorMetas : [];
+        },
+        createElement() {
+            return metaEl({ name: "theme-color" });
+        },
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+    };
+    const window = {
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+        matchMedia: () => ({ matches: false }),
+        requestAnimationFrame() {
+            return 0;
+        },
+    };
+    const injected = SHELL_JS.replace(
+        "const THEME_PAGE_BG = null;",
+        `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
+    ).replace(
+        "const THEME_NAV_BG = null;",
+        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
+    );
+    new Function("document", "window", "Element", injected)(
+        document,
+        window,
+        class Element {},
+    );
+    expect(htmlEl.getAttribute("data-theme")).toBe("light");
+    themeContent = "system";
+    listeners["turbo:before-render"]![0]!({});
+    expect(htmlEl.getAttribute("data-theme")).toBeNull();
+    expect(colorMetas[0]!.getAttribute("content")).toBe(THEME_NAV_BG.light);
+    expect(colorMetas[0]!.getAttribute("media")).toBe(
+        "(prefers-color-scheme: light)",
+    );
+    expect(colorMetas[1]!.getAttribute("content")).toBe(THEME_NAV_BG.dark);
+    expect(colorMetas[1]!.getAttribute("media")).toBe(
+        "(prefers-color-scheme: dark)",
+    );
 });
 
 test("one passive pointermove listener sets --mx and --my on the panel", () => {

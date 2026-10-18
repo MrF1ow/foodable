@@ -1,8 +1,9 @@
 import { test, expect } from "bun:test";
-import { formatQuantity as formatFromFridge } from "../domain/quantity.js";
-import { formatQuantity as formatFromGrocery } from "../domain/quantity.js";
+import { formatQuantityDisplayParts } from "./display-quantity.js";
+import { formatQuantity } from "../domain/quantity.js";
 
-test("fridge and grocery import the same formatQuantity module", () => {
-    expect(formatFromFridge).toBe(formatFromGrocery);
-    expect(formatFromFridge({ amount: 48, unit: "oz" })).toBe("48 oz");
+test("web pages use display quantity formatting, not MCP formatQuantity", () => {
+    expect(formatQuantityDisplayParts(48, "oz")).toBe("48 oz");
+    expect(formatQuantityDisplayParts(4, "each")).toBe("4");
+    expect(formatQuantity({ amount: 4, unit: "each" })).toBe("4 each");
 });

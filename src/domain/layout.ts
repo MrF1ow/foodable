@@ -1,5 +1,4 @@
 export const NUTRITION_CARDS = [
-    "log",
     "nutrition-summary",
     "goal-progress",
     "trends",

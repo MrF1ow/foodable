@@ -26,6 +26,9 @@ import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
+    NUTRITION_LOG_MEAL_MODAL_ID,
+    NUTRITION_LOG_WATER_MODAL_ID,
+    NUTRITION_LOG_WEIGHT_MODAL_ID,
     renderNutritionPage,
     viewerChromeFromProfile,
 } from "../src/web/pages/nutrition.js";
@@ -93,11 +96,26 @@ function fridgeView(chrome: unknown) {
         chrome,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
         items: [
-            item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
-            item("i2", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
-            item("i3", "l1", "Yogurt", 2, "each", addUtcDays(today, 3)),
-            item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
-            item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
+            item(
+                "i1",
+                "l1",
+                "Cremini mushrooms",
+                250,
+                "g",
+                addUtcDays(today, -2),
+            ),
+            item("i2", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
+            item(
+                "i-long",
+                "l1",
+                "Organic whole milk with extra long product name that wraps across two lines in the list",
+                1,
+                "l",
+                addUtcDays(today, -5),
+            ),
+            item("i3", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
+            item("i4", "l1", "Lime", 3, "each", addUtcDays(today, 5)),
+            item("i5", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
             item("i6", "l2", "Paper towels", 3, "roll", null, false),
         ],
     };
@@ -269,15 +287,31 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         weight: await widgetSample("weight-trends"),
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
             "weight-trends",
         ],
     } as never);
+    const nutritionPeer = await renderNutritionPage({
+        access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        viewMemberId: SAM.userId,
+    } as never);
     return {
         nutrition,
+        "nutrition-peer": nutritionPeer,
         fridge: renderFridgePage(fridgeView(chrome) as never),
         grocery: renderGroceryPage(groceryView(chrome) as never),
         recipes: renderRecipesPage({
@@ -288,18 +322,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         recipe: renderRecipeDetailPage({
             chrome,
-            recipe: RECIPE,
+            recipe: {
+                ...RECIPE,
+                name: "Banana bread",
+                yieldPortions: 10,
+            },
             ingredients: [
                 {
                     id: "ing1",
                     recipeId: "r1",
                     foodId: "f1",
-                    displayName: "Eggs",
-                    quantity: { amount: 6, unit: "each" },
-                    note: "large",
+                    displayName: "Banana",
+                    quantity: { amount: 3, unit: "each" },
+                    note: null,
                     sortOrder: 0,
-                    perPortionAmount: 1.5,
-                    personAmount: 1.5,
+                    perPortionAmount: 0.3,
+                    personAmount: 0.3,
+                },
+                {
+                    id: "ing2",
+                    recipeId: "r1",
+                    foodId: "f2",
+                    displayName: "All-purpose flour",
+                    quantity: { amount: 200, unit: "g" },
+                    note: null,
+                    sortOrder: 1,
+                    perPortionAmount: 20,
+                    personAmount: 20,
+                },
+                {
+                    id: "ing3",
+                    recipeId: "r1",
+                    foodId: "f3",
+                    displayName: "Sugar",
+                    quantity: { amount: 100, unit: "g" },
+                    note: null,
+                    sortOrder: 2,
+                    perPortionAmount: 10,
+                    personAmount: 10,
                 },
             ],
             members: [ME, SAM],
@@ -384,12 +444,48 @@ function findChromium(): string | null {
     return null;
 }
 
+async function nutritionWithModal(
+    theme: "light" | "dark",
+    openModalId: string,
+): Promise<string> {
+    const chrome = viewerChromeFromProfile({ theme });
+    return renderNutritionPage({
+        access: { ok: true, mode: "self", viewer: ME, subject: ME },
+        members: [ME, SAM],
+        summary: await widgetSample("nutrition-summary"),
+        goals: await widgetSample("goal-progress"),
+        trends: await widgetSample("trends"),
+        weight: await widgetSample("weight-trends"),
+        chrome,
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        openModalId,
+    } as never);
+}
+
 const names: string[] = [];
+const modalShotPages: string[] = [];
 for (const theme of ["light", "dark"] as const) {
     for (const [name, html] of Object.entries(await pages(theme))) {
         const file = `${name}-${theme}`;
         await Bun.write(`${OUT}/${file}.html`, html);
         names.push(file);
+    }
+    for (const [slug, modalId] of [
+        ["log-meal", NUTRITION_LOG_MEAL_MODAL_ID],
+        ["log-water", NUTRITION_LOG_WATER_MODAL_ID],
+        ["log-weight", NUTRITION_LOG_WEIGHT_MODAL_ID],
+    ] as const) {
+        const file = `nutrition-${slug}-${theme}`;
+        await Bun.write(
+            `${OUT}/${file}.html`,
+            await nutritionWithModal(theme, modalId),
+        );
+        modalShotPages.push(file);
     }
 }
 
@@ -439,6 +535,13 @@ if (process.argv.includes("--shots")) {
         // the GUI profile is never touched.
         const colorScheme = theme === "dark" ? 2 : 1;
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
+        console.log(`${OUT}/${name}.png`);
+    }
+    for (const name of modalShotPages) {
+        const theme = name.endsWith("-dark") ? "dark" : "light";
+        const dataDir = `${OUT}/chrome-${name}`;
+        const colorScheme = theme === "dark" ? 2 : 1;
+        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=4000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
     }
     server.stop();

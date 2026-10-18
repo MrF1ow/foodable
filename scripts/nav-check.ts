@@ -230,6 +230,9 @@ await send("Emulation.setDeviceMetricsOverride", {
     mobile: true,
 });
 
+await import("node:fs/promises").then((fs) =>
+    fs.mkdir("./tmp", { recursive: true }),
+);
 try {
     await goto("/");
     await setMarker();
@@ -467,6 +470,81 @@ try {
         { orderBefore, orderAfter, orderFields, ex: drain() },
     );
 
+    await control("post=fail&modal=nutrition-log-meal&reset=posts&delay=0");
+    await goto("/");
+    await setMarker();
+    const hrefBeforeMeal = (await snap()).href;
+    await clickSel('button[commandfor="nutrition-log-meal"]');
+    await sleep(40);
+    await clickSel("#nutrition-log-meal button[type='submit']");
+    await sleep(500);
+    const badMeal = await snap();
+    record(
+        "nutrition log meal invalid 400",
+        badMeal.marker === "stay" &&
+            badMeal.href === hrefBeforeMeal &&
+            badMeal.open.includes("nutrition-log-meal") &&
+            badMeal.error === "Name is required",
+        { badMeal, hrefBeforeMeal, ex: drain() },
+    );
+
+    await control("post=ok&reset=posts&delay=0");
+    await goto("/");
+    await clickSel('button[commandfor="nutrition-log-meal"]');
+    await sleep(40);
+    await ev(`(() => {
+        const root = document.querySelector("#nutrition-log-meal [data-meal-items]");
+        if (!root) return;
+        root.querySelector("[data-add-meal-item]")?.click();
+    })()`);
+    await sleep(40);
+    await ev(`(() => {
+        const names = document.querySelectorAll("#nutrition-log-meal [data-meal-item-name]");
+        if (names[0]) names[0].value = "Apple";
+        if (names[1]) names[1].value = "Banana";
+    })()`);
+    await ev(`(() => {
+        const rows = document.querySelectorAll("#nutrition-log-meal [data-meal-item]");
+        const second = rows[1];
+        if (second) second.querySelector("[data-meal-item-remove]")?.click();
+    })()`);
+    await sleep(40);
+    await clickSel("#nutrition-log-meal button[type='submit']");
+    await sleep(500);
+    const mealPosts = await stats();
+    const mealPost = mealPosts.posts.find((p) => p.path === "/log-meal");
+    const itemNames =
+        mealPost?.entries
+            .filter(([k]) => k === "item_name")
+            .map(([, v]) => v) ?? [];
+    record(
+        "nutrition log meal add remove row",
+        mealPost !== undefined &&
+            itemNames.length === 1 &&
+            itemNames[0] === "Apple",
+        { itemNames, mealPost, ex: drain() },
+    );
+
+    await control("post=ok&reset=posts&delay=0");
+    await goto("/");
+    await setMarker();
+    await clickSel('button[commandfor="nutrition-log-water"]');
+    await sleep(40);
+    await ev(`(() => {
+        const input = document.querySelector("#nutrition-log-water input[name='amount_ml']");
+        if (input) input.value = "250";
+    })()`);
+    await clickSel("#nutrition-log-water button[type='submit']");
+    await sleep(500);
+    const okWater = await snap();
+    record(
+        "nutrition log water valid 303",
+        okWater.marker === "stay" &&
+            okWater.open.length === 0 &&
+            okWater.href.endsWith("/"),
+        { okWater, ex: drain() },
+    );
+
     await control("reset=approve");
     await goto("/login-test");
     await ev(`window.__marker = "stay"`);
@@ -537,6 +615,241 @@ try {
         approveAfter >= 2 && loginAfterExpired.auth === false,
         { approveAfter, loginAfterExpired, ex: drain() },
     );
+
+    async function themeSnap() {
+        return ev<{
+            dataTheme: string | null;
+            meta: string | null;
+            bg: string;
+            widgetTheme: string | null;
+            marker: string | null;
+            hasMain: boolean;
+        }>(`(() => {
+            const frame = document.querySelector(".widget-frame");
+            let widgetTheme = null;
+            try {
+                widgetTheme = frame?.contentDocument?.documentElement?.getAttribute("data-theme") ?? null;
+            } catch (_) {}
+            return {
+                dataTheme: document.documentElement.getAttribute("data-theme"),
+                meta: document.querySelector('meta[name="foodable-theme"]')?.getAttribute("content") ?? null,
+                bg: getComputedStyle(document.body).getPropertyValue("--bg").trim(),
+                widgetTheme,
+                marker: window.__marker ?? null,
+                hasMain: !!document.querySelector("main.app-main"),
+            };
+        })()`);
+    }
+
+    const NAV_THEME = { light: "#fefefd", dark: "#131615" };
+
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings");
+    await setMarker();
+    const darkStart = await themeSnap();
+    await ev(`(() => {
+        const light = document.querySelector('input[name="theme"][value="light"]');
+        if (light) light.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterLight = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/"]');
+    await sleep(250);
+    const nutritionLight = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/settings"]');
+    await sleep(200);
+    await ev(`(() => {
+        const system = document.querySelector('input[name="theme"][value="system"]');
+        if (system) system.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterSystem = await themeSnap();
+    const themeMetaBaseline = await ev<{
+        count: number;
+        ids: number[];
+        contents: string[];
+    }>(`(() => {
+        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+        metas.forEach((m, i) => { m.__foodableNavCheck = 100 + i; });
+        return {
+            count: metas.length,
+            ids: metas.map((m) => m.__foodableNavCheck),
+            contents: metas.map((m) => m.getAttribute("content")),
+        };
+    })()`);
+    await clickSel('nav.bottom-nav a[href="/fridge"]');
+    await sleep(200);
+    const fridgeTheme = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/settings"]');
+    await sleep(200);
+    const settingsAgain = await themeSnap();
+    const themeMetaAfter = await ev<{
+        count: number;
+        ids: (number | null)[];
+        contents: string[];
+        sameNodes: boolean;
+    }>(`(() => {
+        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+        return {
+            count: metas.length,
+            ids: metas.map((m) => m.__foodableNavCheck ?? null),
+            contents: metas.map((m) => m.getAttribute("content")),
+            sameNodes: metas.every((m, i) => m.__foodableNavCheck === 100 + i),
+        };
+    })()`);
+
+    record(
+        "theme sync across morph refresh and tab visits",
+        darkStart.dataTheme === "dark" &&
+            darkStart.marker === "stay" &&
+            afterLight.dataTheme === "light" &&
+            afterLight.meta === "light" &&
+            afterLight.bg === "#fbfaf7" &&
+            nutritionLight.widgetTheme === "light" &&
+            nutritionLight.marker === "stay" &&
+            afterLight.marker === "stay" &&
+            afterSystem.dataTheme === null &&
+            afterSystem.meta === "system" &&
+            fridgeTheme.dataTheme === null &&
+            settingsAgain.dataTheme === null &&
+            settingsAgain.meta === "system" &&
+            themeMetaAfter.count === themeMetaBaseline.count &&
+            themeMetaAfter.sameNodes &&
+            themeMetaAfter.contents.join() ===
+                themeMetaBaseline.contents.join(),
+        {
+            darkStart,
+            afterLight,
+            nutritionLight,
+            afterSystem,
+            fridgeTheme,
+            settingsAgain,
+            themeMetaBaseline,
+            themeMetaAfter,
+            ex: drain(),
+        },
+    );
+
+    await control("theme=dark&post=ok");
+    await goto("/settings");
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await ev(`(() => {
+        const light = document.querySelector('input[name="theme"][value="light"]');
+        if (light) light.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(700);
+    await goto("/");
+    await sleep(300);
+    const shotLightOk = await ev<boolean>(
+        `!!document.querySelector("main.app-main")`,
+    );
+    await Bun.write(
+        "./tmp/nav-theme-light.png",
+        Buffer.from(
+            (
+                (await send("Page.captureScreenshot", {
+                    format: "png",
+                })) as { data: string }
+            ).data,
+            "base64",
+        ),
+    );
+    await goto("/settings");
+    await sleep(200);
+    await ev(`(() => {
+        const dark = document.querySelector('input[name="theme"][value="dark"]');
+        if (dark) dark.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(700);
+    await goto("/");
+    await sleep(300);
+    const shotDarkOk = await ev<boolean>(
+        `!!document.querySelector("main.app-main")`,
+    );
+    await Bun.write(
+        "./tmp/nav-theme-dark.png",
+        Buffer.from(
+            (
+                (await send("Page.captureScreenshot", {
+                    format: "png",
+                })) as { data: string }
+            ).data,
+            "base64",
+        ),
+    );
+    record(
+        "theme switch screenshots (nutrition 390x844)",
+        shotLightOk && shotDarkOk && (await themeSnap()).dataTheme === "dark",
+        { shotLightOk, shotDarkOk, ex: drain() },
+    );
+
+    async function scrollBottomShot(
+        path: string,
+        theme: "light" | "dark",
+        file: string,
+    ) {
+        await control(`theme=${theme}&post=ok`);
+        await goto(path);
+        await sleep(300);
+        const ok = await ev<boolean>(
+            `!!document.querySelector("main.app-main")`,
+        );
+        await ev(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+        await sleep(150);
+        await Bun.write(
+            file,
+            Buffer.from(
+                (
+                    (await send("Page.captureScreenshot", {
+                        format: "png",
+                    })) as { data: string }
+                ).data,
+                "base64",
+            ),
+        );
+        return ok;
+    }
+    const fridgeDark = await scrollBottomShot(
+        "/fridge",
+        "dark",
+        "./tmp/nav-fridge-dark-bottom.png",
+    );
+    const fridgeLight = await scrollBottomShot(
+        "/fridge",
+        "light",
+        "./tmp/nav-fridge-light-bottom.png",
+    );
+    const recipesDark = await scrollBottomShot(
+        "/recipes",
+        "dark",
+        "./tmp/nav-recipes-dark-bottom.png",
+    );
+    const recipesLight = await scrollBottomShot(
+        "/recipes",
+        "light",
+        "./tmp/nav-recipes-light-bottom.png",
+    );
+    record(
+        "bottom screenshots (fridge and recipes 390x844)",
+        fridgeDark && fridgeLight && recipesDark && recipesLight,
+        { fridgeDark, fridgeLight, recipesDark, recipesLight, ex: drain() },
+    );
+
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
 
     await control("session=app");
     await goto("/fridge");

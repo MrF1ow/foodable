@@ -57,9 +57,9 @@ body {
     background-color: var(--bg);
 }
 
-/* Page glow: a body background layer (not a 100vw pseudo) so scrollWidth stays
-   equal to clientWidth when a classic scrollbar is present. Default attachment
-   is scroll (iOS ignores fixed); glow moves with content like desktop today. */
+/* Page glow: desktop uses a body background layer (not a 100vw pseudo) so
+   scrollWidth stays equal to clientWidth when a classic scrollbar is present.
+   Touch/narrow side glows live on a fixed body::before layer (see below). */
 body:not(.auth) {
     background-image: radial-gradient(
         ellipse min(60vw, 28rem) 18rem at 50% 0,
@@ -79,17 +79,39 @@ body:not(.auth) {
 }
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
     body:not(.auth) {
+        isolation: isolate;
+        background: var(--bg);
+    }
+    /* Viewport-fixed side glows (iOS ignores background-attachment: fixed). */
+    body:not(.auth)::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -1;
         background-image:
             radial-gradient(
-                ellipse 45vw 40vh at 0% 42%,
+                ellipse 45vw 40vh at 0% 40%,
                 color-mix(in srgb, var(--accent) 14%, transparent),
                 transparent 68%
             ),
             radial-gradient(
-                ellipse 45vw 40vh at 100% 48%,
+                ellipse 45vw 40vh at 100% 50%,
                 color-mix(in srgb, var(--accent) 14%, transparent),
                 transparent 68%
             );
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 120px)
+        );
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 120px)
+        );
     }
 }
 
@@ -191,9 +213,9 @@ html:has(dialog.modal[open]) {
 }
 :where(.app-main) h2 {
     margin: 0;
-    font-size: var(--fs-15);
-    font-weight: 800;
-    letter-spacing: -0.01em;
+    font-size: var(--fs-19);
+    font-weight: 700;
+    letter-spacing: -0.02em;
 }
 :where(.app-main) h3 {
     margin: 0;
@@ -202,6 +224,13 @@ html:has(dialog.modal[open]) {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-dim);
+}
+:where(.app-main) h3.subsection-title {
+    font-size: var(--fs-16);
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: -0.02em;
+    color: var(--text);
 }
 :where(.app-main) p {
     margin: 0;
@@ -225,6 +254,8 @@ html:has(dialog.modal[open]) {
 .bottom-nav {
     position: sticky;
     bottom: 0;
+    z-index: 20;
+    isolation: isolate;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
@@ -402,7 +433,6 @@ html:has(dialog.modal[open]) {
 /* Empty states and secondary text. The empty-* classes are pinned by tests,
    so they are listed here rather than given a second class in markup. */
 .muted,
-.peer-note,
 .empty-fridge,
 .empty-grocery,
 .empty-recipes,
@@ -437,6 +467,26 @@ html:has(dialog.modal[open]) {
     display: grid;
     gap: 10px;
 }
+.dash-head-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    min-width: 0;
+}
+.dash-head-title-row h1 {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.dash-head-title-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.dash-head-title-actions .member-switch {
+    flex: 0 1 auto;
+}
 .page-actions {
     display: flex;
     flex-wrap: wrap;
@@ -468,8 +518,59 @@ details.more > summary .count {
     font-variant-numeric: tabular-nums;
 }
 
-.fridge-item-head .expiry-pill {
-    vertical-align: middle;
+/* ---- P8.2a: list rows (title + meta left, actions right) ---- */
+
+.list-row {
+    display: flex;
+    align-items: center;
+    gap: 10px 12px;
+    min-width: 0;
+}
+.list-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+.list-row-main .row-title-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+.list-row-main .row-title-line .expiry-pill {
+    flex: none;
+    align-self: center;
+}
+.list-row-main .row-title-line .row-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.list-row-main .row-title {
+    font-size: var(--fs-16);
+    font-weight: 600;
+}
+.list-row-main .row-meta {
+    margin-left: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.list-row > .row-actions {
+    flex: none;
+    flex-wrap: nowrap;
+    align-self: center;
+}
+.grocery-line-row > .grocery-line-check {
+    flex: none;
+    align-self: center;
+}
+.grocery-line-row .already-have-tag {
+    font-size: inherit;
 }
 
 /* Member switch (nutrition) and settings sub-navigation: links styled as the
@@ -599,7 +700,8 @@ details.more > summary .count {
 }
 .row-title {
     min-width: 0;
-    font-weight: 700;
+    font-size: var(--fs-16);
+    font-weight: 600;
     overflow-wrap: anywhere;
 }
 .row-meta {
@@ -704,16 +806,24 @@ details.more > summary > :is(h2, h3) {
     display: grid;
     gap: var(--gap-col);
 }
-.grocery-line-head {
-    align-items: center;
-    flex-wrap: nowrap;
-}
-.grocery-line-head .row-title {
-    flex: 1 1 auto;
-}
 .grocery-line.is-checked .grocery-line-name {
     color: var(--text-dim);
     text-decoration: line-through;
+}
+.grocery-line-put-away {
+    min-width: 0;
+}
+.grocery-line-put-away .grocery-put-away {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+.grocery-line-put-away .grocery-put-away select {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
 }
 .store-rule-list {
     margin: 0;
@@ -822,12 +932,8 @@ details.more > summary > :is(h2, h3) {
 }
 .recipe-panel-head .row-title {
     margin: 0;
-    font-size: var(--fs-18);
-    font-weight: 650;
-}
-.recipe-ingredient .row-actions {
-    position: relative;
-    z-index: 1;
+    font-size: var(--fs-19);
+    font-weight: 700;
 }
 .recipe-tags {
     display: flex;
@@ -843,6 +949,15 @@ details.more > summary > :is(h2, h3) {
     padding-left: 1.1em;
     color: var(--text-dim);
     font-size: var(--fs-13);
+}
+@media (max-width: 640px) {
+    .recipe-ingredient-row {
+        flex-wrap: wrap;
+    }
+    .recipe-ingredient-row > .row-actions {
+        flex: 1 1 100%;
+        justify-content: flex-end;
+    }
 }
 .recipe-ingredient-note {
     font-style: italic;
@@ -865,15 +980,26 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- nutrition log ---- */
 
-/* Three disclosure pills in a row; the opened one moves to the top of the
-   card and takes its full width. */
-.log-panel {
-    flex-direction: row;
-    flex-wrap: wrap;
+.peer-view-tag {
+    margin: 0;
 }
-.log-panel > details[open] {
-    flex-basis: 100%;
-    order: -1;
+.peer-view-tag-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+    border-radius: var(--r-999);
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn);
+    font-size: var(--fs-12);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.peer-view-tag-inner svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 .meal-items {
     display: grid;
@@ -887,6 +1013,13 @@ details.more > summary > :is(h2, h3) {
 .meal-item-name,
 .meal-item-results {
     grid-column: 1 / -1;
+}
+.meal-item-remove {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+.meal-item-remove[hidden] {
+    display: none;
 }
 
 /* ---- polish ---- */
@@ -1032,7 +1165,6 @@ details.more > summary > :is(h2, h3) {
     line-height: 1.1;
 }
 :where(.app-main) h2 {
-    font-weight: 650;
     letter-spacing: -0.015em;
 }
 /* Eyebrows, like the site's "WHY IT EXISTS": a green that passes AA as text. */
@@ -1040,12 +1172,20 @@ details.more > summary > :is(h2, h3) {
     color: var(--accent-ink);
 }
 
-/* Frosted bottom nav; the active tab gets the brand-soft pill. */
+/* Frosted bottom nav; --nav-chrome matches theme-color on tabbed pages. */
 .bottom-nav {
-    background: color-mix(in srgb, var(--panel) 78%, transparent);
+    background: var(--nav-chrome);
     -webkit-backdrop-filter: saturate(1.6) blur(14px);
     backdrop-filter: saturate(1.6) blur(14px);
     border-top-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
+}
+/* No ::after below the nav: an absolute 100vh box adds a screen of scroll
+   height. The body box-shadow paints the overscroll area without layout. */
+body.has-bottom-nav {
+    box-shadow: 0 100vh 0 100vh var(--nav-chrome);
+}
+html:has(body.has-bottom-nav) {
+    background-color: var(--bg);
 }
 .bottom-nav a {
     border-radius: 14px;
@@ -1126,18 +1266,7 @@ body.auth {
     body.auth {
         position: relative;
         isolation: isolate;
-        background:
-            radial-gradient(
-                ellipse 45vw 40vh at 0% 42%,
-                color-mix(in srgb, var(--accent) 16%, transparent),
-                transparent 68%
-            ),
-            radial-gradient(
-                ellipse 45vw 40vh at 100% 48%,
-                color-mix(in srgb, var(--accent) 16%, transparent),
-                transparent 68%
-            ),
-            var(--bg);
+        background: var(--bg);
     }
     body.auth::before {
         content: "";
@@ -1145,11 +1274,22 @@ body.auth {
         inset: 0;
         pointer-events: none;
         z-index: -1;
-        background: radial-gradient(
-                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
-                transparent 1.2px
-            )
-            0 0 / 18px 18px;
+        background-image:
+            radial-gradient(
+                ellipse 45vw 40vh at 0% 40%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                ellipse 45vw 40vh at 100% 50%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                    color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                    transparent 1.2px
+                )
+                0 0 / 18px 18px;
         -webkit-mask-image: linear-gradient(
             to bottom,
             transparent 0,
@@ -1292,10 +1432,10 @@ body.auth {
 .modal-head {
     flex: none;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 16px 16px 12px;
+    padding: var(--gap-field) 16px 10px;
     border-bottom: 1px solid var(--panel-border);
 }
 .modal-title {
@@ -1310,10 +1450,12 @@ body.auth {
     flex-shrink: 0;
     display: grid;
     place-items: center;
+    min-height: 0;
     width: 36px;
     height: 36px;
-    margin: -4px -6px 0 0;
+    margin: 0 -6px 0 0;
     padding: 0;
+    align-self: center;
     border: none;
     border-radius: var(--r-12);
     background: transparent;
@@ -1332,6 +1474,56 @@ body.auth {
     padding: 16px;
     overflow: auto;
     overscroll-behavior: contain;
+    --gap-label: 4px;
+    --gap-col: 8px;
+    --gap-field: 12px;
+    display: grid;
+    gap: var(--gap-field);
+    align-content: start;
+}
+.modal-body :where(label) {
+    font-size: var(--fs-12-5);
+    font-weight: 600;
+    color: var(--text-dim);
+}
+.modal-body :where(label:has(+ :is(input, select, textarea))) {
+    display: block;
+    margin-bottom: calc(var(--gap-label) - var(--gap-field));
+}
+.modal-body
+    :where(
+        label:has(
+            > :is(
+                input:not([type="checkbox"], [type="radio"]),
+                select,
+                textarea
+            )
+        )
+    ) {
+    display: grid;
+    gap: var(--gap-label);
+}
+.modal-body :where(form) {
+    display: grid;
+    gap: var(--gap-field);
+    margin: 0;
+}
+.modal-body :where(fieldset) {
+    display: grid;
+    gap: var(--gap-field);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.modal-body .food-picker,
+.modal-body .food-picker-panel,
+.modal-body .food-picker-panel > form {
+    display: grid;
+    gap: var(--gap-field);
+}
+.modal-body .seg {
+    margin: 0;
 }
 .modal-message {
     margin: 0 0 16px;

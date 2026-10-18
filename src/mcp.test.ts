@@ -4971,6 +4971,9 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("Viewing Bob");
+        expect(html).toContain('class="peer-view-tag"');
+        expect(html).not.toContain('commandfor="nutrition-arrange"');
+        expect(html).not.toContain('commandfor="nutrition-log-meal"');
         expect(html).not.toContain('action="/add-household-member"');
     });
 
@@ -5804,7 +5807,6 @@ describe("authenticated dashboard HTTP", () => {
         expect(move.status).toBe(303);
         expect(move.headers.get("location")).toBe("/");
         expect(db.profile?.nutrition_layout).toEqual([
-            "log",
             "goal-progress",
             "nutrition-summary",
             "trends",
@@ -5819,7 +5821,7 @@ describe("authenticated dashboard HTTP", () => {
         ).toBeLessThan(html.indexOf('data-nutrition-card="nutrition-summary"'));
     });
 
-    test("POST /nutrition/layout while viewing a peer saves the viewer layout and returns to peer view", async () => {
+    test("POST /nutrition/layout with a peer member is rejected and saves nothing", async () => {
         db.profile = {
             ...PROFILE_BASE,
             user_id: alice,
@@ -5830,17 +5832,12 @@ describe("authenticated dashboard HTTP", () => {
             alice,
             `card=trends&direction=up&member=${encodeURIComponent(bob)}`,
         );
-        expect(move.status).toBe(303);
-        expect(move.headers.get("location")).toBe(`/?member=${bob}`);
-        expect(db.profileUpsertUserIds.at(-1)).toBe(alice);
-        expect(db.profile?.user_id).toBe(alice);
-        expect(db.profile?.nutrition_layout).toEqual([
-            "log",
-            "nutrition-summary",
-            "trends",
-            "goal-progress",
-            "weight-trends",
-        ]);
+        expect(move.status).toBe(403);
+        const html = await move.text();
+        expect(html).toContain(
+            "You can only arrange your own nutrition dashboard.",
+        );
+        expect(db.profile?.nutrition_layout).toBeNull();
     });
 
     test("POST /nutrition/layout rejects an unknown card", async () => {
@@ -5865,12 +5862,11 @@ describe("authenticated dashboard HTTP", () => {
             nutrition_layout: null,
         };
         const order =
-            "order=weight-trends&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+            "order=weight-trends&order=nutrition-summary&order=goal-progress&order=trends";
         const save = await postForm("/nutrition/layout", alice, order);
         expect(save.status).toBe(303);
         expect(db.profile?.nutrition_layout).toEqual([
             "weight-trends",
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
@@ -5879,7 +5875,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("POST /nutrition/layout rejects an invalid full order", async () => {
         const bad =
-            "order=log&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+            "order=nutrition-summary&order=nutrition-summary&order=goal-progress&order=trends";
         const r = await postForm("/nutrition/layout", alice, bad);
         expect(r.status).toBe(400);
         const html = await r.text();
@@ -5937,7 +5933,8 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("<h1>Bob</h1>");
         expect(html).toContain("Viewing Bob");
-        expect(html).toContain("You can look, not edit");
+        expect(html).toContain('class="peer-view-tag"');
+        expect(html).not.toContain("You can look, not edit");
         expect(html).toContain("widget-frame");
     });
 

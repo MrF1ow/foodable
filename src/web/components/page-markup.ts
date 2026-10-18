@@ -1,23 +1,10 @@
 import { escapeHtml } from "../shell.js";
 import type { ExpiryLevel } from "../../domain/stock.js";
+import { iconArrowDown, iconArrowUp, iconPencil, iconTrash } from "./icons.js";
 import { disclosure, modalTrigger } from "./ui.js";
 
-function expiryPill(level: ExpiryLevel): string {
-    const label =
-        level === "expired"
-            ? "Expired"
-            : level === "high"
-              ? "High"
-              : level === "medium"
-                ? "Medium"
-                : "Low";
-    const cls =
-        level === "expired" || level === "high"
-            ? "pill pill-bad expiry-pill"
-            : level === "medium"
-              ? "pill pill-warn expiry-pill"
-              : "pill pill-dim expiry-pill";
-    return `<span class="${cls}">${label}</span>`;
+function expiryPillExpired(): string {
+    return `<span class="pill pill-bad expiry-pill">Expired</span>`;
 }
 
 export function renderExpiringStrip(
@@ -51,17 +38,23 @@ export function renderGroceryLineRow(opts: {
     const checked = opts.checked ? "true" : "false";
     const next = opts.checked ? "0" : "1";
     const verb = opts.checked ? "Uncheck" : "Check";
+    const metaParts = [escapeHtml(opts.quantityLabel)];
+    if (opts.alreadyHaveHtml) {
+        metaParts.push(opts.alreadyHaveHtml);
+    }
+    const meta = metaParts.join(" · ");
     return `<li class="grocery-line${opts.checked ? " is-checked" : ""}" data-line-id="${escapeHtml(opts.id)}" data-checked="${checked}" data-kind="${opts.kind}">
-<div class="grocery-line-head row">
+<div class="list-row grocery-line-row">
 <form class="grocery-line-check" method="post" action="/grocery/lines/${escapeHtml(opts.id)}/check">
 <input type="hidden" name="checked" value="${next}" />
 <button type="submit" class="check-btn" aria-pressed="${checked}"><span class="visually-hidden">${verb} ${escapeHtml(opts.displayName)}</span></button>
 </form>
+<div class="list-row-main">
 <p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
-${opts.alreadyHaveHtml}
-<p class="grocery-line-qty row-meta">${escapeHtml(opts.quantityLabel)}</p>
+<p class="grocery-line-meta row-meta">${meta}</p>
+${opts.putAwayHtml ? `<div class="grocery-line-put-away">${opts.putAwayHtml}</div>` : ""}
 </div>
-${opts.putAwayHtml ?? ""}
+</div>
 </li>`;
 }
 
@@ -75,21 +68,23 @@ export function renderFridgeItemRow(opts: {
     rowActions: string;
 }): string {
     const id = escapeHtml(opts.id);
-    const expires = opts.expiresOn
-        ? ` · exp ${escapeHtml(opts.expiresOn)}`
-        : "";
-    const expiryAttr =
-        opts.expiryLevel != null
-            ? ` data-expiry="${escapeHtml(opts.expiryLevel)}"`
-            : "";
-    const pill = opts.expiryLevel != null ? expiryPill(opts.expiryLevel) : "";
+    const expired = opts.expiryLevel === "expired";
+    const expiryAttr = expired ? ` data-expiry="expired"` : "";
+    const pill = expired ? expiryPillExpired() : "";
+    const expiryText = opts.expiresOn
+        ? `Expires ${escapeHtml(opts.expiresOn)}`
+        : "No expiry";
+    const meta = `${escapeHtml(opts.quantityLabel)} · ${expiryText}`;
+    const titleLine = `<div class="row-title-line"><p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}</p>${pill}</div>`;
     return `<li class="fridge-item" data-item-id="${id}" data-kind="${opts.kind}"${expiryAttr}>
-<div class="fridge-item-head row">
-<p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}${pill ? ` ${pill}` : ""}</p>
-<p class="fridge-item-qty row-meta">${escapeHtml(opts.quantityLabel)}${expires}</p>
+<div class="list-row fridge-item-row">
+<div class="list-row-main">
+${titleLine}
+<p class="fridge-item-qty row-meta">${meta}</p>
 </div>
 <div class="row-actions">
 ${opts.rowActions}
+</div>
 </div>
 </li>`;
 }
@@ -124,7 +119,7 @@ export function renderRecipeIngredientRow(opts: {
     displayName: string;
     totalLabel: string;
     perPortionLabel: string;
-    personLabel: string;
+    personPortionLabel?: string | null;
     perPortionAmount: number;
     personAmount: number;
     totalAmount: number;
@@ -138,29 +133,39 @@ export function renderRecipeIngredientRow(opts: {
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);
     const name = escapeHtml(opts.displayName);
+    const moveUpLabel = escapeHtml(`Move ${opts.displayName} up`);
+    const moveDownLabel = escapeHtml(`Move ${opts.displayName} down`);
+    const editLabel = escapeHtml(`Edit ${opts.displayName}`);
+    const removeLabel = escapeHtml(`Remove ${opts.displayName}`);
+    let meta = `Total ${escapeHtml(opts.totalLabel)} · Per portion ${escapeHtml(opts.perPortionLabel)}`;
+    if (opts.personPortionLabel) {
+        meta += ` · Your portion ${escapeHtml(opts.personPortionLabel)}`;
+    }
     return `<li class="recipe-ingredient" data-ingredient-id="${id}" data-per-portion="${escapeHtml(String(opts.perPortionAmount))}" data-person-amount="${escapeHtml(String(opts.personAmount))}">
-<div class="row">
+<div class="list-row recipe-ingredient-row">
+<div class="list-row-main">
 <p class="recipe-ingredient-name row-title">${name}</p>
-<p class="recipe-ingredient-total row-meta">Total ${escapeHtml(opts.totalLabel)}</p>
+<p class="recipe-ingredient-meta row-meta">${meta}</p>
 </div>
-<p class="recipe-ingredient-per-portion muted">Per portion ${escapeHtml(opts.perPortionLabel)}</p>
-<p class="recipe-ingredient-person muted">${escapeHtml(opts.personLabel)}</p>
-${note}
 <div class="row-actions">
 <form class="recipe-ingredient-move" method="post" action="/recipes/${recipeId}/ingredients/${id}/move">
-<button type="submit" name="direction" value="up" class="btn-sm" aria-label="Move ${name} up">↑</button>
-<button type="submit" name="direction" value="down" class="btn-sm" aria-label="Move ${name} down">↓</button>
+<button type="submit" name="direction" value="up" class="btn-sm btn-icon" aria-label="${moveUpLabel}" title="${moveUpLabel}">${iconArrowUp()}</button>
+<button type="submit" name="direction" value="down" class="btn-sm btn-icon" aria-label="${moveDownLabel}" title="${moveDownLabel}">${iconArrowDown()}</button>
 </form>
 ${modalTrigger({
     target: opts.editModalId,
-    label: "Edit",
-    className: "btn-sm",
+    label: `Edit ${opts.displayName}`,
+    className: "btn-sm btn-icon",
+    icon: iconPencil(),
 })}
 ${modalTrigger({
     target: opts.deleteModalId,
-    label: "Remove",
-    className: "btn-sm btn-danger",
+    label: `Remove ${opts.displayName}`,
+    className: "btn-sm btn-icon btn-danger",
+    icon: iconTrash(),
 })}
 </div>
+</div>
+${note}
 </li>`;
 }

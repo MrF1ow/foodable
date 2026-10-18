@@ -327,6 +327,7 @@ test("quantity field food kind lists food units and preselects an explicit unit"
 
     const eachHtml = renderQuantityField({ kind: "food", unit: "each" });
     expect(eachHtml).toMatch(/<option value="each"[^>]*selected/);
+    expect(eachHtml).toContain(">count</option>");
 
     const supplyHtml = renderQuantityField({ kind: "supply" });
     expect(supplyHtml).toContain('data-kind="supply"');

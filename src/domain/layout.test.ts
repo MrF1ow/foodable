@@ -25,16 +25,31 @@ test("orderCards drops unknown keys and dedupes", () => {
     ).toEqual([
         "trends",
         "nutrition-summary",
-        "log",
         "goal-progress",
         "weight-trends",
     ]);
 });
 
-test("orderCards appends missing keys in default order", () => {
-    expect(orderCards(["weight-trends", "log"])).toEqual([
+test("orderCards drops a saved log key from older layouts", () => {
+    expect(
+        orderCards([
+            "log",
+            "weight-trends",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+        ]),
+    ).toEqual([
         "weight-trends",
-        "log",
+        "nutrition-summary",
+        "goal-progress",
+        "trends",
+    ]);
+});
+
+test("orderCards appends missing keys in default order", () => {
+    expect(orderCards(["weight-trends"])).toEqual([
+        "weight-trends",
         "nutrition-summary",
         "goal-progress",
         "trends",
@@ -44,14 +59,12 @@ test("orderCards appends missing keys in default order", () => {
 test("moveCard swaps adjacent entries", () => {
     const base: NutritionCard[] = [...NUTRITION_CARDS];
     expect(moveCard(base, "goal-progress", "up")).toEqual([
-        "log",
         "goal-progress",
         "nutrition-summary",
         "trends",
         "weight-trends",
     ]);
     expect(moveCard(base, "goal-progress", "down")).toEqual([
-        "log",
         "nutrition-summary",
         "trends",
         "goal-progress",
@@ -62,7 +75,6 @@ test("moveCard swaps adjacent entries", () => {
 test("validateNutritionLayoutOrder accepts a full permutation once each", () => {
     const order: NutritionCard[] = [
         "weight-trends",
-        "log",
         "nutrition-summary",
         "goal-progress",
         "trends",
@@ -73,11 +85,10 @@ test("validateNutritionLayoutOrder accepts a full permutation once each", () => 
 test("validateNutritionLayoutOrder rejects unknown, duplicate, and partial lists", () => {
     expect(
         validateNutritionLayoutOrder([
-            "log",
+            "nutrition-summary",
             "bogus",
             "trends",
             "goal-progress",
-            "weight-trends",
         ]),
     ).toBe("unknown-card");
     expect(nutritionLayoutOrderErrorMessage("unknown-card")).toBe(
@@ -85,23 +96,22 @@ test("validateNutritionLayoutOrder rejects unknown, duplicate, and partial lists
     );
     expect(
         validateNutritionLayoutOrder([
-            "log",
-            "log",
+            "nutrition-summary",
             "nutrition-summary",
             "goal-progress",
             "trends",
         ]),
     ).toBe("duplicate-card");
-    expect(validateNutritionLayoutOrder(["log", "nutrition-summary"])).toBe(
-        "wrong-length",
-    );
+    expect(
+        validateNutritionLayoutOrder(["nutrition-summary", "goal-progress"]),
+    ).toBe("wrong-length");
 });
 
 test("moveCard is a no-op at the ends and for unknown keys", () => {
     const base: NutritionCard[] = [...NUTRITION_CARDS];
-    expect(moveCard(base, "log", "up")).toEqual(base);
+    expect(moveCard(base, "nutrition-summary", "up")).toEqual(base);
     expect(moveCard(base, "weight-trends", "down")).toEqual(base);
-    expect(moveCard(base, "nutrition-summary", "up")).not.toBe(base);
-    const partial = ["log", "trends"] as NutritionCard[];
+    expect(moveCard(base, "goal-progress", "up")).not.toBe(base);
+    const partial = ["trends"] as NutritionCard[];
     expect(moveCard(partial, "nutrition-summary", "up")).toEqual(partial);
 });

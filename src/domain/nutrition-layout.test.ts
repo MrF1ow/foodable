@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
     NUTRITION_ARRANGE_MODAL_ID,
+    NUTRITION_LOG_MEAL_MODAL_ID,
     renderNutritionPage,
 } from "../web/pages/nutrition.js";
 import { assertNoNestedForms } from "../web/components/ui.test.js";
@@ -52,7 +53,6 @@ async function renderOrder(order: NutritionCard[], peer = false) {
 test("nutrition page renders cards in saved order", async () => {
     const order: NutritionCard[] = [
         "weight-trends",
-        "log",
         "nutrition-summary",
         "goal-progress",
         "trends",
@@ -64,28 +64,25 @@ test("nutrition page renders cards in saved order", async () => {
     }
 });
 
-test("peer view keeps the viewer card order and shows Arrange", async () => {
+test("peer view keeps the viewer card order and hides log and Arrange", async () => {
     const order: NutritionCard[] = [
         "trends",
-        "log",
         "nutrition-summary",
         "goal-progress",
         "weight-trends",
     ];
     const html = await renderOrder(order, true);
-    const peerOrder: NutritionCard[] = [
-        "trends",
-        "nutrition-summary",
-        "goal-progress",
-        "weight-trends",
-    ];
-    const pos = cardPositions(html, peerOrder);
+    const pos = cardPositions(html, order);
     for (let i = 1; i < pos.length; i++) {
         expect(pos[i]!).toBeGreaterThan(pos[i - 1]!);
     }
     expect(html).not.toContain('class="panel log-panel"');
-    expect(html).toContain('commandfor="nutrition-arrange"');
+    expect(html).not.toContain('commandfor="nutrition-arrange"');
+    expect(html).not.toContain(`id="${NUTRITION_ARRANGE_MODAL_ID}"`);
+    expect(html).not.toContain('commandfor="nutrition-log-meal"');
+    expect(html).toContain('class="peer-view-tag"');
     expect(html).toContain("Viewing Bob");
+    expect(html).not.toContain("You can look, not edit");
 });
 
 test("Arrange modal lists every card with disabled ends", async () => {
@@ -103,7 +100,6 @@ test("Arrange modal lists every card with disabled ends", async () => {
         weight: { locale: "en" },
         chrome: { theme: "light" },
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
@@ -114,10 +110,10 @@ test("Arrange modal lists every card with disabled ends", async () => {
     expect(html).toContain("Nutrition summary");
     expect(html).toContain("Goal progress");
     expect(html).toContain("Weight trends");
-    expect(html).toContain('aria-label="Move Log up"');
+    expect(html).toContain('aria-label="Move Nutrition summary up"');
     expect(html).toContain('aria-label="Move Weight trends down"');
     expect(html).toMatch(
-        /<button type="button" class="btn-sm arrange-up" aria-label="Move Log up" disabled>↑<\/button>/,
+        /<button type="button" class="btn-sm arrange-up" aria-label="Move Nutrition summary up" disabled>↑<\/button>/,
     );
     expect(html).toMatch(
         /<button type="button" class="btn-sm arrange-down" aria-label="Move Weight trends down" disabled>↓<\/button>/,
@@ -134,7 +130,6 @@ test("Arrange modal lists every card with disabled ends", async () => {
         ...(arrangeModal!.matchAll(/name="order" value="([^"]+)"/g) ?? []),
     ].map((m) => m[1]);
     expect(orderInputs).toEqual([
-        "log",
         "nutrition-summary",
         "goal-progress",
         "trends",
@@ -163,6 +158,38 @@ test("Arrange modal lists every card with disabled ends", async () => {
     );
 });
 
+test("log meal validation error reopens the log meal modal only", async () => {
+    const html = await renderNutritionPage({
+        access: {
+            ok: true,
+            mode: "self",
+            viewer: member,
+            subject: member,
+        },
+        members: [member],
+        summary: { locale: "en" },
+        goals: { locale: "en" },
+        trends: { locale: "en" },
+        weight: { locale: "en" },
+        chrome: { theme: "light" },
+        cardOrder: [
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
+        error: "Enter a meal description or add a food.",
+        openModalId: NUTRITION_LOG_MEAL_MODAL_ID,
+    });
+    expect(html).toMatch(
+        new RegExp(
+            `<dialog class="modal" id="${NUTRITION_LOG_MEAL_MODAL_ID}"[^>]*data-modal-open-on-load`,
+        ),
+    );
+    expect(html).toContain("Enter a meal description or add a food.");
+    expect(html).not.toMatch(/<header class="dash-head"[^>]*error-banner/s);
+});
+
 test("a layout error reopens the Arrange modal only", async () => {
     const html = await renderNutritionPage({
         access: {
@@ -178,7 +205,6 @@ test("a layout error reopens the Arrange modal only", async () => {
         weight: { locale: "en" },
         chrome: { theme: "light" },
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",

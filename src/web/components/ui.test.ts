@@ -54,14 +54,32 @@ test("pageHeader is an h1, wrapped in dash-head when there is a sub or actions",
 <h1>Create household</h1>
 <p class="muted">Name it.</p>
 </header>`);
+    const withTitleActions = pageHeader({
+        title: "Fridge",
+        titleActions: `<button type="button" class="btn-sm btn-primary">Add</button>`,
+    });
+    expect(withTitleActions).toContain('<header class="dash-head">');
+    expect(withTitleActions).toContain('<div class="dash-head-title-row">');
+    expect(withTitleActions).toContain("<h1>Fridge</h1>");
+    expect(withTitleActions).toContain('<div class="dash-head-title-actions">');
+    expect(withTitleActions).not.toContain('<div class="page-actions">');
     const withNav = pageHeader({
         title: "Alice",
-        actions: `<nav class="member-switch">x</nav>`,
+        titleActions: `<nav class="member-switch">x</nav>`,
+        actions: `<button type="button" class="btn-sm">Log meal</button>`,
     });
     expect(withNav).toContain('<header class="dash-head">');
     expect(withNav).toContain("<h1>Alice</h1>");
-    expect(withNav).toContain('<div class="page-actions">');
-    expect(withNav).toContain('<nav class="member-switch">x</nav>');
+    const titleActionsBlock = withNav.match(
+        /<div class="dash-head-title-actions">\n([\s\S]*?)\n<\/div>/,
+    )?.[1];
+    expect(titleActionsBlock).toContain('<nav class="member-switch">x</nav>');
+    expect(titleActionsBlock).not.toContain("Log meal");
+    const pageActionsBlock = withNav.match(
+        /<div class="page-actions">\n([\s\S]*?)\n<\/div>/,
+    )?.[1];
+    expect(pageActionsBlock).toContain("Log meal");
+    expect(pageActionsBlock).not.toContain("member-switch");
 });
 
 test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
@@ -254,7 +272,6 @@ test("every page's h1 comes from pageHeader once", async () => {
         weight: { locale: "en" },
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
@@ -324,13 +341,13 @@ test("every page's h1 comes from pageHeader once", async () => {
         weight: { locale: "en" },
         chrome,
         cardOrder: [
-            "log",
             "nutrition-summary",
             "goal-progress",
             "trends",
             "weight-trends",
         ],
         error: "Enter a meal description or add a food.",
+        openModalId: "nutrition-log-meal",
     });
     expect(withError.indexOf("<h1>Alice</h1>")).toBeLessThan(
         withError.indexOf("error-banner"),

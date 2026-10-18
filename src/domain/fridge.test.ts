@@ -255,7 +255,7 @@ test("fridge page reuses quantity field and food picker", () => {
 test("fridge rows use modals for edit and delete, with expiry badges", () => {
     const today = utcTodayFromDate();
     const expiresOn = addUtcDays(today, 2);
-    const level = expiryLevel(expiresOn, today);
+    expiryLevel(expiresOn, today);
     const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [
@@ -276,15 +276,19 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
         ],
     } as never);
     expect(html).toContain('<ul class="fridge-items list">');
-    expect(html).toContain(`6 each · exp ${expiresOn}`);
-    expect(html).toContain(`data-expiry="${level}"`);
+    expect(html).toContain(`6 · Expires ${expiresOn}`);
+    expect(html).not.toContain('data-expiry="medium"');
+    expect(html).not.toContain('data-expiry="high"');
+    expect(html).not.toContain(">Medium<");
+    expect(html).not.toContain(">High<");
+    expect(html).not.toContain(">Low<");
     expect(html).toContain('class="fridge-item-edit"');
     expect(html).toContain('id="fridge-edit-it-1"');
     expect(html).toContain('commandfor="fridge-edit-it-1"');
     expect(html).toContain('id="fridge-delete-it-1"');
     expect(html).toContain('action="/fridge/items/it-1/delete"');
-    expect(html).toContain('class="fridge-item-eat"');
-    expect(html).toContain('aria-label="Eat Eggs"');
+    expect(html).not.toContain('class="fridge-item-eat"');
+    expect(html).not.toContain('aria-label="Eat Eggs"');
     expect(html).toContain("btn-icon");
     expect(html).not.toContain(">Ate it<");
     expect(html).not.toContain(">Toss<");
@@ -293,10 +297,9 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     const actionsEnd = html.indexOf("</li>", actionsStart);
     const itemChunk = html.slice(actionsStart, actionsEnd);
     const editPos = itemChunk.indexOf('commandfor="fridge-edit-it-1"');
-    const eatPos = itemChunk.indexOf('class="fridge-item-eat"');
     const deletePos = itemChunk.indexOf('commandfor="fridge-delete-it-1"');
-    expect(editPos).toBeLessThan(eatPos);
-    expect(eatPos).toBeLessThan(deletePos);
+    expect(editPos).toBeGreaterThan(-1);
+    expect(deletePos).toBeGreaterThan(editPos);
     expect(html).not.toMatch(
         /<details class="more">\s*<summary>Edit<\/summary>/,
     );
