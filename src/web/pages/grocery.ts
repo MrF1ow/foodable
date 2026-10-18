@@ -1,8 +1,5 @@
-import {
-    formatQuantity,
-    isQuantityUnit,
-    type Quantity,
-} from "../../domain/quantity.js";
+import { type Quantity } from "../../domain/quantity.js";
+import { formatQuantityDisplayParts } from "../display-quantity.js";
 import type { GroceryLine } from "../../domain/grocery.js";
 import type { GrocerySection, GroceryStore } from "../../domain/settings.js";
 import type { StoreRule } from "../../domain/rules.js";
@@ -57,13 +54,7 @@ const ADD_STORE_MODAL_ID = "grocery-add-store";
 const CLEAR_CHECKED_MODAL_ID = "grocery-clear-checked";
 
 function quantityLabel(line: GroceryLine): string {
-    if (isQuantityUnit(line.quantity.unit)) {
-        return formatQuantity({
-            amount: line.quantity.amount,
-            unit: line.quantity.unit,
-        });
-    }
-    return `${line.quantity.amount} ${line.quantity.unit}`;
+    return formatQuantityDisplayParts(line.quantity.amount, line.quantity.unit);
 }
 
 function modalOpen(view: GroceryPageView, id: string): boolean {

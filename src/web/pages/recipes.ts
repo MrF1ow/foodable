@@ -1,4 +1,4 @@
-import { formatQuantity, isQuantityUnit } from "../../domain/quantity.js";
+import { formatQuantityDisplayParts } from "../display-quantity.js";
 import type {
     Recipe,
     RecipeIngredientView,
@@ -77,10 +77,7 @@ function modalFormError(
 }
 
 function quantityLabel(amount: number, unit: string): string {
-    if (isQuantityUnit(unit)) {
-        return formatQuantity({ amount, unit });
-    }
-    return `${amount} ${unit}`;
+    return formatQuantityDisplayParts(amount, unit);
 }
 
 function editRecipeModalId(recipeId: string): string {
@@ -208,22 +205,19 @@ function ingredientRow(
     const deleteId = deleteIngredientModalId(ingredient.id);
     const id = escapeHtml(ingredient.id);
     const recipeIdEsc = escapeHtml(recipeId);
+    const unit = ingredient.quantity.unit;
+    const showPersonPortion =
+        view.portionCount !== 1 ||
+        ingredient.personAmount !== ingredient.perPortionAmount;
     const row = renderRecipeIngredientRow({
         id: ingredient.id,
         recipeId,
         displayName: ingredient.displayName,
-        totalLabel: quantityLabel(
-            ingredient.quantity.amount,
-            ingredient.quantity.unit,
-        ),
-        perPortionLabel: quantityLabel(
-            ingredient.perPortionAmount,
-            ingredient.quantity.unit,
-        ),
-        personLabel: quantityLabel(
-            ingredient.personAmount,
-            ingredient.quantity.unit,
-        ),
+        totalLabel: quantityLabel(ingredient.quantity.amount, unit),
+        perPortionLabel: quantityLabel(ingredient.perPortionAmount, unit),
+        personPortionLabel: showPersonPortion
+            ? quantityLabel(ingredient.personAmount, unit)
+            : null,
         perPortionAmount: ingredient.perPortionAmount,
         personAmount: ingredient.personAmount,
         totalAmount: ingredient.quantity.amount,

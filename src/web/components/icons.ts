@@ -18,13 +18,6 @@ export function iconTrash(): string {
     );
 }
 
-/** Fork (eat / log as snack). */
-export function iconFork(): string {
-    return icon(
-        '<path d="M6 3v8"/><path d="M10 3v8"/><path d="M6 11v2a4 4 0 0 0 4 4v4"/><path d="M10 11v2a4 4 0 0 1-4 4"/><path d="M18 3v12a3 3 0 0 1-3 3"/>',
-    );
-}
-
 /** Log out (door and arrow). */
 export function iconLogOut(): string {
     return icon(

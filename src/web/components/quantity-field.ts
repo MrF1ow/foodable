@@ -2,6 +2,7 @@ import {
     FOOD_QUANTITY_UNITS,
     type QuantityUnit,
 } from "../../domain/quantity.js";
+import { quantityUnitOptionLabel } from "../display-quantity.js";
 import { escapeHtml } from "../shell.js";
 
 export type QuantityFieldKind = "food" | "supply";
@@ -44,7 +45,8 @@ export function renderQuantityField(opts: QuantityFieldOptions): string {
     const options = units
         .map((unit) => {
             const sel = unit === selected ? " selected" : "";
-            return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(unit)}</option>`;
+            const label = quantityUnitOptionLabel(unit);
+            return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
         })
         .join("");
     return `<div class="quantity-field" data-kind="${opts.kind}">
