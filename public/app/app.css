@@ -57,9 +57,9 @@ body {
     background-color: var(--bg);
 }
 
-/* Page glow: a body background layer (not a 100vw pseudo) so scrollWidth stays
-   equal to clientWidth when a classic scrollbar is present. Default attachment
-   is scroll (iOS ignores fixed); glow moves with content like desktop today. */
+/* Page glow: desktop uses a body background layer (not a 100vw pseudo) so
+   scrollWidth stays equal to clientWidth when a classic scrollbar is present.
+   Touch/narrow side glows live on a fixed body::before layer (see below). */
 body:not(.auth) {
     background-image: radial-gradient(
         ellipse min(60vw, 28rem) 18rem at 50% 0,
@@ -79,17 +79,39 @@ body:not(.auth) {
 }
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
     body:not(.auth) {
+        isolation: isolate;
+        background: var(--bg);
+    }
+    /* Viewport-fixed side glows (iOS ignores background-attachment: fixed). */
+    body:not(.auth)::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -1;
         background-image:
             radial-gradient(
-                ellipse 45vw 40vh at 0% 42%,
+                ellipse 45vw 40vh at 0% 40%,
                 color-mix(in srgb, var(--accent) 14%, transparent),
                 transparent 68%
             ),
             radial-gradient(
-                ellipse 45vw 40vh at 100% 48%,
+                ellipse 45vw 40vh at 100% 50%,
                 color-mix(in srgb, var(--accent) 14%, transparent),
                 transparent 68%
             );
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 120px)
+        );
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(env(safe-area-inset-top, 0px) + 8px),
+            #000 calc(env(safe-area-inset-top, 0px) + 120px)
+        );
     }
 }
 
@@ -1165,18 +1187,7 @@ body.auth {
     body.auth {
         position: relative;
         isolation: isolate;
-        background:
-            radial-gradient(
-                ellipse 45vw 40vh at 0% 42%,
-                color-mix(in srgb, var(--accent) 16%, transparent),
-                transparent 68%
-            ),
-            radial-gradient(
-                ellipse 45vw 40vh at 100% 48%,
-                color-mix(in srgb, var(--accent) 16%, transparent),
-                transparent 68%
-            ),
-            var(--bg);
+        background: var(--bg);
     }
     body.auth::before {
         content: "";
@@ -1184,11 +1195,22 @@ body.auth {
         inset: 0;
         pointer-events: none;
         z-index: -1;
-        background: radial-gradient(
-                color-mix(in srgb, var(--accent) 22%, transparent) 1px,
-                transparent 1.2px
-            )
-            0 0 / 18px 18px;
+        background-image:
+            radial-gradient(
+                ellipse 45vw 40vh at 0% 40%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                ellipse 45vw 40vh at 100% 50%,
+                color-mix(in srgb, var(--accent) 16%, transparent),
+                transparent 68%
+            ),
+            radial-gradient(
+                    color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+                    transparent 1.2px
+                )
+                0 0 / 18px 18px;
         -webkit-mask-image: linear-gradient(
             to bottom,
             transparent 0,
