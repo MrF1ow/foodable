@@ -73,8 +73,12 @@ describe("marketing HTTP is gone", () => {
         expect(body).not.toContain("/authorize/google");
         expect(body).not.toContain("Continue with Google");
         expect(body).not.toContain("created automatically");
-        expect(body).toContain('<link rel="stylesheet" href="/app.css" />');
-        expect(body).toContain('<script src="/app.js" defer></script>');
+        expect(body).toContain(
+            '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+        );
+        expect(body).toContain(
+            '<script src="/app.js" defer data-turbo-track="reload"></script>',
+        );
         expect(body).not.toContain("/?locale=");
         expect(body).not.toContain("gtag");
         expect(body).not.toContain("googletagmanager");
@@ -256,8 +260,12 @@ describe("runtime surfaces that stay", () => {
         expect(html).not.toContain('href="/terms"');
         expect(html).not.toContain('href="/privacy"');
         expect(html).not.toMatch(/<a class="brand"[^>]*href="\/"/);
-        expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
-        expect(html).toContain('<script src="/app.js" defer></script>');
+        expect(html).toContain(
+            '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+        );
+        expect(html).toContain(
+            '<script src="/app.js" defer data-turbo-track="reload"></script>',
+        );
         expect(html).not.toContain("gtag");
         expect(html).not.toContain("fonts.googleapis.com");
         expect(html).not.toContain("fonts.gstatic.com");

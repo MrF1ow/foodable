@@ -41,6 +41,29 @@ function onModalClose() {
     unlockPageScroll();
 }
 
+function releaseScrollLockForSwap() {
+    document.querySelectorAll("dialog[open]").forEach((dialog) => {
+        if (typeof dialog.close === "function") dialog.close();
+    });
+    openModalCount = 0;
+    if (bodyWasFixed && document.body) {
+        const y = scrollLockY;
+        document.body.style.position = "";
+        document.body.style.top = "";
+        document.body.style.width = "";
+        bodyWasFixed = false;
+        window.scrollTo(0, y);
+        window.dispatchEvent(
+            new CustomEvent("foodable:scroll-lock-release", {
+                detail: { y },
+            }),
+        );
+    }
+}
+
+document.addEventListener("turbo:before-render", releaseScrollLockForSwap);
+document.addEventListener("turbo:before-morph", releaseScrollLockForSwap);
+
 function focusFirstField(dialog) {
     const field = dialog.querySelector(
         'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
@@ -48,8 +71,12 @@ function focusFirstField(dialog) {
     if (field && typeof field.focus === "function") field.focus();
 }
 
+const dialogInit = new WeakSet();
+
 function initDialog(dialog) {
     if (typeof dialog.showModal !== "function") return;
+    if (dialogInit.has(dialog)) return;
+    dialogInit.add(dialog);
 
     let backdropPointerDown = false;
     dialog.addEventListener("pointerdown", (e) => {
@@ -154,9 +181,17 @@ function initDialog(dialog) {
     });
 }
 
-document.querySelectorAll("dialog.modal").forEach((dialog) => {
-    initDialog(dialog);
-    if (dialog.hasAttribute("data-modal-open-on-load")) {
-        dialog.showModal();
-    }
-});
+function initModals(root) {
+    root.querySelectorAll("dialog.modal").forEach((dialog) => {
+        initDialog(dialog);
+        if (
+            dialog.hasAttribute("data-modal-open-on-load") &&
+            !dialog.open &&
+            typeof dialog.showModal === "function"
+        ) {
+            dialog.showModal();
+        }
+    });
+}
+
+window.FoodableApp.onLoad(initModals);

@@ -1,5 +1,10 @@
 // Nutrition › Arrange: reorder cards client-side, save once.
-document.querySelectorAll(".nutrition-arrange-form").forEach((form) => {
+const arrangeFormInit = new WeakSet();
+
+function initArrangeForm(form) {
+    if (arrangeFormInit.has(form)) return;
+    arrangeFormInit.add(form);
+
     const list = form.querySelector(".nutrition-arrange-list");
     if (!list) return;
 
@@ -87,4 +92,10 @@ document.querySelectorAll(".nutrition-arrange-form").forEach((form) => {
     }
 
     syncDisabled();
-});
+}
+
+function initArrange(root) {
+    root.querySelectorAll(".nutrition-arrange-form").forEach(initArrangeForm);
+}
+
+window.FoodableApp.onLoad(initArrange);

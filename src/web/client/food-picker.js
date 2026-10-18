@@ -5,7 +5,13 @@ function esc(s) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 }
-document.querySelectorAll("[data-food-picker]").forEach(function (root) {
+
+const foodPickerInit = new WeakSet();
+
+function initFoodPicker(root) {
+    if (foodPickerInit.has(root)) return;
+    foodPickerInit.add(root);
+
     var tabs = root.querySelectorAll('[role="tab"]');
     var panels = root.querySelectorAll('[role="tabpanel"]');
     function show(name) {
@@ -129,4 +135,10 @@ document.querySelectorAll("[data-food-picker]").forEach(function (root) {
                 barcodeResults.setAttribute("data-barcode", digits);
         });
     }
-});
+}
+
+function initFoodPickers(root) {
+    root.querySelectorAll("[data-food-picker]").forEach(initFoodPicker);
+}
+
+window.FoodableApp.onLoad(initFoodPickers);

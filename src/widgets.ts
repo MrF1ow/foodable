@@ -185,11 +185,30 @@ export const APP_JS_SOURCES = [
     "./src/web/client/modal.js",
     "./src/web/client/arrange.js",
 ] as const;
+const TURBO_ENTRY = "./src/web/client/turbo-entry.ts";
+let turboBundle: string | undefined;
 let appJs: string | undefined;
+
+async function getTurboBundle(): Promise<string> {
+    if (turboBundle !== undefined) return turboBundle;
+    const result = await Bun.build({
+        entrypoints: [TURBO_ENTRY],
+        format: "iife",
+        minify: true,
+        target: "browser",
+    });
+    if (!result.success) {
+        throw new Error(
+            `Turbo bundle failed: ${result.logs.map((l) => l.message).join("; ")}`,
+        );
+    }
+    turboBundle = await result.outputs[0]!.text();
+    return turboBundle;
+}
 
 export async function getAppJs(): Promise<string> {
     if (appJs !== undefined) return appJs;
-    const parts: string[] = [];
+    const parts: string[] = [await getTurboBundle()];
     for (const path of APP_JS_SOURCES) {
         const file = Bun.file(path);
         if (!(await file.exists())) {

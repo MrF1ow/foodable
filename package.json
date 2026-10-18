@@ -33,6 +33,7 @@
         "inspect": "bunx @modelcontextprotocol/inspector",
         "harness": "bun run scripts/widget-harness.ts",
         "preview:app": "bun run scripts/app-preview.ts",
+        "check:nav": "bun run scripts/nav-check.ts",
         "e2e:agent": "bun run scripts/e2e-agent.ts",
         "test": "bun test",
         "format": "bunx prettier --write .",
@@ -46,6 +47,7 @@
         "generate-oauth-creds": "echo \"OAUTH_CLIENT_ID=$(openssl rand -hex 16)\" && echo \"OAUTH_CLIENT_SECRET=$(openssl rand -hex 32)\" && echo \"SESSION_SECRET=$(openssl rand -hex 32)\""
     },
     "dependencies": {
+        "@hotwired/turbo": "8.0.23",
         "@modelcontextprotocol/server": "^2.0.0",
         "@supabase/supabase-js": "^2.116.0",
         "hono": "^4.13.7",

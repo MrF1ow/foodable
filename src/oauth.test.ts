@@ -108,8 +108,16 @@ test("renderLoginPage has no language switcher or translation notice", async () 
 
 test("generated login uses the shared app stylesheet and no web fonts", async () => {
     const html = await renderLoginPage("s1", fakeSession());
-    expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
-    expect(html).toContain('<script src="/app.js" defer></script>');
+    expect(html).toContain(
+        '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+    );
+    expect(html).toContain('data-turbo="false"');
+    expect(html).toContain(
+        '<meta name="turbo-visit-control" content="reload" />',
+    );
+    expect(html).toContain(
+        '<script src="/app.js" defer data-turbo-track="reload"></script>',
+    );
     expect(html).toContain('class="auth-stage native"');
     expect(html).toContain('class="btn-primary"');
     expect(html).not.toContain("/styles.css");

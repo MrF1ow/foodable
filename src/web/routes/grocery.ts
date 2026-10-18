@@ -95,7 +95,7 @@ groceryRoutes.post("/grocery/stores", requireOwner, async (c) => {
         const page = await groceryFormError(userId, err, "grocery-add-store");
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });
 
 groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
@@ -202,7 +202,7 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });
 
 groceryRoutes.post("/grocery/lines/:id/check", requireMember, async (c) => {
@@ -221,7 +221,7 @@ groceryRoutes.post("/grocery/lines/:id/check", requireMember, async (c) => {
         const page = await groceryFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });
 
 groceryRoutes.post("/grocery/clear-checked", requireMember, async (c) => {
@@ -237,7 +237,7 @@ groceryRoutes.post("/grocery/clear-checked", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });
 
 groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
@@ -261,5 +261,5 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
         const page = await groceryFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/grocery");
+    return c.redirect("/grocery", 303);
 });

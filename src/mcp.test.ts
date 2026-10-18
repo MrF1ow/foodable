@@ -4983,7 +4983,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "display_name=Kid&password=password1&username=kid",
         });
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.members).toContainEqual({
             householdId: "hh-1",
@@ -5045,7 +5045,7 @@ describe("authenticated dashboard HTTP", () => {
             `/settings/household/members/${bob}/make-owner`,
             alice,
         );
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.ownershipTransfers).toEqual([{ from: alice, to: bob }]);
         expect(
@@ -5080,7 +5080,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
             "confirm=yes",
         );
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.wipedUsers).toEqual([bob]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice"]);
@@ -5226,7 +5226,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "name=Pantry",
         });
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/fridge");
         const page = await siteApp.request("http://x/fridge", {
             headers: { cookie: cookieFor(alice) },
@@ -5257,7 +5257,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: `kind=supply&location_id=${locationId}&name=Foil&qty_amount=2&qty_unit=roll`,
         });
-        expect(add.status).toBe(302);
+        expect(add.status).toBe(303);
         const page = await siteApp.request("http://x/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
@@ -5314,7 +5314,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: `kind=food&location_id=${locationId}&barcode=070852010016&qty_amount=1360.8&qty_unit=g`,
         });
-        expect(add.status).toBe(302);
+        expect(add.status).toBe(303);
         const page = await siteApp.request("http://x/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
@@ -5360,7 +5360,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: `qty_amount=1&qty_unit=roll&location_id=${pantry.id}`,
         });
-        expect(save.status).toBe(302);
+        expect(save.status).toBe(303);
         const moved = (await db.fridgeStore.listItems("hh-1"))[0]!;
         expect(moved.quantity.amount).toBe(1);
         expect(moved.locationId).toBe(pantry.id);
@@ -5379,7 +5379,7 @@ describe("authenticated dashboard HTTP", () => {
                 headers: { cookie: cookieFor(alice) },
             },
         );
-        expect(del.status).toBe(302);
+        expect(del.status).toBe(303);
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
         const movements = await db.stockStore.listMovements("hh-1", foil.id);
         expect(movements.every((row) => row.reason === "adjust")).toBe(true);
@@ -5438,7 +5438,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "name=Mac&yield_portions=4",
         });
-        expect(create.status).toBe(302);
+        expect(create.status).toBe(303);
         const loc = create.headers.get("location") ?? "";
         expect(loc.startsWith("/recipes/")).toBe(true);
         const recipeId = loc.slice("/recipes/".length);
@@ -5453,7 +5453,7 @@ describe("authenticated dashboard HTTP", () => {
                 body: "food_name=Pasta&qty_amount=400",
             },
         );
-        expect(addIng.status).toBe(302);
+        expect(addIng.status).toBe(303);
         const detail = await siteApp.request(`http://x/recipes/${recipeId}`, {
             headers: { cookie: cookieFor(alice) },
         });
@@ -5493,7 +5493,7 @@ describe("authenticated dashboard HTTP", () => {
                 headers: { cookie: cookieFor(alice) },
             },
         );
-        expect(ownerDel.status).toBe(302);
+        expect(ownerDel.status).toBe(303);
         const left = await db.recipesStore.listRecipes("hh-1");
         expect(left.map((row) => row.id)).toEqual([recipeId]);
     });
@@ -5524,7 +5524,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: `kind=supply&store_id=${store.id}&section_id=${other.id}&name=Foil&qty_amount=1&qty_unit=roll`,
         });
-        expect(add.status).toBe(302);
+        expect(add.status).toBe(303);
         const lines = await db.groceryStore.listLines("hh-1");
         expect(lines).toHaveLength(1);
         expect(lines[0]?.displayName).toBe("Foil");
@@ -5539,7 +5539,7 @@ describe("authenticated dashboard HTTP", () => {
                 body: "checked=1",
             },
         );
-        expect(check.status).toBe(302);
+        expect(check.status).toBe(303);
         expect((await db.groceryStore.listLines("hh-1"))[0]?.checked).toBe(
             true,
         );
@@ -5559,7 +5559,7 @@ describe("authenticated dashboard HTTP", () => {
             method: "POST",
             headers: { cookie: cookieFor(alice) },
         });
-        expect(clear.status).toBe(302);
+        expect(clear.status).toBe(303);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
@@ -5617,7 +5617,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "name=Corner",
         });
-        expect(add.status).toBe(302);
+        expect(add.status).toBe(303);
         expect(add.headers.get("location")).toBe("/grocery");
         const stores = await db.settingsStore.listStores("hh-1");
         expect(stores.map((row) => row.name)).toEqual(["Corner"]);
@@ -5762,7 +5762,7 @@ describe("authenticated dashboard HTTP", () => {
                 body: "name=Safeway",
             },
         );
-        expect(add.status).toBe(302);
+        expect(add.status).toBe(303);
         const page = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
@@ -5786,7 +5786,7 @@ describe("authenticated dashboard HTTP", () => {
         const r = await siteApp.request("http://x/nutrition", {
             headers: { cookie: cookieFor(alice) },
         });
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/");
     });
 
@@ -5801,7 +5801,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
             "card=goal-progress&direction=up",
         );
-        expect(move.status).toBe(302);
+        expect(move.status).toBe(303);
         expect(move.headers.get("location")).toBe("/");
         expect(db.profile?.nutrition_layout).toEqual([
             "log",
@@ -5830,7 +5830,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
             `card=trends&direction=up&member=${encodeURIComponent(bob)}`,
         );
-        expect(move.status).toBe(302);
+        expect(move.status).toBe(303);
         expect(move.headers.get("location")).toBe(`/?member=${bob}`);
         expect(db.profileUpsertUserIds.at(-1)).toBe(alice);
         expect(db.profile?.user_id).toBe(alice);
@@ -5867,7 +5867,7 @@ describe("authenticated dashboard HTTP", () => {
         const order =
             "order=weight-trends&order=log&order=nutrition-summary&order=goal-progress&order=trends";
         const save = await postForm("/nutrition/layout", alice, order);
-        expect(save.status).toBe(302);
+        expect(save.status).toBe(303);
         expect(db.profile?.nutrition_layout).toEqual([
             "weight-trends",
             "log",
@@ -5898,7 +5898,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "theme=dark",
         });
-        expect(save.status).toBe(302);
+        expect(save.status).toBe(303);
         expect(save.headers.get("location")).toBe("/settings");
         expect(db.profile?.theme).toBe("dark");
         const r = await siteApp.request("http://x/settings", {
@@ -5918,7 +5918,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "theme=system",
         });
-        expect(save.status).toBe(302);
+        expect(save.status).toBe(303);
         expect(db.profile?.theme).toBeNull();
         const r = await siteApp.request("http://x/settings", {
             headers: { cookie: cookieFor(alice) },
@@ -5986,7 +5986,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "household_name=Home&display_name=Alice",
         });
-        expect(r.status).toBe(302);
+        expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/");
         expect(db.household).toMatchObject({ name: "Home" });
         expect(db.members).toEqual([

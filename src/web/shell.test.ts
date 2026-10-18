@@ -72,10 +72,18 @@ test("fridge stub uses the shell and marks Fridge active", () => {
     expect(html).toContain('href="/fridge" aria-current="page"');
     expect(html).toContain('href="/logout"');
     expect(html).toContain('aria-label="Log out"');
+    expect(html).toContain('href="/logout" data-turbo="false"');
     expect(html).toContain('class="app-bar-logo"');
     expect(html).toContain('href="/"');
-    expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
-    expect(html).toContain('<script src="/app.js" defer></script>');
+    expect(html).toContain(
+        '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+    );
+    expect(html).toContain(
+        '<script src="/app.js" defer data-turbo-track="reload"></script>',
+    );
+    expect(html).toContain(
+        '<meta name="turbo-refresh-method" content="morph" />',
+    );
 });
 
 test("system theme leaves data-theme off and offers both theme colors", () => {
@@ -152,7 +160,10 @@ function runFrameSizer(contentHeight: number) {
         contentDocument: { documentElement: docEl },
         addEventListener() {},
     };
-    const document = { querySelectorAll: () => [frame] };
+    const document = {
+        querySelectorAll: () => [frame],
+        addEventListener() {},
+    };
     const window = {
         addEventListener(type: string, fn: (e: unknown) => void) {
             (listeners[type] ??= []).push(fn);

@@ -80,6 +80,7 @@ ${head}
              belt-and-suspenders in case a stray link to /authorize is ever
              crawled. -->
         <meta name="robots" content="noindex, nofollow" />
+        <meta name="turbo-visit-control" content="reload" />
     </head>
     <body class="auth">
 ${generatedBanner("scripts/gen-login.ts")}
@@ -94,7 +95,7 @@ ${generatedBanner("scripts/gen-login.ts")}
                 {{CONNECT_HINT}}
                 {{ERROR}}
 
-                <form method="POST" action="/approve" class="auth-form">
+                <form method="POST" action="/approve" class="auth-form" data-turbo="false">
                     <input type="hidden" name="session_id" value="{{SESSION_ID}}" />
                     <label for="email">${esc(doc.emailLabel)}</label>
                     <input type="text" id="email" name="email" required autocomplete="username" autocapitalize="none" spellcheck="false" />
