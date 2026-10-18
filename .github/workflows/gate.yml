@@ -20,6 +20,9 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
               run: |
                   set -euo pipefail
+                  list=$(mktemp)
+                  trap 'rm -f "$list"' EXIT
+                  gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)' >"$list"
                   fail=0
                   while IFS= read -r path; do
                       [ -z "$path" ] && continue
@@ -29,5 +32,5 @@ jobs:
                               fail=1
                               ;;
                       esac
-                  done < <(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+                  done <"$list"
                   exit "$fail"
