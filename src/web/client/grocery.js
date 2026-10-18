@@ -33,4 +33,13 @@ function initGrocerySections(root) {
     });
 }
 
+function resyncAllGrocerySections() {
+    document
+        .querySelectorAll("[data-grocery-section]")
+        .forEach(function (select) {
+            syncGrocerySection(select);
+        });
+}
+
 window.FoodableApp.onLoad(initGrocerySections);
+document.addEventListener("turbo:morph", resyncAllGrocerySections);

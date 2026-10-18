@@ -110,9 +110,12 @@ export function confirmModal(opts: {
     formClass?: string;
     /** Pre-escaped HTML before the confirm form (same contract as {@link modal}'s `body`). */
     bodyPrefix?: string;
+    /** When true, the confirm form opts out of Turbo (non-redirect success HTML). */
+    turboFalse?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
+    const turboOpt = opts.turboFalse ? ' data-turbo="false"' : "";
     const hidden =
         opts.hiddenFields &&
         Object.entries(opts.hiddenFields)
@@ -121,7 +124,7 @@ export function confirmModal(opts: {
                     `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
             )
             .join("\n");
-    const body = `<form class="${formClass}" method="post" action="${escapeHtml(opts.action)}">
+    const body = `<form class="${formClass}" method="post" action="${escapeHtml(opts.action)}"${turboOpt}>
 ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
 <div class="modal-actions">
 <button type="button" command="close" commandfor="${id}">Cancel</button>

@@ -173,11 +173,11 @@ test("create-household form posts name fields and has no widgets", () => {
 
 test("bare pages use the app stylesheet, not the deleted marketing one", () => {
     const html = createHouseholdFormHtml("Enter a household name.");
-    expect(html).toContain(
-        '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
-    expect(html).toContain(
-        '<script src="/app.js" defer data-turbo-track="reload"></script>',
+    expect(html).toMatch(
+        /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
     );
     expect(html).not.toContain("/styles.css");
     expect(html).not.toContain("<style>");

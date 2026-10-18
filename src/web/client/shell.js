@@ -56,6 +56,8 @@ document.addEventListener("foodable:scroll-lock-release", (event) => {
     if (typeof y === "number" && Number.isFinite(y)) scrollRestoreY = y;
 });
 
+// Login during an in-app visit must full-load (never morph into app chrome).
+// preventDefault() stops Turbo from rendering; reload() replaces the visit.
 document.addEventListener("turbo:before-render", (event) => {
     const newBody = event.detail?.newBody;
     if (

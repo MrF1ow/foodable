@@ -161,6 +161,26 @@ export async function getWidgetHtml(key: string): Promise<string> {
 // template's. Cached like a widget and warmed at boot.
 export const APP_CSS_SOURCE = "./public/app/app.css";
 let appCss: string | undefined;
+let appCssHash: string | undefined;
+
+async function shortContentHash(text: string): Promise<string> {
+    const digest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(text),
+    );
+    return [...new Uint8Array(digest)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .slice(0, 12);
+}
+
+export function appStylesheetHref(): string {
+    return appCssHash ? `/app.css?v=${appCssHash}` : "/app.css";
+}
+
+export function appScriptHref(): string {
+    return appJsHash ? `/app.js?v=${appJsHash}` : "/app.js";
+}
 
 export async function getAppCss(): Promise<string> {
     if (appCss !== undefined) return appCss;
@@ -171,6 +191,7 @@ export async function getAppCss(): Promise<string> {
     appCss = await resolveIncludes(await file.text(), APP_CSS_SOURCE, [
         APP_CSS_SOURCE,
     ]);
+    appCssHash = await shortContentHash(appCss);
     return appCss;
 }
 
@@ -188,6 +209,7 @@ export const APP_JS_SOURCES = [
 const TURBO_ENTRY = "./src/web/client/turbo-entry.ts";
 let turboBundle: string | undefined;
 let appJs: string | undefined;
+let appJsHash: string | undefined;
 
 async function getTurboBundle(): Promise<string> {
     if (turboBundle !== undefined) return turboBundle;
@@ -217,6 +239,7 @@ export async function getAppJs(): Promise<string> {
         parts.push(`(function () {\n${(await file.text()).trim()}\n})();`);
     }
     appJs = parts.join("\n");
+    appJsHash = await shortContentHash(appJs);
     return appJs;
 }
 

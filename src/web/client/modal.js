@@ -62,7 +62,12 @@ function releaseScrollLockForSwap() {
 }
 
 document.addEventListener("turbo:before-render", releaseScrollLockForSwap);
-document.addEventListener("turbo:before-morph", releaseScrollLockForSwap);
+document.addEventListener("turbo:before-morph-element", (event) => {
+    const el = event.detail?.currentElement;
+    if (el instanceof HTMLDialogElement && el.classList.contains("modal")) {
+        releaseScrollLockForSwap();
+    }
+});
 
 function focusFirstField(dialog) {
     const field = dialog.querySelector(

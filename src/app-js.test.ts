@@ -166,8 +166,8 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         recipes,
         nutrition,
     ]) {
-        expect(html).toContain(
-            '<script src="/app.js" defer data-turbo-track="reload"></script>',
+        expect(html).toMatch(
+            /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
         );
         expect(scriptBodies(html)).toEqual([]);
     }

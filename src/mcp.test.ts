@@ -4948,8 +4948,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('class="facts"');
         expect(html).toContain('class="bottom-nav"');
         expect(html).toContain('href="/fridge"');
-        expect(html).toContain('href="/app.css"');
-        expect(html).toContain('src="/app.js"');
+        expect(html).toMatch(/href="\/app\.css\?v=[a-f0-9]{12}"/);
+        expect(html).toMatch(/src="\/app\.js\?v=[a-f0-9]{12}"/);
     });
 
     test("a member dashboard has no add form", async () => {
@@ -5169,7 +5169,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "display_name=Kid&password=password1&username=kid",
         });
-        expect(r.status).toBe(200);
+        expect(r.status).toBe(401);
         const html = await r.text();
         expect(html).toContain('action="/approve"');
         expect(html).not.toContain('action="/settings/household"');

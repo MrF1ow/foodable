@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR } from "../tokens.js";
+import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut } from "./components/icons.js";
 import { pageHeader } from "./components/ui.js";
@@ -67,8 +68,8 @@ ${themeColorMeta(theme)}
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
 <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />
-<script src="/app.js" defer data-turbo-track="reload"></script>`;
+<link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
+<script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }
 
 export function renderAppShell(chrome: AppChrome): string {

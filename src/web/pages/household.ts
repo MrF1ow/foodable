@@ -416,6 +416,7 @@ export function renderHouseholdSettingsPage(
                   action: "/settings/household/rotate-token",
                   confirmLabel: "Rotate token",
                   formClass: "rotate-token modal-confirm",
+                  turboFalse: true,
                   openOnLoad: modalOpen(view, HOUSEHOLD_ROTATE_TOKEN_MODAL_ID),
               })
             : "",

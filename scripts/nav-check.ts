@@ -217,17 +217,8 @@ async function setMarker() {
     await ev(`window.__marker = "stay"`);
 }
 async function prepScroll() {
-    await ev(`(() => {
-        let el = document.getElementById("p8-scroll-spacer");
-        if (!el) {
-            el = document.createElement("div");
-            el.id = "p8-scroll-spacer";
-            el.setAttribute("data-turbo-permanent", "");
-            el.style.cssText = "height:2400px;width:1px;pointer-events:none;visibility:hidden";
-            document.body.prepend(el);
-        }
-        window.scrollTo(0, 900);
-    })()`);
+    await ev(`window.scrollTo(0, 900)`);
+    await sleep(50);
 }
 
 await send("Runtime.enable");
@@ -382,6 +373,63 @@ try {
         { entries: linePost?.entries ?? [], ex: drain() },
     );
 
+    await goto("/grocery");
+    await control("post=ok&reset=posts");
+    await clickSel('button[commandfor="grocery-add-food-s1"]');
+    await sleep(40);
+    await clickSel(
+        '#grocery-add-food-s1 button[role="tab"][data-tab="manual"]',
+    );
+    await sleep(30);
+    await ev(`(() => {
+        const sel = document.querySelector("#grocery-add-food-s1 [data-grocery-section]");
+        if (sel) {
+            sel.value = "sec1";
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        const name = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='food_name']");
+        const amt = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='qty_amount']");
+        if (name) name.value = "Carrots";
+        if (amt) amt.value = "3";
+    })()`);
+    await clickSel(
+        "#grocery-add-food-s1 .food-picker-manual button[type='submit']",
+    );
+    await sleep(500);
+    await clickSel('button[commandfor="grocery-add-food-s1"]');
+    await sleep(40);
+    await clickSel(
+        '#grocery-add-food-s1 button[role="tab"][data-tab="manual"]',
+    );
+    await sleep(30);
+    await ev(`(() => {
+        const sel = document.querySelector("#grocery-add-food-s1 [data-grocery-section]");
+        if (sel) {
+            sel.value = "sec1";
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        const name = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='food_name']");
+        const amt = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='qty_amount']");
+        if (name) name.value = "Celery";
+        if (amt) amt.value = "2";
+    })()`);
+    await clickSel(
+        "#grocery-add-food-s1 .food-picker-manual button[type='submit']",
+    );
+    await sleep(500);
+    const groceryPosts2 = await stats();
+    const linePosts = groceryPosts2.posts.filter(
+        (p) => p.path === "/grocery/lines",
+    );
+    record(
+        "grocery two adds after morph both carry section_id",
+        linePosts.length >= 2 &&
+            linePosts.every((p) =>
+                p.entries.some(([k, v]) => k === "section_id" && v === "sec1"),
+            ),
+        { linePosts: linePosts.map((p) => p.entries), ex: drain() },
+    );
+
     await goto("/");
     await clickSel('nav.bottom-nav a[href="/fridge"]');
     await sleep(200);
@@ -440,21 +488,57 @@ try {
     await setMarker();
     await ev(`(() => {
         const a = document.createElement("a");
-        a.href = "/expired-session-probe";
+        a.href = "/session-login";
         document.querySelector("main").appendChild(a);
         a.click();
     })()`);
     await sleep(1500);
-    const expired = await snap();
-    const hasAppNav = await ev<boolean>(
+    const expiredGet = await snap();
+    const hasAppNavGet = await ev<boolean>(
         `!!document.querySelector("nav.bottom-nav")`,
     );
     record(
-        "session expired full reload to login",
-        expired.auth === true && expired.marker == null && !hasAppNav,
-        { expired, hasAppNav, ex: drain() },
+        "expired session GET login full reload",
+        expiredGet.auth === true && expiredGet.marker == null && !hasAppNavGet,
+        { expiredGet, hasAppNavGet, ex: drain() },
     );
 
+    await goto("/fridge");
+    await setMarker();
+    await control("post=login&reset=posts&session=guest");
+    await clickSel('button[aria-label="Delete Expired milk"]');
+    await sleep(40);
+    await clickSel("dialog[open] button.btn-danger");
+    await sleep(1500);
+    const expiredPost = await snap();
+    const hasAppNavPost = await ev<boolean>(
+        `!!document.querySelector("nav.bottom-nav")`,
+    );
+    record(
+        "expired session POST login full reload",
+        expiredPost.auth === true &&
+            expiredPost.marker == null &&
+            !hasAppNavPost &&
+            expiredPost.open.length === 0,
+        { expiredPost, hasAppNavPost, ex: drain() },
+    );
+
+    await goto("/login-test");
+    await ev(`(() => {
+        document.querySelector("input[name='email']").value = "a@b.co";
+        document.querySelector("input[name='password']").value = "secret12";
+    })()`);
+    await clickSel("form.auth-form button[type='submit']");
+    await sleep(600);
+    const loginAfterExpired = await snap();
+    const approveAfter = (await stats()).approveCount;
+    record(
+        "login form native submit after session expiry",
+        approveAfter >= 2 && loginAfterExpired.auth === false,
+        { approveAfter, loginAfterExpired, ex: drain() },
+    );
+
+    await control("session=app");
     await goto("/fridge");
     await setMarker();
     await clickSel('a[href="/logout"]');

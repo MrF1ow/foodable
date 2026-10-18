@@ -15,6 +15,7 @@ import { HTML_LANG } from "../src/routes.js";
 import { generatedBanner } from "./site-partials.js";
 import { escapeHtml as esc } from "../src/html.js";
 import { appHead } from "../src/web/shell.js";
+import { getAppCss, getAppJs } from "../src/widgets.js";
 import { LOGIN, type LoginDoc } from "../src/copy/login.js";
 import { rm } from "node:fs/promises";
 
@@ -53,10 +54,18 @@ async function removeStaleMarketingHtml(): Promise<void> {
 }
 
 await removeStaleMarketingHtml();
+await getAppCss();
+await getAppJs();
+
+function loginAppHead(title: string): string {
+    return appHead(title, "system")
+        .replace(/href="[^"]*app\.css[^"]*"/, 'href="{{APP_CSS_HREF}}"')
+        .replace(/src="[^"]*app\.js[^"]*"/, 'src="{{APP_JS_HREF}}"');
+}
 
 function renderDoc(doc: LoginDoc): string {
     // appHead escapes the title itself.
-    const head = appHead(`${doc.title} — ${doc.subtitle}`, "system")
+    const head = loginAppHead(`${doc.title} — ${doc.subtitle}`)
         .split("\n")
         .map((line) => `        ${line}`)
         .join("\n");

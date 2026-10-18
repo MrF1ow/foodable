@@ -98,6 +98,16 @@ function fridgeView(chrome: unknown) {
             item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
             item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
             item("i6", "l2", "Paper towels", 3, "roll", null, false),
+            ...Array.from({ length: 42 }, (_, i) =>
+                item(
+                    `i-scroll-${i}`,
+                    "l2",
+                    `Pantry filler ${i + 1}`,
+                    1,
+                    "each",
+                    addUtcDays(today, 30 + (i % 14)),
+                ),
+            ),
         ],
     };
 }
@@ -409,6 +419,7 @@ let postMode = "ok";
 let modalId = "";
 let loginPath = "";
 let postDelay = 0;
+let sessionMode: "app" | "guest" = "app";
 const posts: { path: string; entries: [string, string][] }[] = [];
 const gets: { path: string; n: number }[] = [];
 const getCounts = new Map<string, number>();
@@ -492,6 +503,7 @@ const server = Bun.serve({
                 modalId,
                 loginPath,
                 postDelay,
+                sessionMode,
                 counts: Object.fromEntries(getCounts),
             });
         }
@@ -510,6 +522,10 @@ const server = Bun.serve({
             if (url.searchParams.get("reset") === "search")
                 searchHits.length = 0;
             if (url.searchParams.get("reset") === "approve") approveCount = 0;
+            if (url.searchParams.has("session")) {
+                const mode = url.searchParams.get("session");
+                sessionMode = mode === "guest" ? "guest" : "app";
+            }
             return Response.json({
                 ok: true,
                 stallMs,
@@ -517,16 +533,28 @@ const server = Bun.serve({
                 modalId,
                 loginPath,
                 postDelay,
+                sessionMode,
             });
         }
-        if (path === "/app.css") {
-            return new Response(await getAppCss(), {
-                headers: { "content-type": "text/css; charset=utf-8" },
-            });
-        }
-        if (path === "/app.js") {
-            return new Response(await getAppJs(), {
-                headers: { "content-type": "text/javascript; charset=utf-8" },
+        if (path === "/app.css" || path === "/app.js") {
+            const css = path === "/app.css";
+            const body = css ? await getAppCss() : await getAppJs();
+            const { appScriptHref, appStylesheetHref } =
+                await import("../src/widgets.js");
+            const href = css ? appStylesheetHref() : appScriptHref();
+            const v = url.searchParams.get("v");
+            const expected = new URL(`http://x${href}`).searchParams.get("v");
+            const cache =
+                v && expected && v === expected
+                    ? "public, max-age=31536000, immutable"
+                    : "no-cache";
+            return new Response(body, {
+                headers: {
+                    "content-type": css
+                        ? "text/css; charset=utf-8"
+                        : "text/javascript; charset=utf-8",
+                    "cache-control": cache,
+                },
             });
         }
         if (path === "/api/foods/search") {
@@ -596,7 +624,7 @@ const server = Bun.serve({
             if (postMode === "login") {
                 const login = await loginDocument();
                 return new Response(login, {
-                    status: 200,
+                    status: 401,
                     headers: { "content-type": "text/html; charset=utf-8" },
                 });
             }
@@ -628,10 +656,10 @@ const server = Bun.serve({
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
-        if (path === "/expired-session-probe") {
+        if (path === "/session-login") {
             const login = await loginDocument();
             return new Response(login, {
-                status: 200,
+                status: req.method === "GET" ? 200 : 401,
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
@@ -652,6 +680,13 @@ const server = Bun.serve({
         }
         const mapped = ROUTES[path];
         if (mapped) {
+            if (sessionMode === "guest") {
+                const login = await loginDocument();
+                return new Response(login, {
+                    status: 200,
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                });
+            }
             if (stallMs) await sleep(stallMs);
             const html = await fileHtml(mapped, path + url.search);
             return new Response(html, {

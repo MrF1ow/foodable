@@ -108,15 +108,17 @@ test("renderLoginPage has no language switcher or translation notice", async () 
 
 test("generated login uses the shared app stylesheet and no web fonts", async () => {
     const html = await renderLoginPage("s1", fakeSession());
-    expect(html).toContain(
-        '<link rel="stylesheet" href="/app.css" data-turbo-track="reload" />',
+    expect(html).not.toContain("{{APP_CSS_HREF}}");
+    expect(html).not.toContain("{{APP_JS_HREF}}");
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toContain('data-turbo="false"');
     expect(html).toContain(
         '<meta name="turbo-visit-control" content="reload" />',
     );
-    expect(html).toContain(
-        '<script src="/app.js" defer data-turbo-track="reload"></script>',
+    expect(html).toMatch(
+        /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
     );
     expect(html).toContain('class="auth-stage native"');
     expect(html).toContain('class="btn-primary"');
@@ -490,8 +492,11 @@ test("/token authorization_code requires redirect_uri and code_verifier", async 
 test("beginSiteLogin still renders login without MCP connect hint", async () => {
     const app = new Hono();
     app.get("/", (c) => beginSiteLogin(c));
+    app.post("/", (c) => beginSiteLogin(c));
     const res = await app.request("http://localhost/");
     expect(res.status).toBe(200);
+    const post = await app.request("http://localhost/", { method: "POST" });
+    expect(post.status).toBe(401);
     const html = await res.text();
     expect(html).toContain('action="/approve"');
     // One field takes an email or a username, so it cannot be type="email"

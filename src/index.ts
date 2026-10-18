@@ -11,7 +11,13 @@ import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp } from "./net.js";
-import { getAppCss, getAppJs, warmWidgets } from "./widgets.js";
+import {
+    appScriptHref,
+    appStylesheetHref,
+    getAppCss,
+    getAppJs,
+    warmWidgets,
+} from "./widgets.js";
 import { BRAND_SVGS } from "./brand.js";
 import { APP_FONTS } from "./tokens.js";
 import { clearSiteCookieHeader } from "./site-session.js";
@@ -222,14 +228,30 @@ app.get("/robots.txt", async (c) => {
         "Content-Type": "text/plain",
     });
 });
+function appAssetCacheControl(
+    c: { req: { query: (k: string) => string | undefined } },
+    currentHref: string,
+): string {
+    const v = c.req.query("v");
+    const currentV = new URL(`http://x${currentHref}`).searchParams.get("v");
+    if (v && currentV && v === currentV) {
+        return "public, max-age=31536000, immutable";
+    }
+    return "no-cache";
+}
+
 app.get("/app.css", async (c) => {
+    const href = appStylesheetHref();
     return c.body(await getAppCss(), 200, {
         "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
     });
 });
 app.get("/app.js", async (c) => {
+    const href = appScriptHref();
     return c.body(await getAppJs(), 200, {
         "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
     });
 });
 app.get("/favicon.ico", async (c) => {
