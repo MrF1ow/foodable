@@ -221,6 +221,27 @@ alter table public.child enable row level security;
         expect(findings.some((f) => f.rule === "contract")).toBe(false);
     });
 
+    test("alter rename column, rename column shorthand, and rename constraint are contract", () => {
+        const cases = [
+            "alter table public.foo rename column old_name to new_name;",
+            "alter table public.foo rename old_name to new_name;",
+            "alter table public.foo rename constraint c to d;",
+        ];
+        for (const contents of cases) {
+            const findings = checkMigrations({
+                changes: [
+                    {
+                        status: "added",
+                        path: "supabase/migrations/20261018160000_rename.sql",
+                        contents,
+                    },
+                ],
+                newestBaseTimestamp: "20261017180000",
+            });
+            expect(findings.some((f) => f.rule === "contract")).toBe(true);
+        }
+    });
+
     test("alter column type, rename to, truncate, set not null are contract", () => {
         const cases = [
             "alter table public.foo alter column x type text;",
@@ -241,6 +262,50 @@ alter table public.child enable row level security;
             });
             expect(findings.some((f) => f.rule === "contract")).toBe(true);
         }
+    });
+
+    test("tagged dollar quote with digits hides drop column", () => {
+        const findings = checkMigrations({
+            changes: [
+                {
+                    status: "added",
+                    path: "supabase/migrations/20261018170000_fn_tag.sql",
+                    contents:
+                        "create function f() as $fn1$ begin drop column secret; end $fn1$;",
+                },
+            ],
+            newestBaseTimestamp: "20261017180000",
+        });
+        expect(findings.some((f) => f.rule === "contract")).toBe(false);
+    });
+
+    test("unclosed dollar quote hides trailing drop column", () => {
+        const findings = checkMigrations({
+            changes: [
+                {
+                    status: "added",
+                    path: "supabase/migrations/20261018170000_unclosed.sql",
+                    contents: "select 1; $$\n drop column secret",
+                },
+            ],
+            newestBaseTimestamp: "20261017180000",
+        });
+        expect(findings.some((f) => f.rule === "contract")).toBe(false);
+    });
+
+    test("drop column outside dollar quote is still contract", () => {
+        const findings = checkMigrations({
+            changes: [
+                {
+                    status: "added",
+                    path: "supabase/migrations/20261018170000_outside.sql",
+                    contents:
+                        "create function f() as $fn$ begin end $fn$; alter table public.foo drop column secret;",
+                },
+            ],
+            newestBaseTimestamp: "20261017180000",
+        });
+        expect(findings.some((f) => f.rule === "contract")).toBe(true);
     });
 
     test("dollar-quoted delete with where is not contract", () => {

@@ -25,12 +25,13 @@ export function stripSql(sql: string): string {
     while (i < n) {
         if (sql[i] === "$") {
             const rest = sql.slice(i);
-            const open = rest.match(/^(\$[A-Za-z_]*\$)/);
+            const open = rest.match(/^(\$[A-Za-z_0-9]*\$)/);
             if (open) {
                 const tag = open[1]!;
                 const closeAt = sql.indexOf(tag, i + tag.length);
                 if (closeAt === -1) {
-                    i += tag.length;
+                    i = n;
+                    result += " ";
                     continue;
                 }
                 i = closeAt + tag.length;
@@ -160,7 +161,7 @@ function statementNeedsContract(stmt: string): boolean {
     if (/^\s*drop\s+table\b/i.test(s)) return true;
     if (/\bdrop\s+column\b/i.test(s)) return true;
     if (/^\s*truncate\b/i.test(s)) return true;
-    if (/\brename\s+to\b/i.test(s)) return true;
+    if (/\brename\b/i.test(s)) return true;
     if (/\bset\s+not\s+null\b/i.test(s)) return true;
     if (/\balter\s+column\b[\s\S]*\btype\b/i.test(s)) return true;
     if (deleteOrUpdateWithoutWhere(s)) return true;
