@@ -99,10 +99,14 @@ jobs:
                   bun run scripts/migration-safety.ts --base "$base"
                   echo "postgresql binaries:"
                   ls /usr/lib/postgresql || true
-                  if ! compgen -G "/usr/lib/postgresql/*/bin/initdb" > /dev/null; then
+                  shopt -s nullglob
+                  bins=(/usr/lib/postgresql/*/bin/initdb)
+                  if [ ${#bins[@]} -eq 0 ]; then
                     sudo apt-get update
                     sudo apt-get install -y postgresql
+                    bins=(/usr/lib/postgresql/*/bin/initdb)
                   fi
-                  export PG_BIN="$(dirname "$(ls /usr/lib/postgresql/*/bin/initdb | head -1)")"
+                  PG_BIN=$(dirname "${bins[0]}")
+                  export PG_BIN
                   bun install --frozen-lockfile
                   bun run db:dryrun
