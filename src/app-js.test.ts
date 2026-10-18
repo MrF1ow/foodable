@@ -13,15 +13,17 @@ function scriptBodies(html: string): string[] {
         .filter((body) => body.length > 0);
 }
 
-test("getAppJs concatenates the four client files as one IIFE each", async () => {
+test("getAppJs concatenates the client files as one IIFE each", async () => {
     expect([...APP_JS_SOURCES]).toEqual([
         "./src/web/client/shell.js",
         "./src/web/client/food-picker.js",
         "./src/web/client/nutrition-log.js",
         "./src/web/client/grocery.js",
+        "./src/web/client/modal.js",
+        "./src/web/client/arrange.js",
     ]);
     const js = await getAppJs();
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(4);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
     for (const path of APP_JS_SOURCES) {
         const src = (await Bun.file(path).text()).trim();
         expect(js).toContain(`(function () {\n${src}\n})();`);
@@ -30,6 +32,8 @@ test("getAppJs concatenates the four client files as one IIFE each", async () =>
     expect(js).toContain("[data-food-picker]");
     expect(js).toContain("[data-meal-items]");
     expect(js).toContain("[data-grocery-section]");
+    expect(js).toContain("dialog.modal");
+    expect(js).toContain(".nutrition-arrange-form");
     expect(() =>
         new Bun.Transpiler({ loader: "js" }).transformSync(js),
     ).not.toThrow();
@@ -103,6 +107,13 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: { theme: "light" },
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
     });
     for (const html of [
         comingSoonPage("fridge"),

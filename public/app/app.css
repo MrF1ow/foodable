@@ -44,11 +44,20 @@
     display: none !important;
 }
 
+html {
+    background-color: var(--bg);
+}
+
 body {
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
     font-size: var(--fs-15);
+    background-color: var(--bg);
+}
+
+html:has(dialog.modal[open]) {
+    overflow: hidden;
 }
 
 .visually-hidden {
@@ -66,12 +75,19 @@ body {
 /* ---- shell ---- */
 
 .app-bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
     display: flex;
     justify-content: flex-end;
     width: 100%;
     max-width: 760px;
     margin: 0 auto;
-    padding: 12px 16px 0;
+    padding: calc(12px + env(safe-area-inset-top, 0px))
+        max(16px, env(safe-area-inset-right, 0px)) 0
+        max(16px, env(safe-area-inset-left, 0px));
+    background: var(--bg);
+    border-bottom: 1px solid transparent;
 }
 .app-bar a {
     color: var(--text-dim);
@@ -343,6 +359,40 @@ body {
 .dash-head {
     display: grid;
     gap: 10px;
+}
+.page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.page-actions :is(.btn-primary, .btn-danger, button) {
+    width: fit-content;
+}
+
+.fridge-supply-action {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+details.more > summary .count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.4em;
+    padding: 0 6px;
+    border-radius: var(--r-999);
+    background: var(--track);
+    color: var(--text-dim);
+    font-size: var(--fs-12);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.fridge-item-head .expiry-pill {
+    vertical-align: middle;
 }
 
 /* Member switch (nutrition) and settings sub-navigation: links styled as the
@@ -668,8 +718,39 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- recipes ---- */
 
+.recipe-card {
+    position: relative;
+    cursor: pointer;
+    border-radius: var(--r-md);
+    transition: background-color 0.15s ease;
+}
+.recipe-card:hover {
+    background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+}
+.recipe-card:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.recipe-card a.row-title::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
 .recipe-card .row-title {
     color: var(--text);
+}
+.recipe-panel-head {
+    align-items: center;
+    margin-bottom: var(--gap-col);
+}
+.recipe-panel-head .row-title {
+    margin: 0;
+    font-size: var(--fs-18);
+    font-weight: 650;
+}
+.recipe-ingredient .row-actions {
+    position: relative;
+    z-index: 1;
 }
 .recipe-tags {
     display: flex;
@@ -741,11 +822,13 @@ details.more > summary > :is(h2, h3) {
 
 /* Forms that are just one button sit at their natural width instead of
    stretching across the page or card. */
-.grocery-clear-checked,
-.rotate-token,
-.recipe-delete {
+.rotate-token {
     align-self: flex-start;
     justify-items: start;
+}
+.modal .grocery-clear-checked {
+    align-self: stretch;
+    justify-items: stretch;
 }
 
 /* Keep a control and its button the same height on one line. */
@@ -766,7 +849,13 @@ details.more > summary > :is(h2, h3) {
     place-items: center;
     align-content: center;
     gap: 16px;
-    padding: clamp(24px, 8vw, 64px) 16px;
+    padding-top: max(clamp(24px, 8vw, 64px), env(safe-area-inset-top, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(
+        clamp(24px, 8vw, 64px),
+        env(safe-area-inset-bottom, 0px)
+    );
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
 }
 .auth-card {
     width: 100%;
@@ -853,16 +942,22 @@ details.more > summary > :is(h2, h3) {
     background: color-mix(in srgb, var(--accent) 90%, var(--text));
 }
 
-/* The hero's soft green glow, pinned to the top of every page. */
-body {
-    background:
-        radial-gradient(
-            56rem 22rem at 50% -9rem,
-            color-mix(in srgb, var(--accent) 16%, transparent),
-            transparent 70%
-        ),
-        var(--bg);
-    background-repeat: no-repeat;
+/* Soft green glow below the top bar (keeps iOS status-bar tint on --bg). */
+.app-bar::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    width: 56rem;
+    height: 22rem;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: -1;
+    background: radial-gradient(
+        56rem 22rem at 50% 0,
+        color-mix(in srgb, var(--accent) 16%, transparent),
+        transparent 70%
+    );
 }
 ::selection {
     background: color-mix(in oklab, var(--accent) 35%, transparent);
@@ -969,10 +1064,13 @@ html.fx .app-main > :nth-child(n + 6) {
 }
 
 /* ---- login: the site's hero, scaled down ---- */
+html:has(body.auth) {
+    background: var(--bg);
+}
 body.auth {
     background:
         radial-gradient(
-            40rem 22rem at 50% -4rem,
+            40rem 22rem at 50% calc(-4rem + env(safe-area-inset-top, 0px)),
             color-mix(in srgb, var(--accent) 20%, transparent),
             transparent 70%
         ),
@@ -1074,5 +1172,187 @@ body.auth {
     }
     100% {
         transform: translateX(100%);
+    }
+}
+
+/* ---- modals (native <dialog> + invoker commands) ---- */
+
+.modal {
+    border: none;
+    padding: 0;
+    margin: auto;
+    max-width: min(560px, 100vw - 32px);
+    width: calc(100% - 32px);
+    background: transparent;
+    color: inherit;
+    overflow: visible;
+}
+.modal::backdrop {
+    background: color-mix(in srgb, #000 40%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.modal-sheet {
+    display: flex;
+    flex-direction: column;
+    max-height: min(85dvh, 100%);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+.modal-handle {
+    display: none;
+    flex: none;
+}
+.modal-head {
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--panel-border);
+}
+.modal-title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--fs-18);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+}
+.modal-close {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    margin: -4px -6px 0 0;
+    padding: 0;
+    border: none;
+    border-radius: var(--r-12);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: var(--fs-21);
+    line-height: 1;
+    cursor: pointer;
+}
+.modal-close:hover {
+    background: var(--track);
+    color: var(--text);
+}
+.modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+.modal-message {
+    margin: 0 0 16px;
+    font-size: var(--fs-14);
+    line-height: 1.45;
+    color: var(--text);
+}
+.modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+:where(.native) .btn-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+}
+:where(.native) .btn-icon svg {
+    width: 20px;
+    height: 20px;
+}
+:where(.native) .btn-icon.btn-danger {
+    color: var(--over);
+}
+:where(.native) .btn-icon.btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--over) 12%, transparent);
+}
+.nutrition-arrange-form .modal-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--panel-border);
+}
+.arrange-legacy-move {
+    display: contents;
+}
+
+@media (max-width: 640px) {
+    .modal {
+        margin: 0;
+        width: 100%;
+        max-width: none;
+        max-height: 90dvh;
+        height: auto;
+        inset: auto 0 0 0;
+        top: auto;
+        bottom: 0;
+    }
+    .modal-sheet {
+        max-height: 90dvh;
+        border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .modal-body {
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .modal-handle {
+        display: block;
+        width: 36px;
+        height: 4px;
+        margin: 10px auto 0;
+        border-radius: var(--r-999);
+        background: color-mix(in srgb, var(--text-dim) 35%, transparent);
+        touch-action: none;
+    }
+    .modal-head {
+        touch-action: none;
+        cursor: grab;
+    }
+    .modal-head:active {
+        cursor: grabbing;
+    }
+}
+
+@keyframes modal-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+}
+@keyframes modal-backdrop-in {
+    from {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    html.fx .modal[open] {
+        animation: modal-in 0.22s ease-out both;
+    }
+    html.fx .modal[open]::backdrop {
+        animation: modal-backdrop-in 0.2s ease-out both;
+    }
+    @media (max-width: 640px) {
+        html.fx .modal[open] {
+            animation: modal-in 0.26s ease-out both;
+        }
+        @keyframes modal-in {
+            from {
+                opacity: 0;
+                transform: translateY(100%);
+            }
+        }
     }
 }

@@ -205,6 +205,7 @@ const PROFILE_BASE: actualProfiles.Profile = {
     locale: null,
     theme: null,
     accent_swatch: null,
+    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -242,6 +243,7 @@ const db = {
     weightInserted: [] as Record<string, unknown>[],
     weightUpdates: [] as Record<string, unknown>[],
     profilePatches: [] as Record<string, unknown>[],
+    profileUpsertUserIds: [] as string[],
     // Ids the delete stubs consider to exist. Deleting one removes it, so a
     // second delete of the same id reports "not found" like the real table.
     rowIds: new Set<string>(),
@@ -406,8 +408,10 @@ mock.module("./db/profiles.js", () => ({
         db.profile?.preferred_weight_unit ?? null,
     upsertProfile: async (userId: string, patch: Record<string, unknown>) => {
         db.profilePatches.push(patch);
+        db.profileUpsertUserIds.push(userId);
         db.profile = {
             ...(db.profile ?? { ...PROFILE_BASE, user_id: userId }),
+            user_id: userId,
             ...patch,
         } as actualProfiles.Profile;
         return db.profile;
@@ -604,6 +608,7 @@ beforeEach(() => {
     db.weightInserted = [];
     db.weightUpdates = [];
     db.profilePatches = [];
+    db.profileUpsertUserIds = [];
     db.rowIds = new Set<string>();
     db.analyticsRows = [];
     db.accountWipes = 0;
@@ -5149,6 +5154,9 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("Password must be at least 8 characters.");
         expect(html).toContain('action="/settings/household"');
+        expect(html).toMatch(
+            /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
+        );
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
@@ -5543,7 +5551,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Safeway");
         expect(html).toContain("Foil");
         expect(html).toContain('data-checked="true"');
-        expect(html).toContain("<h3>Add food</h3>");
+        expect(html).toContain('commandfor="grocery-clear-checked"');
+        expect(html).toContain("Add food</button>");
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");
         const clear = await siteApp.request("http://x/grocery/clear-checked", {
@@ -5578,6 +5587,14 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("allergen-warning");
         expect(html.toLowerCase()).toContain("peanut");
         expect(html).toContain("Bob");
+        expect(html).toContain('name="confirm_allergen" value="1"');
+        expect(html).toContain("Add anyway");
+        const modal = html.match(
+            new RegExp(
+                `<dialog class="modal" id="grocery-add-food-${store.id}"[\\s\\S]*?</dialog>`,
+            ),
+        )?.[0];
+        expect(modal).toContain("allergen-warning");
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
@@ -5608,7 +5625,7 @@ describe("authenticated dashboard HTTP", () => {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
-        expect(html).toContain("<h2>Corner</h2>");
+        expect(html).toContain('<h2 class="row-title">Corner</h2>');
         expect(html).toContain('class="grocery-add-store"');
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");
@@ -5718,8 +5735,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
-        expect(html).not.toContain("Add household member");
+        expect(html).not.toContain('commandfor="household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
+    });
+
+    test("GET /settings/help is available to members", async () => {
+        const r = await siteApp.request("http://x/settings/help", {
+            headers: { cookie: cookieFor(alice) },
+        });
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain("<h1>Help</h1>");
+        expect(html).toContain('href="/settings/help" aria-current="page"');
+        expect(html).toContain('id="food-vs-household-item"');
     });
 
     test("POST /settings/household/stores seeds default sections", async () => {
@@ -5760,6 +5788,105 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(302);
         expect(r.headers.get("location")).toBe("/");
+    });
+
+    test("POST /nutrition/layout moves a card for the signed-in viewer", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const move = await postForm(
+            "/nutrition/layout",
+            alice,
+            "card=goal-progress&direction=up",
+        );
+        expect(move.status).toBe(302);
+        expect(move.headers.get("location")).toBe("/");
+        expect(db.profile?.nutrition_layout).toEqual([
+            "log",
+            "goal-progress",
+            "nutrition-summary",
+            "trends",
+            "weight-trends",
+        ]);
+        const page = await siteApp.request("http://x/", {
+            headers: { cookie: cookieFor(alice) },
+        });
+        const html = await page.text();
+        expect(
+            html.indexOf('data-nutrition-card="goal-progress"'),
+        ).toBeLessThan(html.indexOf('data-nutrition-card="nutrition-summary"'));
+    });
+
+    test("POST /nutrition/layout while viewing a peer saves the viewer layout and returns to peer view", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const move = await postForm(
+            "/nutrition/layout",
+            alice,
+            `card=trends&direction=up&member=${encodeURIComponent(bob)}`,
+        );
+        expect(move.status).toBe(302);
+        expect(move.headers.get("location")).toBe(`/?member=${bob}`);
+        expect(db.profileUpsertUserIds.at(-1)).toBe(alice);
+        expect(db.profile?.user_id).toBe(alice);
+        expect(db.profile?.nutrition_layout).toEqual([
+            "log",
+            "nutrition-summary",
+            "trends",
+            "goal-progress",
+            "weight-trends",
+        ]);
+    });
+
+    test("POST /nutrition/layout rejects an unknown card", async () => {
+        const r = await postForm(
+            "/nutrition/layout",
+            alice,
+            "card=not-a-card&direction=up",
+        );
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("Unknown card.");
+        expect(html).toMatch(
+            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
+        );
+        expect(db.profilePatches.at(-1)).not.toHaveProperty("nutrition_layout");
+    });
+
+    test("POST /nutrition/layout saves a full order list", async () => {
+        db.profile = {
+            ...PROFILE_BASE,
+            user_id: alice,
+            nutrition_layout: null,
+        };
+        const order =
+            "order=weight-trends&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+        const save = await postForm("/nutrition/layout", alice, order);
+        expect(save.status).toBe(302);
+        expect(db.profile?.nutrition_layout).toEqual([
+            "weight-trends",
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+        ]);
+    });
+
+    test("POST /nutrition/layout rejects an invalid full order", async () => {
+        const bad =
+            "order=log&order=log&order=nutrition-summary&order=goal-progress&order=trends";
+        const r = await postForm("/nutrition/layout", alice, bad);
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("Duplicate card in order.");
+        expect(html).toMatch(
+            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
+        );
     });
 
     test("POST /settings persists dark theme for the next GET", async () => {

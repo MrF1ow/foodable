@@ -12,10 +12,14 @@ import {
     renderRecipeIngredientRow,
 } from "../components/page-markup.js";
 import {
+    confirmModal,
     disclosure,
     emptyState,
     errorBanner,
+    modal,
+    modalTrigger,
     pageHeader,
+    pageLevelErrorBanner,
     panel,
 } from "../components/ui.js";
 
@@ -35,6 +39,7 @@ export type RecipesPageView = {
     viewerId: string;
     filter?: RecipesPageFilter;
     error?: string;
+    openModalId?: string;
 };
 
 export type RecipeDetailView = {
@@ -52,7 +57,24 @@ export type RecipeDetailView = {
     dislikeNote?: string;
     isOwner: boolean;
     error?: string;
+    openModalId?: string;
 };
+
+const NEW_RECIPE_MODAL_ID = "recipe-new";
+
+function modalOpen(view: { openModalId?: string }, id: string): boolean {
+    return view.openModalId === id;
+}
+
+function modalFormError(
+    view: { error?: string; openModalId?: string },
+    modalId: string,
+): string {
+    if (view.error && view.openModalId === modalId) {
+        return errorBanner(view.error);
+    }
+    return "";
+}
 
 function quantityLabel(amount: number, unit: string): string {
     if (isQuantityUnit(unit)) {
@@ -61,13 +83,44 @@ function quantityLabel(amount: number, unit: string): string {
     return `${amount} ${unit}`;
 }
 
+function editRecipeModalId(recipeId: string): string {
+    return `recipe-edit-${recipeId}`;
+}
+
+function deleteRecipeModalId(recipeId: string): string {
+    return `recipe-delete-${recipeId}`;
+}
+
+function addIngredientModalId(recipeId: string): string {
+    return `recipe-add-ingredient-${recipeId}`;
+}
+
+function cookModalId(recipeId: string): string {
+    return `recipe-cook-${recipeId}`;
+}
+
+function editIngredientModalId(ingredientId: string): string {
+    return `recipe-edit-ingredient-${ingredientId}`;
+}
+
+function deleteIngredientModalId(ingredientId: string): string {
+    return `recipe-delete-ingredient-${ingredientId}`;
+}
+
+function panelHead(title: string, actions: string): string {
+    return `<div class="recipe-panel-head row">
+<h2 class="row-title">${escapeHtml(title)}</h2>
+${actions}
+</div>`;
+}
+
 export function renderRecipesPage(view: RecipesPageView): string {
     const filter = view.filter ?? {
         tag: "",
         canMakeNow: false,
         safeFor: "",
     };
-    const error = errorBanner(view.error);
+    const error = pageLevelErrorBanner(view, [NEW_RECIPE_MODAL_ID]);
     const empty =
         view.recipes.length === 0
             ? emptyState("Add a recipe.", "empty-recipes")
@@ -97,8 +150,27 @@ export function renderRecipesPage(view: RecipesPageView): string {
             : panel({
                   body: `<ul class="recipe-list list">${cards}</ul>`,
               });
+    const newRecipeModal = modal({
+        id: NEW_RECIPE_MODAL_ID,
+        title: "New recipe",
+        openOnLoad: modalOpen(view, NEW_RECIPE_MODAL_ID),
+        body: `${modalFormError(view, NEW_RECIPE_MODAL_ID)}<form class="recipe-create" method="post" action="/recipes">
+                <label for="recipe-name">Name</label>
+                <input id="recipe-name" name="name" type="text" required maxlength="80" autocomplete="off" />
+                <label for="recipe-yield">Yield</label>
+                <input id="recipe-yield" name="yield_portions" type="number" min="0" step="any" required value="4" />
+                <button type="submit" class="btn-primary">Create recipe</button>
+            </form>`,
+    });
     const body = `
-        ${pageHeader({ title: "Recipes" })}
+        ${pageHeader({
+            title: "Recipes",
+            actions: modalTrigger({
+                target: NEW_RECIPE_MODAL_ID,
+                label: "New recipe",
+                className: "btn-primary",
+            }),
+        })}
         ${error}
         ${disclosure({
             summary: "Filter",
@@ -117,17 +189,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
         })}
         ${empty}
         ${list}
-        ${disclosure({
-            summary: "New recipe",
-            open: view.recipes.length === 0,
-            body: `<form class="recipe-create" method="post" action="/recipes">
-                <label for="recipe-name">Name</label>
-                <input id="recipe-name" name="name" type="text" required maxlength="80" autocomplete="off" />
-                <label for="recipe-yield">Yield</label>
-                <input id="recipe-yield" name="yield_portions" type="number" min="0" step="any" required value="4" />
-                <button type="submit" class="btn-primary">Create recipe</button>
-            </form>`,
-        })}
+        ${newRecipeModal}
     `;
     return renderAppShell({
         title: "Recipes",
@@ -138,10 +200,15 @@ export function renderRecipesPage(view: RecipesPageView): string {
 }
 
 function ingredientRow(
-    recipeId: string,
+    view: RecipeDetailView,
     ingredient: RecipeIngredientView,
-): string {
-    return renderRecipeIngredientRow({
+): { row: string; modals: string } {
+    const recipeId = view.recipe.id;
+    const editId = editIngredientModalId(ingredient.id);
+    const deleteId = deleteIngredientModalId(ingredient.id);
+    const id = escapeHtml(ingredient.id);
+    const recipeIdEsc = escapeHtml(recipeId);
+    const row = renderRecipeIngredientRow({
         id: ingredient.id,
         recipeId,
         displayName: ingredient.displayName,
@@ -161,7 +228,32 @@ function ingredientRow(
         personAmount: ingredient.personAmount,
         totalAmount: ingredient.quantity.amount,
         note: ingredient.note,
+        editModalId: editId,
+        deleteModalId: deleteId,
     });
+    const modals =
+        modal({
+            id: editId,
+            title: `Edit ${ingredient.displayName}`,
+            openOnLoad: modalOpen(view, editId),
+            body: `${modalFormError(view, editId)}<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeIdEsc}/ingredients/${id}">
+<label for="note-${id}">Note</label>
+<input id="note-${id}" name="note" type="text" maxlength="500" value="${escapeHtml(ingredient.note ?? "")}" autocomplete="off" />
+<label for="amount-${id}">Amount</label>
+<input id="amount-${id}" name="amount" type="number" min="0" step="any" required value="${escapeHtml(String(ingredient.quantity.amount))}" />
+<button type="submit" class="btn-primary">Save ingredient</button>
+</form>`,
+        }) +
+        confirmModal({
+            id: deleteId,
+            title: "Remove ingredient",
+            message: `Remove ${ingredient.displayName} from this recipe?`,
+            action: `/recipes/${recipeId}/ingredients/${ingredient.id}/delete`,
+            confirmLabel: "Remove",
+            openOnLoad: modalOpen(view, deleteId),
+            bodyPrefix: modalFormError(view, deleteId),
+        });
+    return { row, modals };
 }
 
 function macrosBlock(
@@ -185,15 +277,30 @@ function macrosBlock(
 }
 
 export function renderRecipeDetailPage(view: RecipeDetailView): string {
-    const error = errorBanner(view.error);
+    const recipeId = view.recipe.id;
+    const renderedModalIds = [
+        editRecipeModalId(recipeId),
+        deleteRecipeModalId(recipeId),
+        addIngredientModalId(recipeId),
+        cookModalId(recipeId),
+        ...view.ingredients.flatMap((ingredient) => [
+            editIngredientModalId(ingredient.id),
+            deleteIngredientModalId(ingredient.id),
+        ]),
+    ];
+    const error = pageLevelErrorBanner(view, renderedModalIds);
     const allergen = view.allergenWarning
         ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
         : "";
     const dislike = view.dislikeNote
         ? `<p class="dislike-note">${escapeHtml(view.dislikeNote)}</p>`
         : "";
-    const rows = view.ingredients
-        .map((ingredient) => ingredientRow(view.recipe.id, ingredient))
+    const ingredientParts = view.ingredients.map((ingredient) =>
+        ingredientRow(view, ingredient),
+    );
+    const rows = ingredientParts.map((part) => part.row).join("");
+    const ingredientModals = ingredientParts
+        .map((part) => part.modals)
         .join("");
     const viewingSelf = view.filterUserId === view.viewerId;
     const memberOptions = view.members
@@ -230,61 +337,19 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
 <p class="muted">Leave blank to shop for the people above. Enter more for a whole batch or leftovers.</p>
 <button type="submit" class="btn-primary">Add to grocery</button>
 </form>`;
-    const recipeId = escapeHtml(view.recipe.id);
+    const recipeIdEsc = escapeHtml(recipeId);
     const personMacros =
         view.portionCount === 1 ? "" : macrosBlock(view.macros, "person");
     const perPortion = view.macrosPerPortion ?? view.macros;
     const tagsValue = escapeHtml(view.recipe.tags.join(", "));
-    const body = `
-        <p class="recipe-back"><a href="/recipes">← Recipes</a></p>
-        ${pageHeader({ title: view.recipe.name })}
-        ${error}
-        ${allergen}
-        ${dislike}
-        <p class="recipe-yield muted" data-yield="${escapeHtml(String(view.recipe.yieldPortions))}">Yield ${escapeHtml(String(view.recipe.yieldPortions))}</p>
-        ${panel({
-            title: "Nutrition",
-            body: `<form class="recipe-filter inline-form" method="get" action="/recipes/${recipeId}" data-filter-member="${escapeHtml(view.filterUserId)}">
-                <label for="recipe-member">Filter by person</label>
-                <select id="recipe-member" name="member">${memberOptions}</select>
-                <button type="submit">View</button>
-            </form>
-            ${portion}
-            ${macrosBlock(perPortion, "portion")}
-            ${personMacros}`,
-        })}
-        ${panel({
-            title: "Ingredients",
-            body: `<ul class="recipe-ingredients list">${rows}</ul>
-            ${disclosure({
-                summary: "Add ingredient",
-                body: renderFoodPicker({
-                    id: "recipe-picker",
-                    action: `/recipes/${view.recipe.id}/ingredients`,
-                    method: "post",
-                    includeQuantity: true,
-                }),
-            })}`,
-        })}
-        ${panel({
-            title: "Cook and log",
-            body: `<form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeId}/log-portion">
-                <label>Portions
-                    <input id="log-portion-count" name="portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />
-                </label>
-                <label>Meal type
-                    <select id="log-portion-type" name="meal_type">
-                        <option value="breakfast">Breakfast</option>
-                        <option value="lunch">Lunch</option>
-                        <option value="dinner">Dinner</option>
-                        <option value="snack" selected>Snack</option>
-                    </select>
-                </label>
-                <button type="submit" class="btn-primary">Log a portion</button>
-            </form>
-            ${disclosure({
-                summary: "Cooked it",
-                body: `<form class="recipe-cook field-grid" method="post" action="/recipes/${recipeId}/cook">
+
+    const editId = editRecipeModalId(recipeId);
+    const deleteId = deleteRecipeModalId(recipeId);
+    const addIngredientId = addIngredientModalId(recipeId);
+    const cookId = cookModalId(recipeId);
+    const pickerId = `recipe-picker-${recipeId}`;
+
+    const cookFormBody = `<form class="recipe-cook field-grid" method="post" action="/recipes/${recipeIdEsc}/cook">
                     ${view.members
                         .map((member) => {
                             const value =
@@ -313,16 +378,14 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                         <label><input type="checkbox" name="log_meals" value="1" checked /> Log meals</label>
                     </fieldset>
                     <button type="submit" class="btn-primary">Cooked it</button>
-                </form>`,
-            })}`,
-        })}
-        ${panel({
-            title: "Groceries",
-            body: grocery,
-        })}
-        ${disclosure({
-            summary: "Edit recipe",
-            body: `<form class="recipe-edit" method="post" action="/recipes/${recipeId}">
+                </form>`;
+
+    const pageModals =
+        modal({
+            id: editId,
+            title: "Edit recipe",
+            openOnLoad: modalOpen(view, editId),
+            body: `${modalFormError(view, editId)}<form class="recipe-edit" method="post" action="/recipes/${recipeIdEsc}">
                 <label for="edit-name">Name</label>
                 <input id="edit-name" name="name" type="text" required maxlength="80" value="${escapeHtml(view.recipe.name)}" />
                 <label for="edit-yield">Yield</label>
@@ -341,10 +404,117 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                 <textarea id="edit-notes" name="notes" rows="3">${escapeHtml(view.recipe.notes ?? "")}</textarea>
                 <button type="submit" class="btn-primary">Save recipe</button>
             </form>`,
+        }) +
+        confirmModal({
+            id: deleteId,
+            title: "Delete recipe",
+            message: `Delete ${view.recipe.name}? This cannot be undone.`,
+            action: `/recipes/${recipeId}/delete`,
+            confirmLabel: "Delete recipe",
+            openOnLoad: modalOpen(view, deleteId),
+            bodyPrefix: modalFormError(view, deleteId),
+        }) +
+        modal({
+            id: addIngredientId,
+            title: "Add ingredient",
+            openOnLoad: modalOpen(view, addIngredientId),
+            body: `${modalFormError(view, addIngredientId)}${renderFoodPicker({
+                id: pickerId,
+                action: `/recipes/${recipeId}/ingredients`,
+                method: "post",
+                includeQuantity: true,
+            })}`,
+        }) +
+        modal({
+            id: cookId,
+            title: "Cooked it",
+            openOnLoad: modalOpen(view, cookId),
+            body: `${modalFormError(view, cookId)}${cookFormBody}`,
+        });
+
+    const headerActions = [
+        modalTrigger({
+            target: editId,
+            label: "Edit recipe",
+            className: "btn-sm",
+        }),
+        modalTrigger({
+            target: deleteId,
+            label: "Delete recipe",
+            className: "btn-sm btn-danger",
+        }),
+    ].join("\n");
+
+    const ingredientsHead = panelHead(
+        "Ingredients",
+        `<div class="row-actions">
+${modalTrigger({
+    target: addIngredientId,
+    label: "Add ingredient",
+    className: "btn-sm",
+})}
+</div>`,
+    );
+
+    const cookHead = panelHead(
+        "Cook and log",
+        `<div class="row-actions">
+${modalTrigger({
+    target: cookId,
+    label: "Cooked it",
+    className: "btn-sm",
+})}
+</div>`,
+    );
+
+    const body = `
+        <p class="recipe-back"><a href="/recipes">← Recipes</a></p>
+        ${pageHeader({
+            title: view.recipe.name,
+            actions: headerActions,
         })}
-        <form class="recipe-delete" method="post" action="/recipes/${recipeId}/delete">
-            <button type="submit" class="btn-danger">Delete recipe</button>
-        </form>
+        ${error}
+        ${allergen}
+        ${dislike}
+        <p class="recipe-yield muted" data-yield="${escapeHtml(String(view.recipe.yieldPortions))}">Yield ${escapeHtml(String(view.recipe.yieldPortions))}</p>
+        ${panel({
+            title: "Nutrition",
+            body: `<form class="recipe-filter inline-form" method="get" action="/recipes/${recipeIdEsc}" data-filter-member="${escapeHtml(view.filterUserId)}">
+                <label for="recipe-member">Filter by person</label>
+                <select id="recipe-member" name="member">${memberOptions}</select>
+                <button type="submit">View</button>
+            </form>
+            ${portion}
+            ${macrosBlock(perPortion, "portion")}
+            ${personMacros}`,
+        })}
+        <section class="panel">
+${ingredientsHead}
+<ul class="recipe-ingredients list">${rows}</ul>
+</section>
+        <section class="panel">
+${cookHead}
+<form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeIdEsc}/log-portion">
+                <label>Portions
+                    <input id="log-portion-count" name="portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />
+                </label>
+                <label>Meal type
+                    <select id="log-portion-type" name="meal_type">
+                        <option value="breakfast">Breakfast</option>
+                        <option value="lunch">Lunch</option>
+                        <option value="dinner">Dinner</option>
+                        <option value="snack" selected>Snack</option>
+                    </select>
+                </label>
+                <button type="submit" class="btn-primary">Log a portion</button>
+            </form>
+</section>
+        ${panel({
+            title: "Groceries",
+            body: grocery,
+        })}
+        ${pageModals}
+        ${ingredientModals}
     `;
     return renderAppShell({
         title: view.recipe.name,

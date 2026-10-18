@@ -373,8 +373,9 @@ test("grocery page groups by store then section and shows already-have", () => {
     expect(html).toContain('class="food-picker"');
     expect(html).toContain('href="/grocery" aria-current="page"');
     expect(html).toContain('action="/grocery/lines"');
-    expect(html).toContain('action="/grocery/clear-checked"');
-    expect(html).toContain("<h3>Add food</h3>");
+    expect(html).not.toContain('action="/grocery/clear-checked"');
+    expect(html).toContain('commandfor="grocery-add-food-st-1"');
+    expect(html).not.toMatch(/<details class="more"/);
     expect(html).not.toContain("<h3>Add supply</h3>");
     expect(html).not.toContain("grocery-add-supply");
     expect(html).not.toContain('name="kind" value="supply"');
@@ -420,7 +421,7 @@ test("owner grocery page keeps the add-store form when a store already exists", 
             },
         ],
     });
-    expect(html).toContain("<h2>Corner</h2>");
+    expect(html).toContain('<h2 class="row-title">Corner</h2>');
     expect(html).toContain('class="grocery-add-store"');
     expect(html).toContain('action="/grocery/stores"');
     expect(html).not.toContain("<h3>Add supply</h3>");
@@ -506,8 +507,318 @@ test("grocery lines are rows with a labelled round check button", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-sm btn-primary">Put away</button>',
     );
+    expect(html).not.toMatch(/id="put-away-tip-/);
+    expect(html).toContain('commandfor="grocery-add-food-st-1"');
+    expect(html).toContain('id="grocery-add-food-st-1"');
+    expect(html).toContain('commandfor="grocery-clear-checked"');
+    expect(html).toContain('action="/grocery/clear-checked"');
+    expect(html).toContain("grocery-clear-checked");
+    expect(html).not.toMatch(/<details class="more"/);
+});
+
+test("grocery header actions and modals match fridge patterns", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        isOwner: true,
+        locations: [{ id: "l1", name: "Fridge" }],
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [
+                            {
+                                id: "line-1",
+                                householdId: HH,
+                                storeId: "st-1",
+                                sectionId: "sec-other",
+                                kind: "food",
+                                displayName: "Milk",
+                                quantity: { amount: 1, unit: "each" },
+                                identity: {
+                                    kind: "food",
+                                    via: "manual",
+                                    displayName: "Milk",
+                                },
+                                foodId: "f-1",
+                                checked: true,
+                                alreadyHave: null,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    } as never);
+    expect(html).toContain('<header class="dash-head">');
+    expect(html).toContain('commandfor="grocery-add-store"');
+    expect(html).toContain('commandfor="grocery-clear-checked"');
     expect(html).toMatch(
-        /<summary><h3>Add food<\/h3><\/summary>\s*<label for="section-st-1">/,
+        /<button type="button" class="btn-danger" commandfor="grocery-clear-checked"/,
     );
-    expect(html).toContain("<summary>Add store</summary>");
+    expect(html).toContain("Remove every checked item from the list?");
+    expect(html).toContain('commandfor="grocery-add-food-st-1"');
+    expect(html).toContain('<form class="grocery-put-away row-actions"');
+    expect(html).not.toMatch(/<details class="more"/);
+});
+
+test("member grocery page has no add-store trigger or form", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        isOwner: false,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [
+                            {
+                                id: "line-1",
+                                householdId: HH,
+                                storeId: "st-1",
+                                sectionId: "sec-other",
+                                kind: "food",
+                                displayName: "Milk",
+                                quantity: { amount: 1, unit: "each" },
+                                identity: {
+                                    kind: "food",
+                                    via: "manual",
+                                    displayName: "Milk",
+                                },
+                                foodId: "f-1",
+                                checked: true,
+                                alreadyHave: null,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    } as never);
+    expect(html).not.toContain('commandfor="grocery-add-store"');
+    expect(html).not.toContain("grocery-add-store");
+});
+
+test("a server error reopens the grocery modal that submitted the form", () => {
+    const addStore = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [],
+        isOwner: true,
+        error: "Enter a store name.",
+        openModalId: "grocery-add-store",
+    });
+    expect(addStore).toMatch(
+        /<dialog class="modal" id="grocery-add-store"[^>]*data-modal-open-on-load/,
+    );
+    const clearChecked = renderGroceryPage({
+        chrome: groceryChrome,
+        isOwner: true,
+        locations: [{ id: "l1", name: "Fridge" }],
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [
+                            {
+                                id: "line-1",
+                                householdId: HH,
+                                storeId: "st-1",
+                                sectionId: "sec-other",
+                                kind: "food",
+                                displayName: "Milk",
+                                quantity: { amount: 1, unit: "each" },
+                                identity: {
+                                    kind: "food",
+                                    via: "manual",
+                                    displayName: "Milk",
+                                },
+                                foodId: "f-1",
+                                checked: true,
+                                alreadyHave: null,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        error: "Could not clear.",
+        openModalId: "grocery-clear-checked",
+    } as never);
+    expect(clearChecked).toMatch(
+        /<dialog class="modal" id="grocery-clear-checked"[^>]*data-modal-open-on-load/,
+    );
+    const addFood = renderGroceryPage({
+        chrome: groceryChrome,
+        isOwner: true,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+        error: "Pick a food.",
+        openModalId: "grocery-add-food-st-1",
+    } as never);
+    expect(addFood).toMatch(
+        /<dialog class="modal" id="grocery-add-food-st-1"[^>]*data-modal-open-on-load/,
+    );
+});
+
+test("add-food modal contains the section select with picker forms", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-produce",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Produce",
+                        sortOrder: 0,
+                        hidden: false,
+                        isOther: false,
+                        lines: [],
+                    },
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+    } as never);
+    const modal = html.match(
+        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(modal).toBeDefined();
+    expect(modal!).toContain("data-grocery-section");
+    expect(modal!).toContain('data-infer-section="sec-other"');
+    expect(modal!).not.toContain("popovertarget=");
+    expect(modal!).toContain('<label for="section-st-1">');
+    expect(modal!).toContain('class="food-picker"');
+    expect(modal!).toContain('action="/grocery/lines"');
+    expect(modal!).not.toContain('name="section_id"');
+});
+
+test("owner with no stores does not auto-open the add-store modal", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [],
+        isOwner: true,
+    });
+    expect(html).toContain('id="grocery-add-store"');
+    expect(html).not.toMatch(
+        /<dialog class="modal" id="grocery-add-store"[^>]*data-modal-open-on-load/,
+    );
+    expect(html).toContain('commandfor="grocery-add-store"');
+});
+
+test("blocking allergen warning and Add anyway form render inside the reopened add-food modal", () => {
+    const html = renderGroceryPage({
+        chrome: groceryChrome,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Corner",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+        allergenWarning: "Peanut allergen for Bob.",
+        openModalId: "grocery-add-food-st-1",
+        allergenRetry: {
+            storeId: "st-1",
+            fields: {
+                kind: "food",
+                store_id: "st-1",
+                food_name: "Peanut Butter",
+                qty_amount: "1",
+                qty_unit: "each",
+            },
+        },
+    } as never);
+    expect(html).not.toMatch(
+        /<header class="dash-head">[\s\S]*class="allergen-warning"/,
+    );
+    const modal = html.match(
+        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
+    )?.[0];
+    expect(modal).toContain('class="allergen-warning"');
+    expect(modal).toContain('name="confirm_allergen" value="1"');
+    expect(modal).toContain("Add anyway");
+    expect(modal).toContain('name="food_name" value="Peanut Butter"');
 });

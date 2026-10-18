@@ -31,7 +31,36 @@ import { findFoodById } from "../../domain/foods.js";
 
 export const groceryRoutes = new Hono();
 
-async function groceryFormError(userId: string, err: unknown) {
+function groceryAllergenRetryFields(
+    body: Record<string, File | string>,
+    storeId: string,
+): Record<string, string> {
+    const fields: Record<string, string> = {
+        kind: formText(body, "kind") || "food",
+        store_id: storeId,
+    };
+    const sectionId = formText(body, "section_id");
+    if (sectionId) fields.section_id = sectionId;
+    const foodId = formText(body, "food_id");
+    if (foodId) fields.food_id = foodId;
+    const foodName = formText(body, "food_name");
+    if (foodName) fields.food_name = foodName;
+    const barcode = formText(body, "barcode");
+    if (barcode) fields.barcode = barcode;
+    const amount = formText(body, "qty_amount");
+    if (amount) fields.qty_amount = amount;
+    const unit = formText(body, "qty_unit");
+    if (unit) fields.qty_unit = unit;
+    const name = formText(body, "name");
+    if (name) fields.name = name;
+    return fields;
+}
+
+async function groceryFormError(
+    userId: string,
+    err: unknown,
+    openModalId?: string,
+) {
     const message =
         err instanceof GroceryInputError
             ? err.message
@@ -42,6 +71,7 @@ async function groceryFormError(userId: string, err: unknown) {
                 : "Could not update the grocery list.";
     const page = await renderGroceryListPage(userId, {
         error: message,
+        openModalId,
     });
     return { html: page.html, status: 400 as const };
 }
@@ -62,7 +92,7 @@ groceryRoutes.post("/grocery/stores", requireOwner, async (c) => {
             formText(body, "name"),
         );
     } catch (err) {
-        const page = await groceryFormError(userId, err);
+        const page = await groceryFormError(userId, err, "grocery-add-store");
         return c.html(page.html, page.status);
     }
     return c.redirect("/grocery");
@@ -121,6 +151,11 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
             if (warning?.blocking && !confirmed) {
                 const page = await renderGroceryListPage(userId, {
                     allergenWarning: warning.text,
+                    openModalId: `grocery-add-food-${storeId}`,
+                    allergenRetry: {
+                        storeId,
+                        fields: groceryAllergenRetryFields(body, storeId),
+                    },
                 });
                 return c.html(page.html, 400);
             }
@@ -160,28 +195,48 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
             }
         }
     } catch (err) {
-        const page = await groceryFormError(userId, err);
+        const page = await groceryFormError(
+            userId,
+            err,
+            `grocery-add-food-${storeId}`,
+        );
         return c.html(page.html, page.status);
     }
     return c.redirect("/grocery");
 });
 
 groceryRoutes.post("/grocery/lines/:id/check", requireMember, async (c) => {
+    const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
     const checked = formText(body, "checked") !== "0";
-    await checkGroceryLine(
-        liveGroceryStore(),
-        member.householdId,
-        c.req.param("id"),
-        checked,
-    );
+    try {
+        await checkGroceryLine(
+            liveGroceryStore(),
+            member.householdId,
+            c.req.param("id"),
+            checked,
+        );
+    } catch (err) {
+        const page = await groceryFormError(userId, err);
+        return c.html(page.html, page.status);
+    }
     return c.redirect("/grocery");
 });
 
 groceryRoutes.post("/grocery/clear-checked", requireMember, async (c) => {
+    const userId = c.get("userId");
     const member = siteMember(c);
-    await clearCheckedLines(liveGroceryStore(), member.householdId);
+    try {
+        await clearCheckedLines(liveGroceryStore(), member.householdId);
+    } catch (err) {
+        const page = await groceryFormError(
+            userId,
+            err,
+            "grocery-clear-checked",
+        );
+        return c.html(page.html, page.status);
+    }
     return c.redirect("/grocery");
 });
 

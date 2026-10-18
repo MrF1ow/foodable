@@ -120,7 +120,7 @@ test("owner household page has add-member form on /settings/household only", () 
     expect(html).toContain("<h1>Household</h1>");
     expect(html).toContain('href="/settings/foods"');
     expect(html).toContain('action="/settings/household"');
-    expect(html).toContain("Add household member");
+    expect(html).toContain('commandfor="household-add-member"');
     expect(html).toContain("Alice");
     expect(html).toContain("Bob");
     expect(html).not.toContain('action="/add-household-member"');
@@ -155,13 +155,13 @@ test("member household page is read-only without add-member", () => {
     });
     expect(html).toContain("Seattle");
     expect(html).not.toContain('action="/settings/household"');
-    expect(html).not.toContain("Add household member");
+    expect(html).not.toContain('commandfor="household-add-member"');
     expect(html).not.toContain('action="/settings/household/stores"');
     expect(html).not.toContain("/make-owner");
     expect(html).not.toContain("/remove");
 });
 
-test("household settings groups owner tools into cards and disclosures", () => {
+test("household settings groups owner tools into cards and modals", () => {
     const html = renderHouseholdSettingsPage({
         chrome,
         householdName: "Home",
@@ -184,7 +184,7 @@ test("household settings groups owner tools into cards and disclosures", () => {
     for (const heading of ["Household", "Members", "Grocery stores", "Rules"]) {
         expect(html).toContain(`<h2>${heading}</h2>`);
     }
-    expect(html).toContain("<summary>Add household member</summary>");
+    expect(html).toContain('id="household-add-member"');
     expect(html).toContain('<li class="allergen pill pill-bad">');
     expect(html).toContain('<li class="dislike pill pill-dim">Olives</li>');
     expect(html).toContain(

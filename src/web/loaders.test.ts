@@ -7,6 +7,9 @@ import {
 } from "./loaders.js";
 
 import type { HouseholdMember } from "../household.js";
+import { NUTRITION_CARDS } from "../domain/layout.js";
+
+const defaultCardOrder = [...NUTRITION_CARDS];
 
 const alice: HouseholdMember = {
     householdId: "hh-1",
@@ -53,6 +56,7 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
         trends: { locale: "en" },
         weight: { locale: "en", unit: "kg" },
         chrome: lightChrome,
+        cardOrder: defaultCardOrder,
     });
     expect(html).toContain("<h1>Alice</h1>");
     expect(html).not.toContain('class="peer-note"');
@@ -83,6 +87,7 @@ test("self dashboard logs through one compact panel of disclosures", async () =>
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: lightChrome,
+        cardOrder: defaultCardOrder,
     });
     expect(html).toContain(
         '<section class="panel log-panel" aria-label="Log">',
@@ -109,6 +114,7 @@ test("owner self dashboard has no add-member form", async () => {
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: lightChrome,
+        cardOrder: defaultCardOrder,
     });
     expect(html).not.toContain('action="/add-household-member"');
     expect(html).not.toContain("Add household member");
@@ -124,6 +130,7 @@ test("member self dashboard has no add form", async () => {
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: lightChrome,
+        cardOrder: defaultCardOrder,
     });
     expect(html).toContain("<h1>Bob</h1>");
     expect(html).not.toContain('action="/add-household-member"');
@@ -139,6 +146,7 @@ test("peer dashboard is read-only", async () => {
         trends: { locale: "en" },
         weight: { locale: "en" },
         chrome: lightChrome,
+        cardOrder: defaultCardOrder,
     });
     expect(html).toContain("<h1>Bob</h1>");
     expect(html).toContain("Viewing Bob");

@@ -1,20 +1,42 @@
 import { escapeHtml } from "../shell.js";
-import { disclosure } from "./ui.js";
+import type { ExpiryLevel } from "../../domain/stock.js";
+import { disclosure, modalTrigger } from "./ui.js";
+
+function expiryPill(level: ExpiryLevel): string {
+    const label =
+        level === "expired"
+            ? "Expired"
+            : level === "high"
+              ? "High"
+              : level === "medium"
+                ? "Medium"
+                : "Low";
+    const cls =
+        level === "expired" || level === "high"
+            ? "pill pill-bad expiry-pill"
+            : level === "medium"
+              ? "pill pill-warn expiry-pill"
+              : "pill pill-dim expiry-pill";
+    return `<span class="${cls}">${label}</span>`;
+}
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
 ): string {
     if (items.length === 0) return "";
+    const n = items.length;
     const rows = items
         .map(
             (item) =>
                 `<li data-item-id="${escapeHtml(item.id)}"><div class="row"><span class="row-title">${escapeHtml(item.displayName)}</span><span class="row-meta">${escapeHtml(item.expiresOn)}</span></div></li>`,
         )
         .join("");
-    return `<section class="fridge-expiring panel">
-<h2>Expiring soon</h2>
+    return disclosure({
+        summary: `Expiring soon <span class="count">${n}</span>`,
+        body: `<section class="fridge-expiring panel">
 <ul class="list">${rows}</ul>
-</section>`;
+</section>`,
+    });
 }
 
 export function renderGroceryLineRow(opts: {
@@ -49,30 +71,25 @@ export function renderFridgeItemRow(opts: {
     displayName: string;
     quantityLabel: string;
     expiresOn?: string | null;
-    editFields: string;
-    extraActions?: string;
+    expiryLevel?: ExpiryLevel | null;
+    rowActions: string;
 }): string {
     const id = escapeHtml(opts.id);
     const expires = opts.expiresOn
         ? ` · exp ${escapeHtml(opts.expiresOn)}`
         : "";
-    return `<li class="fridge-item" data-item-id="${id}" data-kind="${opts.kind}">
+    const expiryAttr =
+        opts.expiryLevel != null
+            ? ` data-expiry="${escapeHtml(opts.expiryLevel)}"`
+            : "";
+    const pill = opts.expiryLevel != null ? expiryPill(opts.expiryLevel) : "";
+    return `<li class="fridge-item" data-item-id="${id}" data-kind="${opts.kind}"${expiryAttr}>
 <div class="fridge-item-head row">
-<p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}</p>
+<p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}${pill ? ` ${pill}` : ""}</p>
 <p class="fridge-item-qty row-meta">${escapeHtml(opts.quantityLabel)}${expires}</p>
 </div>
 <div class="row-actions">
-${opts.extraActions ?? ""}
-${disclosure({
-    summary: "Edit",
-    body: `<form class="fridge-item-edit" method="post" action="/fridge/items/${id}">
-${opts.editFields}
-<button type="submit" class="btn-primary">Save</button>
-</form>
-<form class="fridge-item-delete" method="post" action="/fridge/items/${id}/delete">
-<button type="submit" class="btn-danger">Delete</button>
-</form>`,
-})}
+${opts.rowActions}
 </div>
 </li>`;
 }
@@ -112,6 +129,8 @@ export function renderRecipeIngredientRow(opts: {
     personAmount: number;
     totalAmount: number;
     note?: string | null;
+    editModalId: string;
+    deleteModalId: string;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
@@ -132,19 +151,16 @@ ${note}
 <button type="submit" name="direction" value="up" class="btn-sm" aria-label="Move ${name} up">↑</button>
 <button type="submit" name="direction" value="down" class="btn-sm" aria-label="Move ${name} down">↓</button>
 </form>
-${disclosure({
-    summary: "Edit",
-    body: `<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeId}/ingredients/${id}">
-<label for="note-${id}">Note</label>
-<input id="note-${id}" name="note" type="text" maxlength="500" value="${escapeHtml(opts.note ?? "")}" autocomplete="off" />
-<label for="amount-${id}">Amount</label>
-<input id="amount-${id}" name="amount" type="number" min="0" step="any" required value="${escapeHtml(String(opts.totalAmount))}" />
-<button type="submit" class="btn-primary">Save ingredient</button>
-</form>`,
+${modalTrigger({
+    target: opts.editModalId,
+    label: "Edit",
+    className: "btn-sm",
 })}
-<form class="recipe-ingredient-delete" method="post" action="/recipes/${recipeId}/ingredients/${id}/delete">
-<button type="submit" class="btn-sm btn-danger">Remove</button>
-</form>
+${modalTrigger({
+    target: opts.deleteModalId,
+    label: "Remove",
+    className: "btn-sm btn-danger",
+})}
 </div>
 </li>`;
 }

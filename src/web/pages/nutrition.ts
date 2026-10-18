@@ -24,8 +24,26 @@ import {
     resolveTheme,
     type ViewerChrome,
 } from "../shell.js";
-import { disclosure, errorBanner, pageHeader } from "../components/ui.js";
+import {
+    disclosure,
+    errorBanner,
+    modal,
+    modalTrigger,
+    pageHeader,
+    pageLevelErrorBanner,
+} from "../components/ui.js";
 import type { MealFormItem } from "../form.js";
+import type { NutritionCard } from "../../domain/layout.js";
+
+export const NUTRITION_ARRANGE_MODAL_ID = "nutrition-arrange";
+
+const CARD_LABELS: Record<NutritionCard, string> = {
+    log: "Log",
+    "nutrition-summary": "Nutrition summary",
+    "goal-progress": "Goal progress",
+    trends: "Trends",
+    "weight-trends": "Weight trends",
+};
 
 export type NutritionView = {
     access: Extract<DashboardAccess, { ok: true }>;
@@ -35,7 +53,10 @@ export type NutritionView = {
     trends: unknown;
     weight: unknown;
     chrome: ViewerChrome;
+    cardOrder: NutritionCard[];
+    viewMemberId?: string;
     error?: string;
+    openModalId?: string;
 };
 
 export type LogFormResult = { ok: true } | { ok: false; error: string };
@@ -250,15 +271,115 @@ export async function logWeightFromForm(
     return { ok: true };
 }
 
+function memberHiddenField(viewMemberId?: string): string {
+    if (!viewMemberId) return "";
+    return `<input type="hidden" name="member" value="${escapeHtml(viewMemberId)}" />`;
+}
+
+function arrangeLegacyMoveFormId(
+    key: NutritionCard,
+    direction: "up" | "down",
+): string {
+    return `nutrition-arrange-move-${key}-${direction}`;
+}
+
+function arrangeLegacyMoveButton(
+    key: NutritionCard,
+    direction: "up" | "down",
+): string {
+    const label = CARD_LABELS[key];
+    const verb = direction === "up" ? "up" : "down";
+    const arrow = direction === "up" ? "↑" : "↓";
+    const formId = arrangeLegacyMoveFormId(key, direction);
+    return `<button type="submit" class="btn-sm arrange-legacy-move" form="${formId}" aria-label="Move ${escapeHtml(label)} ${verb}">${arrow}</button>`;
+}
+
+function arrangeLegacyMoveForm(
+    key: NutritionCard,
+    direction: "up" | "down",
+    view: NutritionView,
+): string {
+    const formId = arrangeLegacyMoveFormId(key, direction);
+    return `<form id="${formId}" class="arrange-legacy-move-form" method="post" action="/nutrition/layout">
+${memberHiddenField(view.viewMemberId)}
+<input type="hidden" name="card" value="${escapeHtml(key)}" />
+<input type="hidden" name="direction" value="${direction}" />
+</form>`;
+}
+
+function arrangeModal(view: NutritionView): string {
+    const order = view.cardOrder;
+    const legacyForms: string[] = [];
+    const rows = order
+        .map((key, index) => {
+            const label = CARD_LABELS[key];
+            const upDisabled = index === 0;
+            const downDisabled = index === order.length - 1;
+            const upBtn = `<button type="button" class="btn-sm arrange-up" aria-label="Move ${escapeHtml(label)} up"${upDisabled ? " disabled" : ""}>↑</button>`;
+            const downBtn = `<button type="button" class="btn-sm arrange-down" aria-label="Move ${escapeHtml(label)} down"${downDisabled ? " disabled" : ""}>↓</button>`;
+            const legacy =
+                !upDisabled || !downDisabled
+                    ? `${upDisabled ? "" : arrangeLegacyMoveButton(key, "up")}${downDisabled ? "" : arrangeLegacyMoveButton(key, "down")}`
+                    : "";
+            if (!upDisabled) {
+                legacyForms.push(arrangeLegacyMoveForm(key, "up", view));
+            }
+            if (!downDisabled) {
+                legacyForms.push(arrangeLegacyMoveForm(key, "down", view));
+            }
+            return `<li class="row arrange-row" data-card="${escapeHtml(key)}">
+<input type="hidden" name="order" value="${escapeHtml(key)}" />
+<span class="row-title">${escapeHtml(label)}</span>
+<span class="row-actions">${upBtn}${downBtn}${legacy}</span>
+</li>`;
+        })
+        .join("");
+    const modalError =
+        view.error && view.openModalId === NUTRITION_ARRANGE_MODAL_ID
+            ? errorBanner(view.error)
+            : "";
+    const body = `${modalError}<form id="nutrition-arrange-save" class="nutrition-arrange-form" method="post" action="/nutrition/layout">
+${memberHiddenField(view.viewMemberId)}
+<ul class="list nutrition-arrange-list">${rows}</ul>
+<div class="modal-actions">
+<button type="button" class="arrange-reset" command="close" commandfor="${NUTRITION_ARRANGE_MODAL_ID}">Cancel</button>
+<button type="submit" class="btn-primary">Save</button>
+</div>
+</form>${legacyForms.join("")}`;
+    return modal({
+        id: NUTRITION_ARRANGE_MODAL_ID,
+        title: "Arrange cards",
+        openOnLoad: view.openModalId === NUTRITION_ARRANGE_MODAL_ID,
+        body,
+    });
+}
+
 export async function renderNutritionPage(
     view: NutritionView,
 ): Promise<string> {
-    const cards = await Promise.all([
+    const [summaryCard, goalsCard, trendsCard, weightCard] = await Promise.all([
         widgetCard("nutrition-summary", view.summary, view.chrome),
         widgetCard("goal-progress", view.goals, view.chrome),
         widgetCard("trends", view.trends, view.chrome),
         widgetCard("weight-trends", view.weight, view.chrome),
     ]);
+
+    const logPanel = view.access.mode === "peer" ? "" : logForms();
+    const fragments: Record<NutritionCard, string> = {
+        log: logPanel,
+        "nutrition-summary": summaryCard,
+        "goal-progress": goalsCard,
+        trends: trendsCard,
+        "weight-trends": weightCard,
+    };
+    const orderedCards = view.cardOrder
+        .map((key) => {
+            const html = fragments[key];
+            if (!html) return "";
+            return `<div class="nutrition-card" data-nutrition-card="${escapeHtml(key)}">${html}</div>`;
+        })
+        .filter((html) => html.length > 0)
+        .join("\n");
 
     const memberNav = view.members
         .map((m) => {
@@ -278,17 +399,24 @@ export async function renderNutritionPage(
             ? `<p class="peer-note">Viewing ${escapeHtml(view.access.subject.displayName)}. You can look, not edit. Only they (or a household bot) can change these records.</p>`
             : "";
 
-    const forms = view.access.mode === "peer" ? "" : logForms();
+    const headActions = `${modalTrigger({
+        target: NUTRITION_ARRANGE_MODAL_ID,
+        label: "Arrange",
+        className: "btn-sm",
+    })}
+<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`;
+
+    const pageError = pageLevelErrorBanner(view, [NUTRITION_ARRANGE_MODAL_ID]);
 
     const body = `
         ${pageHeader({
             title: view.access.subject.displayName,
             sub: peerNote || undefined,
-            actions: `<nav class="member-switch" aria-label="Household members">${memberNav}</nav>`,
+            actions: headActions,
         })}
-        ${errorBanner(view.error)}
-        ${forms}
-        ${cards.join("\n")}
+        ${pageError}
+        ${orderedCards}
+        ${arrangeModal(view)}
     `;
     return renderAppShell({
         title: "Nutrition",

@@ -182,6 +182,8 @@ export const APP_JS_SOURCES = [
     "./src/web/client/food-picker.js",
     "./src/web/client/nutrition-log.js",
     "./src/web/client/grocery.js",
+    "./src/web/client/modal.js",
+    "./src/web/client/arrange.js",
 ] as const;
 let appJs: string | undefined;
 

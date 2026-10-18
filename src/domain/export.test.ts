@@ -407,6 +407,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
         locale: null,
         theme: null,
         accent_swatch: null,
+        nutrition_layout: null,
         created_at: "2026-01-02T14:30:00.000Z",
         updated_at: "2026-06-20T14:30:00.000Z",
         ...overrides,

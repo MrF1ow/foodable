@@ -26,11 +26,15 @@ import { liveRecipesStore } from "../db/recipes.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import { renderFridgePage } from "./pages/fridge.js";
-import { renderGroceryPage } from "./pages/grocery.js";
+import {
+    renderGroceryPage,
+    type GroceryAllergenRetry,
+} from "./pages/grocery.js";
 import { renderRecipeDetailPage, renderRecipesPage } from "./pages/recipes.js";
 import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
 import { renderHouseholdSettingsPage } from "./pages/household.js";
+import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
 import { foodsByIds } from "../domain/foods.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
@@ -43,6 +47,7 @@ import {
     RecipeInputError,
     recipeDislikeNote,
 } from "../domain/recipes.js";
+import { orderCards } from "../domain/layout.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -120,6 +125,7 @@ export async function renderDashboardPage(
     viewerUserId: string,
     requestedMember: string | undefined,
     error?: string,
+    openModalId?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -152,6 +158,11 @@ export async function renderDashboardPage(
         getWeightTrendsPayload(access.subject.userId),
     ]);
 
+    const viewMemberId =
+        requestedMember && requestedMember !== viewerUserId
+            ? requestedMember
+            : undefined;
+
     return {
         status: 200,
         html: await renderDashboardHtml({
@@ -162,7 +173,10 @@ export async function renderDashboardPage(
             trends,
             weight,
             chrome: viewerChromeFromProfile(viewerProfile),
+            cardOrder: orderCards(viewerProfile?.nutrition_layout),
+            viewMemberId,
             error,
+            openModalId,
         }),
     };
 }
@@ -170,6 +184,7 @@ export async function renderDashboardPage(
 export async function renderFridgeInventoryPage(
     viewerUserId: string,
     error?: string,
+    openModalId?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -184,13 +199,19 @@ export async function renderFridgeInventoryPage(
             ...snapshot,
             chrome: viewerChromeFromProfile(profile),
             error,
+            openModalId,
         }),
     };
 }
 
 export async function renderGroceryListPage(
     viewerUserId: string,
-    opts: { error?: string; allergenWarning?: string } = {},
+    opts: {
+        error?: string;
+        allergenWarning?: string;
+        allergenRetry?: GroceryAllergenRetry;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -280,7 +301,9 @@ export async function renderGroceryListPage(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             allergenWarning: opts.allergenWarning,
+            allergenRetry: opts.allergenRetry,
             unknownAllergen: unknownAllergen && !opts.allergenWarning,
+            openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({
                 id: loc.id,
                 name: loc.name,
@@ -323,9 +346,23 @@ export async function renderSettingsAccountPage(
     };
 }
 
+export async function renderSettingsHelpRoute(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    return {
+        status: 200,
+        html: renderSettingsHelpPageHtml({
+            chrome: viewerChromeFromProfile(profile),
+        }),
+    };
+}
+
 export async function renderSettingsFoodsPage(
     viewerUserId: string,
-    error?: string,
+    opts: { error?: string; openModalId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -344,14 +381,19 @@ export async function renderSettingsFoodsPage(
         html: renderFoodsSettingsPage({
             chrome: viewerChromeFromProfile(profile),
             foods: withAliases,
-            error,
+            error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }
 
 export async function renderHouseholdSettingsRoute(
     viewerUserId: string,
-    opts: { error?: string; issuedToken?: string } = {},
+    opts: {
+        error?: string;
+        issuedToken?: string;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -392,19 +434,23 @@ export async function renderHouseholdSettingsRoute(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             issuedToken: opts.issuedToken,
+            openModalId: opts.openModalId,
         }),
     };
 }
 
 export async function renderRecipesListPage(
     viewerUserId: string,
-    error?: string,
-    filter: {
+    opts: {
+        error?: string;
+        openModalId?: string;
         tag?: string;
         canMakeNow?: boolean;
         safeFor?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
+    const filter = opts;
+    const error = opts.error;
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
@@ -464,6 +510,7 @@ export async function renderRecipesListPage(
                 safeFor: safeForId,
             },
             error,
+            openModalId: opts.openModalId,
         }),
     };
 }
@@ -471,7 +518,11 @@ export async function renderRecipesListPage(
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
-    opts: { member?: string; error?: string } = {},
+    opts: {
+        member?: string;
+        error?: string;
+        openModalId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -492,7 +543,9 @@ export async function renderRecipeDetailRoute(
         );
     } catch (err) {
         if (err instanceof RecipeInputError) {
-            const page = await renderRecipesListPage(viewerUserId, err.message);
+            const page = await renderRecipesListPage(viewerUserId, {
+                error: err.message,
+            });
             return { status: 404, html: page.html };
         }
         throw err;
@@ -560,6 +613,7 @@ export async function renderRecipeDetailRoute(
                 : undefined,
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }

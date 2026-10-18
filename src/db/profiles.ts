@@ -23,6 +23,8 @@ export interface Profile {
     locale: string | null;
     theme: "light" | "dark" | null;
     accent_swatch: string | null;
+    /** Null means default nutrition dashboard card order. */
+    nutrition_layout: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -148,6 +150,7 @@ export async function upsertProfile(
         locale?: string;
         theme?: "light" | "dark" | null;
         accent_swatch?: string | null;
+        nutrition_layout?: string[] | null;
     },
 ): Promise<Profile> {
     const payload: Record<string, unknown> = {
@@ -169,6 +172,8 @@ export async function upsertProfile(
     if (patch.theme !== undefined) payload.theme = patch.theme;
     if (patch.accent_swatch !== undefined)
         payload.accent_swatch = patch.accent_swatch;
+    if (patch.nutrition_layout !== undefined)
+        payload.nutrition_layout = patch.nutrition_layout;
 
     const { data, error } = await getSupabase()
         .from("profiles")
@@ -178,4 +183,11 @@ export async function upsertProfile(
 
     if (error) throw new Error(`Failed to save profile: ${error.message}`);
     return data as Profile;
+}
+
+export async function setNutritionLayout(
+    userId: string,
+    layout: string[],
+): Promise<Profile> {
+    return upsertProfile(userId, { nutrition_layout: layout });
 }

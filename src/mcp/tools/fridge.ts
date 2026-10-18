@@ -21,10 +21,12 @@ import {
     deleteFridgeItemAdjust,
     discardFridgeItem,
     eatFridgeItem,
+    fridgeEatLogsMeal,
     listExpiring,
     StockInputError,
     updateFridgeItemQuantityAdjust,
 } from "../../domain/stock.js";
+import { findFoodById } from "../../domain/foods.js";
 import {
     descriptionFromItems,
     itemListDigest,
@@ -596,7 +598,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Eat Fridge Item",
             description:
-                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal.",
+                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal. Household supplies (kind 'supply') are deducted as used and log no meal (meal_id null).",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -643,14 +645,40 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                         );
                         const applied = Math.abs(eaten.movement.delta);
                         let mealId: string | null = null;
-                        if (applied > 0 && eaten.itemBefore.foodId) {
+                        const foodId = eaten.itemBefore.foodId;
+                        if (applied > 0 && foodId) {
+                            const food = await findFoodById(
+                                liveFoodsStore(),
+                                householdId,
+                                foodId,
+                            );
+                            if (!fridgeEatLogsMeal(food)) {
+                                const payload = {
+                                    shortfall: eaten.shortfall
+                                        ? {
+                                              amount: eaten.shortfall.amount,
+                                              unit: eaten.shortfall.unit,
+                                          }
+                                        : null,
+                                    meal_id: null as string | null,
+                                };
+                                return {
+                                    content: [
+                                        {
+                                            type: "text" as const,
+                                            text: `Used ${applied} ${eaten.itemBefore.quantity.unit} of ${eaten.itemBefore.displayName}.`,
+                                        },
+                                    ],
+                                    structuredContent: payload,
+                                };
+                            }
                             const { built, specs } = await resolveAndBuildMeal({
                                 householdId,
                                 foods: liveFoodsStore(),
                                 recipes: liveRecipesStore(),
                                 items: [
                                     {
-                                        foodId: eaten.itemBefore.foodId,
+                                        foodId,
                                         amount: applied,
                                         unit: eaten.itemBefore.quantity.unit,
                                         name: eaten.itemBefore.displayName,

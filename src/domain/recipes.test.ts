@@ -36,6 +36,7 @@ import {
     renderRecipeDetailPage,
     renderRecipesPage,
 } from "../web/pages/recipes.js";
+import { getAppCss } from "../widgets.js";
 import type { FoodResult } from "../foods.js";
 
 const HH = "hh-1";
@@ -523,9 +524,11 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
     expect(detail).toContain("Bob dislikes cilantro.");
     expect(detail).toContain('action="/recipes/r1/add-to-grocery"');
     expect(detail).toContain('action="/recipes/r1/delete"');
+    expect(detail).toContain('commandfor="recipe-edit-r1"');
+    expect(detail).toContain('id="recipe-add-ingredient-r1"');
 });
 
-test("recipe pages group forms into cards and disclosures", () => {
+test("recipe pages use modals for create and detail actions", async () => {
     const recipe = {
         id: "r1",
         householdId: "hh-1",
@@ -550,7 +553,17 @@ test("recipe pages group forms into cards and disclosures", () => {
         '<span class="recipe-tag pill pill-dim">dinner</span>',
     );
     expect(list).toContain("<summary>Filter</summary>");
-    expect(list).toContain("<summary>New recipe</summary>");
+    expect(list).not.toContain("<summary>New recipe</summary>");
+    expect(list).toContain('commandfor="recipe-new"');
+    expect(list).toContain('id="recipe-new"');
+    const cardLinks = list.match(/class="recipe-card"[\s\S]*?<\/li>/g) ?? [];
+    expect(cardLinks).toHaveLength(1);
+    expect(cardLinks[0]!.match(/<a /g)?.length).toBe(1);
+    expect(cardLinks[0]).toContain('class="row-title"');
+    const css = await getAppCss();
+    expect(css).toMatch(
+        /\.recipe-card a\.row-title::after[\s\S]*position:\s*absolute;[\s\S]*inset:\s*0;/,
+    );
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
@@ -586,20 +599,212 @@ test("recipe pages group forms into cards and disclosures", () => {
         },
         isOwner: true,
     } as never);
-    for (const heading of [
-        "Nutrition",
-        "Ingredients",
-        "Cook and log",
-        "Groceries",
-    ]) {
-        expect(detail).toContain(`<h2>${heading}</h2>`);
-    }
+    expect(detail).toContain("<h2>Nutrition</h2>");
+    expect(detail).toContain('<h2 class="row-title">Ingredients</h2>');
+    expect(detail).toContain('<h2 class="row-title">Cook and log</h2>');
+    expect(detail).toContain("<h2>Groceries</h2>");
     expect(detail).toContain('<ul class="recipe-ingredients list">');
     expect(detail).toContain('aria-label="Move Pasta up"');
-    expect(detail).toContain("<summary>Edit recipe</summary>");
-    expect(detail).toContain(
-        '<button type="submit" class="btn-danger">Delete recipe</button>',
+    expect(detail).not.toMatch(/<details class="more">[\s\S]*Edit recipe/);
+    expect(detail).not.toMatch(/<details class="more">[\s\S]*Add ingredient/);
+    expect(detail).not.toMatch(/<details class="more">[\s\S]*Cooked it/);
+    expect(detail).toContain('commandfor="recipe-edit-r1"');
+    expect(detail).toContain('commandfor="recipe-delete-r1"');
+    expect(detail).toContain('commandfor="recipe-add-ingredient-r1"');
+    expect(detail).toContain('commandfor="recipe-cook-r1"');
+    expect(detail).toContain('commandfor="recipe-edit-ingredient-ing1"');
+    expect(detail).toContain('commandfor="recipe-delete-ingredient-ing1"');
+    expect(detail).toContain('action="/recipes/r1/delete"');
+    expect(detail).toContain('action="/recipes/r1/ingredients/ing1/delete"');
+});
+
+test("a server error reopens the recipe modal that submitted the form", () => {
+    const list = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: "u1",
+        error: "Enter a recipe name.",
+        openModalId: "recipe-new",
+    });
+    expect(list).toMatch(
+        /<dialog class="modal" id="recipe-new"[^>]*data-modal-open-on-load/,
     );
+    expect(list).toContain("Enter a recipe name.");
+    expect(list.match(/Enter a recipe name\./g)?.length).toBe(1);
+    const newDialogStart = list.indexOf('id="recipe-new"');
+    const newDialogEnd = list.indexOf("</dialog>", newDialogStart);
+    expect(list.indexOf("Enter a recipe name.")).toBeGreaterThan(
+        newDialogStart,
+    );
+    expect(list.indexOf("Enter a recipe name.")).toBeLessThan(newDialogEnd);
+
+    const detail = renderRecipeDetailPage({
+        chrome: { theme: "light" },
+        recipe: {
+            id: "r1",
+            householdId: "hh-1",
+            creatorId: "u1",
+            name: "Mac",
+            yieldPortions: 4,
+            instructions: null,
+            sourceUrl: null,
+            tags: [],
+            notes: null,
+            prepMinutes: null,
+            cookMinutes: null,
+        },
+        ingredients: [
+            {
+                id: "ing1",
+                recipeId: "r1",
+                foodId: "f1",
+                displayName: "Pasta",
+                quantity: { amount: 400, unit: "g" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 100,
+                personAmount: 100,
+            },
+        ],
+        members: [],
+        stores: [],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [],
+        },
+        isOwner: true,
+        error: "Only the creator or household owner can delete this recipe.",
+        openModalId: "recipe-delete-r1",
+    } as never);
+    expect(detail).toMatch(
+        /<dialog class="modal" id="recipe-delete-r1"[^>]*data-modal-open-on-load/,
+    );
+    const deleteMsg =
+        "Only the creator or household owner can delete this recipe.";
+    expect(detail).toContain(deleteMsg);
+    expect(
+        detail.match(
+            new RegExp(deleteMsg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+        )?.length,
+    ).toBe(1);
+    const deleteDialogStart = detail.indexOf('id="recipe-delete-r1"');
+    const deleteDialogEnd = detail.indexOf("</dialog>", deleteDialogStart);
+    expect(detail.indexOf(deleteMsg)).toBeGreaterThan(deleteDialogStart);
+    expect(detail.indexOf(deleteMsg)).toBeLessThan(deleteDialogEnd);
+
+    const editIng = renderRecipeDetailPage({
+        chrome: { theme: "light" },
+        recipe: {
+            id: "r1",
+            householdId: "hh-1",
+            creatorId: "u1",
+            name: "Mac",
+            yieldPortions: 4,
+            instructions: null,
+            sourceUrl: null,
+            tags: [],
+            notes: null,
+            prepMinutes: null,
+            cookMinutes: null,
+        },
+        ingredients: [
+            {
+                id: "ing1",
+                recipeId: "r1",
+                foodId: "f1",
+                displayName: "Pasta",
+                quantity: { amount: 400, unit: "g" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 100,
+                personAmount: 100,
+            },
+        ],
+        members: [],
+        stores: [],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: {
+            calories: 300,
+            protein_g: 10,
+            carbs_g: 50,
+            fat_g: 5,
+            fiber_g: 3,
+            sugar_g: 2,
+            alcohol_g: 0,
+            incomplete: false,
+            incompleteReasons: [],
+        },
+        isOwner: true,
+        error: "Amount must be positive.",
+        openModalId: "recipe-edit-ingredient-ing1",
+    } as never);
+    expect(editIng).toMatch(
+        /<dialog class="modal" id="recipe-edit-ingredient-ing1"[^>]*data-modal-open-on-load/,
+    );
+    const amountMsg = "Amount must be positive.";
+    expect(editIng).toContain(amountMsg);
+    expect(editIng.match(/Amount must be positive\./g)?.length).toBe(1);
+    const editIngDialogStart = editIng.indexOf(
+        'id="recipe-edit-ingredient-ing1"',
+    );
+    const editIngDialogEnd = editIng.indexOf("</dialog>", editIngDialogStart);
+    expect(editIng.indexOf(amountMsg)).toBeGreaterThan(editIngDialogStart);
+    expect(editIng.indexOf(amountMsg)).toBeLessThan(editIngDialogEnd);
+});
+
+test("recipe detail shows a page banner when openModalId does not match a dialog", () => {
+    const html = renderRecipeDetailPage({
+        chrome: { theme: "light" },
+        recipe: {
+            id: "r1",
+            householdId: "hh-1",
+            creatorId: "u1",
+            name: "Mac",
+            yieldPortions: 4,
+            instructions: null,
+            sourceUrl: null,
+            tags: [],
+            notes: null,
+            prepMinutes: null,
+            cookMinutes: null,
+        },
+        ingredients: [],
+        members: [],
+        stores: [],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [],
+        },
+        isOwner: true,
+        error: "Unknown ingredient.",
+        openModalId: "recipe-delete-ingredient-gone",
+    } as never);
+    expect(html).toContain('class="error-banner"');
+    expect(html).toContain("Unknown ingredient.");
+    expect(html).not.toMatch(/data-modal-open-on-load/);
 });
 
 test("updateRecipe writes fuller fields and updateRecipeIngredient stores a note", async () => {

@@ -22,8 +22,13 @@ import {
     cookRecipe,
     createMemoryStockStore,
     deleteFridgeItemAdjust,
+    discardFridgeItem,
+    eatFridgeItem,
+    fridgeEatLogsMeal,
     ledgerMatchesStock,
+    expiryLevel,
     listExpiring,
+    utcTodayFromDate,
     putAwayGroceryLines,
     updateFridgeItemQuantityAdjust,
 } from "./stock.js";
@@ -196,6 +201,21 @@ test("ledger sum equals current state across purchases and cooks", async () => {
     expect(ledger).toBe(expected);
 });
 
+test("expiryLevel uses UTC-day boundaries", () => {
+    const today = utcTodayFromDate(new Date("2026-10-05T12:00:00.000Z"));
+    expect(today).toBe("2026-10-05");
+    expect(expiryLevel(null, today)).toBe(null);
+    expect(expiryLevel("2026-10-03", today)).toBe("expired");
+    expect(expiryLevel("2026-10-04", today)).toBe("expired");
+    expect(expiryLevel("2026-10-05", today)).toBe("high");
+    expect(expiryLevel("2026-10-06", today)).toBe("high");
+    expect(expiryLevel("2026-10-07", today)).toBe("medium");
+    expect(expiryLevel("2026-10-08", today)).toBe("medium");
+    expect(expiryLevel("2026-10-09", today)).toBe("low");
+    expect(expiryLevel("2026-10-12", today)).toBe("low");
+    expect(expiryLevel("2026-10-13", today)).toBe(null);
+});
+
 test("list_expiring includes items within the window, oldest first", () => {
     const now = new Date("2026-10-05T12:00:00.000Z");
     const listed = listExpiring(
@@ -316,6 +336,72 @@ test("manual update writes an adjust movement and the ledger matches stock", asy
             eggsFood,
         ),
     ).toBe(true);
+});
+
+test("fridgeEatLogsMeal is false for household supplies", () => {
+    expect(fridgeEatLogsMeal({ kind: "supply" })).toBe(false);
+    expect(fridgeEatLogsMeal({ kind: "food" })).toBe(true);
+});
+
+test("discardFridgeItem writes a discard movement and the ledger matches", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const yogurt = await findOrCreateManualFood(foods, HH, "food", "Yogurt");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: yogurt.id,
+        amount: 3,
+        unit: "g",
+        locationId: loc.id,
+    });
+    const tossed = await discardFridgeItem(fridge, stock, foods, {
+        householdId: HH,
+        itemId: added.item!.id,
+        amount: 2,
+        actorUserId: "u1",
+    });
+    expect(tossed.movement.reason).toBe("discard");
+    expect(tossed.movement.delta).toBe(-2);
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(1);
+    const movements = await stock.listMovements(HH, yogurt.id);
+    expect(ledgerMatchesStock(items, movements, yogurt)).toBe(true);
+    expect(fridgeEatLogsMeal(yogurt)).toBe(true);
+});
+
+test("eatFridgeItem on a supply writes an eat movement and the ledger matches", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Pantry");
+    const towels = await findOrCreateManualFood(
+        foods,
+        HH,
+        "supply",
+        "Paper towels",
+    );
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: towels.id,
+        amount: 2,
+        unit: "roll",
+        locationId: loc.id,
+    });
+    const eaten = await eatFridgeItem(fridge, stock, foods, {
+        householdId: HH,
+        itemId: added.item!.id,
+        amount: 1,
+        actorUserId: "u1",
+    });
+    expect(eaten.movement.reason).toBe("eat");
+    expect(eaten.movement.delta).toBe(-1);
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(1);
+    const movements = await stock.listMovements(HH, towels.id);
+    expect(ledgerMatchesStock(items, movements, towels)).toBe(true);
+    expect(fridgeEatLogsMeal(towels)).toBe(false);
 });
 
 test("manual delete writes an adjust movement and the ledger matches stock", async () => {

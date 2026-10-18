@@ -14,6 +14,7 @@
  * dark as different bytes.
  * The server never imports this file.
  */
+import { utcTodayFromDate } from "../src/domain/stock.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
@@ -23,6 +24,7 @@ import {
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
+import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -54,7 +56,14 @@ async function widgetSample(key: string): Promise<unknown> {
     return m ? new Function(`return (${m[1]})`)() : { locale: "en" };
 }
 
+function addUtcDays(isoDate: string, days: number): string {
+    const d = new Date(`${isoDate}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
 function fridgeView(chrome: unknown) {
+    const today = utcTodayFromDate();
     const loc = (id: string, name: string, sortOrder: number) => ({
         id,
         householdId: H,
@@ -77,22 +86,26 @@ function fridgeView(chrome: unknown) {
         displayName,
         quantity: { amount, unit },
         identity: {},
-        foodId: food ? `f-${id}` : null,
+        foodId: food ? `f-${id}` : `f-sup-${id}`,
         expiresOn,
     });
     return {
         chrome,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
         items: [
-            item("i1", "l1", "Eggs", 6, "each", "2026-10-08"),
-            item("i2", "l1", "Milk", 1000, "ml", "2026-10-07"),
-            item("i3", "l2", "Paper towels", 3, "roll", null, false),
+            item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
+            item("i2", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
+            item("i3", "l1", "Yogurt", 2, "each", addUtcDays(today, 3)),
+            item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
+            item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
+            item("i6", "l2", "Paper towels", 3, "roll", null, false),
         ],
     };
 }
 
 function groceryView(chrome: unknown) {
     const section = (
+        storeId: string,
         id: string,
         name: string,
         isOther: boolean,
@@ -100,7 +113,7 @@ function groceryView(chrome: unknown) {
     ) => ({
         id,
         householdId: H,
-        storeId: "s1",
+        storeId,
         name,
         sortOrder: isOther ? 8 : 0,
         hidden: false,
@@ -108,6 +121,8 @@ function groceryView(chrome: unknown) {
         lines,
     });
     const line = (
+        storeId: string,
+        sectionId: string,
         id: string,
         name: string,
         amount: number,
@@ -117,8 +132,8 @@ function groceryView(chrome: unknown) {
     ) => ({
         id,
         householdId: H,
-        storeId: "s1",
-        sectionId: "sec1",
+        storeId,
+        sectionId,
         kind: "food",
         displayName: name,
         quantity: { amount, unit },
@@ -142,16 +157,28 @@ function groceryView(chrome: unknown) {
                 sortOrder: 0,
                 rules: [{ id: "r1", body: "Prefer store brand." }],
                 sections: [
-                    section("sec1", "Produce", false, [
-                        line("g1", "Bananas", 6, "each", false),
-                        line("g2", "Spinach", 300, "g", true),
+                    section("s1", "sec1", "Produce", false, [
+                        line("s1", "sec1", "g1", "Bananas", 6, "each", false),
+                        line("s1", "sec1", "g2", "Spinach", 300, "g", true),
                     ]),
-                    section("sec2", "Other", true, [
-                        line("g3", "Eggs", 12, "each", false, {
+                    section("s1", "sec2", "Other", true, [
+                        line("s1", "sec2", "g3", "Eggs", 12, "each", false, {
                             cover: "partial",
                             have: { amount: 6, unit: "each" },
                             need: { amount: 12, unit: "each" },
                         }),
+                    ]),
+                ],
+            },
+            {
+                id: "s2",
+                householdId: H,
+                name: "Costco",
+                sortOrder: 1,
+                rules: [],
+                sections: [
+                    section("s2", "sec3", "Dairy", false, [
+                        line("s2", "sec3", "g4", "Milk", 2, "l", false),
                     ]),
                 ],
             },
@@ -171,6 +198,20 @@ const RECIPE = {
     notes: null,
     prepMinutes: 10,
     cookMinutes: 20,
+};
+
+const RECIPE_TWO = {
+    id: "r2",
+    householdId: H,
+    creatorId: "u1",
+    name: "Oatmeal",
+    yieldPortions: 2,
+    instructions: "Simmer oats.",
+    sourceUrl: null,
+    tags: ["breakfast"],
+    notes: null,
+    prepMinutes: 5,
+    cookMinutes: 10,
 };
 
 const MACROS = {
@@ -227,6 +268,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         trends: await widgetSample("trends"),
         weight: await widgetSample("weight-trends"),
         chrome,
+        cardOrder: [
+            "log",
+            "nutrition-summary",
+            "goal-progress",
+            "trends",
+            "weight-trends",
+        ],
     } as never);
     return {
         nutrition,
@@ -234,7 +282,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         grocery: renderGroceryPage(groceryView(chrome) as never),
         recipes: renderRecipesPage({
             chrome,
-            recipes: [RECIPE],
+            recipes: [RECIPE, RECIPE_TWO],
             members: [ME, SAM],
             viewerId: "u1",
         } as never),
@@ -305,6 +353,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
         } as never),
+        help: renderSettingsHelpPage({ chrome } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };

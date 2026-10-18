@@ -473,6 +473,39 @@ export async function applyMovement(
     };
 }
 
+export type ExpiryLevel = "expired" | "high" | "medium" | "low";
+
+export function utcTodayFromDate(now = new Date()): string {
+    return new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    )
+        .toISOString()
+        .slice(0, 10);
+}
+
+function utcDayIndex(isoDate: string): number {
+    const [y, m, d] = isoDate.split("-").map(Number);
+    return Date.UTC(y!, m! - 1, d!) / 86_400_000;
+}
+
+/** Days from `today` until `expiresOn` (0 = expires today). */
+function daysUntilExpiry(today: string, expiresOn: string): number {
+    return utcDayIndex(expiresOn) - utcDayIndex(today);
+}
+
+export function expiryLevel(
+    expiresOn: string | null | undefined,
+    today: string,
+): ExpiryLevel | null {
+    if (!expiresOn) return null;
+    const days = daysUntilExpiry(today, expiresOn);
+    if (days < 0) return "expired";
+    if (days <= 1) return "high";
+    if (days <= 3) return "medium";
+    if (days <= 7) return "low";
+    return null;
+}
+
 export function listExpiring(
     items: readonly FridgeItem[],
     days = 3,
@@ -645,6 +678,11 @@ export async function cookRecipe(
         if (applied.shortfall) shortfalls.push(applied.shortfall);
     }
     return { totalPortions, shortfalls };
+}
+
+/** Meal logging after an eat movement applies only to catalog foods, not supplies. */
+export function fridgeEatLogsMeal(food: Pick<Food, "kind">): boolean {
+    return food.kind === "food";
 }
 
 export async function eatFridgeItem(
