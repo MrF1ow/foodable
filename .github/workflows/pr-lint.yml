@@ -1,0 +1,33 @@
+name: PR lint
+
+on:
+    pull_request:
+        types: [opened, edited, synchronize, reopened]
+
+permissions:
+    contents: read
+
+jobs:
+    pr-lint:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+              with:
+                  persist-credentials: false
+                  fetch-depth: 0
+
+            - name: Fetch base branch
+              env:
+                  BASE_REF: ${{ github.base_ref }}
+              run: git fetch --no-tags origin "$BASE_REF"
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.2
+
+            - name: PR conventions
+              env:
+                  GITHUB_EVENT_PATH: ${{ github.event_path }}
+              run: bun run pr:check
