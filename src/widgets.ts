@@ -17,6 +17,7 @@
 // Markers resolve relative to public/widgets/src/ and expand recursively.
 
 import { WIDGET_STRINGS } from "./copy/widgets.js";
+import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 
 const SRC_DIR = "./public/widgets/src";
 const INCLUDE_RE = /\/\*@include\s+([^\s@]+)\s*@\*\//g;
@@ -236,7 +237,19 @@ export async function getAppJs(): Promise<string> {
         if (!(await file.exists())) {
             throw new Error(`app client source not found: ${path}`);
         }
-        parts.push(`(function () {\n${(await file.text()).trim()}\n})();`);
+        let src = (await file.text()).trim();
+        if (path.endsWith("shell.js")) {
+            src = src
+                .replace(
+                    "const THEME_PAGE_BG = null;",
+                    `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+                )
+                .replace(
+                    "const THEME_NAV_BG = null;",
+                    `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
+                );
+        }
+        parts.push(`(function () {\n${src}\n})();`);
     }
     appJs = parts.join("\n");
     appJsHash = await shortContentHash(appJs);

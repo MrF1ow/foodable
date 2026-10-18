@@ -58,7 +58,7 @@ await getAppCss();
 await getAppJs();
 
 function loginAppHead(title: string): string {
-    return appHead(title, "system")
+    return appHead(title, "system", "page")
         .replace(/href="[^"]*app\.css[^"]*"/, 'href="{{APP_CSS_HREF}}"')
         .replace(/src="[^"]*app\.js[^"]*"/, 'src="{{APP_JS_HREF}}"');
 }

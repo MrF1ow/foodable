@@ -452,8 +452,8 @@ function applyAccountTheme(html: string): string {
         )
         .replace(
             /<meta name="theme-color" content="[^"]+" \/>/,
-            `<meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#0d0f0e" media="(prefers-color-scheme: dark)" />`,
+            `<meta name="theme-color" content="#fefefd" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#131615" media="(prefers-color-scheme: dark)" />`,
         );
 }
 

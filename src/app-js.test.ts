@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
+import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 import { comingSoonPage } from "./web/shell.js";
 import { renderFridgePage } from "./web/pages/fridge.js";
 import { renderGroceryPage } from "./web/pages/grocery.js";
@@ -27,9 +28,21 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     expect(js).toContain("FoodableApp.onLoad");
     expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
     for (const path of APP_JS_SOURCES) {
-        const src = (await Bun.file(path).text()).trim();
+        let src = (await Bun.file(path).text()).trim();
+        if (path.endsWith("shell.js")) {
+            src = src
+                .replace(
+                    "const THEME_PAGE_BG = null;",
+                    `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+                )
+                .replace(
+                    "const THEME_NAV_BG = null;",
+                    `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
+                );
+        }
         expect(js).toContain(`(function () {\n${src}\n})();`);
     }
+    expect(js).toContain(JSON.stringify(THEME_NAV_COLOR));
     expect(js).toContain('classList.add("fx")');
     expect(() =>
         new Bun.Transpiler({ loader: "js" }).transformSync(js),

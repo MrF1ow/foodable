@@ -7,6 +7,7 @@ import {
     NUTRIENTS,
     RADIUS_SCALE,
     THEME_COLOR,
+    THEME_NAV_COLOR,
     TYPE_SCALE,
     renderBrandCss,
     renderTokensCss,
@@ -48,6 +49,12 @@ test("browser chrome uses the app background", () => {
         dark: APP.dark.bg,
     });
     expect(THEME_COLOR).toEqual({ light: "#fbfaf7", dark: "#0d0f0e" });
+});
+
+test("nav chrome meta matches the frosted bottom nav over --bg", () => {
+    expect(THEME_NAV_COLOR).toEqual({ light: "#fefefd", dark: "#131615" });
+    expect(renderBrandCss()).toContain("--nav-chrome: #fefefd;");
+    expect(renderBrandCss()).toContain("--nav-chrome: #131615;");
 });
 
 test("APP_FONTS names the committed allowlisted files", () => {

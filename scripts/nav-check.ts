@@ -641,6 +641,8 @@ try {
         })()`);
     }
 
+    const NAV_THEME = { light: "#fefefd", dark: "#131615" };
+
     await control("session=app&theme=dark&reset=posts&post=ok");
     await goto("/settings");
     await setMarker();
@@ -664,12 +666,40 @@ try {
     })()`);
     await sleep(600);
     const afterSystem = await themeSnap();
+    const themeMetaBaseline = await ev<{
+        count: number;
+        ids: number[];
+        contents: string[];
+    }>(`(() => {
+        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+        metas.forEach((m, i) => { m.__foodableNavCheck = 100 + i; });
+        return {
+            count: metas.length,
+            ids: metas.map((m) => m.__foodableNavCheck),
+            contents: metas.map((m) => m.getAttribute("content")),
+        };
+    })()`);
     await clickSel('nav.bottom-nav a[href="/fridge"]');
     await sleep(200);
     const fridgeTheme = await themeSnap();
     await clickSel('nav.bottom-nav a[href="/settings"]');
     await sleep(200);
     const settingsAgain = await themeSnap();
+    const themeMetaAfter = await ev<{
+        count: number;
+        ids: (number | null)[];
+        contents: string[];
+        sameNodes: boolean;
+    }>(`(() => {
+        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+        return {
+            count: metas.length,
+            ids: metas.map((m) => m.__foodableNavCheck ?? null),
+            contents: metas.map((m) => m.getAttribute("content")),
+            sameNodes: metas.every((m, i) => m.__foodableNavCheck === 100 + i),
+        };
+    })()`);
+
     record(
         "theme sync across morph refresh and tab visits",
         darkStart.dataTheme === "dark" &&
@@ -684,7 +714,11 @@ try {
             afterSystem.meta === "system" &&
             fridgeTheme.dataTheme === null &&
             settingsAgain.dataTheme === null &&
-            settingsAgain.meta === "system",
+            settingsAgain.meta === "system" &&
+            themeMetaAfter.count === themeMetaBaseline.count &&
+            themeMetaAfter.sameNodes &&
+            themeMetaAfter.contents.join() ===
+                themeMetaBaseline.contents.join(),
         {
             darkStart,
             afterLight,
@@ -692,6 +726,8 @@ try {
             afterSystem,
             fridgeTheme,
             settingsAgain,
+            themeMetaBaseline,
+            themeMetaAfter,
             ex: drain(),
         },
     );
@@ -754,6 +790,58 @@ try {
         "theme switch screenshots (nutrition 390x844)",
         shotLightOk && shotDarkOk && (await themeSnap()).dataTheme === "dark",
         { shotLightOk, shotDarkOk, ex: drain() },
+    );
+
+    async function scrollBottomShot(
+        path: string,
+        theme: "light" | "dark",
+        file: string,
+    ) {
+        await control(`theme=${theme}&post=ok`);
+        await goto(path);
+        await sleep(300);
+        const ok = await ev<boolean>(
+            `!!document.querySelector("main.app-main")`,
+        );
+        await ev(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+        await sleep(150);
+        await Bun.write(
+            file,
+            Buffer.from(
+                (
+                    (await send("Page.captureScreenshot", {
+                        format: "png",
+                    })) as { data: string }
+                ).data,
+                "base64",
+            ),
+        );
+        return ok;
+    }
+    const fridgeDark = await scrollBottomShot(
+        "/fridge",
+        "dark",
+        "./tmp/nav-fridge-dark-bottom.png",
+    );
+    const fridgeLight = await scrollBottomShot(
+        "/fridge",
+        "light",
+        "./tmp/nav-fridge-light-bottom.png",
+    );
+    const recipesDark = await scrollBottomShot(
+        "/recipes",
+        "dark",
+        "./tmp/nav-recipes-dark-bottom.png",
+    );
+    const recipesLight = await scrollBottomShot(
+        "/recipes",
+        "light",
+        "./tmp/nav-recipes-light-bottom.png",
+    );
+    record(
+        "bottom screenshots (fridge and recipes 390x844)",
+        fridgeDark && fridgeLight && recipesDark && recipesLight,
+        { fridgeDark, fridgeLight, recipesDark, recipesLight, ex: drain() },
     );
 
     await send("Emulation.setDeviceMetricsOverride", {

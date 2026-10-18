@@ -126,6 +126,32 @@ export const THEME_COLOR: Record<Theme, string> = {
     dark: APP.dark.bg,
 };
 
+/** Opaque equivalent of the frosted bottom nav (`color-mix(panel 78%, transparent)`
+ *  over `--bg` in public/app/app.css). Used for `<meta name="theme-color">` on
+ *  tabbed app pages and for painting below the nav on iOS Safari. */
+function navChromeOverBg(
+    panel: string,
+    bg: string,
+    panelWeight = 0.78,
+): string {
+    const parse = (hex: string) => {
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)!;
+        return [1, 2, 3].map((i) => parseInt(m[i]!, 16));
+    };
+    const p = parse(panel);
+    const b = parse(bg);
+    const t = 1 - panelWeight;
+    const ch = p.map((v, i) => Math.round(v * panelWeight + b[i]! * t));
+    return (
+        "#" + ch.map((c) => c.toString(16).padStart(2, "0")).join("")
+    ).toLowerCase();
+}
+
+export const THEME_NAV_COLOR: Record<Theme, string> = {
+    light: navChromeOverBg(APP.light.panel, APP.light.bg),
+    dark: navChromeOverBg(APP.dark.panel, APP.dark.bg),
+};
+
 /** Self-hosted fonts (SIL OFL 1.1), served from /fonts/ by allowlist. */
 export const APP_FONTS = [
     { family: "Geist", file: "geist-latin.woff2", weight: "100 900" },
@@ -306,6 +332,7 @@ const appEntries = (t: Theme): [string, string][] => {
         ["shadow", p.shadow],
         ["accent-soft", p["accent-soft"]],
         ["accent-ink", p["accent-ink"]],
+        ["nav-chrome", THEME_NAV_COLOR[t]],
     ];
 };
 
