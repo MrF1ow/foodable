@@ -11,16 +11,26 @@ on:
     push:
         branches: ["main"]
 
+permissions:
+    contents: read
+
+# Cancel a superseded pull request run. A run on main must finish: Railway's
+# Wait for CI can sit in WAITING when the run it is watching is cancelled.
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
     check:
         runs-on: ubuntu-latest
-
         steps:
             - name: Checkout code
-              uses: actions/checkout@v5
+              uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+              with:
+                  persist-credentials: false
 
             - name: Set up Bun
-              uses: oven-sh/setup-bun@v2
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
               with:
                   bun-version: 1.4.2
 
@@ -38,3 +48,14 @@ jobs:
 
             - name: Run tests
               run: bun test
+
+    docker:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+              with:
+                  persist-credentials: false
+
+            - name: Build image
+              run: docker build .

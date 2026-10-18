@@ -1,0 +1,36 @@
+name: Gate
+
+on:
+    # zizmor: ignore[dangerous-triggers] — no head checkout; does not run pull request code
+    pull_request_target:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: read
+    pull-requests: read
+
+jobs:
+    gate:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Fail when a gate file changes
+              env:
+                  REPO: ${{ github.repository }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  list=$(mktemp)
+                  trap 'rm -f "$list"' EXIT
+                  gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)' >"$list"
+                  fail=0
+                  while IFS= read -r path; do
+                      [ -z "$path" ] && continue
+                      case "$path" in
+                          .github/workflows/* | .github/rulesets/* | .github/CODEOWNERS | scripts/conventions/* | scripts/migration-safety/* | scripts/migration-dryrun* | package.json)
+                              echo "gate: $path"
+                              fail=1
+                              ;;
+                      esac
+                  done <"$list"
+                  exit "$fail"
