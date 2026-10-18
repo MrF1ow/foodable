@@ -184,9 +184,8 @@ test("bare pages use the app stylesheet, not the deleted marketing one", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-primary">Create household</button>',
     );
-    expect(html).toContain(
-        '<header class="app-bar"><a href="/logout">Log out</a></header>',
-    );
+    expect(html).toContain('class="app-bar-logo"');
+    expect(html).toContain('aria-label="Log out"');
     expect(html).toContain('class="error-banner"');
     expect(html).not.toContain('class="logout"');
     expect(html).not.toContain("bottom-nav");

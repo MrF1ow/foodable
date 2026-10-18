@@ -71,6 +71,9 @@ test("fridge stub uses the shell and marks Fridge active", () => {
     expect(html).toContain("Coming soon.");
     expect(html).toContain('href="/fridge" aria-current="page"');
     expect(html).toContain('href="/logout"');
+    expect(html).toContain('aria-label="Log out"');
+    expect(html).toContain('class="app-bar-logo"');
+    expect(html).toContain('href="/"');
     expect(html).toContain('<link rel="stylesheet" href="/app.css" />');
     expect(html).toContain('<script src="/app.js" defer></script>');
 });
@@ -94,9 +97,9 @@ test("an explicit theme stamps data-theme on html", () => {
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {
     const system = renderBarePage("Household", "<p class='empty'>x</p>");
-    expect(system).toContain(
-        '<header class="app-bar"><a href="/logout">Log out</a></header>',
-    );
+    expect(system).toContain('class="app-bar-logo"');
+    expect(system).toContain('aria-label="Log out"');
+    expect(system).not.toContain(">Log out<");
     expect(system).toContain('<main class="app-main native">');
     expect(system).not.toContain("bottom-nav");
     expect(system).toContain('<html lang="en">');

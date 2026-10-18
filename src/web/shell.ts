@@ -1,6 +1,7 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR } from "../tokens.js";
 import { bottomNav } from "./components/bottom-nav.js";
+import { iconLogOut } from "./components/icons.js";
 import { pageHeader } from "./components/ui.js";
 
 export { bottomNav, escapeHtml };
@@ -52,6 +53,10 @@ function themeColorMeta(theme: ThemePref): string {
 <meta name="theme-color" content="${THEME_COLOR.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
+export function appBar(): string {
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-logout" href="/logout" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
+}
+
 export function appHead(title: string, theme: ThemePref): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -71,7 +76,7 @@ ${htmlOpen(chrome.theme)}
 ${appHead(chrome.title, chrome.theme)}
 </head>
 <body>
-<header class="app-bar"><a href="/logout">Log out</a></header>
+${appBar()}
 <main class="app-main native">${chrome.body}</main>
 ${bottomNav(chrome.active)}
 </body>
@@ -92,7 +97,7 @@ ${htmlOpen(theme)}
 ${appHead(title, theme)}
 </head>
 <body>
-<header class="app-bar"><a href="/logout">Log out</a></header>
+${appBar()}
 <main class="app-main native">${body}</main>
 </body>
 </html>`;

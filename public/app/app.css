@@ -46,6 +46,7 @@
 
 html {
     background-color: var(--bg);
+    overflow-x: clip;
 }
 
 body {
@@ -75,25 +76,61 @@ html:has(dialog.modal[open]) {
 /* ---- shell ---- */
 
 .app-bar {
-    position: sticky;
-    top: 0;
-    z-index: 20;
+    position: relative;
+    z-index: 1;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     width: 100%;
     max-width: 760px;
     margin: 0 auto;
     padding: calc(12px + env(safe-area-inset-top, 0px))
         max(16px, env(safe-area-inset-right, 0px)) 0
         max(16px, env(safe-area-inset-left, 0px));
-    background: var(--bg);
-    border-bottom: 1px solid transparent;
+    background: transparent;
 }
-.app-bar a {
-    color: var(--text-dim);
-    font-size: var(--fs-13);
-    font-weight: 600;
+.app-bar-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: var(--fs-24);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--text);
     text-decoration: none;
+}
+.app-bar-logo img {
+    display: block;
+    width: 27px;
+    height: auto;
+}
+.app-bar-logout {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-999);
+    background: transparent;
+    color: var(--text-dim);
+    text-decoration: none;
+    cursor: pointer;
+}
+.app-bar-logout:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.app-bar-logout:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.app-bar-logout svg {
+    width: 20px;
+    height: 20px;
 }
 
 .app-main {
@@ -101,7 +138,7 @@ html:has(dialog.modal[open]) {
     width: 100%;
     max-width: 760px;
     margin: 0 auto;
-    padding: 8px 16px 96px;
+    padding: 14px 16px 96px;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -109,7 +146,7 @@ html:has(dialog.modal[open]) {
 /* Element defaults for page content, at element-only specificity so any
    class wins (.row-meta's margin-left: auto lost to `.app-main p` before). */
 :where(.app-main) h1 {
-    margin: 4px 0 0;
+    margin: 0;
     font-size: var(--fs-24);
     font-weight: 800;
     letter-spacing: -0.03em;
@@ -942,21 +979,21 @@ details.more > summary > :is(h2, h3) {
     background: color-mix(in srgb, var(--accent) 90%, var(--text));
 }
 
-/* Soft green glow below the top bar (keeps iOS status-bar tint on --bg). */
+/* Soft green glow behind the top bar and page title; html --bg tints iOS Safari. */
 .app-bar::after {
     content: "";
     position: absolute;
     left: 50%;
-    top: 100%;
-    width: 56rem;
-    height: 22rem;
+    top: 0;
+    width: 100vw;
+    height: 24rem;
     transform: translateX(-50%);
     pointer-events: none;
     z-index: -1;
     background: radial-gradient(
-        56rem 22rem at 50% 0,
+        ellipse min(88vw, 32rem) 18rem at 50% 0,
         color-mix(in srgb, var(--accent) 16%, transparent),
-        transparent 70%
+        transparent 65%
     );
 }
 ::selection {
@@ -977,26 +1014,6 @@ details.more > summary > :is(h2, h3) {
 /* Eyebrows, like the site's "WHY IT EXISTS": a green that passes AA as text. */
 :where(.app-main) h3 {
     color: var(--accent-ink);
-}
-
-/* Brand mark + wordmark on the left of the top bar, as on the site's nav. */
-.app-bar {
-    justify-content: space-between;
-    align-items: center;
-}
-.app-bar::before {
-    content: "Foodable";
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding-left: 26px;
-    min-height: 22px;
-    font-family: var(--font-heading);
-    font-weight: 700;
-    font-size: 17px;
-    letter-spacing: -0.02em;
-    color: var(--text);
-    background: url("/brand/mark.svg") no-repeat left center / 20px 19px;
 }
 
 /* Frosted bottom nav; the active tab gets the brand-soft pill. */
