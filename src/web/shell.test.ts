@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     APP_TABS,
+    appHead,
     bottomNav,
     comingSoonPage,
     parseAppearanceInput,
@@ -90,6 +91,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     const html = comingSoonPage("fridge");
     expect(html).toContain('<html lang="en">');
     expect(html).not.toContain("data-theme");
+    expect(html).toContain('<meta name="foodable-theme" content="system" />');
     expect(html).toContain(
         '<meta name="theme-color" content="#0d0f0e" media="(prefers-color-scheme: dark)" />',
     );
@@ -100,7 +102,17 @@ test("an explicit theme stamps data-theme on html", () => {
     const html = comingSoonPage("settings", { theme: "dark" });
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain('<meta name="theme-color" content="#0d0f0e" />');
+    expect(html).toContain('<meta name="foodable-theme" content="dark" />');
     expect(html).not.toContain("--accent");
+});
+
+test("appHead emits foodable-theme for every preference", () => {
+    expect(appHead("T", "light")).toContain(
+        '<meta name="foodable-theme" content="light" />',
+    );
+    expect(appHead("T", "system")).toContain(
+        '<meta name="foodable-theme" content="system" />',
+    );
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {
@@ -290,6 +302,79 @@ test("html.fx is not added when reduced motion is requested", () => {
     runShellScript(document, window);
     expect(raf).toEqual([]);
     expect(html.classList.added).toEqual([]);
+});
+
+test("foodable-theme meta syncs html data-theme before turbo body paint", () => {
+    const htmlEl = {
+        attrs: { "data-theme": "dark" } as Record<string, string>,
+        setAttribute(k: string, v: string) {
+            this.attrs[k] = v;
+        },
+        getAttribute(k: string) {
+            return this.attrs[k] ?? null;
+        },
+        removeAttribute(k: string) {
+            delete this.attrs[k];
+        },
+    };
+    let themeContent = "light";
+    const themeMeta = {
+        getAttribute(n: string) {
+            return n === "content" ? themeContent : null;
+        },
+    };
+    const headChildren: { name: string; content: string; media?: string }[] =
+        [];
+    const head = {
+        appendChild(el: (typeof headChildren)[number]) {
+            headChildren.push(el);
+        },
+        querySelectorAll() {
+            return [];
+        },
+    };
+    const listeners: Record<string, ((e: unknown) => void)[]> = {};
+    const document = {
+        documentElement: htmlEl,
+        head,
+        querySelector(sel: string) {
+            return sel.includes("foodable-theme") ? themeMeta : null;
+        },
+        querySelectorAll(sel: string) {
+            return sel.includes("theme-color") ? [] : [];
+        },
+        createElement() {
+            return {
+                name: "",
+                content: "",
+                media: undefined as string | undefined,
+                setAttribute(k: string, v: string) {
+                    if (k === "media") this.media = v;
+                },
+            };
+        },
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+    };
+    const window = {
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+        matchMedia: () => ({ matches: false }),
+        requestAnimationFrame() {
+            return 0;
+        },
+    };
+    runShellScript(document, window);
+    expect(htmlEl.getAttribute("data-theme")).toBe("light");
+    htmlEl.setAttribute("data-theme", "dark");
+    themeContent = "system";
+    listeners["turbo:before-render"]![0]!({});
+    expect(htmlEl.getAttribute("data-theme")).toBeNull();
+    expect(
+        headChildren.some((m) => m.media?.includes("prefers-color-scheme")),
+    ).toBe(true);
 });
 
 test("one passive pointermove listener sets --mx and --my on the panel", () => {

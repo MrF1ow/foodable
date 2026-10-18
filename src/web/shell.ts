@@ -61,6 +61,7 @@ export function appBar(): string {
 export function appHead(title: string, theme: ThemePref): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="foodable-theme" content="${theme}" />
 <meta name="turbo-refresh-method" content="morph" />
 <meta name="turbo-refresh-scroll" content="preserve" />
 ${themeColorMeta(theme)}

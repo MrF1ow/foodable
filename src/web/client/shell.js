@@ -56,6 +56,68 @@ document.addEventListener("foodable:scroll-lock-release", (event) => {
     if (typeof y === "number" && Number.isFinite(y)) scrollRestoreY = y;
 });
 
+// Turbo morphs/replaces <body> and merges provisional <head> nodes; it never
+// copies data-theme onto <html>. The server stamps the viewer theme in
+// meta[name=foodable-theme] (merged on visits and morph refreshes); sync html
+// and theme-color before the new body paints.
+const THEME_PAGE_BG = { light: "#fbfaf7", dark: "#0d0f0e" };
+
+function readFoodableTheme() {
+    const v = document
+        .querySelector('meta[name="foodable-theme"]')
+        ?.getAttribute("content");
+    return v === "light" || v === "dark" || v === "system" ? v : "system";
+}
+
+function syncThemeColorMeta(theme) {
+    document
+        .querySelectorAll('meta[name="theme-color"]')
+        .forEach((el) => el.remove());
+    if (theme === "system") {
+        for (const [scheme, bg] of [
+            ["(prefers-color-scheme: light)", THEME_PAGE_BG.light],
+            ["(prefers-color-scheme: dark)", THEME_PAGE_BG.dark],
+        ]) {
+            const m = document.createElement("meta");
+            m.name = "theme-color";
+            m.content = bg;
+            m.setAttribute("media", scheme);
+            document.head.appendChild(m);
+        }
+    } else {
+        const m = document.createElement("meta");
+        m.name = "theme-color";
+        m.content = THEME_PAGE_BG[theme];
+        document.head.appendChild(m);
+    }
+}
+
+function syncDocumentTheme() {
+    if (typeof document.querySelector !== "function") return;
+    const theme = readFoodableTheme();
+    const html = document.documentElement;
+    if (!html) return;
+    if (theme === "system") {
+        if (typeof html.removeAttribute === "function")
+            html.removeAttribute("data-theme");
+    } else if (typeof html.setAttribute === "function") {
+        html.setAttribute("data-theme", theme);
+    }
+    if (typeof document.createElement === "function" && document.head) {
+        syncThemeColorMeta(theme);
+    }
+}
+
+function onTurboThemeSync() {
+    syncDocumentTheme();
+}
+
+document.addEventListener("turbo:before-render", onTurboThemeSync);
+document.addEventListener("turbo:render", onTurboThemeSync);
+document.addEventListener("turbo:load", onTurboThemeSync);
+document.addEventListener("turbo:morph", onTurboThemeSync);
+if (typeof document.querySelector === "function") syncDocumentTheme();
+
 // Login during an in-app visit must full-load (never morph into app chrome).
 // preventDefault() stops Turbo from rendering; reload() replaces the visit.
 document.addEventListener("turbo:before-render", (event) => {

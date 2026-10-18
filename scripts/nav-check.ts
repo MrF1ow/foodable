@@ -230,6 +230,9 @@ await send("Emulation.setDeviceMetricsOverride", {
     mobile: true,
 });
 
+await import("node:fs/promises").then((fs) =>
+    fs.mkdir("./tmp", { recursive: true }),
+);
 try {
     await goto("/");
     await setMarker();
@@ -612,6 +615,153 @@ try {
         approveAfter >= 2 && loginAfterExpired.auth === false,
         { approveAfter, loginAfterExpired, ex: drain() },
     );
+
+    async function themeSnap() {
+        return ev<{
+            dataTheme: string | null;
+            meta: string | null;
+            bg: string;
+            widgetTheme: string | null;
+            marker: string | null;
+            hasMain: boolean;
+        }>(`(() => {
+            const frame = document.querySelector(".widget-frame");
+            let widgetTheme = null;
+            try {
+                widgetTheme = frame?.contentDocument?.documentElement?.getAttribute("data-theme") ?? null;
+            } catch (_) {}
+            return {
+                dataTheme: document.documentElement.getAttribute("data-theme"),
+                meta: document.querySelector('meta[name="foodable-theme"]')?.getAttribute("content") ?? null,
+                bg: getComputedStyle(document.body).getPropertyValue("--bg").trim(),
+                widgetTheme,
+                marker: window.__marker ?? null,
+                hasMain: !!document.querySelector("main.app-main"),
+            };
+        })()`);
+    }
+
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings");
+    await setMarker();
+    const darkStart = await themeSnap();
+    await ev(`(() => {
+        const light = document.querySelector('input[name="theme"][value="light"]');
+        if (light) light.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterLight = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/"]');
+    await sleep(250);
+    const nutritionLight = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/settings"]');
+    await sleep(200);
+    await ev(`(() => {
+        const system = document.querySelector('input[name="theme"][value="system"]');
+        if (system) system.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterSystem = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/fridge"]');
+    await sleep(200);
+    const fridgeTheme = await themeSnap();
+    await clickSel('nav.bottom-nav a[href="/settings"]');
+    await sleep(200);
+    const settingsAgain = await themeSnap();
+    record(
+        "theme sync across morph refresh and tab visits",
+        darkStart.dataTheme === "dark" &&
+            darkStart.marker === "stay" &&
+            afterLight.dataTheme === "light" &&
+            afterLight.meta === "light" &&
+            afterLight.bg === "#fbfaf7" &&
+            nutritionLight.widgetTheme === "light" &&
+            nutritionLight.marker === "stay" &&
+            afterLight.marker === "stay" &&
+            afterSystem.dataTheme === null &&
+            afterSystem.meta === "system" &&
+            fridgeTheme.dataTheme === null &&
+            settingsAgain.dataTheme === null &&
+            settingsAgain.meta === "system",
+        {
+            darkStart,
+            afterLight,
+            nutritionLight,
+            afterSystem,
+            fridgeTheme,
+            settingsAgain,
+            ex: drain(),
+        },
+    );
+
+    await control("theme=dark&post=ok");
+    await goto("/settings");
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await ev(`(() => {
+        const light = document.querySelector('input[name="theme"][value="light"]');
+        if (light) light.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(700);
+    await goto("/");
+    await sleep(300);
+    const shotLightOk = await ev<boolean>(
+        `!!document.querySelector("main.app-main")`,
+    );
+    await Bun.write(
+        "./tmp/nav-theme-light.png",
+        Buffer.from(
+            (
+                (await send("Page.captureScreenshot", {
+                    format: "png",
+                })) as { data: string }
+            ).data,
+            "base64",
+        ),
+    );
+    await goto("/settings");
+    await sleep(200);
+    await ev(`(() => {
+        const dark = document.querySelector('input[name="theme"][value="dark"]');
+        if (dark) dark.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(700);
+    await goto("/");
+    await sleep(300);
+    const shotDarkOk = await ev<boolean>(
+        `!!document.querySelector("main.app-main")`,
+    );
+    await Bun.write(
+        "./tmp/nav-theme-dark.png",
+        Buffer.from(
+            (
+                (await send("Page.captureScreenshot", {
+                    format: "png",
+                })) as { data: string }
+            ).data,
+            "base64",
+        ),
+    );
+    record(
+        "theme switch screenshots (nutrition 390x844)",
+        shotLightOk && shotDarkOk && (await themeSnap()).dataTheme === "dark",
+        { shotLightOk, shotDarkOk, ex: drain() },
+    );
+
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
 
     await control("session=app");
     await goto("/fridge");

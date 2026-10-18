@@ -418,17 +418,44 @@ for (const theme of ["light", "dark"] as const) {
     }
 }
 
-const ROUTES: Record<string, string> = {
-    "/": "nutrition-light.html",
-    "/fridge": "fridge-light.html",
-    "/grocery": "grocery-light.html",
-    "/recipes": "recipes-light.html",
-    "/settings": "settings-light.html",
-    "/settings/help": "help-light.html",
-    "/settings/household": "household-light.html",
-    "/settings/foods": "foods-light.html",
-    "/create-household": "create-household-light.html",
+const ROUTE_BASE: Record<string, string> = {
+    "/": "nutrition",
+    "/fridge": "fridge",
+    "/grocery": "grocery",
+    "/recipes": "recipes",
+    "/settings": "settings",
+    "/settings/help": "help",
+    "/settings/household": "household",
+    "/settings/foods": "foods",
+    "/create-household": "create-household",
 };
+
+/** Saved appearance from Settings › Account (null = system). */
+let accountTheme: "light" | "dark" | null = "dark";
+
+function themeFileSuffix(): "light" | "dark" {
+    return accountTheme ?? "light";
+}
+
+function routeHtmlFile(pathname: string): string {
+    const base = ROUTE_BASE[pathname] || "fridge";
+    return `${base}-${themeFileSuffix()}.html`;
+}
+
+function applyAccountTheme(html: string): string {
+    if (accountTheme === "light" || accountTheme === "dark") return html;
+    return html
+        .replace(/\sdata-theme="(light|dark)"/, "")
+        .replace(
+            /<meta name="foodable-theme" content="[^"]+" \/>/,
+            '<meta name="foodable-theme" content="system" />',
+        )
+        .replace(
+            /<meta name="theme-color" content="[^"]+" \/>/,
+            `<meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0d0f0e" media="(prefers-color-scheme: dark)" />`,
+        );
+}
 
 let stallMs = 0;
 let postMode = "ok";
@@ -542,6 +569,15 @@ const server = Bun.serve({
                 const mode = url.searchParams.get("session");
                 sessionMode = mode === "guest" ? "guest" : "app";
             }
+            if (url.searchParams.has("theme")) {
+                const t = url.searchParams.get("theme");
+                accountTheme =
+                    t === "light" || t === "dark"
+                        ? t
+                        : t === "system"
+                          ? null
+                          : accountTheme;
+            }
             return Response.json({
                 ok: true,
                 stallMs,
@@ -550,6 +586,7 @@ const server = Bun.serve({
                 loginPath,
                 postDelay,
                 sessionMode,
+                accountTheme,
             });
         }
         if (path === "/app.css" || path === "/app.js") {
@@ -627,13 +664,23 @@ const server = Bun.serve({
             const entries: [string, string][] = [];
             for (const [k, v] of form.entries()) entries.push([k, String(v)]);
             posts.push({ path, entries });
+            if (
+                path === "/settings" &&
+                entries.some(([k, v]) => k === "group" && v === "account")
+            ) {
+                const picked = entries.find(([k]) => k === "theme")?.[1];
+                accountTheme =
+                    picked === "light" || picked === "dark" ? picked : null;
+            }
             if (postDelay) await sleep(postDelay);
             const referer =
                 req.headers.get("referer") || "http://127.0.0.1:4791/fridge";
             const dest = new URL(referer);
             const destKey = dest.pathname + dest.search;
-            const file = ROUTES[dest.pathname] || ROUTES["/fridge"];
-            let html = await fileHtml(file!, destKey + "#post");
+            const file = routeHtmlFile(dest.pathname);
+            let html = applyAccountTheme(
+                await fileHtml(file, destKey + "#post"),
+            );
             if (postMode === "json") {
                 return Response.json({ error: "nope" }, { status: 500 });
             }
@@ -694,8 +741,7 @@ const server = Bun.serve({
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
-        const mapped = ROUTES[path];
-        if (mapped) {
+        if (ROUTE_BASE[path]) {
             if (sessionMode === "guest") {
                 const login = await loginDocument();
                 return new Response(login, {
@@ -704,7 +750,9 @@ const server = Bun.serve({
                 });
             }
             if (stallMs) await sleep(stallMs);
-            const html = await fileHtml(mapped, path + url.search);
+            const html = applyAccountTheme(
+                await fileHtml(routeHtmlFile(path), path + url.search),
+            );
             return new Response(html, {
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
