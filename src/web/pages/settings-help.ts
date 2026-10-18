@@ -60,7 +60,7 @@ function glossaryHtml(): string {
         (
             entry,
         ) => `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
-<h3>${escapeHtml(entry.title)}</h3>
+<h3 class="subsection-title">${escapeHtml(entry.title)}</h3>
 <p>${escapeHtml(entry.body)}</p>
 </section>`,
     ).join("");

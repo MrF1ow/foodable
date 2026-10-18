@@ -70,9 +70,16 @@ test("pageHeader is an h1, wrapped in dash-head when there is a sub or actions",
     });
     expect(withNav).toContain('<header class="dash-head">');
     expect(withNav).toContain("<h1>Alice</h1>");
-    expect(withNav).toContain('<div class="page-actions">');
-    expect(withNav).toContain('<nav class="member-switch">x</nav>');
-    expect(withNav).toContain("Log meal");
+    const titleActionsBlock = withNav.match(
+        /<div class="dash-head-title-actions">\n([\s\S]*?)\n<\/div>/,
+    )?.[1];
+    expect(titleActionsBlock).toContain('<nav class="member-switch">x</nav>');
+    expect(titleActionsBlock).not.toContain("Log meal");
+    const pageActionsBlock = withNav.match(
+        /<div class="page-actions">\n([\s\S]*?)\n<\/div>/,
+    )?.[1];
+    expect(pageActionsBlock).toContain("Log meal");
+    expect(pageActionsBlock).not.toContain("member-switch");
 });
 
 test("errorBanner, emptyState, disclosure, panel, and row markup", () => {

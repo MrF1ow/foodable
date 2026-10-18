@@ -1,5 +1,6 @@
 import { escapeHtml } from "../shell.js";
 import type { ExpiryLevel } from "../../domain/stock.js";
+import { iconArrowDown, iconArrowUp, iconPencil, iconTrash } from "./icons.js";
 import { disclosure, modalTrigger } from "./ui.js";
 
 function expiryPillExpired(): string {
@@ -132,6 +133,10 @@ export function renderRecipeIngredientRow(opts: {
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);
     const name = escapeHtml(opts.displayName);
+    const moveUpLabel = escapeHtml(`Move ${opts.displayName} up`);
+    const moveDownLabel = escapeHtml(`Move ${opts.displayName} down`);
+    const editLabel = escapeHtml(`Edit ${opts.displayName}`);
+    const removeLabel = escapeHtml(`Remove ${opts.displayName}`);
     let meta = `Total ${escapeHtml(opts.totalLabel)} · Per portion ${escapeHtml(opts.perPortionLabel)}`;
     if (opts.personPortionLabel) {
         meta += ` · Your portion ${escapeHtml(opts.personPortionLabel)}`;
@@ -144,18 +149,20 @@ export function renderRecipeIngredientRow(opts: {
 </div>
 <div class="row-actions">
 <form class="recipe-ingredient-move" method="post" action="/recipes/${recipeId}/ingredients/${id}/move">
-<button type="submit" name="direction" value="up" class="btn-sm" aria-label="Move ${name} up">↑</button>
-<button type="submit" name="direction" value="down" class="btn-sm" aria-label="Move ${name} down">↓</button>
+<button type="submit" name="direction" value="up" class="btn-sm btn-icon" aria-label="${moveUpLabel}" title="${moveUpLabel}">${iconArrowUp()}</button>
+<button type="submit" name="direction" value="down" class="btn-sm btn-icon" aria-label="${moveDownLabel}" title="${moveDownLabel}">${iconArrowDown()}</button>
 </form>
 ${modalTrigger({
     target: opts.editModalId,
-    label: "Edit",
-    className: "btn-sm",
+    label: `Edit ${opts.displayName}`,
+    className: "btn-sm btn-icon",
+    icon: iconPencil(),
 })}
 ${modalTrigger({
     target: opts.deleteModalId,
-    label: "Remove",
-    className: "btn-sm btn-danger",
+    label: `Remove ${opts.displayName}`,
+    className: "btn-sm btn-icon btn-danger",
+    icon: iconTrash(),
 })}
 </div>
 </div>

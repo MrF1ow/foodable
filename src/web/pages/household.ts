@@ -212,7 +212,7 @@ function storeCard(
         : "";
     const card = `<section class="household-store psec" data-store-id="${escapeHtml(store.id)}">
 <div class="row">
-<h3 class="row-title">${escapeHtml(store.name)}</h3>
+<h3 class="subsection-title">${escapeHtml(store.name)}</h3>
 ${headRule}
 </div>
 <ul class="store-section-list list">${sections}</ul>
@@ -291,7 +291,7 @@ ${allergenOptions}
         : "";
     const card = `<section class="member-rules psec" data-user-id="${escapeHtml(view.member.userId)}">
 <div class="row">
-<h3 class="row-title">${escapeHtml(view.member.displayName)}</h3>
+<h3 class="subsection-title">${escapeHtml(view.member.displayName)}</h3>
 ${editTrigger}
 </div>
 <ul class="allergen-list pills">${allergens}</ul>

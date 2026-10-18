@@ -225,6 +225,13 @@ html:has(dialog.modal[open]) {
     letter-spacing: 0.06em;
     color: var(--text-dim);
 }
+:where(.app-main) h3.subsection-title {
+    font-size: var(--fs-16);
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: -0.02em;
+    color: var(--text);
+}
 :where(.app-main) p {
     margin: 0;
 }
@@ -692,7 +699,8 @@ details.more > summary .count {
 }
 .row-title {
     min-width: 0;
-    font-weight: 700;
+    font-size: var(--fs-16);
+    font-weight: 600;
     overflow-wrap: anywhere;
 }
 .row-meta {
@@ -923,8 +931,8 @@ details.more > summary > :is(h2, h3) {
 }
 .recipe-panel-head .row-title {
     margin: 0;
-    font-size: inherit;
-    font-weight: inherit;
+    font-size: var(--fs-19);
+    font-weight: 700;
 }
 .recipe-tags {
     display: flex;
@@ -940,6 +948,15 @@ details.more > summary > :is(h2, h3) {
     padding-left: 1.1em;
     color: var(--text-dim);
     font-size: var(--fs-13);
+}
+@media (max-width: 640px) {
+    .recipe-ingredient-row {
+        flex-wrap: wrap;
+    }
+    .recipe-ingredient-row > .row-actions {
+        flex: 1 1 100%;
+        justify-content: flex-end;
+    }
 }
 .recipe-ingredient-note {
     font-style: italic;
