@@ -10,14 +10,14 @@ import {
 } from "./conventions.ts";
 
 describe("CONTRIBUTING.md", () => {
-    test("lists every type and scope as backtick tokens", async () => {
+    test("lists every type and scope as a list item", async () => {
         const path = `${import.meta.dir}/../../CONTRIBUTING.md`;
         const text = await Bun.file(path).text();
         for (const type of TYPES) {
-            expect(text).toContain(`\`${type}\``);
+            expect(text).toContain(`- \`${type}\``);
         }
         for (const scope of SCOPES) {
-            expect(text).toContain(`\`${scope}\``);
+            expect(text).toContain(`- \`${scope}\``);
         }
     });
 });
