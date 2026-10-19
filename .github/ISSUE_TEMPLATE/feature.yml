@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a change after describing the problem
+title: "[feat]: "
+labels:
+    - type:feat
+body:
+    - type: markdown
+      attributes:
+          value: |
+              New tools, pages, schema changes, and dependencies should be discussed before you open a PR. A short problem statement helps.
+    - type: textarea
+      id: problem
+      attributes:
+          label: Problem
+          description: What is hard, missing, or wrong today?
+          placeholder: I want to ...
+      validations:
+          required: true
+    - type: textarea
+      id: proposal
+      attributes:
+          label: Proposed change
+          description: How you think Foodable should solve it (rough idea is fine)
+          placeholder: |
+              ...
+      validations:
+          required: true

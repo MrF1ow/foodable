@@ -21,8 +21,8 @@ Every pillar is meant to refer to the same foods. That shared catalog is the hou
 This is a single-household deploy. Clone the repo, copy `.env.example` to `.env`, create a Supabase project, push the migrations in `supabase/migrations/`, and run the server.
 
 ```bash
-git clone https://github.com/MrF1ow/nutrition-mcp.git
-cd nutrition-mcp
+git clone https://github.com/MrF1ow/foodable.git
+cd foodable
 bun install
 cp .env.example .env   # fill in Supabase and OAuth values
 supabase db push       # after `supabase link --project-ref <ref>`
