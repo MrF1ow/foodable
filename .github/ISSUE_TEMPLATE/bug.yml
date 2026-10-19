@@ -1,0 +1,41 @@
+name: Bug report
+description: Something broke on your self-hosted deploy or in an MCP client
+title: "[fix]: "
+labels:
+    - type:fix
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Do **not** include secrets, API tokens, session cookies, or personal food data in this issue.
+
+              For security problems, use [Security report](https://github.com/MrF1ow/foodable/security/advisories/new) instead of this form.
+    - type: dropdown
+      id: host
+      attributes:
+          label: Host
+          description: How you run Foodable
+          options:
+              - Railway
+              - Docker
+              - Bare Bun
+      validations:
+          required: true
+    - type: input
+      id: mcp_client
+      attributes:
+          label: MCP client
+          description: Client and version if you know it (Claude, ChatGPT, VS Code, Inspector, etc.)
+          placeholder: e.g. Claude Desktop 1.2
+      validations:
+          required: true
+    - type: textarea
+      id: steps
+      attributes:
+          label: Steps to reproduce
+          description: What you did, what you expected, and what happened instead
+          placeholder: |
+              1. ...
+              2. ...
+      validations:
+          required: true
