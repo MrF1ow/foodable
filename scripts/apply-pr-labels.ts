@@ -84,7 +84,11 @@ async function ghApi(
     });
     if (!res.ok) {
         const body = await res.text();
-        throw new Error(`GitHub API ${path} failed (${res.status}): ${body}`);
+        const err = new Error(
+            `GitHub API ${path} failed (${res.status}): ${body}`,
+        ) as Error & { status: number };
+        err.status = res.status;
+        throw err;
     }
     return res.json();
 }
@@ -115,7 +119,7 @@ async function ghApiPaginateFiles(
     return [...new Set(paths)];
 }
 
-async function fetchMigrationContents(
+export async function fetchMigrationContents(
     token: string,
     repo: string,
     paths: string[],
@@ -124,14 +128,27 @@ async function fetchMigrationContents(
     const fileContents: Record<string, string> = {};
     for (const path of paths) {
         if (!path.startsWith("supabase/migrations/")) continue;
-        const data = (await ghApi(token, `repos/${repo}/contents/${path}`, {
-            ref: headSha,
-        })) as { content?: string; encoding?: string };
-        if (data.encoding === "base64" && data.content) {
-            const normalized = data.content.replace(/\n/g, "");
-            fileContents[path] = Buffer.from(normalized, "base64").toString(
-                "utf8",
-            );
+        try {
+            const data = (await ghApi(
+                token,
+                `repos/${repo}/contents/${path}`,
+                { ref: headSha },
+            )) as { content?: string; encoding?: string };
+            if (data.encoding === "base64" && data.content) {
+                const normalized = data.content.replace(/\n/g, "");
+                fileContents[path] = Buffer.from(normalized, "base64").toString(
+                    "utf8",
+                );
+            }
+        } catch (err) {
+            if (
+                err instanceof Error &&
+                "status" in err &&
+                (err as Error & { status: number }).status === 404
+            ) {
+                continue;
+            }
+            throw err;
         }
     }
     return fileContents;
