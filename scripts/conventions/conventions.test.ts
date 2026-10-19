@@ -83,6 +83,19 @@ describe("classifyPath mapped", () => {
         }
         expect(unmapped).toEqual([]);
     });
+
+    test("agent skill paths are low", () => {
+        expect(classifyPath(".claude/settings.json")).toEqual({
+            level: "low",
+            area: "repo",
+            mapped: true,
+        });
+        expect(classifyPath(".agents/skills")).toEqual({
+            level: "low",
+            area: "repo",
+            mapped: true,
+        });
+    });
 });
 
 describe("parseTitle", () => {

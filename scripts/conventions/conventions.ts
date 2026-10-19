@@ -194,7 +194,14 @@ const LOW_REPO_EXACT = new Set([
     "public/robots.txt",
 ]);
 
-const LOW_REPO_PREFIXES = [".github/", "scripts/", ".cursor/", "public/fonts/"];
+const LOW_REPO_PREFIXES = [
+    ".github/",
+    ".claude/",
+    ".agents/",
+    "scripts/",
+    ".cursor/",
+    "public/fonts/",
+];
 
 const BLAST_RANK: Record<BlastLevel, number> = {
     low: 0,

@@ -27,6 +27,10 @@ Host-agnostic config: optional `PUBLIC_ORIGIN` (see `.env.example` and `docs/sel
 
 **Brand icons.** `src/brand.ts` holds the logo as hand-built SVG geometry: the bare mark, a light tile (green on `#f1f1f1`), a dark tile (white on `#383838`) and an adaptive favicon that switches on `prefers-color-scheme`. `scripts/gen-icons.ts` (`bun run gen:icons`, needs `rsvg-convert` and ImageMagick) writes `public/brand/*.svg`, `public/favicon.ico` and `public/apple-touch-icon.png` from it; `src/brand.test.ts` fails when the committed SVGs drift from the module. `/brand/:file` serves the SVGs straight from the module. Do not hand-edit the generated files.
 
+## Conventions and skills
+
+PR titles, blast radius, branch naming, and migration lint live in [`scripts/conventions/`](scripts/conventions/) and [`CONTRIBUTING.md`](CONTRIBUTING.md). Repo-specific agent workflows are in [`.claude/skills/`](.claude/skills/).
+
 ## Household data model
 
 Every pillar points at one household `foods` row (`src/domain/foods.ts`). Fridge items, grocery lines, recipe ingredients and dislikes carry `food_id`. Barcodes and aliases hang off a food (`food_barcodes`, `food_aliases`). Manual names resolve through `normalizeFoodName`, so "Eggs", "eggs " and "EGGS" are one food, and `mergeFoods` repoints every reference when duplicates slip in. Supplies are foods with `kind = 'supply'`. `foods` holds nutrition **per 100 g**, and null means unknown, never zero. OFF values only reach those columns when OFF reported them per 100 g (`catalogNutritionFromOff`), because the `food_cache` payload is per serving whenever a product lists a serving size.
@@ -204,6 +208,8 @@ One shared base, one app brand layer. Colours, type sizes (`--fs-*`) and radii (
 ---
 
 # Claude Code Operating Instructions
+
+Other coding agents should follow the architecture rules above and skip this section. Please do not push to `main`, run `gh pr merge --admin`, or create, update, or delete GitHub rulesets; that is a request to contributors, not a guarantee for every tool — [`.claude/settings.json`](.claude/settings.json) binds Claude Code only.
 
 ## Core Philosophy
 
