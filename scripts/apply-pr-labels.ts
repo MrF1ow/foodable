@@ -129,11 +129,9 @@ export async function fetchMigrationContents(
     for (const path of paths) {
         if (!path.startsWith("supabase/migrations/")) continue;
         try {
-            const data = (await ghApi(
-                token,
-                `repos/${repo}/contents/${path}`,
-                { ref: headSha },
-            )) as { content?: string; encoding?: string };
+            const data = (await ghApi(token, `repos/${repo}/contents/${path}`, {
+                ref: headSha,
+            })) as { content?: string; encoding?: string };
             if (data.encoding === "base64" && data.content) {
                 const normalized = data.content.replace(/\n/g, "");
                 fileContents[path] = Buffer.from(normalized, "base64").toString(
