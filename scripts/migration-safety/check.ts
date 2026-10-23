@@ -8,14 +8,7 @@ export type MigrationChange = {
 };
 
 export type Finding = {
-    rule:
-        | "immutable"
-        | "name"
-        | "timestamp"
-        | "contract"
-        | "rls"
-        | "grant"
-        | "contents";
+    rule: "immutable" | "name" | "timestamp" | "contract" | "rls" | "contents";
     path: string;
     message: string;
 };
@@ -149,104 +142,6 @@ function tablesWithRls(stripped: string): Set<string> {
     return enabled;
 }
 
-const TABLE_DML = ["select", "insert", "update", "delete"] as const;
-
-function grantTargetKey(raw: string): string | undefined {
-    const piece = raw.trim();
-    if (!piece || piece.toLowerCase() === "only") return undefined;
-    const parts = piece.split(".");
-    if (parts.length === 2) return tableKey(parts[0], parts[1]!);
-    if (parts.length === 1) return tableKey(undefined, parts[0]!);
-    return undefined;
-}
-
-function addTablePrivileges(into: Set<string>, raw: string): void {
-    if (/\ball(?:\s+privileges)?\b/i.test(raw)) {
-        for (const privilege of TABLE_DML) into.add(privilege);
-        return;
-    }
-    for (const part of raw.split(",")) {
-        const name = part
-            .trim()
-            .toLowerCase()
-            .match(/^[a-z_]+/)?.[0];
-        if (
-            name === "select" ||
-            name === "insert" ||
-            name === "update" ||
-            name === "delete"
-        ) {
-            into.add(name);
-        }
-    }
-}
-
-// Tables in this file on which service_role receives select, insert, update,
-// and delete, either in one GRANT ALL or across several statements.
-function tablesGrantedToServiceRole(stripped: string): Set<string> {
-    const privsByTable = new Map<string, Set<string>>();
-    for (const stmt of stripped.split(";")) {
-        const s = stmt.trim();
-        if (!s) continue;
-        const match =
-            /^grant\s+([\s\S]+?)\s+on\s+(?:table\s+)?([\s\S]+?)\s+to\s+([\s\S]+)$/i.exec(
-                s,
-            );
-        if (!match) continue;
-        const targetRaw = match[2]!.trim();
-        if (
-            /^(?:function|procedure|routine|sequence|schema|type|domain|language)\b/i.test(
-                targetRaw,
-            ) ||
-            /^all\s+(?:tables|sequences|functions|procedures|routines)\b/i.test(
-                targetRaw,
-            )
-        ) {
-            continue;
-        }
-        const roles = match[3]!
-            .replace(/\bwith\s+grant\s+option\b/gi, "")
-            .split(",")
-            .map((role) => unquoteIdent(role.trim()).toLowerCase());
-        if (!roles.includes("service_role")) continue;
-        for (const tableRaw of targetRaw.split(",")) {
-            const key = grantTargetKey(tableRaw);
-            if (!key) continue;
-            let privs = privsByTable.get(key);
-            if (!privs) {
-                privs = new Set();
-                privsByTable.set(key, privs);
-            }
-            addTablePrivileges(privs, match[1]!);
-        }
-    }
-    const covered = new Set<string>();
-    for (const [key, privs] of privsByTable) {
-        if (TABLE_DML.every((privilege) => privs.has(privilege))) {
-            covered.add(key);
-        }
-    }
-    return covered;
-}
-
-function checkGrants(path: string, contents: string): Finding[] {
-    const stripped = stripSql(contents);
-    const created = findCreatedTables(stripped);
-    const granted = tablesGrantedToServiceRole(stripped);
-    const findings: Finding[] = [];
-    for (const table of created) {
-        if (!granted.has(table)) {
-            const short = table.includes(".") ? table.split(".")[1]! : table;
-            findings.push({
-                rule: "grant",
-                path,
-                message: `CREATE TABLE must GRANT select, insert, update, delete on ${short} to service_role`,
-            });
-        }
-    }
-    return findings;
-}
-
 function deleteOrUpdateWithoutWhere(stmt: string): boolean {
     const s = stmt.replace(/\bon\s+delete\s+cascade\b/gi, " ");
     const trimmed = s.trim();
@@ -353,7 +248,6 @@ function checkNewFile(
     const contract = checkContract(path, contents);
     if (contract) findings.push(contract);
     findings.push(...checkRls(path, contents));
-    findings.push(...checkGrants(path, contents));
     return findings;
 }
 

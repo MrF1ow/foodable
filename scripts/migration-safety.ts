@@ -1,3 +1,4 @@
+import { checkServiceRoleGrants } from "./data-api-grants.js";
 import {
     checkMigrations,
     type MigrationChange,
@@ -115,10 +116,21 @@ for (const change of changes) {
     }
 }
 
-const findings = checkMigrations({
-    changes,
-    newestBaseTimestamp: newestBaseTimestamp(base),
-});
+const findings: { rule: string; path: string; message: string }[] = [
+    ...checkMigrations({
+        changes,
+        newestBaseTimestamp: newestBaseTimestamp(base),
+    }),
+];
+
+for (const change of changes) {
+    if (
+        (change.status === "added" || change.status === "renamed") &&
+        change.contents !== undefined
+    ) {
+        findings.push(...checkServiceRoleGrants(change.path, change.contents));
+    }
+}
 
 for (const f of findings) {
     console.log(`${f.rule} ${f.path} ${f.message}`);
