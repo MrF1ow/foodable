@@ -9,8 +9,21 @@ What comes after go-live, in rough order. Each item names the rules it has to ke
 
 ## Next: after the deploy has run for a while
 
-1. **Phase 8, contract.** Drop the old shapes the expand steps left behind: `identity` JSON on fridge, grocery, recipe and dislike rows; `households.fridge_locations`; `profiles.accent_swatch`; the uncalled `bootstrap_household`; the test-only `comingSoonPage`. Take a backup first. Every destructive statement carries `-- foodable:contract <reason>`. Details: [handoff/foodable-architecture-plan.md](./handoff/foodable-architecture-plan.md), "Phase 8".
+1. **Phase 8, contract.** Run this only after the deploy has been stable for a while. Take a backup first. A fresh start has no legacy `identity` data, only rows written since launch. Every destructive statement carries `-- foodable:contract <reason>`.
+    - Drop `fridge_items.identity`, `grocery_lines.identity`, `recipe_ingredients.identity`, `recipe_ingredients.nutrition`, and `member_dislikes.identity`.
+    - Set `fridge_items.food_id`, `grocery_lines.food_id`, and `recipe_ingredients.food_id` to `not null`.
+    - Drop `households.fridge_locations`. `fridgeLocations` still sits on the household config type and mapper in `src/household.ts`. It is not exposed through MCP or the web, and it goes with the column.
+    - Delete `ManualRef` and `householdManualId` from `src/domain/food-identity.ts`, and any path still writing `identity`.
+    - Drop `bootstrap_household`. Nothing in `src/` calls it.
+    - Drop `profiles.accent_swatch`, and the field from the `Profile` type and `upsertProfile` in `src/db/profiles.ts`.
+    - Remove `comingSoonPage` in `src/web/shell.ts`. Tests are the only callers.
 2. **Weekly household digest (optional).** One tool across the pillars: what expires, what ran out, nutrition against goals per member, and suggested grocery lines from the stock ledger. Today's weekly digest covers nutrition only.
+
+Still open, and not features:
+
+- `groupMealVariations` in `src/search.ts` still groups by meal text, not by the `food_id` set.
+- `package.json` `homepage` and `repository` still say `MrF1ow/nutrition-mcp`. The old URL redirects.
+- Renaming Grocery to "Shopping list" stays deferred: copy only, and the table names stay.
 
 ## Later: planned features
 
