@@ -1,6 +1,6 @@
 # Foodable UI plan: the site's look in the app, one source for everything
 
-Status: not started. Written 2026-10-17 against `main` at `e0eebaf`; D4 and D5 approved the same day, so no phase is blocked on a decision. Every phase below is open. A reference implementation of most of it exists on the branch [`spike/magic-ui-fx`](https://github.com/MrF1ow/foodable/tree/spike/magic-ui-fx); see "Reference implementation" before writing code.
+Status: done. U1–U10 are merged; the table at the end of this file names the pull requests. U10 landed through the usability plan. Written 2026-10-17 against `main` at `e0eebaf`; D4 and D5 were approved the same day. The body below is the plan as it was written, including "not started" in the phase sketches. The status table is the current record. A reference implementation of most of it existed on [`spike/magic-ui-fx`](https://github.com/MrF1ow/foodable/tree/spike/magic-ui-fx).
 
 This plan is for an agent that has not seen the conversation it came from. Read `CLAUDE.md` in full first. Everything here assumes its rules (Bun only, prettier-clean tree, moves before changes, test-pinned class names). Where this plan changes a `CLAUDE.md` rule, the phase that does it says so and updates `CLAUDE.md` in the same PR.
 

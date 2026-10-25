@@ -1,33 +1,33 @@
 # Foodable architecture plan
 
-Status: Phases 0 to 7 are merged (`3687f53`, PRs #31 to #44), plus the unified styling (#52, #53) and the deployment-audit fixes (#55 to #58). Phase 8 is not started. All 40 migrations are applied to the new Supabase project (`dapbxswqfiqvxutsobhr`); the household is not live on Railway yet. Written 2026-10-04 from a full walkthrough of the codebase at `47da66f`. Status updated 2026-10-10.
+Status: Phases 0 to 7 are merged (`3687f53`, PRs #31 to #44), plus the unified styling (#52, #53), the deployment-audit fixes (#55 to #58), the logo (#61), the add-member fix (#62), and the UI and usability plans (U1–U10, through #84). Phase 8 is not started. All 43 migrations are applied to the Supabase project (`dapbxswqfiqvxutsobhr`) as of 2026-10-25; the household is not live on Railway yet. Written 2026-10-04 from a full walkthrough of the codebase at `47da66f`. Status updated 2026-10-25.
 
-Foodable is a self-hosted MCP platform for one household. People use it through their AI agents and a small web app. It has five pillars: Fridge, Groceries, Nutrition, Recipes, and Settings. It is a fork of `akutishevsky/nutrition-mcp`. The fork is personal and open source. It is not a public hosted service. The deploy target and the domain are not decided yet.
+Foodable is a self-hosted MCP platform for one household. People use it through their AI agents and a small web app. It has five pillars: Fridge, Groceries, Nutrition, Recipes, and Settings. It is a fork of `akutishevsky/nutrition-mcp`. The fork is personal and open source. It is not a public hosted service. The app hosts on Railway, the database stays on Supabase cloud, and a custom domain, if any, is Cloudflare DNS in front of Railway ([docs/roadmap.md](../roadmap.md)).
 
 The goal is one cohesive system. Every pillar refers to the same foods. Buying, storing, cooking, and eating are steps of one loop, not four separate trackers.
 
 ## Status at handoff (2026-10-10)
 
-`main` passes 1098 tests, `bun run typecheck` and `bun run format:check`. A checked box below means the code is on `main` and was checked against it. It does not mean the item has run in production for the household.
+On 2026-10-25, `main` at `6750fb2` passes 1291 tests and `bun run typecheck`. The table below is the 2026-10-10 picture, with the rows that have since changed marked in the status column. A checked box means the code is on `main`. It does not mean the item has run in production for the household.
 
 **Launch progress.** The user chose to start fresh on a new Supabase project hosted on Railway, with no data carried over. `docs/deploy-checklist.md` is the go-live list and `docs/handoff/foodable-launch-handoff.md` holds the detail.
 
-| Step                                                                                                         | Status                                                     |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| Preflight at `ee7f06f` (tests, typecheck, format:check, gen:all, db dry run)                                 | Done                                                       |
-| New Supabase project `dapbxswqfiqvxutsobhr` (`us-east-1`): 31 `public` tables, `exports` bucket, email auth  | Done; no data copied; old project and old server untouched |
-| Local smoke against that project (`/health`, sign-in page, OAuth on `127.0.0.1`, `PUBLIC_ORIGIN` unset)      | Done; not running                                          |
-| Live schema checked against the 39 committed files (2026-10-06): no drift                                    | Done                                                       |
-| Ledger gap (#50), old-name leftovers (#49), `railway.toml` (#48)                                             | Merged 2026-10-06                                          |
-| One design system for widgets, app and login; one green accent (#52, #53)                                    | Merged                                                     |
-| Audit fixes: OAuth allow-list + PKCE (#55), RPC grants (#56), MCP admin tools removed (#57), hardening (#58) | Merged 2026-10-10; #56 migration applied live (40 total)   |
-| Members: username sign-in, ownership transfer, removal; Docker production mode (#60)                         | Merged 2026-10-10                                          |
-| Repo renamed to `MrF1ow/foodable` (old URL redirects)                                                        | Done by 2026-10-12                                         |
-| Logo as SVG icons, `#28cf8b` accent (#61); add-member, widget-height and form-spacing fixes (#62)            | Open PRs                                                   |
-| Docker build, Railway service, variables, `PUBLIC_ORIGIN`, household sign-in, AI clients, walk, retire old   | Not done                                                   |
-| Phase 8                                                                                                      | Not started                                                |
+| Step                                                                                                         | Status                                                         |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Preflight at `ee7f06f` (tests, typecheck, format:check, gen:all, db dry run)                                 | Done                                                           |
+| New Supabase project `dapbxswqfiqvxutsobhr` (`us-east-1`): 31 `public` tables, `exports` bucket, email auth  | Done; no data copied; old project and old server untouched     |
+| Local smoke against that project (`/health`, sign-in page, OAuth on `127.0.0.1`, `PUBLIC_ORIGIN` unset)      | Done; not running                                              |
+| Live schema checked against the 39 committed files (2026-10-06): no drift                                    | Done                                                           |
+| Ledger gap (#50), old-name leftovers (#49), `railway.toml` (#48)                                             | Merged 2026-10-06                                              |
+| One design system for widgets, app and login; one green accent (#52, #53)                                    | Merged                                                         |
+| Audit fixes: OAuth allow-list + PKCE (#55), RPC grants (#56), MCP admin tools removed (#57), hardening (#58) | Merged 2026-10-10; 43 migrations applied live as of 2026-10-25 |
+| Members: username sign-in, ownership transfer, removal; Docker production mode (#60)                         | Merged 2026-10-10                                              |
+| Repo renamed to `MrF1ow/foodable` (old URL redirects)                                                        | Done by 2026-10-12                                             |
+| Logo as SVG icons, `#28cf8b` accent (#61); add-member, widget-height and form-spacing fixes (#62)            | Merged                                                         |
+| Docker build, Railway service, variables, `PUBLIC_ORIGIN`, household sign-in, AI clients, walk, retire old   | Docker image built 2026-10-25. Railway and the rest not done   |
+| Phase 8                                                                                                      | Not started                                                    |
 
-Deploy day is still ahead. The version stays `0.1.0` until a gated decision says otherwise. The repo is renamed to `MrF1ow/foodable`; the logo is in #61.
+Deploy day is still ahead. The version stays `0.1.0` until a gated decision says otherwise. The repo is `MrF1ow/foodable` and the logo is on `main` (#61).
 
 Before the fresh start was chosen, the pre-push dry run caught two bugs in the then-unapplied migrations, and both were fixed in place. The backfill copied `food_cache` macros into the per-100 g columns even when Open Food Facts reported them per serving. The fridge-locations copy hit the unique key when a household's array repeated a name. `scripts/migration-dryrun/` holds the fixture that pins both.
 
@@ -38,8 +38,8 @@ Before the fresh start was chosen, the pre-push dry run caught two bugs in the t
 - **`fridgeLocations` stays in the household config type and mapper** (`src/household.ts`). It is no longer exposed through MCP or the web. It goes with the column in Phase 8.
 - **The Phase 1 layout is partial.** `src/db/`, `src/domain/`, `src/mcp/` and `src/web/` exist. Auth, OAuth, middleware, rate limiting and analytics still sit at the top of `src/`. `src/mcp.ts` is a re-export barrel. `domain/recipes.ts`, `db/nutrition.ts` and `mcp/shared.ts` are over 1,300 lines.
 - **`groupMealVariations` still groups by text,** not by the `food_id` set.
-- **Old-name leftovers** are done (#49, 2026-10-06): the export object is `foodable-export.zip` (account deletion still removes the old key), `bun.lock` is regenerated, and the test fixtures are renamed. The repo URLs wait on the repo rename.
-- **Dead leftovers waiting on Phase 8:** `profiles.accent_swatch` is no longer read or written by the app since #52, but stays in the table and the `Profile` type. `bootstrap_household` has no callers in `src/` since closed-household PR-4 (`20260920142021_drop_bootstrap_join.sql`). `comingSoonPage` in `src/app/shell.ts` is only referenced by tests.
+- **Old-name leftovers** are done (#49, 2026-10-06): the export object is `foodable-export.zip` (account deletion still removes the old key), `bun.lock` is regenerated, and the test fixtures are renamed. The repo is `MrF1ow/foodable`. `package.json` `homepage` and `repository` still name `nutrition-mcp`.
+- **Dead leftovers waiting on Phase 8:** `profiles.accent_swatch` is no longer read or written by the app since #52, but stays in the table and the `Profile` type. `bootstrap_household` has no callers in `src/` since closed-household PR-4 (`20260920142021_drop_bootstrap_join.sql`). `comingSoonPage` in `src/web/shell.ts` is only referenced by tests.
 - **Gated by decision:** the repo rename, brand assets (no logo yet), and the optional weekly household digest. The existing weekly digest is the nutrition-only resource.
 
 ## Where we started (2026-10-04)
@@ -441,12 +441,12 @@ Run only after Phases 2 to 7 have been live and stable for a while, with a backu
 
 ## Decisions
 
-| Decision                               | Outcome                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------------- |
-| i18n: keep any non-English locale?     | English only (Phase 0)                                                  |
-| Fonts: self-host vs system stack       | System stack; the self-hosted fonts were deleted in #53                 |
-| Brand accent                           | One widget-green accent everywhere (#52); no logo yet                   |
-| Starting version                       | `0.1.0`                                                                 |
-| Hosting target                         | Railway for now, Supabase cloud; `PUBLIC_ORIGIN` keeps it host-agnostic |
-| Supabase cloud vs self-hosted Supabase | Cloud first, self-hosted documented in `docs/self-hosting.md`           |
-| Rename Grocery to Shopping list        | **Still open.** Defer; rename copy only, keep table names               |
+| Decision                               | Outcome                                                                                                                                              |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| i18n: keep any non-English locale?     | English only (Phase 0)                                                                                                                               |
+| Fonts: self-host vs system stack       | Widgets stay on the system stack. The app and login self-host Geist and Bricolage Grotesque (UI plan U2/U3), after #53 had removed the earlier fonts |
+| Brand accent                           | One accent, `#28cf8b`, everywhere (#52, #61). The logo is the SVG mark in `src/brand.ts`                                                             |
+| Starting version                       | `0.1.0`                                                                                                                                              |
+| Hosting target                         | Railway for now, Supabase cloud; `PUBLIC_ORIGIN` keeps it host-agnostic                                                                              |
+| Supabase cloud vs self-hosted Supabase | Cloud first, self-hosted documented in `docs/self-hosting.md`                                                                                        |
+| Rename Grocery to Shopping list        | **Still open.** Defer; rename copy only, keep table names                                                                                            |
