@@ -12,7 +12,7 @@ It runs on MCP TypeScript SDK **v2** (`@modelcontextprotocol/server` at runtime,
 
 ## Architecture rules
 
-These are the rules in `docs/handoff/foodable-architecture-plan.md`. Follow them for every change. Do not start a later phase from a PR that owns an earlier one.
+Follow these for every change.
 
 - **Subtract before you add.** Phase 0 removes upstream leftovers before any feature work.
 - **Moves before changes.** Phase 1 is pure file moves with zero behavior change. Feature diffs after it stay small and reviewable.

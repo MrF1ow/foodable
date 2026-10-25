@@ -1,6 +1,6 @@
 # Deploy checklist
 
-Use this on deploy day. The deployment-audit fixes (#55 to #58) are on `main`, and the #56 migration is already applied to `dapbxswqfiqvxutsobhr`. See `docs/handoff/foodable-launch-handoff.md` for step-by-step detail rather than duplicating it here.
+Use this on deploy day. The deployment-audit fixes (#55 to #58) are on `main`, and the #56 migration is already applied to `dapbxswqfiqvxutsobhr`. Environment variables and the first-user flow are in [self-hosting.md](./self-hosting.md).
 
 Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app once (MCP tokens are unaffected).
 
@@ -53,7 +53,23 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 - [ ] Optional: as the owner, hand ownership to a member and back (Settings → Household → Manage).
 - [ ] Bots: Settings → Household → rotate the token, copy it once, then configure
       `Authorization: Bearer nt_hh_…` against `https://<domain>/mcp`. The bot passes `user_id` for the person it acts for.
-- [ ] Run the walk in `docs/handoff/foodable-launch-handoff.md`, step 5 (`tools/list` returns 67 tools).
+
+## Walk
+
+Run this on the live site with two members.
+
+- [ ] **Foods.** On `/settings/foods`, save **Eggs** with grams per each and calories per 100 g. Save **Toast** the same way.
+- [ ] **Food-backed meal.** On `/`, set Meal type to Breakfast. Add Eggs: amount 2, unit each. Use **Add another food** for Toast: amount 1, unit each. Submit **Log meal**. Expect the meal total to equal the sum of the item snapshots.
+- [ ] **Snapshot.** Change the egg calories on `/settings/foods`. Expect the logged breakfast to keep the old total.
+- [ ] **Recipe to grocery.** On `/recipes`, save a recipe that uses eggs. Put a note on an ingredient and a tag on the recipe. Submit **Add to grocery**. Expect only what is not already stocked to be added.
+- [ ] **Put away.** On `/grocery`, check that line and submit **Put away**. Expect `/fridge` to show the new stock. **Clear checked** does not stock the fridge.
+- [ ] **Cook.** On the recipe, submit **Cooked it** with **Log meals** checked, for both members. Expect the fridge count to drop and two meals to appear, one per member. If stock is short, the shortfall is reported and the fridge does not go negative. With two lots of the same food, the earlier expiry is used first.
+- [ ] **Eat and toss.** On `/fridge`, submit **Ate it** on one item and **Toss** on another. Expect **Ate it** to also log a meal.
+- [ ] **Export.** Run `export_all_data`. Expect the ZIP to hold `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `profile.csv`, and `README.txt`. `meal_items.csv` is keyed by `meal_id`, has a `timezone` column, and keeps its header with zero rows.
+- [ ] **Agent surface.** `tools/list` returns 67 tools. `get_meals`, `get_water`, `get_weight`, `get_fridge`, `get_household_rules`, and `set_household_rules` exist. `list_grocery_lines` and `get_fridge` render their cards in a widget-capable client.
+- [ ] **Barcode.** `lookup_barcode` on a real product returns data, which proves `OFF_USER_AGENT` is set.
+
+Manual fridge add, edit, and delete write `adjust` movements, so after each step every item's stock should match its ledger.
 
 ## Retire the old deploy (confirm first)
 
