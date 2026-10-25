@@ -6,13 +6,13 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 ## Before deploy day (local)
 
-- [ ] #61 (logo and accent) and #62 (add-member form, widget frame height, form spacing) are merged to `main`. Without #62 no member can be added from Settings → Household.
-- [ ] `docker build -t foodable .` succeeds on the pinned `oven/bun:1.4.2` image, and `docker run --env-file .env -p 8080:8080 foodable` answers `GET /health` with `ok`. Not yet run anywhere.
-- [ ] With the local server up, `bun run inspect` (MCP Inspector) completes OAuth through its loopback callback and lists 67 tools.
+- [x] #61 (logo and accent) and #62 (add-member form, widget frame height, form spacing) are merged to `main` (`ed6b714`, `f273472`).
+- [x] `docker build -t foodable:check .` succeeded on 2026-10-25 on the pinned `oven/bun:1.4.2` image. A container started with the local env answered `GET /health` with `ok` and served the login page.
+- [ ] With the local server up, `bun run inspect` (MCP Inspector) completes OAuth through its loopback callback and lists 67 tools. Not run on 2026-10-25. Grok's `mcp doctor foodable` did pass that day: protocol `2026-07-28`, 67 tools, against the local server.
 
 ## Supabase
 
-- [ ] `PG_BIN=<postgres bin>/ bun run db:dryrun`, then `bunx supabase db push --dry-run`, then `bunx supabase db push`.
+- [x] All 43 migrations are applied on `dapbxswqfiqvxutsobhr` as of 2026-10-25 (`supabase migration list --linked`, local and remote in step), including `20261022180000_explicit_data_api_grants` (#95). That grant migration needs to be on the project before Supabase stops auto-granting table privileges on 2026-10-30. It is. A later migration still goes through `bun run db:dryrun`, then `bunx supabase db push --dry-run`, then `bunx supabase db push`.
 - [ ] Authentication → Sign In / Providers: email + password on, "Confirm email" off.
 - [ ] Leave "Allow new users to sign up" **on** until the owner has signed up (step under Railway). Then turn it **off**.
       Members are created with the admin API, which ignores this toggle.
@@ -35,9 +35,11 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
       `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (service role), `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`
       (all fresh from `bun run generate-oauth-creds`), `OFF_USER_AGENT=Foodable (<email>)`.
 - [ ] Networking → Generate Domain. Set `PUBLIC_ORIGIN=https://<domain>` (no trailing slash). Redeploy.
+- [ ] Optional custom domain: [self-hosting.md](./self-hosting.md#custom-domain-on-cloudflare). Cloudflare SSL/TLS mode is **Full**. Then point `PUBLIC_ORIGIN` at that origin and redeploy.
 - [ ] `curl https://<domain>/health` → `ok`. `/.well-known/oauth-authorization-server` shows `https://<domain>` URLs.
-- [ ] **Immediately** open `https://<domain>/`, sign up as the owner, and create the household.
-      While Auth is empty, the first visitor becomes the owner. Do not share the URL before this.
+- [ ] Confirm who already exists in this Supabase project before anyone opens the URL. On 2026-10-05 one Auth user signed up, created a household named "Flow", and logged two test meals. If that account is the owner, skip sign-up and use it. If you want a clean start, wipe Auth and the `public` data first: a second email is refused, and a second household cannot be created.
+- [ ] **Immediately** open `https://<domain>/` and sign in as the owner (or sign up, if you wiped Auth), and create the household if there is not one yet.
+      While Auth is empty, the first visitor becomes the owner. Do not share the URL before the owner exists.
 - [ ] Supabase: turn "Allow new users to sign up" **off**. Confirm a new email at `/` gets "Wrong email, username or password."
 
 ## Members and bots
@@ -45,6 +47,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 - [ ] Settings → Household: add each person (name, email or username, password). Hand them the login yourself.
 - [ ] Each person: Claude.ai → Settings → Connectors → Add custom connector → `https://<domain>/mcp`, then sign in.
       Same URL in ChatGPT and Claude Code. Confirm `tools/list` loads. Remove any old nutrition-mcp connector.
+- [ ] Grok CLI: point the `foodable` MCP server at `https://<domain>/mcp` and sign in again (`/mcps` → foodable → `i`). The local session on `http://localhost:8080/mcp` does not carry over.
 - [ ] A username member signs in by typing just the username.
 - [ ] As a member (not the owner), adding a person and rotating the token in Settings → Household are both refused.
 - [ ] Optional: as the owner, hand ownership to a member and back (Settings → Household → Manage).

@@ -6,6 +6,30 @@ Written 2026-10-05. For an agent with access to GitHub, Supabase, and Railway. I
 
 Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status at handoff" section) first. This file does not repeat them.
 
+## Status (2026-10-25)
+
+Checked against `main` at `6750fb2`. Where this disagrees with the 2026-10-12 notes, this section wins.
+
+**Checked this day**
+
+- `bun test`: 1291 pass, 0 fail. `bun run typecheck` clean.
+- Supabase project `dapbxswqfiqvxutsobhr`: all 43 migrations applied, local and remote in step. That includes #95 (`20261022180000_explicit_data_api_grants`), before Supabase stops auto-granting table privileges on 2026-10-30.
+- The local Supabase containers were gone again and the volumes were still there. `bunx supabase@2.120.0 start` from `~/.local/share/foodable-dev` brought the data back. `GET /health` returns `ok`. Grok `mcp doctor foodable` reports protocol `2026-07-28` and 67 tools.
+- `bun run e2e:agent`: 10 of 13 turns passed. The three failures were an empty fridge (the seed foods had been eaten or discarded), and no tool call failed. After restocking through `add_fridge_item`, the discard, cook, and fridge-recount turns passed 3/3. The suite restores the database to the snapshot it took at the start of the run.
+- Docker image `foodable:check` built from the repo Dockerfile. A container with the local env answered `GET /health` with `ok` and served the login page.
+- Host for now: Railway for the app, Supabase cloud for the database, Cloudflare only if you add a custom domain. [roadmap.md](../roadmap.md).
+
+**Still open**
+
+- No Railway project, no public domain, no `PUBLIC_ORIGIN`. The walk in step 5 has not been run on a public URL.
+- Production Auth is not empty. On 2026-10-05 one user created household "Flow" and logged two test meals of "Milk". Confirm that account before deploy day. Keep it if it is the owner. Otherwise wipe Auth and `public` first, because a second sign-up is refused.
+- `package.json` `homepage` and `repository` still say `MrF1ow/nutrition-mcp`. The old URL redirects. Not a deploy blocker. Left out of the docs pull request on purpose: `package.json` is a high blast-radius path.
+
+**Done since 2026-10-12**
+
+- #61 and #62 are merged. Later merges through #95 are on `main` (logo, repo conventions, migration CI, service-role grants).
+- UI plan phases U1–U10 are done. The usability plan through P8.2 is merged (#84).
+
 ## Status (2026-10-12)
 
 **Done**
@@ -23,13 +47,12 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 
 **Open PRs to merge before deploy day**
 
-- #61: the logo and the `#28cf8b` accent.
-- #62: the add-member form fix (separate Email and Username boxes meant no member could be created from Settings → Household), embedded widget frames that were cut off or scrolled on desktop, and one spacing scale for app forms. Merge this one before the member steps in step 4.
+None. #61 and #62 merged after this note was written. See the 2026-10-25 status.
 
-**Not done**
+**Not done** (as of this 2026-10-12 note; the 2026-10-25 status is current)
 
 - The two-person household sign-in (step 4) has not been done. The project is no longer empty, though. On 2026-10-05 one Auth user signed up, created a household named "Flow" as owner, and logged two test meals of "Milk". Keep it if that account is the intended owner. Otherwise wipe Auth and the `public` data before step 4, because only the first sign-up is allowed.
-- The Docker image has not been built locally, and MCP Inspector OAuth has not been run against the new allow-list. Both are in the deploy checklist.
+- MCP Inspector OAuth has not been run against the new allow-list. The Docker image was built on 2026-10-25; see the status above.
 - The end-to-end walk (step 5) has not been done.
 - Railway was not created. DNS was not changed. Phase 8 has not started.
 
@@ -45,9 +68,9 @@ Read `CLAUDE.md` and `docs/handoff/foodable-architecture-plan.md` (its "Status a
 
 ## Where the code is
 
-- Phases 0 to 7 and the audit fixes are merged. `bun test` passes 1098 tests (after `bun run gen:all`, 2026-10-10). `bun run typecheck` and `bun run format:check` are clean. CI is green.
+- Phases 0 to 7 and the audit fixes are merged. On 2026-10-25 `bun test` passes 1291 tests and `bun run typecheck` is clean.
 - `tools/list` returns 67 tools.
-- There are 40 migrations, all applied to `dapbxswqfiqvxutsobhr`. `bun run db:dryrun` applies them in order to an empty Postgres (with Supabase stubs).
+- There are 43 migrations, all applied to `dapbxswqfiqvxutsobhr` as of 2026-10-25. `bun run db:dryrun` applies them in order to an empty Postgres (with Supabase stubs).
 - The app is Railway-ready as is:
     - It binds `0.0.0.0` on `PORT`, which Railway injects.
     - `/health` returns `ok`.
@@ -192,7 +215,7 @@ The decision is to delete all old user data. Confirm with the user once, right b
 ## 8. After launch, in order
 
 1. ~~**Ledger gap.**~~ Done in #50 (2026-10-06).
-2. ~~**Old-name leftovers.**~~ Done in #49 (2026-10-06). The repo is now renamed, so the remaining repo URLs (`package.json` `homepage` / `repository`, the clone commands in `README.md` and `docs/self-hosting.md`, and `CLAUDE.md`) can move to `MrF1ow/foodable`. The old URL redirects, so this is not a deploy blocker.
+2. ~~**Old-name leftovers.**~~ Done in #49 (2026-10-06). The clone commands in `README.md` and `docs/self-hosting.md`, and the repo link in `CLAUDE.md`, name `MrF1ow/foodable`. `package.json` `homepage` and `repository` still say `MrF1ow/nutrition-mcp`. The old URL redirects, so this is not a deploy blocker.
 3. **Phase 8 (contract)** once the deploy has run stably, after a fresh backup. With a fresh start there is no legacy `identity` data to worry about, only rows written since launch.
 4. **Gated items** when the user decides: the optional weekly household digest. (The repo rename is done, and the logo is in #61.)
 

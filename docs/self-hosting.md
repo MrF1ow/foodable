@@ -2,11 +2,11 @@
 
 Foodable is a single-household deploy. It is not a public hosted service. You run the Bun server yourself and point it at a Supabase project.
 
-Clone [https://github.com/MrF1ow/nutrition-mcp](https://github.com/MrF1ow/nutrition-mcp), copy `.env.example` to `.env`, fill in the values below, push the migrations, and start the server.
+Clone [https://github.com/MrF1ow/foodable](https://github.com/MrF1ow/foodable), copy `.env.example` to `.env`, fill in the values below, push the migrations, and start the server. The old `MrF1ow/nutrition-mcp` URL redirects here.
 
 ```bash
-git clone https://github.com/MrF1ow/nutrition-mcp.git
-cd nutrition-mcp
+git clone https://github.com/MrF1ow/foodable.git
+cd foodable
 bun install
 cp .env.example .env
 bun run generate-oauth-creds   # paste into .env
@@ -58,7 +58,7 @@ Self-hosted Supabase is the other option, not the default. The app speaks the sa
 
 Install the Supabase CLI, point it at the self-hosted project, and run the same `supabase db push` against `supabase/migrations/`. You are responsible for Auth (email+password), storage (the `exports` bucket from the migrations), and keeping the instance reachable from the Foodable process.
 
-A self-hosted instance that only exposes the database, without GoTrue and PostgREST, will not work. Sign-up, sign-in, and the household RPCs all go through the Supabase API.
+A self-hosted instance that only exposes the database, without GoTrue and PostgREST, will not work. Sign-up, sign-in, and the household RPCs all go through the Supabase API. Running on plain Postgres with none of those services is planned, and not available yet: [roadmap.md](./roadmap.md).
 
 ## Environment variables
 
@@ -133,6 +133,18 @@ Set the same variables as `.env.example` on the service:
 Do **not** set `PORT`. Railway injects it, and the app reads it.
 
 Generate a domain in the service's networking settings, set `PUBLIC_ORIGIN` to that `https://` origin with no trailing slash, then redeploy. If you add a custom domain later, change `PUBLIC_ORIGIN` to it.
+
+## Custom domain on Cloudflare
+
+Optional. The generated `*.up.railway.app` domain is enough to go live. Cloudflare here is DNS and the proxy in front of Railway, not where the process runs.
+
+1. In the Railway service, open Networking and add a custom domain. Railway shows a CNAME target and a TXT record that proves you own the name.
+2. In Cloudflare DNS, add both records. Proxy the CNAME (orange cloud). If you ever add a wildcard, its `_acme-challenge` record stays DNS-only (grey cloud).
+3. Set SSL/TLS to **Full**. Flexible sends plain HTTP to Railway, and Railway redirects HTTP to HTTPS, so the browser loops. Full (strict) is also wrong for this setup: while Railway issues or renews the certificate it can briefly present the `*.up.railway.app` certificate, and strict mode answers 526. Full still encrypts the hop from Cloudflare to Railway. Source: [Railway's SSL troubleshooting](https://docs.railway.com/networking/troubleshooting/ssl).
+4. If Railway stays on "Validating Challenges", turn the Cloudflare proxy off, wait until Railway shows the certificate as issued, then turn the proxy back on.
+5. Set `PUBLIC_ORIGIN` to `https://your-domain` with no trailing slash, and redeploy. OAuth metadata and the MCP icon URL follow that value.
+
+Use a single-label name such as `food.example.com`. A deeper name (`app.food.example.com`) does not work through the orange cloud unless the zone has Cloudflare Advanced Certificate Manager. For that name, leave the record DNS-only.
 
 ## First-user flow
 

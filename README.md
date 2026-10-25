@@ -31,6 +31,17 @@ bun src/index.ts       # http://localhost:8080
 
 `bun run generate-oauth-creds` prints `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, and `SESSION_SECRET` (site cookie signing). Open Food Facts barcode lookup needs `OFF_USER_AGENT` in the form `Foodable (you@example.com)`.
 
+The app is set up to run on [Railway](docs/self-hosting.md#railway) against Supabase cloud. Go-live steps are in [docs/deploy-checklist.md](docs/deploy-checklist.md).
+
+## Docs
+
+| Doc                                                  | What it is                                                                             |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Supabase, Railway, an optional Cloudflare domain, and the first-user flow |
+| [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                                   |
+| [docs/roadmap.md](docs/roadmap.md)                   | After go-live: the Phase 8 contract, a plain-Postgres option, and sharing              |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                                  |
+
 ## Connecting an agent
 
 Point any MCP client at your own `/mcp` URL, for example `https://your-host/mcp`.
