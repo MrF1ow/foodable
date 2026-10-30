@@ -23,6 +23,7 @@ import {
     perPortionAmount,
     RecipeForbiddenError,
     RecipeInputError,
+    recipeSteps,
     resolveTotalPortions,
     removeRecipeIngredient,
     reorderRecipeIngredients,
@@ -1031,4 +1032,31 @@ test("total portions default to the members' sum and may only grow it", () => {
     expect(() => resolveTotalPortions(3, 2)).toThrow(/can't be less/);
     expect(() => resolveTotalPortions(0, 0)).toThrow(RecipeInputError);
     expect(() => resolveTotalPortions(0, Number.NaN)).toThrow(RecipeInputError);
+});
+
+test("recipeSteps splits lines and drops typed numbering", () => {
+    expect(recipeSteps(null)).toEqual([]);
+    expect(recipeSteps("  \n ")).toEqual([]);
+    expect(
+        recipeSteps("1. Boil water\n2) Add pasta\n\nStep 3: Drain\n- Serve"),
+    ).toEqual(["Boil water", "Add pasta", "Drain", "Serve"]);
+    expect(recipeSteps("1.5 cups flour into a bowl\r\nWhisk")).toEqual([
+        "1.5 cups flour into a bowl",
+        "Whisk",
+    ]);
+});
+
+test("recipeSteps treats paragraphs as steps when blank lines separate them", () => {
+    expect(
+        recipeSteps(
+            "Heat the oil\nin a large pan.\n\n2. Add onions\nand stir.",
+        ),
+    ).toEqual(["Heat the oil in a large pan.", "Add onions and stir."]);
+});
+
+test("recipeSteps wraps unnumbered lines into the numbered step above", () => {
+    expect(recipeSteps("1. Boil the water\nwith salt\n2. Add pasta")).toEqual([
+        "Boil the water with salt",
+        "Add pasta",
+    ]);
 });

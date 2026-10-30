@@ -278,7 +278,12 @@ recipesRoutes.post("/recipes/:id", requireMember, async (c) => {
         await updateRecipe(liveRecipesStore(), member.householdId, recipeId, {
             name: formText(body, "name"),
             yieldPortions: formAmount(body, "yield_portions"),
-            instructions: formText(body, "instructions"),
+            // Steps have their own form (/instructions); a form without
+            // the field must not clear them.
+            instructions:
+                "instructions" in body
+                    ? formText(body, "instructions")
+                    : undefined,
             sourceUrl: formText(body, "source_url"),
             tags: formText(body, "tags").split(","),
             notes: formText(body, "notes"),
@@ -292,6 +297,24 @@ recipesRoutes.post("/recipes/:id", requireMember, async (c) => {
         return c.html(page.html, page.status);
     }
     return redirectWithToast(c, `/recipes/${recipeId}`, "recipes.updated");
+});
+
+recipesRoutes.post("/recipes/:id/instructions", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    const body = await c.req.parseBody();
+    try {
+        await updateRecipe(liveRecipesStore(), member.householdId, recipeId, {
+            instructions: formText(body, "instructions"),
+        });
+    } catch (err) {
+        const page = await recipeFormError(userId, recipeId, err, {
+            openModalId: `recipe-method-${recipeId}`,
+        });
+        return c.html(page.html, page.status);
+    }
+    return redirectWithToast(c, `/recipes/${recipeId}`, "recipes.steps.saved");
 });
 
 recipesRoutes.post(

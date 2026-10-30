@@ -3732,6 +3732,34 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("get_recipe returns instructions as numbered steps", async () => {
+        await withUser(alice, async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Toast",
+                yield_portions: 1,
+                instructions: "1. Toast the bread\n2. Butter it",
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const got = await call("get_recipe", { id: recipeId });
+            expect(got.isError).toBeFalsy();
+            expect(got.structuredContent?.steps).toEqual([
+                "Toast the bread",
+                "Butter it",
+            ]);
+            expect(textOf(got)).toContain(
+                "Method:\n1. Toast the bread\n2. Butter it",
+            );
+            const cleared = await call("update_recipe", {
+                id: recipeId,
+                instructions: null,
+            });
+            expect(cleared.isError).toBeFalsy();
+            const empty = await call("get_recipe", { id: recipeId });
+            expect(empty.structuredContent?.steps).toEqual([]);
+            expect(textOf(empty)).not.toContain("Method:");
+        });
+    });
+
     test("cook_recipe deducts stock and logs one meal per member", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withUser(alice, async (call) => {

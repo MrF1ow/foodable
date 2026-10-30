@@ -1,8 +1,9 @@
 import { formatQuantityDisplayParts } from "../display-quantity.js";
-import type {
-    Recipe,
-    RecipeIngredientView,
-    RecipeMacros,
+import {
+    recipeSteps,
+    type Recipe,
+    type RecipeIngredientView,
+    type RecipeMacros,
 } from "../../domain/recipes.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
@@ -90,6 +91,10 @@ function deleteRecipeModalId(recipeId: string): string {
 
 function addIngredientModalId(recipeId: string): string {
     return `recipe-add-ingredient-${recipeId}`;
+}
+
+function methodModalId(recipeId: string): string {
+    return `recipe-method-${recipeId}`;
 }
 
 function cookModalId(recipeId: string): string {
@@ -276,6 +281,7 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
         editRecipeModalId(recipeId),
         deleteRecipeModalId(recipeId),
         addIngredientModalId(recipeId),
+        methodModalId(recipeId),
         cookModalId(recipeId),
         ...view.ingredients.flatMap((ingredient) => [
             editIngredientModalId(ingredient.id),
@@ -340,6 +346,7 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
     const editId = editRecipeModalId(recipeId);
     const deleteId = deleteRecipeModalId(recipeId);
     const addIngredientId = addIngredientModalId(recipeId);
+    const methodId = methodModalId(recipeId);
     const cookId = cookModalId(recipeId);
     const pickerId = `recipe-picker-${recipeId}`;
 
@@ -392,8 +399,6 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                 <input id="edit-prep" name="prep_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.prepMinutes == null ? "" : String(view.recipe.prepMinutes))}" />
                 <label for="edit-cook">Cook minutes</label>
                 <input id="edit-cook" name="cook_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.cookMinutes == null ? "" : String(view.recipe.cookMinutes))}" />
-                <label for="edit-instructions">Instructions</label>
-                <textarea id="edit-instructions" name="instructions" rows="8">${escapeHtml(view.recipe.instructions ?? "")}</textarea>
                 <label for="edit-notes">Notes</label>
                 <textarea id="edit-notes" name="notes" rows="3">${escapeHtml(view.recipe.notes ?? "")}</textarea>
                 <button type="submit" class="btn-primary">Save recipe</button>
@@ -418,6 +423,17 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
                 method: "post",
                 includeQuantity: true,
             })}`,
+        }) +
+        modal({
+            id: methodId,
+            title: "Method",
+            openOnLoad: modalOpen(view, methodId),
+            body: `${modalFormError(view, methodId)}<form class="recipe-method-form" method="post" action="/recipes/${recipeIdEsc}/instructions">
+                <label for="method-instructions">Steps</label>
+                <textarea id="method-instructions" name="instructions" rows="12" placeholder="Boil a large pot of salted water.\nCook the pasta until al dente.">${escapeHtml(view.recipe.instructions ?? "")}</textarea>
+                <p class="muted">One step per line. Leave a blank line between steps to write a step over several lines.</p>
+                <button type="submit" class="btn-primary">Save steps</button>
+            </form>`,
         }) +
         modal({
             id: cookId,
@@ -449,6 +465,27 @@ ${modalTrigger({
 })}
 </div>`,
     );
+
+    const steps = recipeSteps(view.recipe.instructions);
+    const methodHead = panelHead(
+        "Method",
+        `<div class="row-actions">
+${modalTrigger({
+    target: methodId,
+    label: steps.length === 0 ? "Add steps" : "Edit steps",
+    className: "btn-sm",
+})}
+</div>`,
+    );
+    const methodBody =
+        steps.length === 0
+            ? emptyState("No steps yet.", "empty-recipe-steps")
+            : `<ol class="recipe-steps">${steps
+                  .map((step) => `<li>${escapeHtml(step)}</li>`)
+                  .join("")}</ol>`;
+    const notes = view.recipe.notes
+        ? `<p class="recipe-notes muted">${escapeHtml(view.recipe.notes)}</p>`
+        : "";
 
     const cookHead = panelHead(
         "Cook and log",
@@ -485,6 +522,11 @@ ${modalTrigger({
         <section class="panel">
 ${ingredientsHead}
 <ul class="recipe-ingredients list">${rows}</ul>
+</section>
+        <section class="panel recipe-method">
+${methodHead}
+${methodBody}
+${notes}
 </section>
         <section class="panel">
 ${cookHead}
