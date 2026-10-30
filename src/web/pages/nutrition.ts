@@ -17,7 +17,7 @@ import {
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
 import { isWeightUnit, toGrams, type WeightUnit } from "../../domain/units.js";
-import { getEmbedCss, getWidgetHtml, withWidgetData } from "../../widgets.js";
+import { getEmbedWidgetHtml } from "../../widgets.js";
 import {
     escapeHtml,
     renderAppShell,
@@ -73,15 +73,21 @@ export function viewerChromeFromProfile(
 }
 
 async function widgetCard(
-    key: string,
+    key: NutritionCard,
     data: unknown,
     chrome: ViewerChrome,
 ): Promise<string> {
-    const html = withWidgetData(await getWidgetHtml(key), data, {
-        theme: chrome.theme,
-        skin: await getEmbedCss(),
-    });
-    return `<iframe class="widget-frame" title="${escapeHtml(key)}" srcdoc="${escapeHtml(html)}"></iframe>`;
+    // Static document is cached by ?v=. The JSON and the explicit theme ride
+    // on the element; the frame's seed script reads them before paint.
+    // "system" leaves data-theme off so the widget follows the media query.
+    const { hash } = await getEmbedWidgetHtml(key);
+    const src = `/app/widgets/${key}?v=${hash}`;
+    const themeAttr =
+        chrome.theme === "system"
+            ? ""
+            : ` data-theme="${escapeHtml(chrome.theme)}"`;
+    const json = JSON.stringify(data ?? null);
+    return `<iframe class="widget-frame" title="${escapeHtml(key)}" src="${escapeHtml(src)}" data-widget-data="${escapeHtml(json)}"${themeAttr}></iframe>`;
 }
 
 function mealTypeSelect(): string {

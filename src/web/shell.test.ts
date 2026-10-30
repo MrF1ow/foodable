@@ -181,10 +181,10 @@ test("the appearance form maps System to a cleared preference", () => {
 });
 
 // The frame-sizing script lives in src/web/client/shell.js (served as /app.js
-// with defer). A srcdoc widget frame does not wait for /app.css, so it can
-// finish loading and post its first size-changed before the script attaches
-// a listener. Run the real script against a frame that has already loaded
-// and check it is sized without any load event or message.
+// with defer). A widget frame can finish loading and post its first
+// size-changed before the script attaches a listener. Run the real script
+// against a frame that has already loaded and check it is sized without any
+// load event or message.
 function runFrameSizer(contentHeight: number) {
     const script = SHELL_JS;
     const listeners: Record<string, ((e: unknown) => void)[]> = {};
@@ -238,6 +238,169 @@ test("a frame still on about:blank is left alone until it reports", () => {
     expect(frame.style.height).toBe("");
     post(contentWindow, 300);
     expect(frame.style.height).toBe("300px");
+});
+
+class FakeWidgetFrame {
+    classList = { contains: (name: string) => name === "widget-frame" };
+    style = { height: "" };
+    // Counts src re-sets: that is how shell.js reloads a frame.
+    reloads = 0;
+    private attrs: Record<string, string>;
+
+    constructor(attrs: Record<string, string>, height = "") {
+        this.attrs = { ...attrs };
+        this.style.height = height;
+    }
+
+    getAttribute(name: string): string | null {
+        return Object.prototype.hasOwnProperty.call(this.attrs, name)
+            ? this.attrs[name]!
+            : null;
+    }
+
+    setAttribute(name: string, value: string) {
+        if (name === "src") this.reloads += 1;
+        this.attrs[name] = value;
+    }
+
+    removeAttribute(name: string) {
+        delete this.attrs[name];
+    }
+}
+
+function runWidgetMorph() {
+    // shell.js looks up HTMLIFrameElement on the real global. This runtime
+    // has no DOM lib, so the test installs the fake constructor there.
+    const iframeGlobal = globalThis as typeof globalThis & {
+        HTMLIFrameElement?: typeof FakeWidgetFrame;
+    };
+    const prev = iframeGlobal.HTMLIFrameElement;
+    iframeGlobal.HTMLIFrameElement = FakeWidgetFrame;
+    const listeners: Record<string, ((e: unknown) => void)[]> = {};
+    const document = {
+        documentElement: { classList: { add() {} } },
+        querySelectorAll: () => [],
+        addEventListener(type: string, fn: (e: unknown) => void) {
+            (listeners[type] ??= []).push(fn);
+        },
+    };
+    const window = { addEventListener() {} };
+    new Function("document", "window", "Element", SHELL_JS)(
+        document,
+        window,
+        class Element {},
+    );
+    const fire = (type: string, detail: unknown) => {
+        let prevented = false;
+        for (const fn of listeners[type] ?? []) {
+            fn({
+                detail,
+                preventDefault() {
+                    prevented = true;
+                },
+            });
+        }
+        return prevented;
+    };
+    return {
+        fire,
+        restore() {
+            if (prev) iframeGlobal.HTMLIFrameElement = prev;
+            else delete iframeGlobal.HTMLIFrameElement;
+        },
+    };
+}
+
+const FRAME_SRC = "/app/widgets/trends?v=abc123abc123";
+
+test("a widget frame is kept when src, data, and theme all match", () => {
+    const { fire, restore } = runWidgetMorph();
+    try {
+        const current = new FakeWidgetFrame(
+            {
+                src: FRAME_SRC,
+                "data-widget-data": '{"n":1}',
+                "data-theme": "light",
+            },
+            "480px",
+        );
+        const next = new FakeWidgetFrame({
+            src: FRAME_SRC,
+            "data-widget-data": '{"n":1}',
+            "data-theme": "light",
+        });
+        const prevented = fire("turbo:before-morph-element", {
+            currentElement: current,
+            newElement: next,
+        });
+        expect(prevented).toBe(true);
+        fire("turbo:morph-element", { currentElement: current });
+        expect(current.reloads).toBe(0);
+        expect(current.style.height).toBe("480px");
+    } finally {
+        restore();
+    }
+});
+
+test("a same-src widget frame reloads when data or theme changes and keeps its height", () => {
+    const { fire, restore } = runWidgetMorph();
+    try {
+        const current = new FakeWidgetFrame(
+            {
+                src: FRAME_SRC,
+                "data-widget-data": '{"n":1}',
+                "data-theme": "dark",
+            },
+            "480px",
+        );
+        const next = new FakeWidgetFrame({
+            src: FRAME_SRC,
+            "data-widget-data": '{"n":2}',
+            "data-theme": "light",
+        });
+        const prevented = fire("turbo:before-morph-element", {
+            currentElement: current,
+            newElement: next,
+        });
+        expect(prevented).toBe(false);
+        // The morph copies attributes and drops the fitted inline height.
+        current.setAttribute("data-widget-data", '{"n":2}');
+        current.setAttribute("data-theme", "light");
+        current.style.height = "";
+        fire("turbo:morph-element", { currentElement: current });
+        expect(current.reloads).toBe(1);
+        expect(current.style.height).toBe("480px");
+    } finally {
+        restore();
+    }
+});
+
+test("a widget frame whose src changed keeps its height and is not reloaded twice", () => {
+    const { fire, restore } = runWidgetMorph();
+    try {
+        const current = new FakeWidgetFrame(
+            { src: FRAME_SRC, "data-widget-data": '{"n":1}' },
+            "480px",
+        );
+        const next = new FakeWidgetFrame({
+            src: "/app/widgets/trends?v=fff000fff000",
+            "data-widget-data": '{"n":1}',
+        });
+        const prevented = fire("turbo:before-morph-element", {
+            currentElement: current,
+            newElement: next,
+        });
+        expect(prevented).toBe(false);
+        // The morph itself sets the new src (one navigation) and drops the
+        // fitted inline height.
+        current.setAttribute("src", "/app/widgets/trends?v=fff000fff000");
+        current.style.height = "";
+        fire("turbo:morph-element", { currentElement: current });
+        expect(current.reloads).toBe(1);
+        expect(current.style.height).toBe("480px");
+    } finally {
+        restore();
+    }
 });
 
 function runShellScript(

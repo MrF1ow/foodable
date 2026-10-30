@@ -34,7 +34,8 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
-import { getAppCss, getAppJs } from "../src/widgets.js";
+import { isNutritionCard } from "../src/domain/layout.js";
+import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4791;
@@ -446,8 +447,11 @@ function routeHtmlFile(pathname: string): string {
 
 function applyAccountTheme(html: string): string {
     if (accountTheme === "light" || accountTheme === "dark") return html;
+    // System follows the OS. The light render stamps data-theme on <html>
+    // and on each widget frame; every stamp has to come off or the cards
+    // stay light while the page does not.
     return html
-        .replace(/\sdata-theme="(light|dark)"/, "")
+        .replace(/\sdata-theme="(light|dark)"/g, "")
         .replace(
             /<meta name="foodable-theme" content="[^"]+" \/>/,
             '<meta name="foodable-theme" content="system" />',
@@ -618,6 +622,21 @@ const server = Bun.serve({
                 postDelay,
                 sessionMode,
                 accountTheme,
+            });
+        }
+        if (path.startsWith("/app/widgets/")) {
+            let key = path.slice("/app/widgets/".length);
+            try {
+                key = decodeURIComponent(key);
+            } catch {
+                return new Response("not found", { status: 404 });
+            }
+            if (!isNutritionCard(key)) {
+                return new Response("not found", { status: 404 });
+            }
+            const doc = await getEmbedWidgetHtml(key);
+            return new Response(doc.html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
         if (path === "/app.css" || path === "/app.js") {

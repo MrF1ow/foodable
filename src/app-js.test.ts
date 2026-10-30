@@ -193,7 +193,9 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         expect(scriptBodies(html)).toEqual([]);
     }
     expect(nutrition).toContain("widget-frame");
-    expect(nutrition).toContain("&lt;script&gt;");
+    expect(nutrition).not.toContain("srcdoc");
+    expect(nutrition).toContain('src="/app/widgets/');
+    expect(nutrition).not.toContain("&lt;script&gt;");
 });
 
 test("the Fridge page ships the picker logic once", async () => {

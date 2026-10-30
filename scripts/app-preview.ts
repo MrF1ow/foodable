@@ -36,7 +36,8 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
-import { getAppCss, getAppJs } from "../src/widgets.js";
+import { isNutritionCard } from "../src/domain/layout.js";
+import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4787;
@@ -493,6 +494,21 @@ const server = Bun.serve({
     port: PORT,
     async fetch(req) {
         const path = new URL(req.url).pathname;
+        if (path.startsWith("/app/widgets/")) {
+            let key = path.slice("/app/widgets/".length);
+            try {
+                key = decodeURIComponent(key);
+            } catch {
+                return new Response("not found", { status: 404 });
+            }
+            if (!isNutritionCard(key)) {
+                return new Response("not found", { status: 404 });
+            }
+            const doc = await getEmbedWidgetHtml(key);
+            return new Response(doc.html, {
+                headers: { "content-type": "text/html; charset=utf-8" },
+            });
+        }
         if (path === "/app.css") {
             return new Response(await getAppCss(), {
                 headers: { "content-type": "text/css; charset=utf-8" },

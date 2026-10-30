@@ -67,7 +67,10 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     expect(html).toContain('title="goal-progress"');
     expect(html).toContain('title="trends"');
     expect(html).toContain('title="weight-trends"');
-    expect(html).toContain("window.__WIDGET_DATA__=");
+    expect(html).not.toContain("srcdoc");
+    expect(html).not.toContain("window.__WIDGET_DATA__=");
+    expect(html).toContain('src="/app/widgets/nutrition-summary?v=');
+    expect(html).toContain("data-widget-data=");
     expect(html).toContain('href="/logout"');
     expect(html).not.toContain('action="/approve"');
     expect(html).toContain(`href="/?member=${bob.userId}"`);
@@ -77,6 +80,74 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     expect(html).toContain('action="/log-water"');
     expect(html).toContain('action="/log-weight"');
     expect(html).not.toContain('class="error-banner"');
+});
+
+function unescapeHtml(value: string): string {
+    return value
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&");
+}
+
+function widgetFrameTag(html: string, key: string): string {
+    const tag = html.match(
+        new RegExp(`<iframe class="widget-frame" title="${key}"[^>]*>`),
+    );
+    expect(tag, key).not.toBeNull();
+    return tag![0];
+}
+
+test("dashboard frames round-trip widget data and cannot break out of the attribute", async () => {
+    const nasty = `Tom & "Jerry"><script>alert(1)</script></iframe></script>`;
+    const summary = { locale: "en", meals: [{ name: nasty }] };
+    const goals = { locale: "en", note: nasty };
+    const trends = { locale: "en", label: "a < b" };
+    const weight = { locale: "en", unit: "kg", name: nasty };
+    const html = await renderDashboardHtml({
+        access: { ok: true, mode: "self", viewer: alice, subject: alice },
+        members: [alice],
+        summary,
+        goals,
+        trends,
+        weight,
+        chrome: lightChrome,
+        cardOrder: defaultCardOrder,
+    });
+    expect(html).not.toContain("srcdoc");
+    expect(html).not.toContain("<script>alert");
+    expect(html).not.toContain('"><script>');
+    const payloads: Record<string, unknown> = {
+        "nutrition-summary": summary,
+        "goal-progress": goals,
+        trends,
+        "weight-trends": weight,
+    };
+    for (const key of NUTRITION_CARDS) {
+        const tag = widgetFrameTag(html, key);
+        expect(tag).toMatch(
+            new RegExp(`src="/app/widgets/${key}\\?v=[a-f0-9]{12}"`),
+        );
+        expect(tag).toContain('data-theme="light"');
+        const encoded = tag.match(/data-widget-data="([^"]*)"/)?.[1];
+        expect(encoded, key).toBeDefined();
+        expect(JSON.parse(unescapeHtml(encoded ?? ""))).toEqual(payloads[key]);
+    }
+
+    const system = await renderDashboardHtml({
+        access: { ok: true, mode: "self", viewer: alice, subject: alice },
+        members: [alice],
+        summary,
+        goals,
+        trends,
+        weight,
+        chrome: { theme: "system" },
+        cardOrder: defaultCardOrder,
+    });
+    for (const key of NUTRITION_CARDS) {
+        expect(widgetFrameTag(system, key)).not.toContain("data-theme");
+    }
+    expect(system).not.toContain("data-theme");
 });
 
 test("log-weight form follows the viewer's weight unit", async () => {
