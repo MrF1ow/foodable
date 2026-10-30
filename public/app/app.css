@@ -642,9 +642,10 @@ details.more > summary .count {
 
 /* ---- widgets embedded in the page ---- */
 
-/* Widgets render in srcdoc iframes whose .wrap.tight adds a 12px gutter
+/* Widgets render in same-origin iframes whose .wrap.tight adds a 12px gutter
    (14px from 560px; base.css). Pull the frame out by the same amount so the
-   widget card's edges line up with the page's own panels. */
+   widget card's edges line up with the page's own panels. min-height is the
+   slot before the frame reports its content height. */
 .widget-frame {
     display: block;
     width: calc(100% + 24px);

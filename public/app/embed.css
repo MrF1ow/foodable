@@ -1,6 +1,7 @@
-/* Skin for a widget the household app embeds (withWidgetData in
- * src/widgets.ts injects it as the last <style> in the frame). Chat hosts
- * never receive it, so a widget served over MCP looks exactly as before. */
+/* Skin for a widget the household app embeds. getEmbedWidgetHtml (the
+ * /app/widgets/:key document) and withWidgetData both append this as the
+ * frame's last <style>. Chat hosts never receive it, so a widget served
+ * over MCP looks exactly as before. */
 /*@include ../../app/brand.css@*/
 
 /* The page behind the frame carries the glow; a painted body would cut a

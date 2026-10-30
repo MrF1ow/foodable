@@ -192,17 +192,72 @@ document.addEventListener("turbo:before-render", (event) => {
     }
 });
 
+// Fitted height lives on the iframe's inline style. A morph replaces the
+// element from server HTML, which has no inline height, so a same-src frame
+// would collapse to the CSS min-height and also keep painting the previous
+// payload: changing data-widget-data does not navigate an iframe.
+const widgetFramesToReload = new Set();
+const widgetFrameHeight = new WeakMap();
+
+function widgetFrameAttr(el, name) {
+    return el.getAttribute(name) || "";
+}
+
+function reloadWidgetFrame(frame) {
+    try {
+        const win = frame.contentWindow;
+        if (win && win.location && typeof win.location.reload === "function") {
+            win.location.reload();
+            return;
+        }
+    } catch (_) {}
+    const src = frame.getAttribute("src");
+    if (!src) return;
+    frame.removeAttribute("src");
+    frame.setAttribute("src", src);
+}
+
 document.addEventListener("turbo:before-morph-element", (event) => {
     const { currentElement, newElement } = event.detail || {};
     if (
-        currentElement instanceof HTMLIFrameElement &&
-        currentElement.classList.contains("widget-frame") &&
-        newElement instanceof HTMLIFrameElement
+        !(currentElement instanceof HTMLIFrameElement) ||
+        !currentElement.classList.contains("widget-frame") ||
+        !(newElement instanceof HTMLIFrameElement)
     ) {
-        const oldDoc = currentElement.getAttribute("srcdoc") || "";
-        const newDoc = newElement.getAttribute("srcdoc") || "";
-        if (oldDoc === newDoc) event.preventDefault();
+        return;
     }
+    const srcSame =
+        widgetFrameAttr(currentElement, "src") ===
+        widgetFrameAttr(newElement, "src");
+    const dataSame =
+        widgetFrameAttr(currentElement, "data-widget-data") ===
+        widgetFrameAttr(newElement, "data-widget-data");
+    const themeSame =
+        widgetFrameAttr(currentElement, "data-theme") ===
+        widgetFrameAttr(newElement, "data-theme");
+    if (srcSame && dataSame && themeSame) {
+        event.preventDefault();
+        return;
+    }
+    if (srcSame) {
+        widgetFrameHeight.set(
+            currentElement,
+            currentElement.style.height || "",
+        );
+        widgetFramesToReload.add(currentElement);
+    }
+});
+
+document.addEventListener("turbo:morph-element", (event) => {
+    const frame = event.detail && event.detail.currentElement;
+    if (!frame || !widgetFramesToReload.has(frame)) return;
+    widgetFramesToReload.delete(frame);
+    const height = widgetFrameHeight.get(frame);
+    widgetFrameHeight.delete(frame);
+    // Restore before the browser paints the morphed tree, then reload so the
+    // seed script reads the new data-widget-data / data-theme.
+    if (height) frame.style.height = height;
+    reloadWidgetFrame(frame);
 });
 
 // html.fx is set inside a frame, never under prefers-reduced-motion, so a

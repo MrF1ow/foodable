@@ -4954,7 +4954,10 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("<h1>Alice</h1>");
         expect(html).toContain("widget-frame");
-        expect(html).toContain("window.__WIDGET_DATA__=");
+        expect(html).not.toContain("srcdoc");
+        expect(html).not.toContain("window.__WIDGET_DATA__=");
+        expect(html).toContain('src="/app/widgets/nutrition-summary?v=');
+        expect(html).toContain("data-widget-data=");
         expect(html).toContain('title="nutrition-summary"');
         expect(html).not.toContain("You can look, not edit");
         expect(html).not.toContain('action="/approve"');
