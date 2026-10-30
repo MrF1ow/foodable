@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { sharedDialogItem } from "./shared-dialog.js";
 import {
     confirmModal,
     disclosure,
@@ -255,6 +256,61 @@ test("modal, modalTrigger, and confirmModal markup", () => {
             data: { 'a"b': "c&d" },
         }),
     ).toContain('data-a&quot;b="c&amp;d"');
+
+    const hostile = `"><img src=x onerror=alert(1)>`;
+    const filled = modalTrigger({
+        target: "fridge-edit-food",
+        label: "Edit",
+        fill: {
+            action: "/fridge/items/1",
+            title: `Edit ${hostile}`,
+            message: "Remove it?",
+            fields: { qty_amount: 6, archived: true, note: null },
+        },
+    });
+    expect(filled).toContain('data-fill-action="/fridge/items/1"');
+    expect(filled).toContain(
+        'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(filled).toContain('data-fill-message="Remove it?"');
+    expect(filled).toContain('data-fill-field-qty_amount="6"');
+    expect(filled).toContain('data-fill-field-archived="true"');
+    expect(filled).toContain('data-fill-field-note=""');
+    expect(filled).not.toContain("<img");
+
+    expect(
+        modal({
+            id: "shared",
+            title: "Edit item",
+            submitDisabled: true,
+            body: `<form><button type="submit" class="btn-primary">Save</button></form>`,
+        }),
+    ).toContain('<button type="submit" class="btn-primary" disabled>');
+});
+
+test("sharedDialogItem maps a per-item reopen id onto the item", () => {
+    const eggs = { id: "it-1", name: "Eggs" };
+    expect(
+        sharedDialogItem({
+            openModalId: "fridge-edit-it-1",
+            prefix: "fridge-edit-",
+            lookup: (id) => (id === eggs.id ? eggs : null),
+        }),
+    ).toEqual({ item: eggs, openModalId: "fridge-edit-it-1" });
+    expect(
+        sharedDialogItem({
+            openModalId: "fridge-edit-gone",
+            prefix: "fridge-edit-",
+            lookup: () => null,
+        }),
+    ).toBeNull();
+    expect(
+        sharedDialogItem({
+            openModalId: "fridge-add-location",
+            prefix: "fridge-edit-",
+            lookup: () => eggs,
+        }),
+    ).toBeNull();
 });
 
 test("no page module contains a raw <h1", () => {

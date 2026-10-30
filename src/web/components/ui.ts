@@ -70,17 +70,61 @@ export function emptyState(text: string, className = "empty"): string {
     return `<p class="${className}">${escapeHtml(text)}</p>`;
 }
 
+/** Values copied onto a shared dialog when its trigger opens it. */
+export type ModalFill = {
+    action?: string;
+    title?: string;
+    message?: string;
+    fields?: Record<string, string | number | boolean | null>;
+};
+
+function fillValue(value: string | number | boolean | null): string {
+    if (value == null) return "";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return String(value);
+}
+
+function fillAttributes(fill: ModalFill | undefined): string {
+    if (!fill) return "";
+    const attrs: [string, string][] = [];
+    if (fill.action != null) attrs.push(["fill-action", fill.action]);
+    if (fill.title != null) attrs.push(["fill-title", fill.title]);
+    if (fill.message != null) attrs.push(["fill-message", fill.message]);
+    for (const [name, value] of Object.entries(fill.fields ?? {})) {
+        attrs.push([`fill-field-${name}`, fillValue(value)]);
+    }
+    return attrs
+        .map(
+            ([key, value]) => ` data-${escapeHtml(key)}="${escapeHtml(value)}"`,
+        )
+        .join("");
+}
+
+/** An unfilled shared dialog cannot post until the client copies a target in. */
+function disableSubmitButtons(html: string): string {
+    return html.replace(/<button\b([^>]*)>/gi, (full, attrs: string) => {
+        if (!/\btype\s*=\s*"submit"/.test(attrs)) return full;
+        if (/\bdisabled\b/.test(attrs)) return full;
+        return `<button${attrs} disabled>`;
+    });
+}
+
 export function modal(opts: {
     id: string;
     title: string;
     body: string;
     size?: string;
     openOnLoad?: boolean;
+    /** Disable submit buttons in `body` (a shared dialog not yet filled). */
+    submitDisabled?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const titleId = `${id}-title`;
     const sizeCls = opts.size ? ` modal--${escapeHtml(opts.size)}` : "";
     const reopen = opts.openOnLoad ? " data-modal-open-on-load" : "";
+    const body = opts.submitDisabled
+        ? disableSubmitButtons(opts.body)
+        : opts.body;
     return `<dialog class="modal${sizeCls}" id="${id}" aria-labelledby="${titleId}"${reopen}>
 <div class="modal-sheet">
 <div class="modal-handle" aria-hidden="true"></div>
@@ -89,7 +133,7 @@ export function modal(opts: {
 <button type="button" class="modal-close" command="close" commandfor="${id}" aria-label="Close"><span aria-hidden="true">×</span></button>
 </header>
 <div class="modal-body">
-${opts.body}
+${body}
 </div>
 </div>
 </dialog>`;
@@ -103,6 +147,8 @@ export function modalTrigger(opts: {
     icon?: string;
     /** Extra `data-*` attributes. Both the key and the value are escaped. */
     data?: Record<string, string>;
+    /** Declarative `data-fill-*` attributes for a shared dialog. */
+    fill?: ModalFill;
 }): string {
     const cls = opts.className ?? "btn-primary";
     const aria = escapeHtml(opts.label);
@@ -116,7 +162,8 @@ export function modalTrigger(opts: {
               )
               .join("")
         : "";
-    return `<button type="button" class="${escapeHtml(cls)}" commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}${data}>${inner}</button>`;
+    const fill = fillAttributes(opts.fill);
+    return `<button type="button" class="${escapeHtml(cls)}" commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}${data}${fill}>${inner}</button>`;
 }
 
 export function confirmModal(opts: {

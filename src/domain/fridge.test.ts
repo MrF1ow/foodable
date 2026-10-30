@@ -311,12 +311,15 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     expect(itemChunk).toContain('aria-label="Delete Eggs"');
     expect(itemChunk).toContain('class="btn-sm btn-icon btn-danger"');
     expect(itemChunk).toContain('data-item-id="it-1"');
-    expect(itemChunk).toContain('data-item-name="Eggs"');
-    expect(itemChunk).toContain('data-item-kind="food"');
-    expect(itemChunk).toContain('data-item-amount="6"');
-    expect(itemChunk).toContain('data-item-unit="each"');
-    expect(itemChunk).toContain('data-item-location="loc-1"');
-    expect(itemChunk).toContain(`data-item-expires="${expiresOn}"`);
+    expect(itemChunk).toContain('data-fill-action="/fridge/items/it-1"');
+    expect(itemChunk).toContain('data-fill-title="Edit Eggs"');
+    expect(itemChunk).toContain('data-fill-field-qty_amount="6"');
+    expect(itemChunk).toContain('data-fill-field-qty_unit="each"');
+    expect(itemChunk).toContain('data-fill-field-location_id="loc-1"');
+    expect(itemChunk).toContain(`data-fill-field-expires_on="${expiresOn}"`);
+    expect(itemChunk).toContain(
+        'data-fill-message="Remove Eggs from the fridge?"',
+    );
     expect(html).not.toMatch(
         /<details class="more">\s*<summary>Edit<\/summary>/,
     );
@@ -398,9 +401,9 @@ test("supply items omit the eat icon action", () => {
     expect(itemChunk).toContain('commandfor="fridge-delete-item"');
     expect(itemChunk).not.toContain('commandfor="fridge-edit-food"');
     expect(itemChunk).toContain('data-item-id="it-sup"');
-    expect(itemChunk).toContain('data-item-kind="supply"');
-    expect(itemChunk).toContain('data-item-unit="roll"');
-    expect(itemChunk).toContain('data-item-expires=""');
+    expect(itemChunk).toContain('data-fill-action="/fridge/items/it-sup"');
+    expect(itemChunk).toContain('data-fill-field-qty_unit="roll"');
+    expect(itemChunk).toContain('data-fill-field-expires_on=""');
 });
 
 test("a server error reopens the modal that submitted the form", () => {
@@ -637,7 +640,7 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
     expect(html.match(/id="move-edit-supply"/g)?.length).toBe(1);
     expect(html.match(/<dialog\b/g)?.length).toBe(1 + locations.length * 3 + 3);
     expect(html).toContain(
-        'data-item-name="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+        'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
     expect(html).toContain(
         'aria-label="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',

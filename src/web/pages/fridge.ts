@@ -12,6 +12,7 @@ import {
     renderFridgeItemRow,
 } from "../components/page-markup.js";
 import { iconPencil, iconTrash } from "../components/icons.js";
+import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
     emptyState,
@@ -20,6 +21,7 @@ import {
     modalTrigger,
     pageHeader,
     pageLevelErrorBanner,
+    type ModalFill,
 } from "../components/ui.js";
 import {
     expiryLevel,
@@ -78,17 +80,7 @@ const FRIDGE_EDIT_FOOD_ID = "fridge-edit-food";
 const FRIDGE_EDIT_SUPPLY_ID = "fridge-edit-supply";
 const FRIDGE_DELETE_ITEM_ID = "fridge-delete-item";
 
-function openItemId(
-    openModalId: string | undefined,
-    prefix: string,
-): string | null {
-    if (!openModalId?.startsWith(prefix)) return null;
-    const id = openModalId.slice(prefix.length);
-    return id.length > 0 ? id : null;
-}
-
-function itemById(view: FridgePageView, id: string | null): FridgeItem | null {
-    if (!id) return null;
+function findItem(view: FridgePageView, id: string): FridgeItem | null {
     return view.items.find((item) => item.id === id) ?? null;
 }
 
@@ -99,51 +91,68 @@ function itemById(view: FridgePageView, id: string | null): FridgeItem | null {
  * repeated under the header. An unknown id stays off the list.
  */
 function sharedItemErrorId(view: FridgePageView): string | null {
-    if (!view.error || !view.openModalId) return null;
-    const editId = openItemId(view.openModalId, "fridge-edit-");
-    if (editId && itemById(view, editId)) return view.openModalId;
-    const deleteId = openItemId(view.openModalId, "fridge-delete-");
-    if (deleteId && itemById(view, deleteId)) return view.openModalId;
-    return null;
+    if (!view.error) return null;
+    const edit = sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix: "fridge-edit-",
+        lookup: (id) => findItem(view, id),
+    });
+    if (edit) return edit.openModalId;
+    const remove = sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix: "fridge-delete-",
+        lookup: (id) => findItem(view, id),
+    });
+    return remove ? remove.openModalId : null;
 }
 
 function editReopenItem(
     view: FridgePageView,
     kind: FridgeItem["kind"],
 ): FridgeItem | null {
-    const item = itemById(view, openItemId(view.openModalId, "fridge-edit-"));
-    if (!item || item.kind !== kind) return null;
-    return item;
+    const match = sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix: "fridge-edit-",
+        lookup: (id) => findItem(view, id),
+    });
+    if (!match || match.item.kind !== kind) return null;
+    return match.item;
 }
 
-function itemTriggerData(item: FridgeItem): Record<string, string> {
+function itemFill(item: FridgeItem, mode: "edit" | "delete"): ModalFill {
+    if (mode === "delete") {
+        return {
+            action: `/fridge/items/${item.id}/delete`,
+            message: `Remove ${item.displayName} from the fridge?`,
+        };
+    }
     return {
-        "item-id": item.id,
-        "item-name": item.displayName,
-        "item-kind": item.kind,
-        "item-amount": String(item.quantity.amount),
-        "item-unit": item.quantity.unit,
-        "item-location": item.locationId,
-        "item-expires": item.expiresOn ?? "",
+        action: `/fridge/items/${item.id}`,
+        title: `Edit ${item.displayName}`,
+        fields: {
+            qty_amount: item.quantity.amount,
+            qty_unit: item.quantity.unit,
+            location_id: item.locationId,
+            expires_on: item.expiresOn ?? "",
+        },
     };
 }
 
 function itemRow(item: FridgeItem, today: string): string {
     const editTarget =
         item.kind === "supply" ? FRIDGE_EDIT_SUPPLY_ID : FRIDGE_EDIT_FOOD_ID;
-    const data = itemTriggerData(item);
     const rowActions = `${modalTrigger({
         target: editTarget,
         label: `Edit ${item.displayName}`,
         className: "btn-sm btn-icon",
         icon: iconPencil(),
-        data,
+        fill: itemFill(item, "edit"),
     })}${modalTrigger({
         target: FRIDGE_DELETE_ITEM_ID,
         label: `Delete ${item.displayName}`,
         className: "btn-sm btn-icon btn-danger",
         icon: iconTrash(),
-        data,
+        fill: itemFill(item, "delete"),
     })}`;
     return renderFridgeItemRow({
         id: item.id,
@@ -207,13 +216,18 @@ function sharedEditModal(
         openOnLoad: open,
         body: `${open ? modalError(view, openId) : ""}<form class="fridge-item-edit" method="post" action="${escapeHtml(action)}">
 ${editFields(kind, locations, item)}
-<button type="submit" class="btn-primary"${item ? "" : " disabled"}>Save</button>
+<button type="submit" class="btn-primary">Save</button>
 </form>`,
+        submitDisabled: item == null,
     });
 }
 
 function sharedDeleteModal(view: FridgePageView): string {
-    const item = itemById(view, openItemId(view.openModalId, "fridge-delete-"));
+    const item = sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix: "fridge-delete-",
+        lookup: (id) => findItem(view, id),
+    })?.item;
     const openId = item ? `fridge-delete-${item.id}` : "";
     const open = item != null && modalOpen(view, openId);
     return confirmModal({
