@@ -227,6 +227,18 @@ describe("response compression", () => {
         expect([...body.subarray(0, 4)]).toEqual([0x77, 0x4f, 0x46, 0x32]);
     });
 
+    // Hono's default filter would gzip image/x-icon; the allowlist must not.
+    test.each(["/favicon.ico", "/apple-touch-icon.png"])(
+        "does not gzip %s",
+        async (path) => {
+            const r = await app.request(`http://x${path}`, {
+                headers: { "Accept-Encoding": "gzip" },
+            });
+            expect(r.status).toBe(200);
+            expect(r.headers.get("Content-Encoding")).toBeNull();
+        },
+    );
+
     test("keeps security headers on a gzipped response", async () => {
         const r = await app.request("http://x/app.css", {
             headers: { "Accept-Encoding": "gzip" },

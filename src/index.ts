@@ -65,27 +65,18 @@ app.use("*", async (c, next) => {
     );
 });
 
-// Response compression for the household app. The nutrition page is hundreds
-// of kilobytes of HTML, and /app.css and /app.js ride along on every tab
-// visit; over Tailscale that transfer is most of the navigation time. Hono's
-// compress negotiates from Accept-Encoding and only gzip is offered.
-// Registered after the access log, which stays outermost and still records
-// the final status, and before the security-header middleware, so those
-// headers are already on the response when compress copies it into the
-// encoded one. compress() sets Vary: Accept-Encoding on the responses it
-// encodes, and it leaves a response alone when Content-Encoding is already
-// set.
+// Response compression. The nutrition page is hundreds of kilobytes of HTML,
+// and over Tailscale that transfer was most of a tab visit. gzip only,
+// negotiated from Accept-Encoding; compress() adds Vary: Accept-Encoding.
+// Order matters three ways: inside the access log, so it logs the final
+// status; outside the security headers, so compress() copies them onto the
+// encoded response; outside flashToastMiddleware, which reads the HTML body
+// as text and would otherwise read gzip bytes.
 //
-// /mcp is skipped by path, before compress() runs, so its body is never
-// piped through CompressionStream. That endpoint can answer text/event-stream,
-// and gzip holds bytes until the stream finishes, which breaks incremental
-// flushing. A content-type check would be too late for a streamed
-// application/json body: it has no Content-Length, so the 1024-byte default
-// threshold would not save it. /health is skipped too — a two-byte probe
-// should stay one. The allowlist is narrower than Hono's default, which
-// would gzip image/x-icon and font/ttf. woff2, PNG, and ICO are already
-// compressed. text/event-stream is refused on every other path as well.
-// Bodies that advertise a Content-Length under 1024 bytes stay raw.
+// /mcp is skipped by path. It can stream, gzip holds bytes until the stream
+// ends, and a streamed application/json body would pass a content-type check.
+// Fonts and images are already compressed, so the allowlist is narrower than
+// Hono's default (which includes image/x-icon).
 const COMPRESSIBLE_TYPES = new Set([
     "text/html",
     "text/css",
@@ -113,7 +104,9 @@ const gzipResponses = compress({
 
 app.use("*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
-    if (path === "/mcp" || path === "/health") return next();
+    if (path === "/mcp" || path.startsWith("/mcp/") || path === "/health") {
+        return next();
+    }
     return gzipResponses(c, next);
 });
 
