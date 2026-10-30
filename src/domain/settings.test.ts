@@ -116,6 +116,8 @@ test("owner household page has add-member form on /settings/household only", () 
             { member: bob, rules: [], allergens: [], dislikes: [] },
         ],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
     });
     expect(html).toContain("<h1>Household</h1>");
     expect(html).toContain('href="/settings/foods"');
@@ -152,6 +154,8 @@ test("member household page is read-only without add-member", () => {
             { member: bob, rules: [], allergens: [], dislikes: [] },
         ],
         isOwner: false,
+        canManage: false,
+        viewerUserId: bob.userId,
     });
     expect(html).toContain("Seattle");
     expect(html).not.toContain('action="/settings/household"');
@@ -172,11 +176,13 @@ test("household settings groups owner tools into cards and modals", () => {
             {
                 member: alice,
                 rules: [],
-                allergens: [{ allergen: "peanut", otherLabel: null }],
-                dislikes: [{ displayName: "Olives" }],
+                allergens: [{ id: "a1", allergen: "peanut", otherLabel: null }],
+                dislikes: [{ id: "d1", displayName: "Olives" }],
             },
         ],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
     } as never);
     expect(html).toContain(
         '<a href="/settings/household" aria-current="page">Household</a>',
@@ -190,4 +196,99 @@ test("household settings groups owner tools into cards and modals", () => {
     expect(html).toContain(
         '<form method="post" action="/settings/household/name" class="household-name inline-form">',
     );
+});
+
+test("owner can make a member an admin without giving up ownership", () => {
+    const html = renderHouseholdSettingsPage({
+        chrome,
+        householdName: "Home",
+        location: "",
+        members: [alice, bob],
+        stores: [],
+        memberRules: [],
+        isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
+    });
+    expect(html).toContain(
+        `action="/settings/household/members/${bob.userId}/role"`,
+    );
+    expect(html).toContain('name="role" value="admin"');
+    expect(html).toContain("You stay the owner.");
+});
+
+test("admin manages the household but not roles, removal or the token", () => {
+    const admin: HouseholdMember = { ...bob, role: "admin" };
+    const carol: HouseholdMember = {
+        ...bob,
+        userId: "33333333-3333-4333-8333-333333333333",
+        displayName: "Carol",
+    };
+    const html = renderHouseholdSettingsPage({
+        chrome,
+        householdName: "Home",
+        location: "",
+        members: [alice, admin, carol],
+        stores: [],
+        memberRules: [
+            { member: carol, rules: [], allergens: [], dislikes: [] },
+        ],
+        isOwner: false,
+        canManage: true,
+        viewerUserId: admin.userId,
+    });
+    expect(html).toContain('commandfor="household-add-member"');
+    expect(html).toContain('action="/settings/household/name"');
+    expect(html).toContain(
+        `action="/settings/household/members/${carol.userId}/rules"`,
+    );
+    expect(html).not.toContain("/role");
+    expect(html).not.toContain("/make-owner");
+    expect(html).not.toContain("household-rotate-token");
+    expect(html).toContain('data-role="admin"');
+});
+
+test("member edits their own rules and only their own", () => {
+    const html = renderHouseholdSettingsPage({
+        chrome,
+        householdName: "Home",
+        location: "",
+        members: [alice, bob],
+        stores: [],
+        memberRules: [
+            {
+                member: alice,
+                rules: [],
+                allergens: [],
+                dislikes: [],
+            },
+            {
+                member: bob,
+                rules: [
+                    {
+                        id: "r1",
+                        householdId: HH,
+                        userId: bob.userId,
+                        body: "No pork",
+                        sortOrder: 0,
+                    },
+                ],
+                allergens: [],
+                dislikes: [],
+            },
+        ],
+        isOwner: false,
+        canManage: false,
+        viewerUserId: bob.userId,
+    });
+    expect(html).toContain(
+        `action="/settings/household/members/${bob.userId}/rules"`,
+    );
+    expect(html).toContain(
+        `action="/settings/household/members/${bob.userId}/rules/r1/remove"`,
+    );
+    expect(html).not.toContain(
+        `action="/settings/household/members/${alice.userId}/rules"`,
+    );
+    expect(html).not.toContain('action="/settings/household/name"');
 });

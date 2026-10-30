@@ -42,7 +42,11 @@ export type HouseholdSettingsView = {
     members: HouseholdMember[];
     stores: HouseholdStoreView[];
     memberRules: HouseholdMemberRulesView[];
+    /** Owner only: roles, removal, transfer, the bot token. */
     isOwner: boolean;
+    /** Owner or admin: household settings, stores, everyone's rules. */
+    canManage: boolean;
+    viewerUserId: string;
     error?: string;
     issuedToken?: string;
     openModalId?: string;
@@ -114,17 +118,31 @@ function memberActionsHtml(
     const ownerId = makeOwnerModalId(member.userId);
     const removeError =
         view.error && modalOpen(view, removeId) ? errorBanner(view.error) : "";
+    const manageError =
+        view.error && modalOpen(view, manageId) ? errorBanner(view.error) : "";
+    const isAdmin = member.role === "admin";
+    const roleForm = `<form method="post" action="/settings/household/members/${id}/role" class="member-role">
+<input type="hidden" name="role" value="${isAdmin ? "member" : "admin"}" />
+<p class="muted">${
+        isAdmin
+            ? `${name} is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner.`
+            : `Make ${name} an admin to let them change household settings, stores and everyone's rules, and add people. You stay the owner.`
+    }</p>
+<button type="submit"${isAdmin ? "" : ' class="btn-primary"'}>${
+        isAdmin ? "Make member" : "Make admin"
+    }</button>
+</form>`;
     const modals =
         modal({
             id: manageId,
             title: `Manage ${member.displayName}`,
             openOnLoad: modalOpen(view, manageId),
-            body: `<p class="muted">Transfer ownership or remove this member from the household.</p>
+            body: `${manageError}${roleForm}
+<p class="muted">Transfer ownership or remove this member from the household.</p>
 <div class="modal-actions">
 ${modalTrigger({
     target: ownerId,
     label: `Make ${member.displayName} the owner`,
-    className: "btn-primary",
 })}
 ${modalTrigger({
     target: removeId,
@@ -251,6 +269,24 @@ function memberRulesCard(
             `<option value="${code}">${escapeHtml(ALLERGEN_LABELS[code])}</option>`,
     ).join("");
     const rulesModalId = householdMemberRulesModalId(view.member.userId);
+    const base = `/settings/household/members/${escapeHtml(view.member.userId)}`;
+    const removeRow = (kind: string, id: string, label: string) =>
+        `<li class="row">
+<span class="row-title">${escapeHtml(label)}</span>
+<div class="row-actions"><form method="post" action="${base}/${kind}/${escapeHtml(id)}/remove"><button type="submit" class="btn-sm btn-danger" aria-label="Remove ${escapeHtml(label)}">Remove</button></form></div>
+</li>`;
+    const current = [
+        ...view.allergens.map((row) =>
+            removeRow("allergens", row.id, `Allergen: ${allergenLabel(row)}`),
+        ),
+        ...view.dislikes.map((row) =>
+            removeRow("dislikes", row.id, `Dislike: ${row.displayName}`),
+        ),
+        ...view.rules.map((row) => removeRow("rules", row.id, row.body)),
+    ].join("");
+    const currentList = current
+        ? `<ul class="person-rule-current list">${current}</ul>`
+        : "";
     const rulesModalError =
         pageView.error && modalOpen(pageView, rulesModalId)
             ? errorBanner(pageView.error)
@@ -260,7 +296,7 @@ function memberRulesCard(
               id: rulesModalId,
               title: `Rules for ${view.member.displayName}`,
               openOnLoad: modalOpen(pageView, rulesModalId),
-              body: `${rulesModalError}<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
+              body: `${rulesModalError}${currentList}<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
 <label for="allergen-${escapeHtml(view.member.userId)}">Allergen</label>
 <select id="allergen-${escapeHtml(view.member.userId)}" name="allergen">
 ${allergenOptions}
@@ -332,7 +368,14 @@ export function renderHouseholdSettingsPage(
             )}</li>`;
         })
         .join("");
-    const householdCard = view.isOwner
+    const rotateToken = view.isOwner
+        ? `<div class="row-actions">${modalTrigger({
+              target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+              label: "Rotate household token",
+              className: "btn-sm",
+          })}</div>`
+        : "";
+    const householdCard = view.canManage
         ? `<form method="post" action="/settings/household/name" class="household-name inline-form">
 <label for="household_name">Household name</label>
 <input id="household_name" name="name" value="${escapeHtml(view.householdName)}" required maxlength="80" />
@@ -343,11 +386,7 @@ export function renderHouseholdSettingsPage(
 <input id="household_location" name="location" value="${escapeHtml(view.location)}" maxlength="120" />
 <button type="submit">Save</button>
 </form>
-<div class="row-actions">${modalTrigger({
-              target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
-              label: "Rotate household token",
-              className: "btn-sm",
-          })}</div>`
+${rotateToken}`
         : `<p class="household-name">${escapeHtml(view.householdName)}</p>
 <p class="household-location muted">${view.location ? escapeHtml(view.location) : "No location set."}</p>`;
     modalIds.push(HOUSEHOLD_ADD_MEMBER_MODAL_ID, HOUSEHOLD_ADD_STORE_MODAL_ID);
@@ -357,9 +396,9 @@ export function renderHouseholdSettingsPage(
     let storeModals = "";
     const stores = view.stores
         .map((store) => {
-            const part = storeCard(store, view.isOwner, view);
+            const part = storeCard(store, view.canManage, view);
             storeModals += part.modals;
-            if (view.isOwner) {
+            if (view.canManage) {
                 modalIds.push(storeRuleModalId(store.id));
             }
             return part.card;
@@ -368,9 +407,11 @@ export function renderHouseholdSettingsPage(
     let rulesModals = "";
     const memberRules = view.memberRules
         .map((row) => {
-            const part = memberRulesCard(row, view.isOwner, view);
+            const canEdit =
+                view.canManage || row.member.userId === view.viewerUserId;
+            const part = memberRulesCard(row, canEdit, view);
             rulesModals += part.modals;
-            if (view.isOwner) {
+            if (canEdit) {
                 modalIds.push(householdMemberRulesModalId(row.member.userId));
             }
             return part.card;
@@ -378,7 +419,7 @@ export function renderHouseholdSettingsPage(
         .join("");
 
     const headerActions: string[] = [];
-    if (view.isOwner) {
+    if (view.canManage) {
         headerActions.push(
             modalTrigger({
                 target: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
@@ -394,8 +435,8 @@ export function renderHouseholdSettingsPage(
     }
 
     const pageModals = [
-        view.isOwner ? addMemberModal(view) : "",
-        view.isOwner
+        view.canManage ? addMemberModal(view) : "",
+        view.canManage
             ? modal({
                   id: HOUSEHOLD_ADD_STORE_MODAL_ID,
                   title: "Add store",

@@ -1,4 +1,8 @@
-import { dashboardAccess, type HouseholdMember } from "../household.js";
+import {
+    canManageHousehold,
+    dashboardAccess,
+    type HouseholdMember,
+} from "../household.js";
 import {
     getGoalProgressPayload,
     getNutritionSummaryPayload,
@@ -298,7 +302,7 @@ export async function renderGroceryListPage(
         html: renderGroceryPage({
             chrome: viewerChromeFromProfile(profile),
             stores,
-            isOwner: gate.viewer.role === "owner",
+            canManage: canManageHousehold(gate.viewer),
             error: opts.error,
             allergenWarning: opts.allergenWarning,
             allergenRetry: opts.allergenRetry,
@@ -432,6 +436,8 @@ export async function renderHouseholdSettingsRoute(
             stores: storeViews,
             memberRules,
             isOwner: gate.viewer.role === "owner",
+            canManage: canManageHousehold(gate.viewer),
+            viewerUserId: gate.viewer.userId,
             error: opts.error,
             issuedToken: opts.issuedToken,
             openModalId: opts.openModalId,

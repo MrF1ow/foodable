@@ -51,6 +51,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 - [ ] A username member signs in by typing just the username.
 - [ ] As a member (not the owner), adding a person and rotating the token in Settings → Household are both refused.
 - [ ] Optional: as the owner, hand ownership to a member and back (Settings → Household → Manage).
+- [ ] As the owner, make a member an admin: they can add a person but cannot rotate the token, and you stay the owner. As a plain member, add and remove one of your own rules.
 - [ ] Bots: Settings → Household → rotate the token, copy it once, then configure
       `Authorization: Bearer nt_hh_…` against `https://<domain>/mcp`. The bot passes `user_id` for the person it acts for.
 

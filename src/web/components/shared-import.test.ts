@@ -237,7 +237,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     const grocery = renderGroceryPage({
         chrome: { theme: "light" },
         stores: [],
-        isOwner: true,
+        canManage: true,
         error: "Enter a store name.",
     });
     expect(grocery).toContain('class="error-banner"');

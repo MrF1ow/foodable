@@ -314,6 +314,8 @@ test("every page's h1 comes from pageHeader once", async () => {
                 stores: [],
                 memberRules: [],
                 isOwner: true,
+                canManage: true,
+                viewerUserId: "u1",
             }),
         ],
         ["help", renderSettingsHelpPage({ chrome })],

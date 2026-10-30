@@ -297,3 +297,26 @@ export async function transferHouseholdOwnership(
         throw new Error(`Failed to transfer ownership: ${error.message}`);
     }
 }
+
+// Moves a member between admin and member. The owner row is excluded in the
+// query itself, so a stale page cannot demote the owner through this path;
+// ownership only moves through transfer_household_ownership.
+export async function setHouseholdMemberRole(
+    householdId: string,
+    userId: string,
+    role: "admin" | "member",
+): Promise<void> {
+    const { data, error } = await getSupabase()
+        .from("household_members")
+        .update({ role })
+        .eq("household_id", householdId)
+        .eq("user_id", userId)
+        .neq("role", "owner")
+        .select("user_id");
+    if (error) {
+        throw new Error(`Failed to change role: ${error.message}`);
+    }
+    if ((data ?? []).length === 0) {
+        throw new Error("That person is not a member you can change.");
+    }
+}

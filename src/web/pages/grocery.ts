@@ -42,7 +42,7 @@ export type GroceryPageView = {
     chrome: ViewerChrome;
     stores: GroceryStoreView[];
     locations?: { id: string; name: string }[];
-    isOwner?: boolean;
+    canManage?: boolean;
     error?: string;
     allergenWarning?: string;
     allergenRetry?: GroceryAllergenRetry;
@@ -254,7 +254,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
     const modalIds = storeParts.map((part) => part.modalId);
 
     const headerActions: string[] = [];
-    if (view.isOwner) {
+    if (view.canManage) {
         headerActions.push(
             modalTrigger({
                 target: ADD_STORE_MODAL_ID,
@@ -274,7 +274,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
     }
 
     const pageModals: string[] = [];
-    if (view.isOwner) {
+    if (view.canManage) {
         modalIds.push(ADD_STORE_MODAL_ID);
         pageModals.push(
             modal({

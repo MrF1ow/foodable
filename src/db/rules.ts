@@ -7,6 +7,7 @@ import {
     personRuleToRow,
     storeRuleFromRow,
     storeRuleToRow,
+    type PersonRowRef,
     type RulesStore,
 } from "../domain/rules.js";
 import { getSupabase } from "./client.js";
@@ -111,7 +112,34 @@ export function liveRulesStore(): RulesStore {
             }
             return memberDislikeFromRow(data);
         },
+        async deletePersonRule(ref) {
+            return deleteRef("person_rules", "person rule", ref);
+        },
+        async deleteAllergen(ref) {
+            return deleteRef("member_allergens", "allergen", ref);
+        },
+        async deleteDislike(ref) {
+            return deleteRef("member_dislikes", "dislike", ref);
+        },
     };
 }
 
 export type { RulesStore };
+
+async function deleteRef(
+    table: "person_rules" | "member_allergens" | "member_dislikes",
+    label: string,
+    ref: PersonRowRef,
+): Promise<boolean> {
+    const { data, error } = await getSupabase()
+        .from(table)
+        .delete()
+        .eq("id", ref.id)
+        .eq("household_id", ref.householdId)
+        .eq("user_id", ref.userId)
+        .select("id");
+    if (error) {
+        throw new Error(`Failed to remove ${label}: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
+}
