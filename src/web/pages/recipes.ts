@@ -12,6 +12,7 @@ import {
     renderRecipeCard,
     renderRecipeIngredientRow,
 } from "../components/page-markup.js";
+import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
     disclosure,
@@ -22,6 +23,7 @@ import {
     pageHeader,
     pageLevelErrorBanner,
     panel,
+    type ModalFill,
 } from "../components/ui.js";
 
 export type RecipeMember = { userId: string; displayName: string };
@@ -101,12 +103,46 @@ function cookModalId(recipeId: string): string {
     return `recipe-cook-${recipeId}`;
 }
 
-function editIngredientModalId(ingredientId: string): string {
-    return `recipe-edit-ingredient-${ingredientId}`;
+const RECIPE_EDIT_INGREDIENT_ID = "recipe-edit-ingredient";
+const RECIPE_DELETE_INGREDIENT_ID = "recipe-delete-ingredient";
+const EDIT_INGREDIENT_PREFIX = "recipe-edit-ingredient-";
+const DELETE_INGREDIENT_PREFIX = "recipe-delete-ingredient-";
+
+function reopenIngredient(
+    view: RecipeDetailView,
+    prefix: string,
+): RecipeIngredientView | null {
+    return (
+        sharedDialogItem({
+            openModalId: view.openModalId,
+            prefix,
+            lookup: (id) =>
+                view.ingredients.find((ingredient) => ingredient.id === id) ??
+                null,
+        })?.item ?? null
+    );
 }
 
-function deleteIngredientModalId(ingredientId: string): string {
-    return `recipe-delete-ingredient-${ingredientId}`;
+function ingredientFill(
+    view: RecipeDetailView,
+    ingredient: RecipeIngredientView,
+    mode: "edit" | "delete",
+): ModalFill {
+    const recipeId = view.recipe.id;
+    if (mode === "delete") {
+        return {
+            action: `/recipes/${recipeId}/ingredients/${ingredient.id}/delete`,
+            message: `Remove ${ingredient.displayName} from this recipe?`,
+        };
+    }
+    return {
+        action: `/recipes/${recipeId}/ingredients/${ingredient.id}`,
+        title: `Edit ${ingredient.displayName}`,
+        fields: {
+            note: ingredient.note ?? "",
+            amount: ingredient.quantity.amount,
+        },
+    };
 }
 
 function panelHead(title: string, actions: string): string {
@@ -204,19 +240,14 @@ export function renderRecipesPage(view: RecipesPageView): string {
 function ingredientRow(
     view: RecipeDetailView,
     ingredient: RecipeIngredientView,
-): { row: string; modals: string } {
-    const recipeId = view.recipe.id;
-    const editId = editIngredientModalId(ingredient.id);
-    const deleteId = deleteIngredientModalId(ingredient.id);
-    const id = escapeHtml(ingredient.id);
-    const recipeIdEsc = escapeHtml(recipeId);
+): string {
     const unit = ingredient.quantity.unit;
     const showPersonPortion =
         view.portionCount !== 1 ||
         ingredient.personAmount !== ingredient.perPortionAmount;
-    const row = renderRecipeIngredientRow({
+    return renderRecipeIngredientRow({
         id: ingredient.id,
-        recipeId,
+        recipeId: view.recipe.id,
         displayName: ingredient.displayName,
         totalLabel: quantityLabel(ingredient.quantity.amount, unit),
         perPortionLabel: quantityLabel(ingredient.perPortionAmount, unit),
@@ -227,32 +258,61 @@ function ingredientRow(
         personAmount: ingredient.personAmount,
         totalAmount: ingredient.quantity.amount,
         note: ingredient.note,
-        editModalId: editId,
-        deleteModalId: deleteId,
+        editModalId: RECIPE_EDIT_INGREDIENT_ID,
+        deleteModalId: RECIPE_DELETE_INGREDIENT_ID,
+        editFill: ingredientFill(view, ingredient, "edit"),
+        deleteFill: ingredientFill(view, ingredient, "delete"),
     });
-    const modals =
+}
+
+function sharedIngredientModals(view: RecipeDetailView): string {
+    if (view.ingredients.length === 0) return "";
+    const editItem = reopenIngredient(view, EDIT_INGREDIENT_PREFIX);
+    const deleteItem = reopenIngredient(view, DELETE_INGREDIENT_PREFIX);
+    const editOpen =
+        editItem != null &&
+        modalOpen(view, `${EDIT_INGREDIENT_PREFIX}${editItem.id}`);
+    const deleteOpen =
+        deleteItem != null &&
+        modalOpen(view, `${DELETE_INGREDIENT_PREFIX}${deleteItem.id}`);
+    const recipeId = escapeHtml(view.recipe.id);
+    const editId = editItem ? escapeHtml(editItem.id) : "";
+    return (
         modal({
-            id: editId,
-            title: `Edit ${ingredient.displayName}`,
-            openOnLoad: modalOpen(view, editId),
-            body: `${modalFormError(view, editId)}<form class="recipe-ingredient-edit" method="post" action="/recipes/${recipeIdEsc}/ingredients/${id}">
-<label for="note-${id}">Note</label>
-<input id="note-${id}" name="note" type="text" maxlength="500" value="${escapeHtml(ingredient.note ?? "")}" autocomplete="off" />
-<label for="amount-${id}">Amount</label>
-<input id="amount-${id}" name="amount" type="number" min="0" step="any" required value="${escapeHtml(String(ingredient.quantity.amount))}" />
+            id: RECIPE_EDIT_INGREDIENT_ID,
+            title: editItem
+                ? `Edit ${editItem.displayName}`
+                : "Edit ingredient",
+            openOnLoad: editOpen,
+            submitDisabled: editItem == null,
+            body: `${editOpen ? modalFormError(view, `${EDIT_INGREDIENT_PREFIX}${editItem?.id}`) : ""}<form class="recipe-ingredient-edit" method="post" action="${editItem ? `/recipes/${recipeId}/ingredients/${editId}` : ""}">
+<label for="recipe-ingredient-note">Note</label>
+<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />
+<label for="recipe-ingredient-amount">Amount</label>
+<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" required value="${editItem ? escapeHtml(String(editItem.quantity.amount)) : ""}" />
 <button type="submit" class="btn-primary">Save ingredient</button>
 </form>`,
         }) +
         confirmModal({
-            id: deleteId,
+            id: RECIPE_DELETE_INGREDIENT_ID,
             title: "Remove ingredient",
-            message: `Remove ${ingredient.displayName} from this recipe?`,
-            action: `/recipes/${recipeId}/ingredients/${ingredient.id}/delete`,
+            message: deleteItem
+                ? `Remove ${deleteItem.displayName} from this recipe?`
+                : "Remove this ingredient from this recipe?",
+            action: deleteItem
+                ? `/recipes/${view.recipe.id}/ingredients/${deleteItem.id}/delete`
+                : "",
             confirmLabel: "Remove",
-            openOnLoad: modalOpen(view, deleteId),
-            bodyPrefix: modalFormError(view, deleteId),
-        });
-    return { row, modals };
+            openOnLoad: deleteOpen,
+            bodyPrefix: deleteOpen
+                ? modalFormError(
+                      view,
+                      `${DELETE_INGREDIENT_PREFIX}${deleteItem?.id}`,
+                  )
+                : "",
+            submitDisabled: deleteItem == null,
+        })
+    );
 }
 
 function macrosBlock(
@@ -277,16 +337,20 @@ function macrosBlock(
 
 export function renderRecipeDetailPage(view: RecipeDetailView): string {
     const recipeId = view.recipe.id;
+    const editIngredient = reopenIngredient(view, EDIT_INGREDIENT_PREFIX);
+    const deleteIngredient = reopenIngredient(view, DELETE_INGREDIENT_PREFIX);
     const renderedModalIds = [
         editRecipeModalId(recipeId),
         deleteRecipeModalId(recipeId),
         addIngredientModalId(recipeId),
         methodModalId(recipeId),
         cookModalId(recipeId),
-        ...view.ingredients.flatMap((ingredient) => [
-            editIngredientModalId(ingredient.id),
-            deleteIngredientModalId(ingredient.id),
-        ]),
+        ...(editIngredient && view.error
+            ? [`${EDIT_INGREDIENT_PREFIX}${editIngredient.id}`]
+            : []),
+        ...(deleteIngredient && view.error
+            ? [`${DELETE_INGREDIENT_PREFIX}${deleteIngredient.id}`]
+            : []),
     ];
     const error = pageLevelErrorBanner(view, renderedModalIds);
     const allergen = view.allergenWarning
@@ -295,13 +359,10 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
     const dislike = view.dislikeNote
         ? `<p class="dislike-note">${escapeHtml(view.dislikeNote)}</p>`
         : "";
-    const ingredientParts = view.ingredients.map((ingredient) =>
-        ingredientRow(view, ingredient),
-    );
-    const rows = ingredientParts.map((part) => part.row).join("");
-    const ingredientModals = ingredientParts
-        .map((part) => part.modals)
+    const rows = view.ingredients
+        .map((ingredient) => ingredientRow(view, ingredient))
         .join("");
+    const ingredientModals = sharedIngredientModals(view);
     const viewingSelf = view.filterUserId === view.viewerId;
     const memberOptions = view.members
         .map((member) => {

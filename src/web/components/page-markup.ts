@@ -1,7 +1,7 @@
 import { escapeHtml } from "../shell.js";
 import type { ExpiryLevel } from "../../domain/stock.js";
 import { iconArrowDown, iconArrowUp, iconPencil, iconTrash } from "./icons.js";
-import { disclosure, modalTrigger } from "./ui.js";
+import { disclosure, modalTrigger, type ModalFill } from "./ui.js";
 
 function expiryPillExpired(): string {
     return `<span class="pill pill-bad expiry-pill">Expired</span>`;
@@ -126,6 +126,8 @@ export function renderRecipeIngredientRow(opts: {
     note?: string | null;
     editModalId: string;
     deleteModalId: string;
+    editFill?: ModalFill;
+    deleteFill?: ModalFill;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
@@ -157,12 +159,14 @@ ${modalTrigger({
     label: `Edit ${opts.displayName}`,
     className: "btn-sm btn-icon",
     icon: iconPencil(),
+    fill: opts.editFill,
 })}
 ${modalTrigger({
     target: opts.deleteModalId,
     label: `Remove ${opts.displayName}`,
     className: "btn-sm btn-icon btn-danger",
     icon: iconTrash(),
+    fill: opts.deleteFill,
 })}
 </div>
 </div>
