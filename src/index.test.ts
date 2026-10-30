@@ -166,3 +166,87 @@ describe("CORS allow-headers", () => {
         expect(r.headers.get("Access-Control-Allow-Origin")).toBeNull();
     });
 });
+
+describe("response compression", () => {
+    test("gzips /app.css when the client accepts gzip", async () => {
+        const raw = await app.request("http://x/app.css");
+        const gzipped = await app.request("http://x/app.css", {
+            headers: { "Accept-Encoding": "gzip" },
+        });
+        expect(gzipped.status).toBe(200);
+        expect(gzipped.headers.get("Content-Encoding")).toBe("gzip");
+        // compress() appends this. A cache that ignored it would reuse one
+        // encoding for every client.
+        expect(gzipped.headers.get("Vary")?.toLowerCase()).toContain(
+            "accept-encoding",
+        );
+        const rawBytes = new Uint8Array(await raw.arrayBuffer());
+        const decoded = new Uint8Array(
+            Bun.gunzipSync(new Uint8Array(await gzipped.arrayBuffer())),
+        );
+        expect(decoded.byteLength).toBe(rawBytes.byteLength);
+        expect(Buffer.from(decoded).equals(Buffer.from(rawBytes))).toBe(true);
+    });
+
+    test("leaves /app.css uncompressed when Accept-Encoding is absent", async () => {
+        const r = await app.request("http://x/app.css");
+        expect(r.status).toBe(200);
+        expect(r.headers.get("Content-Encoding")).toBeNull();
+        const body = new Uint8Array(await r.arrayBuffer());
+        expect(body.byteLength).toBeGreaterThan(0);
+        // gzip magic is 1f 8b. The stylesheet is text.
+        expect(body[0]).not.toBe(0x1f);
+    });
+
+    test("does not gzip /mcp", async () => {
+        // The unauthenticated POST is the 401 from authenticateBearer. /mcp
+        // is skipped by path: the same JSON type is compressible everywhere
+        // else, and a streamed tool result must not be buffered.
+        const r = await app.request("http://x/mcp", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "Accept-Encoding": "gzip",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+        });
+        expect(r.status).toBe(401);
+        expect(r.headers.get("Content-Encoding")).toBeNull();
+        expect(await r.json()).toMatchObject({ error: "unauthorized" });
+    });
+
+    test("does not gzip an allowlisted woff2 font", async () => {
+        const r = await app.request("http://x/fonts/geist-latin.woff2", {
+            headers: { "Accept-Encoding": "gzip" },
+        });
+        expect(r.status).toBe(200);
+        expect(r.headers.get("Content-Type")).toBe("font/woff2");
+        expect(r.headers.get("Content-Encoding")).toBeNull();
+        const body = new Uint8Array(await r.arrayBuffer());
+        // wOFF2 magic. A gzip wrapper would start 1f 8b instead.
+        expect([...body.subarray(0, 4)]).toEqual([0x77, 0x4f, 0x46, 0x32]);
+    });
+
+    // Hono's default filter would gzip image/x-icon; the allowlist must not.
+    test.each(["/favicon.ico", "/apple-touch-icon.png"])(
+        "does not gzip %s",
+        async (path) => {
+            const r = await app.request(`http://x${path}`, {
+                headers: { "Accept-Encoding": "gzip" },
+            });
+            expect(r.status).toBe(200);
+            expect(r.headers.get("Content-Encoding")).toBeNull();
+        },
+    );
+
+    test("keeps security headers on a gzipped response", async () => {
+        const r = await app.request("http://x/app.css", {
+            headers: { "Accept-Encoding": "gzip" },
+        });
+        expect(r.headers.get("Content-Encoding")).toBe("gzip");
+        expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+        expect(r.headers.get("Content-Security-Policy")).toContain(
+            "default-src",
+        );
+    });
+});

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
+import { compress } from "hono/compress";
 import { createOAuthRouter } from "./oauth.js";
 import {
     authenticateBearer,
@@ -62,6 +63,51 @@ app.use("*", async (c, next) => {
     console.log(
         `[req] ${c.req.method} ${path} ${c.res.status} ${ms}ms ip=${ip}${era ? ` era=${era}` : ""}${client ? ` client=${client}` : ""}`,
     );
+});
+
+// Response compression. The nutrition page is hundreds of kilobytes of HTML,
+// and over Tailscale that transfer was most of a tab visit. gzip only,
+// negotiated from Accept-Encoding; compress() adds Vary: Accept-Encoding.
+// Order matters three ways: inside the access log, so it logs the final
+// status; outside the security headers, so compress() copies them onto the
+// encoded response; outside flashToastMiddleware, which reads the HTML body
+// as text and would otherwise read gzip bytes.
+//
+// /mcp is skipped by path. It can stream, gzip holds bytes until the stream
+// ends, and a streamed application/json body would pass a content-type check.
+// Fonts and images are already compressed, so the allowlist is narrower than
+// Hono's default (which includes image/x-icon).
+const COMPRESSIBLE_TYPES = new Set([
+    "text/html",
+    "text/css",
+    "text/javascript",
+    "application/javascript",
+    "image/svg+xml",
+    "application/json",
+    "text/plain",
+]);
+
+function compressibleContentType(contentType: string): boolean {
+    // Handlers send parameters (`text/css; charset=utf-8`). Compare the
+    // media type only. The event-stream guard stays even though that type
+    // is not in the set, so widening the set later cannot start buffering
+    // an event stream.
+    const media = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+    if (media === "text/event-stream") return false;
+    return COMPRESSIBLE_TYPES.has(media);
+}
+
+const gzipResponses = compress({
+    encoding: "gzip",
+    contentTypeFilter: compressibleContentType,
+});
+
+app.use("*", async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path === "/mcp" || path.startsWith("/mcp/") || path === "/health") {
+        return next();
+    }
+    return gzipResponses(c, next);
 });
 
 // Security headers
