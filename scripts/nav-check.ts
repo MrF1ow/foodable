@@ -319,6 +319,123 @@ try {
         },
     );
 
+    await control("post=ok&delay=0&reset=posts");
+    await goto("/fridge");
+    await setMarker();
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    const eggsEdit = await ev<{
+        open: boolean;
+        dialogs: number;
+        action: string | null;
+        amount: string | null;
+        unit: string | null;
+        location: string | null;
+        expires: string | null;
+        title: string | null;
+        expectedExpires: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-edit-food");
+        const form = dialog?.querySelector("form.fridge-item-edit");
+        const trigger = document.querySelector('button[aria-label="Edit Eggs"]');
+        return {
+            open: !!dialog?.open,
+            dialogs: document.querySelectorAll("#fridge-edit-food").length,
+            action: form?.getAttribute("action") ?? null,
+            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
+            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
+            location: form?.querySelector("select[name='location_id']")?.value ?? null,
+            expires: form?.querySelector("input[name='expires_on']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            expectedExpires: trigger?.getAttribute("data-item-expires") ?? null,
+        };
+    })()`);
+    await ev(`document.getElementById("fridge-edit-food")?.close()`);
+    await clickSel('button[aria-label="Edit Paper towels"]');
+    await sleep(40);
+    const supplyEdit = await ev<{
+        open: boolean;
+        action: string | null;
+        amount: string | null;
+        unit: string | null;
+        location: string | null;
+        expires: string | null;
+        title: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-edit-supply");
+        const form = dialog?.querySelector("form.fridge-item-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
+            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
+            location: form?.querySelector("select[name='location_id']")?.value ?? null,
+            expires: form?.querySelector("input[name='expires_on']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+        };
+    })()`);
+    await ev(`document.getElementById("fridge-edit-supply")?.close()`);
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    await ev(`(() => {
+        const input = document.querySelector("#fridge-edit-food input[name='qty_amount']");
+        if (input) input.value = "12";
+    })()`);
+    await clickSel("#fridge-edit-food button[type='submit']");
+    await sleep(700);
+    const afterEdit = await snap();
+    const editPosts = await stats();
+    const editPost = editPosts.posts.find((p) => p.path === "/fridge/items/i2");
+    const eggsQty = await ev<string | null>(
+        `document.querySelector('li.fridge-item[data-item-id="i2"] .fridge-item-qty')?.textContent ?? null`,
+    );
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    const reopened = await ev<string | null>(
+        `document.querySelector("#fridge-edit-food input[name='qty_amount']")?.value ?? null`,
+    );
+    record(
+        "fridge shared edit dialog",
+        eggsEdit.open === true &&
+            eggsEdit.dialogs === 1 &&
+            eggsEdit.action === "/fridge/items/i2" &&
+            eggsEdit.amount === "6" &&
+            eggsEdit.unit === "each" &&
+            eggsEdit.location === "l1" &&
+            eggsEdit.title === "Edit Eggs" &&
+            eggsEdit.expires === eggsEdit.expectedExpires &&
+            !!eggsEdit.expires &&
+            supplyEdit.open === true &&
+            supplyEdit.action === "/fridge/items/i6" &&
+            supplyEdit.amount === "3" &&
+            supplyEdit.unit === "roll" &&
+            supplyEdit.location === "l2" &&
+            supplyEdit.expires === "" &&
+            supplyEdit.title === "Edit Paper towels" &&
+            afterEdit.marker === "stay" &&
+            afterEdit.href.endsWith("/fridge") &&
+            afterEdit.open.length === 0 &&
+            editPost !== undefined &&
+            editPost.entries.some(
+                ([k, v]) => k === "qty_amount" && v === "12",
+            ) &&
+            editPost.entries.some(
+                ([k, v]) => k === "qty_unit" && v === "each",
+            ) &&
+            eggsQty != null &&
+            eggsQty.includes("12 ·") &&
+            reopened === "12",
+        {
+            eggsEdit,
+            supplyEdit,
+            afterEdit,
+            editPost,
+            eggsQty,
+            reopened,
+            ex: drain(),
+        },
+    );
+
     await goto("/fridge");
     await setMarker();
     await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");

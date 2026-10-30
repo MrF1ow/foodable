@@ -235,6 +235,26 @@ test("modal, modalTrigger, and confirmModal markup", () => {
             icon: "<svg></svg>",
         }),
     ).toContain("<svg></svg>");
+
+    expect(
+        modalTrigger({
+            target: "edit-1",
+            label: "Edit",
+            data: {
+                "item-name": `"><img src=x onerror=alert(1)>`,
+                'a"b': "c&d",
+            },
+        }),
+    ).toContain(
+        'data-item-name="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(
+        modalTrigger({
+            target: "edit-1",
+            label: "Edit",
+            data: { 'a"b': "c&d" },
+        }),
+    ).toContain('data-a&quot;b="c&amp;d"');
 });
 
 test("no page module contains a raw <h1", () => {

@@ -20,6 +20,13 @@ function addUtcDays(isoDate: string, days: number): string {
     return d.toISOString().slice(0, 10);
 }
 
+function dialogHtml(html: string, id: string): string {
+    const re = new RegExp(
+        `<dialog class="modal" id="${id}"[\\s\\S]*?</dialog>`,
+    );
+    return html.match(re)?.[0] ?? "";
+}
+
 const HH = "hh-1";
 
 function food(
@@ -283,10 +290,10 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     expect(html).not.toContain(">High<");
     expect(html).not.toContain(">Low<");
     expect(html).toContain('class="fridge-item-edit"');
-    expect(html).toContain('id="fridge-edit-it-1"');
-    expect(html).toContain('commandfor="fridge-edit-it-1"');
-    expect(html).toContain('id="fridge-delete-it-1"');
-    expect(html).toContain('action="/fridge/items/it-1/delete"');
+    expect(html).toContain('id="fridge-edit-food"');
+    expect(html).toContain('id="fridge-delete-item"');
+    expect(html).not.toContain('id="fridge-edit-it-1"');
+    expect(html).not.toContain('id="fridge-delete-it-1"');
     expect(html).not.toContain('class="fridge-item-eat"');
     expect(html).not.toContain('aria-label="Eat Eggs"');
     expect(html).toContain("btn-icon");
@@ -296,10 +303,20 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     const actionsStart = html.indexOf('data-item-id="it-1"', listStart);
     const actionsEnd = html.indexOf("</li>", actionsStart);
     const itemChunk = html.slice(actionsStart, actionsEnd);
-    const editPos = itemChunk.indexOf('commandfor="fridge-edit-it-1"');
-    const deletePos = itemChunk.indexOf('commandfor="fridge-delete-it-1"');
+    const editPos = itemChunk.indexOf('commandfor="fridge-edit-food"');
+    const deletePos = itemChunk.indexOf('commandfor="fridge-delete-item"');
     expect(editPos).toBeGreaterThan(-1);
     expect(deletePos).toBeGreaterThan(editPos);
+    expect(itemChunk).toContain('aria-label="Edit Eggs"');
+    expect(itemChunk).toContain('aria-label="Delete Eggs"');
+    expect(itemChunk).toContain('class="btn-sm btn-icon btn-danger"');
+    expect(itemChunk).toContain('data-item-id="it-1"');
+    expect(itemChunk).toContain('data-item-name="Eggs"');
+    expect(itemChunk).toContain('data-item-kind="food"');
+    expect(itemChunk).toContain('data-item-amount="6"');
+    expect(itemChunk).toContain('data-item-unit="each"');
+    expect(itemChunk).toContain('data-item-location="loc-1"');
+    expect(itemChunk).toContain(`data-item-expires="${expiresOn}"`);
     expect(html).not.toMatch(
         /<details class="more">\s*<summary>Edit<\/summary>/,
     );
@@ -374,8 +391,16 @@ test("supply items omit the eat icon action", () => {
         ],
     } as never);
     expect(html).not.toContain('class="fridge-item-eat"');
-    expect(html).toContain('commandfor="fridge-edit-it-sup"');
-    expect(html).toContain('commandfor="fridge-delete-it-sup"');
+    const listStart = html.indexOf('<ul class="fridge-items list">');
+    const itemEnd = html.indexOf("</li>", listStart);
+    const itemChunk = html.slice(listStart, itemEnd);
+    expect(itemChunk).toContain('commandfor="fridge-edit-supply"');
+    expect(itemChunk).toContain('commandfor="fridge-delete-item"');
+    expect(itemChunk).not.toContain('commandfor="fridge-edit-food"');
+    expect(itemChunk).toContain('data-item-id="it-sup"');
+    expect(itemChunk).toContain('data-item-kind="supply"');
+    expect(itemChunk).toContain('data-item-unit="roll"');
+    expect(itemChunk).toContain('data-item-expires=""');
 });
 
 test("a server error reopens the modal that submitted the form", () => {
@@ -424,7 +449,17 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         openModalId: "fridge-delete-it-1",
     } as never);
     expect(deleteHtml).toMatch(
-        /<dialog class="modal" id="fridge-delete-it-1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="fridge-delete-item"[^>]*data-modal-open-on-load/,
+    );
+    expect(deleteHtml).toContain('action="/fridge/items/it-1/delete"');
+    expect(deleteHtml).toContain("Remove Milk from the fridge?");
+    expect(deleteHtml).not.toContain("Remove this item from the fridge?");
+    const deleteDialog = dialogHtml(deleteHtml, "fridge-delete-item");
+    expect(deleteDialog).toContain("error-banner");
+    expect(deleteDialog).toContain("Cannot remove.");
+    expect(deleteHtml.match(/Cannot remove\./g)?.length).toBe(1);
+    expect(deleteHtml).not.toMatch(
+        /<dialog class="modal" id="fridge-edit-food"[^>]*data-modal-open-on-load/,
     );
     expect(deleteHtml).not.toMatch(
         /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
@@ -437,8 +472,9 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
     );
     expect(removeHtml).not.toMatch(
-        /<dialog class="modal" id="fridge-delete-it-1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="fridge-delete-item"[^>]*data-modal-open-on-load/,
     );
+    expect(removeHtml).toContain("Remove this item from the fridge?");
 });
 
 test("fridge still shows a page banner when openModalId does not match a dialog", () => {
@@ -454,4 +490,163 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     expect(html).toContain('class="error-banner"');
     expect(html).toContain("Unknown item.");
     expect(html).not.toMatch(/data-modal-open-on-load/);
+    const editGone = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+        ],
+        items: [],
+        error: "Unknown item.",
+        openModalId: "fridge-edit-gone",
+    } as never);
+    expect(editGone).toContain("Unknown item.");
+    expect(editGone).not.toMatch(/data-modal-open-on-load/);
+});
+
+test("a server error reopens the shared edit dialog pre-filled", () => {
+    const expiresOn = "2026-11-02";
+    const base = {
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+            { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },
+        ],
+        error: "Enter an amount.",
+    };
+    const foodHtml = renderFridgePage({
+        ...base,
+        openModalId: "fridge-edit-it-1",
+        items: [
+            {
+                id: "it-1",
+                householdId: HH,
+                locationId: "loc-2",
+                kind: "food",
+                displayName: "Eggs",
+                quantity: { amount: 6, unit: "each" },
+                identity: { kind: "food", via: "manual", displayName: "Eggs" },
+                foodId: "f-1",
+                expiresOn,
+            },
+        ],
+    } as never);
+    const foodDialog = dialogHtml(foodHtml, "fridge-edit-food");
+    expect(foodDialog).toMatch(/data-modal-open-on-load/);
+    expect(foodDialog).toContain('action="/fridge/items/it-1"');
+    expect(foodDialog).toContain(">Edit Eggs</h2>");
+    expect(foodDialog).toContain('id="qty-edit-food-amount"');
+    expect(foodDialog).toContain('value="6"');
+    expect(foodDialog).toContain('value="each" selected');
+    expect(foodDialog).toContain('value="loc-2" selected');
+    expect(foodDialog).toContain(`value="${expiresOn}"`);
+    expect(foodDialog).toContain("error-banner");
+    expect(foodDialog).toContain("Enter an amount.");
+    expect(foodHtml.match(/Enter an amount\./g)?.length).toBe(1);
+    expect(foodHtml).not.toMatch(
+        /<dialog class="modal" id="fridge-edit-supply"[^>]*data-modal-open-on-load/,
+    );
+    expect(dialogHtml(foodHtml, "fridge-edit-supply")).toContain('action=""');
+    // Unfilled templates cannot submit; the reopened one can.
+    expect(dialogHtml(foodHtml, "fridge-edit-supply")).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(dialogHtml(foodHtml, "fridge-delete-item")).toContain(
+        '<button type="submit" class="btn-danger" disabled>',
+    );
+    expect(foodDialog).toContain('<button type="submit" class="btn-primary">');
+
+    const supplyHtml = renderFridgePage({
+        ...base,
+        openModalId: "fridge-edit-it-sup",
+        items: [
+            {
+                id: "it-sup",
+                householdId: HH,
+                locationId: "loc-1",
+                kind: "supply",
+                displayName: "Paper towels",
+                quantity: { amount: 2, unit: "roll" },
+                identity: {
+                    kind: "supply",
+                    via: "manual",
+                    displayName: "Paper towels",
+                },
+                foodId: "f-sup",
+                expiresOn: null,
+            },
+        ],
+    } as never);
+    const supplyDialog = dialogHtml(supplyHtml, "fridge-edit-supply");
+    expect(supplyDialog).toMatch(/data-modal-open-on-load/);
+    expect(supplyDialog).toContain('action="/fridge/items/it-sup"');
+    expect(supplyDialog).toContain(">Edit Paper towels</h2>");
+    expect(supplyDialog).toContain('id="qty-edit-supply-amount"');
+    expect(supplyDialog).toContain('value="2"');
+    expect(supplyDialog).toContain('value="roll" selected');
+    expect(supplyDialog).toContain('value="loc-1" selected');
+    expect(supplyDialog).toContain('name="expires_on" type="date" value=""');
+    expect(supplyDialog).toContain("Enter an amount.");
+    expect(supplyHtml.match(/Enter an amount\./g)?.length).toBe(1);
+    expect(supplyHtml).not.toMatch(
+        /<dialog class="modal" id="fridge-edit-food"[^>]*data-modal-open-on-load/,
+    );
+});
+
+test("fridge item edit and delete dialogs are shared and escape row data", () => {
+    const hostile = `"><img src=x onerror=alert(1)>`;
+    const locations = ["Fridge", "Freezer", "Pantry", "Counter"].map(
+        (name, index) => ({
+            id: `loc-${index + 1}`,
+            householdId: HH,
+            name,
+            sortOrder: index,
+        }),
+    );
+    const items = Array.from({ length: 8 }, (_, index) => {
+        const supply = index % 2 === 1;
+        return {
+            id: `it-${index + 1}`,
+            householdId: HH,
+            locationId: locations[index % locations.length]!.id,
+            kind: supply ? "supply" : "food",
+            displayName: index === 0 ? hostile : `Item ${index + 1}`,
+            quantity: supply
+                ? { amount: 2, unit: "roll" }
+                : { amount: 4, unit: "each" },
+            identity: {
+                kind: supply ? "supply" : "food",
+                via: "manual",
+                displayName: index === 0 ? hostile : `Item ${index + 1}`,
+            },
+            foodId: `f-${index + 1}`,
+            expiresOn: supply ? null : "2026-12-01",
+        };
+    });
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations,
+        items,
+    } as never);
+    expect(html.match(/id="fridge-edit-food"/g)?.length).toBe(1);
+    expect(html.match(/id="fridge-edit-supply"/g)?.length).toBe(1);
+    expect(html.match(/id="fridge-delete-item"/g)?.length).toBe(1);
+    expect(html.match(/id="qty-edit-food-amount"/g)?.length).toBe(1);
+    expect(html.match(/id="qty-edit-supply-amount"/g)?.length).toBe(1);
+    expect(html.match(/id="qty-edit-food-unit"/g)?.length).toBe(1);
+    expect(html.match(/id="move-edit-food"/g)?.length).toBe(1);
+    expect(html.match(/id="move-edit-supply"/g)?.length).toBe(1);
+    expect(html.match(/<dialog\b/g)?.length).toBe(1 + locations.length * 3 + 3);
+    expect(html).toContain(
+        'data-item-name="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(html).toContain(
+        'aria-label="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(html).not.toContain('"><img src=x');
+    expect(html).not.toContain("onerror=alert(1)>");
+    const foodTriggers = html.match(/commandfor="fridge-edit-food"/g) ?? [];
+    const supplyTriggers = html.match(/commandfor="fridge-edit-supply"/g) ?? [];
+    // Each shared dialog's close button also points at it.
+    expect(foodTriggers.length).toBe(5);
+    expect(supplyTriggers.length).toBe(5);
 });

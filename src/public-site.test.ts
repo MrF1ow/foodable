@@ -134,7 +134,7 @@ describe("runtime surfaces that stay", () => {
         );
         expect(r.headers.get("cache-control")).toBe("no-cache");
         const js = await r.text();
-        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(7);
+        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(8);
         expect(js).toContain('classList.add("fx")');
         expect(js).toContain("[data-food-picker]");
     });
