@@ -123,9 +123,10 @@ app.use("*", async (c, next) => {
     }
     if (!c.res.headers.get("Content-Security-Policy")) {
         // img-src data: — form.css draws the <select> chevron as an inline
-        // SVG data URI. script-src keeps 'unsafe-inline' because assembled
-        // widgets run inline script. Dashboard frames are their own documents
-        // and set this same policy with frame-ancestors 'self'.
+        // SVG data URI. script-src 'unsafe-inline' dates from srcdoc widget
+        // frames, which inherited this policy; app pages no longer need it,
+        // and dropping it is its own change. Dashboard widget frames are now
+        // their own documents with their own copy (frame-ancestors 'self').
         c.header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'",

@@ -243,20 +243,13 @@ test("a frame still on about:blank is left alone until it reports", () => {
 class FakeWidgetFrame {
     classList = { contains: (name: string) => name === "widget-frame" };
     style = { height: "" };
+    // Counts src re-sets: that is how shell.js reloads a frame.
     reloads = 0;
     private attrs: Record<string, string>;
-    contentWindow: { location: { reload: () => void } };
 
     constructor(attrs: Record<string, string>, height = "") {
         this.attrs = { ...attrs };
         this.style.height = height;
-        this.contentWindow = {
-            location: {
-                reload: () => {
-                    this.reloads += 1;
-                },
-            },
-        };
     }
 
     getAttribute(name: string): string | null {
@@ -266,6 +259,7 @@ class FakeWidgetFrame {
     }
 
     setAttribute(name: string, value: string) {
+        if (name === "src") this.reloads += 1;
         this.attrs[name] = value;
     }
 
@@ -381,7 +375,7 @@ test("a same-src widget frame reloads when data or theme changes and keeps its h
     }
 });
 
-test("a widget frame whose src changed is left for the browser to navigate", () => {
+test("a widget frame whose src changed keeps its height and is not reloaded twice", () => {
     const { fire, restore } = runWidgetMorph();
     try {
         const current = new FakeWidgetFrame(
@@ -397,8 +391,13 @@ test("a widget frame whose src changed is left for the browser to navigate", () 
             newElement: next,
         });
         expect(prevented).toBe(false);
+        // The morph itself sets the new src (one navigation) and drops the
+        // fitted inline height.
+        current.setAttribute("src", "/app/widgets/trends?v=fff000fff000");
+        current.style.height = "";
         fire("turbo:morph-element", { currentElement: current });
-        expect(current.reloads).toBe(0);
+        expect(current.reloads).toBe(1);
+        expect(current.style.height).toBe("480px");
     } finally {
         restore();
     }

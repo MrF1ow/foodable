@@ -393,7 +393,7 @@ export async function warmWidgets(): Promise<void> {
         getEmbedCss(),
         getAppJs(),
     ]);
-    // Hashes of the framed documents, same cache as getEmbedCss. After the
-    // widgets and the skin exist, so boot does not assemble them twice.
+    // Hashes of the framed documents. After the widgets and the skin are
+    // cached, so boot does not assemble them twice.
     await Promise.all(NUTRITION_CARDS.map((key) => getEmbedWidgetHtml(key)));
 }

@@ -86,7 +86,7 @@ async function widgetCard(
         chrome.theme === "system"
             ? ""
             : ` data-theme="${escapeHtml(chrome.theme)}"`;
-    const json = JSON.stringify(data ?? null) ?? "null";
+    const json = JSON.stringify(data ?? null);
     return `<iframe class="widget-frame" title="${escapeHtml(key)}" src="${escapeHtml(src)}" data-widget-data="${escapeHtml(json)}"${themeAttr}></iframe>`;
 }
 

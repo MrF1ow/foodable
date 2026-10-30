@@ -193,28 +193,23 @@ document.addEventListener("turbo:before-render", (event) => {
 });
 
 // Fitted height lives on the iframe's inline style. A morph replaces the
-// element from server HTML, which has no inline height, so a same-src frame
-// would collapse to the CSS min-height and also keep painting the previous
-// payload: changing data-widget-data does not navigate an iframe.
-const widgetFramesToReload = new Set();
+// element from server HTML, which has no inline height, so every morphed
+// frame would dip to the CSS min-height until it reloads; the height is put
+// back after the morph. A same-src frame also keeps painting the previous
+// payload, because changing data-widget-data does not navigate an iframe.
+const widgetFramesToReload = new WeakSet();
 const widgetFrameHeight = new WeakMap();
 
 function widgetFrameAttr(el, name) {
     return el.getAttribute(name) || "";
 }
 
+// Re-setting src navigates the frame again and is served from the HTTP cache
+// (the ?v= URL is immutable). location.reload() would revalidate and, with no
+// ETag on the route, re-download the whole document.
 function reloadWidgetFrame(frame) {
-    try {
-        const win = frame.contentWindow;
-        if (win && win.location && typeof win.location.reload === "function") {
-            win.location.reload();
-            return;
-        }
-    } catch (_) {}
     const src = frame.getAttribute("src");
-    if (!src) return;
-    frame.removeAttribute("src");
-    frame.setAttribute("src", src);
+    if (src) frame.setAttribute("src", src);
 }
 
 document.addEventListener("turbo:before-morph-element", (event) => {
@@ -239,25 +234,23 @@ document.addEventListener("turbo:before-morph-element", (event) => {
         event.preventDefault();
         return;
     }
-    if (srcSame) {
-        widgetFrameHeight.set(
-            currentElement,
-            currentElement.style.height || "",
-        );
-        widgetFramesToReload.add(currentElement);
-    }
+    widgetFrameHeight.set(currentElement, currentElement.style.height || "");
+    if (srcSame) widgetFramesToReload.add(currentElement);
 });
 
 document.addEventListener("turbo:morph-element", (event) => {
     const frame = event.detail && event.detail.currentElement;
-    if (!frame || !widgetFramesToReload.has(frame)) return;
-    widgetFramesToReload.delete(frame);
+    if (!frame || !widgetFrameHeight.has(frame)) return;
     const height = widgetFrameHeight.get(frame);
     widgetFrameHeight.delete(frame);
-    // Restore before the browser paints the morphed tree, then reload so the
-    // seed script reads the new data-widget-data / data-theme.
+    // Restore before the browser paints the morphed tree. A changed src is
+    // already navigating; a same-src frame reloads so the seed script reads
+    // the new data-widget-data / data-theme. initWidgetFrames refits on load.
     if (height) frame.style.height = height;
-    reloadWidgetFrame(frame);
+    if (widgetFramesToReload.has(frame)) {
+        widgetFramesToReload.delete(frame);
+        reloadWidgetFrame(frame);
+    }
 });
 
 // html.fx is set inside a frame, never under prefers-reduced-motion, so a
