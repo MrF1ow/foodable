@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
+import { TOASTS } from "./copy/toasts.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 import { comingSoonPage } from "./web/shell.js";
 import { renderFridgePage } from "./web/pages/fridge.js";
@@ -17,6 +18,7 @@ function scriptBodies(html: string): string[] {
 test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     expect([...APP_JS_SOURCES]).toEqual([
         "./src/web/client/shell.js",
+        "./src/web/client/toast.js",
         "./src/web/client/food-picker.js",
         "./src/web/client/nutrition-log.js",
         "./src/web/client/grocery.js",
@@ -26,7 +28,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(6);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(7);
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {
@@ -39,6 +41,12 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
                     "const THEME_NAV_BG = null;",
                     `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
                 );
+        }
+        if (path.endsWith("toast.js")) {
+            src = src.replace(
+                "const TOAST_CATALOG = null;",
+                `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
+            );
         }
         expect(js).toContain(`(function () {\n${src}\n})();`);
     }

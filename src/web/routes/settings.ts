@@ -68,6 +68,7 @@ import {
     HOUSEHOLD_ADD_STORE_MODAL_ID,
 } from "../pages/household.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
+import { redirectWithToast } from "../toast.js";
 
 export const settingsRoutes = new Hono();
 
@@ -135,7 +136,7 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
-        return c.redirect("/settings", 303);
+        return redirectWithToast(c, "/settings", "settings.nutrition.saved");
     }
     const appearance = parseAppearanceInput({ theme: body.theme });
     await upsertProfile(userId, appearance);
@@ -143,7 +144,7 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);
     }
-    return c.redirect("/settings", 303);
+    return redirectWithToast(c, "/settings", "settings.profile.saved");
 });
 
 settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
@@ -169,7 +170,7 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
                 : "Could not create the household.";
         return c.html(createHouseholdFormHtml(message), 400);
     }
-    return c.redirect("/", 303);
+    return redirectWithToast(c, "/", "settings.household.created");
 });
 
 settingsRoutes.post("/settings/household", requireManager, async (c) => {
@@ -201,7 +202,11 @@ settingsRoutes.post("/settings/household", requireManager, async (c) => {
         });
         return c.html(page.html, 400);
     }
-    return c.redirect("/settings/household", 303);
+    return redirectWithToast(
+        c,
+        "/settings/household",
+        "settings.household.member.added",
+    );
 });
 
 settingsRoutes.post("/settings/household/name", requireManager, async (c) => {
@@ -217,7 +222,11 @@ settingsRoutes.post("/settings/household/name", requireManager, async (c) => {
     }
     const config = await getHouseholdConfig(manager.householdId);
     await updateHouseholdConfig(manager.householdId, { ...config, name });
-    return c.redirect("/settings/household", 303);
+    return redirectWithToast(
+        c,
+        "/settings/household",
+        "settings.household.name.saved",
+    );
 });
 
 settingsRoutes.post(
@@ -231,7 +240,11 @@ settingsRoutes.post(
             manager.householdId,
             formText(body, "location"),
         );
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.location.saved",
+        );
     },
 );
 
@@ -285,7 +298,11 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err, makeOwnerModal);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.ownership.transferred",
+        );
     },
 );
 
@@ -330,7 +347,11 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.member.removed",
+        );
     },
 );
 
@@ -352,7 +373,11 @@ settingsRoutes.post("/settings/household/stores", requireManager, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/household", 303);
+    return redirectWithToast(
+        c,
+        "/settings/household",
+        "settings.household.store.added",
+    );
 });
 
 settingsRoutes.post(
@@ -373,7 +398,11 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.section.renamed",
+        );
     },
 );
 
@@ -399,7 +428,11 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.store-rule.added",
+        );
     },
 );
 
@@ -425,7 +458,11 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.allergen.added",
+        );
     },
 );
 
@@ -450,7 +487,11 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.dislike.added",
+        );
     },
 );
 
@@ -475,7 +516,11 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.rule.added",
+        );
     },
 );
 
@@ -542,7 +587,11 @@ settingsRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.rule.removed",
+        );
     },
 );
 
@@ -581,7 +630,11 @@ settingsRoutes.post(
             const page = await householdFormError(userId, err, manageModal);
             return c.html(page.html, page.status);
         }
-        return c.redirect("/settings/household", 303);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.role.updated",
+        );
     },
 );
 
@@ -640,7 +693,7 @@ settingsRoutes.post("/settings/foods/merge", requireMember, async (c) => {
         const page = await foodsFormError(userId, err, FOODS_MERGE_MODAL_ID);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/foods", 303);
+    return redirectWithToast(c, "/settings/foods", "settings.foods.merged");
 });
 
 settingsRoutes.post("/settings/foods/:id", requireMember, async (c) => {
@@ -683,5 +736,5 @@ settingsRoutes.post("/settings/foods/:id", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/settings/foods", 303);
+    return redirectWithToast(c, "/settings/foods", "settings.foods.updated");
 });

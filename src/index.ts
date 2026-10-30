@@ -27,6 +27,7 @@ import { groceryRoutes } from "./web/routes/grocery.js";
 import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
 import { settingsRoutes } from "./web/routes/settings.js";
+import { flashToastMiddleware } from "./web/toast.js";
 
 const app = new Hono();
 
@@ -201,6 +202,8 @@ app.all(
     rateLimit,
     handleMcp,
 );
+
+app.use("*", flashToastMiddleware);
 
 app.route("/", nutritionRoutes);
 app.route("/", foodsRoutes);
