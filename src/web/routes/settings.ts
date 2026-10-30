@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
 import { parseNutritionPrefsInput } from "../pages/settings.js";
@@ -12,14 +12,17 @@ import {
 } from "../loaders.js";
 import { formText } from "../form.js";
 import {
+    requireManager,
     requireMember,
     requireOwner,
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
 import {
+    canEditPersonRules,
     checkManagedMember,
     HouseholdAlreadyExistsError,
+    type HouseholdMember,
     parseMemberInput,
 } from "../../household.js";
 import {
@@ -32,7 +35,9 @@ import {
     addDislike,
     addPersonRule,
     addStoreRule,
+    removePersonRuleRow,
     RulesInputError,
+    type PersonRuleKind,
 } from "../../domain/rules.js";
 import {
     createGroceryStore,
@@ -46,6 +51,7 @@ import {
     getHouseholdConfig,
     getHouseholdMembership,
     rotateHouseholdMcpToken,
+    setHouseholdMemberRole,
     transferHouseholdOwnership,
     updateHouseholdConfig,
     updateMemberDisplayName,
@@ -166,9 +172,9 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
     return c.redirect("/", 303);
 });
 
-settingsRoutes.post("/settings/household", requireOwner, async (c) => {
+settingsRoutes.post("/settings/household", requireManager, async (c) => {
     const userId = c.get("userId");
-    const owner = siteMember(c);
+    const manager = siteMember(c);
     const body = await c.req.parseBody();
     const parsed = parseMemberInput({
         display_name: String(body.display_name ?? ""),
@@ -185,7 +191,7 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
         return c.html(page.html, 400);
     }
     const added = await addHouseholdMemberForHousehold(
-        owner.householdId,
+        manager.householdId,
         parsed.value,
     );
     if (!added.ok) {
@@ -198,9 +204,9 @@ settingsRoutes.post("/settings/household", requireOwner, async (c) => {
     return c.redirect("/settings/household", 303);
 });
 
-settingsRoutes.post("/settings/household/name", requireOwner, async (c) => {
+settingsRoutes.post("/settings/household/name", requireManager, async (c) => {
     const userId = c.get("userId");
-    const owner = siteMember(c);
+    const manager = siteMember(c);
     const body = await c.req.parseBody();
     const name = formText(body, "name").trim();
     if (!name) {
@@ -209,21 +215,25 @@ settingsRoutes.post("/settings/household/name", requireOwner, async (c) => {
         });
         return c.html(page.html, 400);
     }
-    const config = await getHouseholdConfig(owner.householdId);
-    await updateHouseholdConfig(owner.householdId, { ...config, name });
+    const config = await getHouseholdConfig(manager.householdId);
+    await updateHouseholdConfig(manager.householdId, { ...config, name });
     return c.redirect("/settings/household", 303);
 });
 
-settingsRoutes.post("/settings/household/location", requireOwner, async (c) => {
-    const owner = siteMember(c);
-    const body = await c.req.parseBody();
-    await setHouseholdLocation(
-        liveSettingsStore(),
-        owner.householdId,
-        formText(body, "location"),
-    );
-    return c.redirect("/settings/household", 303);
-});
+settingsRoutes.post(
+    "/settings/household/location",
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        await setHouseholdLocation(
+            liveSettingsStore(),
+            manager.householdId,
+            formText(body, "location"),
+        );
+        return c.redirect("/settings/household", 303);
+    },
+);
 
 settingsRoutes.post(
     "/settings/household/rotate-token",
@@ -324,14 +334,14 @@ settingsRoutes.post(
     },
 );
 
-settingsRoutes.post("/settings/household/stores", requireOwner, async (c) => {
+settingsRoutes.post("/settings/household/stores", requireManager, async (c) => {
     const userId = c.get("userId");
-    const owner = siteMember(c);
+    const manager = siteMember(c);
     const body = await c.req.parseBody();
     try {
         await createGroceryStore(
             liveSettingsStore(),
-            owner.householdId,
+            manager.householdId,
             formText(body, "name"),
         );
     } catch (err) {
@@ -347,15 +357,15 @@ settingsRoutes.post("/settings/household/stores", requireOwner, async (c) => {
 
 settingsRoutes.post(
     "/settings/household/sections/:id",
-    requireOwner,
+    requireManager,
     async (c) => {
         const userId = c.get("userId");
-        const owner = siteMember(c);
+        const manager = siteMember(c);
         const body = await c.req.parseBody();
         try {
             await renameSection(
                 liveSettingsStore(),
-                owner.householdId,
+                manager.householdId,
                 c.req.param("id"),
                 formText(body, "name"),
             );
@@ -369,15 +379,15 @@ settingsRoutes.post(
 
 settingsRoutes.post(
     "/settings/household/stores/:id/rules",
-    requireOwner,
+    requireManager,
     async (c) => {
         const userId = c.get("userId");
-        const owner = siteMember(c);
+        const manager = siteMember(c);
         const body = await c.req.parseBody();
         const storeId = c.req.param("id");
         try {
             await addStoreRule(liveRulesStore(), {
-                householdId: owner.householdId,
+                householdId: manager.householdId,
                 storeId,
                 body: formText(body, "body"),
             });
@@ -395,14 +405,14 @@ settingsRoutes.post(
 
 settingsRoutes.post(
     "/settings/household/members/:userId/allergens",
-    requireOwner,
+    requireMember,
     async (c) => {
         const userId = c.get("userId");
-        const owner = siteMember(c);
+        const manager = siteMember(c);
         const body = await c.req.parseBody();
         try {
             await addAllergen(liveRulesStore(), {
-                householdId: owner.householdId,
+                householdId: manager.householdId,
                 userId: c.req.param("userId"),
                 allergen: formText(body, "allergen"),
                 otherLabel: formText(body, "other_label"),
@@ -421,14 +431,14 @@ settingsRoutes.post(
 
 settingsRoutes.post(
     "/settings/household/members/:userId/dislikes",
-    requireOwner,
+    requireMember,
     async (c) => {
         const userId = c.get("userId");
-        const owner = siteMember(c);
+        const manager = siteMember(c);
         const body = await c.req.parseBody();
         try {
             await addDislike(liveRulesStore(), {
-                householdId: owner.householdId,
+                householdId: manager.householdId,
                 userId: c.req.param("userId"),
                 displayName: formText(body, "display_name"),
             });
@@ -446,14 +456,14 @@ settingsRoutes.post(
 
 settingsRoutes.post(
     "/settings/household/members/:userId/rules",
-    requireOwner,
+    requireMember,
     async (c) => {
         const userId = c.get("userId");
-        const owner = siteMember(c);
+        const manager = siteMember(c);
         const body = await c.req.parseBody();
         try {
             await addPersonRule(liveRulesStore(), {
-                householdId: owner.householdId,
+                householdId: manager.householdId,
                 userId: c.req.param("userId"),
                 body: formText(body, "body"),
             });
@@ -463,6 +473,112 @@ settingsRoutes.post(
                 err,
                 `household-member-rules-${c.req.param("userId")}`,
             );
+            return c.html(page.html, page.status);
+        }
+        return c.redirect("/settings/household", 303);
+    },
+);
+
+// Who may edit a person's allergens, dislikes and rules: that person, or an
+// owner or admin. The target must be in the viewer's household.
+async function personRulesTarget(
+    c: Context,
+): Promise<
+    | { ok: true; member: HouseholdMember }
+    | { ok: false; page: Awaited<ReturnType<typeof householdFormError>> }
+> {
+    const viewer = siteMember(c);
+    const targetId = c.req.param("userId") ?? "";
+    const modalId = `household-member-rules-${targetId}`;
+    const target = await getHouseholdMembership(targetId, viewer.householdId);
+    if (target == null) {
+        return {
+            ok: false,
+            page: await householdFormError(
+                viewer.userId,
+                new Error("That person is not in this household."),
+            ),
+        };
+    }
+    if (!canEditPersonRules(viewer, target.userId)) {
+        return {
+            ok: false,
+            page: await householdFormError(
+                viewer.userId,
+                new Error("You can only edit your own rules."),
+                modalId,
+            ),
+        };
+    }
+    return { ok: true, member: target };
+}
+
+const PERSON_RULE_KINDS: Record<string, PersonRuleKind> = {
+    rules: "rule",
+    allergens: "allergen",
+    dislikes: "dislike",
+};
+
+settingsRoutes.post(
+    "/settings/household/members/:userId/:kind/:id/remove",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const kind = PERSON_RULE_KINDS[c.req.param("kind")];
+        if (kind == null) return c.notFound();
+        const target = await personRulesTarget(c);
+        if (!target.ok) return c.html(target.page.html, target.page.status);
+        try {
+            await removePersonRuleRow(liveRulesStore(), kind, {
+                householdId: target.member.householdId,
+                userId: target.member.userId,
+                id: c.req.param("id"),
+            });
+        } catch (err) {
+            const page = await householdFormError(
+                userId,
+                err,
+                `household-member-rules-${target.member.userId}`,
+            );
+            return c.html(page.html, page.status);
+        }
+        return c.redirect("/settings/household", 303);
+    },
+);
+
+// The owner raises a member to admin or lowers an admin back to member. The
+// owner keeps ownership either way.
+settingsRoutes.post(
+    "/settings/household/members/:userId/role",
+    requireOwner,
+    async (c) => {
+        const userId = c.get("userId");
+        const owner = siteMember(c);
+        const body = await c.req.parseBody();
+        const targetId = c.req.param("userId");
+        const manageModal = `household-manage-${targetId}`;
+        const role = formText(body, "role");
+        const target = await getHouseholdMembership(
+            targetId,
+            owner.householdId,
+        );
+        const check = checkManagedMember(owner, target, "role");
+        if (!check.ok || (role !== "admin" && role !== "member")) {
+            const page = await householdFormError(
+                userId,
+                new Error(check.ok ? "Choose admin or member." : check.error),
+                manageModal,
+            );
+            return c.html(page.html, page.status);
+        }
+        try {
+            await setHouseholdMemberRole(
+                owner.householdId,
+                check.target.userId,
+                role,
+            );
+        } catch (err) {
+            const page = await householdFormError(userId, err, manageModal);
             return c.html(page.html, page.status);
         }
         return c.redirect("/settings/household", 303);

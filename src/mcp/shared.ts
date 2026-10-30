@@ -8,7 +8,7 @@ import {
 } from "../auth-context.js";
 import {
     requireMemberOfHousehold,
-    requireOwner,
+    requireManager,
     resolveActorUserId,
     type ActorIntent,
 } from "../household.js";
@@ -1159,7 +1159,7 @@ export type ToolContext = {
         intent?: ActorIntent,
     ) => Promise<string>;
     callerHouseholdId: () => Promise<string>;
-    callerOwnerHouseholdId: () => Promise<string>;
+    callerManagerHouseholdId: () => Promise<string>;
     writeUserId: (
         requested: string | undefined,
         targetMember: string | undefined,
@@ -1259,15 +1259,15 @@ export function createToolContext(
         }
         return member.householdId;
     }
-    async function callerOwnerHouseholdId(): Promise<string> {
+    async function callerManagerHouseholdId(): Promise<string> {
         if (auth.kind === "household") return auth.householdId;
         const member = await getHouseholdMembership(auth.userId);
-        const check = requireOwner(member);
+        const check = requireManager(member);
         if (!check.ok) {
             throw new Error(
                 check.error === "not_a_member"
                     ? "not a household member"
-                    : "only the household owner may call this",
+                    : "only the household owner or an admin may call this",
             );
         }
         return check.member.householdId;
@@ -1366,7 +1366,7 @@ export function createToolContext(
         nutritionWriteSchema,
         actorUserId,
         callerHouseholdId,
-        callerOwnerHouseholdId,
+        callerManagerHouseholdId,
         writeUserId,
         requireHouseholdMemberId,
         callerActor,

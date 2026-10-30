@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { beginSiteLogin } from "../oauth.js";
 import {
+    requireManager as managerCheck,
     requireOwner as ownerCheck,
     type HouseholdMember,
 } from "../household.js";
@@ -28,7 +29,9 @@ export function siteUserId(cookieHeader: string | undefined): string | null {
 export function siteMember(c: Context): HouseholdMember {
     const member = c.get("member");
     if (member == null) {
-        throw new Error("web: requireMember/requireOwner must run first");
+        throw new Error(
+            "web: requireMember/requireManager/requireOwner must run first",
+        );
     }
     return member;
 }
@@ -55,6 +58,18 @@ export const requireOwner = createMiddleware(async (c, next) => {
     if (!userId) return beginSiteLogin(c, c.req.query("locale"));
     const member = await getHouseholdMembership(userId);
     const check = ownerCheck(member);
+    if (!check.ok) return c.html(forbiddenDashboardHtml(), 403);
+    c.set("userId", userId);
+    c.set("member", check.member);
+    return next();
+});
+
+/** Owner or admin. */
+export const requireManager = createMiddleware(async (c, next) => {
+    const userId = siteUserId(c.req.header("cookie"));
+    if (!userId) return beginSiteLogin(c, c.req.query("locale"));
+    const member = await getHouseholdMembership(userId);
+    const check = managerCheck(member);
     if (!check.ok) return c.html(forbiddenDashboardHtml(), 403);
     c.set("userId", userId);
     c.set("member", check.member);

@@ -1,6 +1,11 @@
 import type { AuthContext } from "./auth-context.js";
 
-export type MemberRole = "owner" | "member";
+/** `admin` is an elevated member: they manage the household (settings,
+ * stores, everyone's rules, adding people) alongside the owner. Ownership
+ * itself (roles, removal, transfer, the bot token) stays with the owner. */
+export type MemberRole = "owner" | "admin" | "member";
+
+export const MEMBER_ROLES = ["owner", "admin", "member"] as const;
 
 export type HouseholdMember = {
     householdId: string;
@@ -89,6 +94,10 @@ export type RequireMemberResult =
 export type RequireOwnerResult =
     | { ok: true; member: HouseholdMember }
     | { ok: false; error: "not_a_member" | "not_owner" };
+
+export type RequireManagerResult =
+    | { ok: true; member: HouseholdMember }
+    | { ok: false; error: "not_a_member" | "not_manager" };
 
 export class HouseholdAlreadyExistsError extends Error {
     readonly code = "household_already_exists" as const;
@@ -229,12 +238,39 @@ export function requireOwner(
     return { ok: true, member: check.member };
 }
 
-export type ManagedMemberAction = "transfer" | "remove";
+export function canManageHousehold(member: HouseholdMember): boolean {
+    return member.role === "owner" || member.role === "admin";
+}
+
+/** Owner or admin. */
+export function requireManager(
+    member: HouseholdMember | null | undefined,
+    householdId: string | null = null,
+): RequireManagerResult {
+    const check = requireMemberOfHousehold(member, householdId);
+    if (!check.ok) return check;
+    if (!canManageHousehold(check.member)) {
+        return { ok: false, error: "not_manager" };
+    }
+    return { ok: true, member: check.member };
+}
+
+/** Anyone edits their own allergens, dislikes and rules; an owner or admin
+ * edits anyone's in the same household. */
+export function canEditPersonRules(
+    actor: HouseholdMember,
+    targetUserId: string,
+): boolean {
+    return actor.userId === targetUserId || canManageHousehold(actor);
+}
+
+export type ManagedMemberAction = "transfer" | "remove" | "role";
 
 export type ManagedMemberResult =
     { ok: true; target: HouseholdMember } | { ok: false; error: string };
 
-/** The owner acting on another person: hand them ownership or remove them.
+/** The owner acting on another person: hand them ownership, change their
+ * role between admin and member, or remove them.
  * The database enforces the same rules (transfer_household_ownership); this
  * is what turns a bad request into a readable message before it gets there. */
 export function checkManagedMember(
@@ -254,7 +290,9 @@ export function checkManagedMember(
             error:
                 action === "transfer"
                     ? "You are already the owner."
-                    : "You can't remove yourself. Make someone else the owner first.",
+                    : action === "role"
+                      ? "You are the owner. Transfer ownership to change your role."
+                      : "You can't remove yourself. Make someone else the owner first.",
         };
     }
     return { ok: true, target };

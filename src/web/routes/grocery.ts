@@ -4,7 +4,7 @@ import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
 import { formAmount, formText } from "../form.js";
 import {
     requireMember,
-    requireOwner,
+    requireManager,
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
@@ -81,7 +81,7 @@ groceryRoutes.get("/grocery", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-groceryRoutes.post("/grocery/stores", requireOwner, async (c) => {
+groceryRoutes.post("/grocery/stores", requireManager, async (c) => {
     const userId = c.get("userId");
     const owner = siteMember(c);
     const body = await c.req.parseBody();

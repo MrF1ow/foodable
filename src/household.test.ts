@@ -1,5 +1,9 @@
 import { test, expect } from "bun:test";
 import {
+    canEditPersonRules,
+    canManageHousehold,
+    checkManagedMember,
+    requireManager,
     addHouseholdMember,
     createHousehold,
     createMemoryHouseholdStore,
@@ -417,4 +421,43 @@ test("requireOwner refuses a stranger with not_a_member", () => {
         ok: false,
         error: "not_a_member",
     });
+});
+
+test("an admin manages the household but is not the owner", () => {
+    const owner: HouseholdMember = {
+        householdId: "hh",
+        userId: alice,
+        role: "owner",
+        displayName: "Alice",
+    };
+    const admin: HouseholdMember = { ...owner, userId: bob, role: "admin" };
+    const member: HouseholdMember = { ...owner, userId: carol, role: "member" };
+
+    expect(canManageHousehold(owner)).toBe(true);
+    expect(canManageHousehold(admin)).toBe(true);
+    expect(canManageHousehold(member)).toBe(false);
+    expect(requireManager(admin).ok).toBe(true);
+    expect(requireManager(member)).toEqual({
+        ok: false,
+        error: "not_manager",
+    });
+    expect(requireOwner(admin)).toEqual({ ok: false, error: "not_owner" });
+
+    // Only the owner changes roles, and never their own.
+    expect(checkManagedMember(owner, member, "role").ok).toBe(true);
+    expect(checkManagedMember(admin, member, "role").ok).toBe(false);
+    expect(checkManagedMember(owner, owner, "role").ok).toBe(false);
+});
+
+test("anyone edits their own rules; managers edit everyone's", () => {
+    const member: HouseholdMember = {
+        householdId: "hh",
+        userId: carol,
+        role: "member",
+        displayName: "Carol",
+    };
+    const admin: HouseholdMember = { ...member, userId: bob, role: "admin" };
+    expect(canEditPersonRules(member, carol)).toBe(true);
+    expect(canEditPersonRules(member, bob)).toBe(false);
+    expect(canEditPersonRules(admin, carol)).toBe(true);
 });

@@ -1,4 +1,12 @@
-import { test, expect, describe, mock, beforeEach, afterAll } from "bun:test";
+import {
+    test,
+    expect,
+    describe,
+    mock,
+    beforeAll,
+    beforeEach,
+    afterAll,
+} from "bun:test";
 import {
     formatProgress,
     sumMeals,
@@ -89,7 +97,7 @@ import type {
     WeightEntry,
 } from "./db/nutrition.js";
 import { dateInTz, formatLocalDateTime, weekdayInTz } from "./domain/tz.js";
-import { getWidgetHtml } from "./widgets.js";
+import { getAppCss, getAppJs, getWidgetHtml } from "./widgets.js";
 
 function meal(over: Partial<Meal> = {}): Meal {
     return {
@@ -4905,6 +4913,14 @@ describe("authenticated dashboard HTTP", () => {
     function cookieFor(userId: string): string {
         return `${SITE_COOKIE}=${mintSiteSession(userId)}`;
     }
+
+    // The ?v= asset hashes exist only once the app CSS and JS are assembled.
+    // The server warms them at boot; here nothing does, so without this the
+    // hash assertions pass or fail on whichever test file ran first.
+    beforeAll(async () => {
+        await getAppCss();
+        await getAppJs();
+    });
 
     beforeEach(() => {
         db.members = [

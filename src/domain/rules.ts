@@ -71,7 +71,16 @@ export type RulesStore = {
     insertAllergen(row: MemberAllergen): Promise<MemberAllergen>;
     listDislikes(householdId: string, userId: string): Promise<MemberDislike[]>;
     insertDislike(row: MemberDislike): Promise<MemberDislike>;
+    /** Each delete is scoped to one person: an id that belongs to someone
+     * else matches nothing. Resolves true when a row was removed. */
+    deletePersonRule(ref: PersonRowRef): Promise<boolean>;
+    deleteAllergen(ref: PersonRowRef): Promise<boolean>;
+    deleteDislike(ref: PersonRowRef): Promise<boolean>;
 };
+
+export type PersonRowRef = { householdId: string; userId: string; id: string };
+
+export type PersonRuleKind = "rule" | "allergen" | "dislike";
 
 export class RulesInputError extends Error {
     readonly code = "rules_input" as const;
@@ -149,7 +158,49 @@ export function createMemoryRulesStore(): RulesStore {
             dislikes.push({ ...row });
             return { ...row };
         },
+        async deletePersonRule(ref) {
+            return spliceRef(personRules, ref);
+        },
+        async deleteAllergen(ref) {
+            return spliceRef(allergens, ref);
+        },
+        async deleteDislike(ref) {
+            return spliceRef(dislikes, ref);
+        },
     };
+}
+
+function spliceRef(
+    rows: Array<{ id: string; householdId: string; userId: string }>,
+    ref: PersonRowRef,
+): boolean {
+    const index = rows.findIndex(
+        (row) =>
+            row.id === ref.id &&
+            row.householdId === ref.householdId &&
+            row.userId === ref.userId,
+    );
+    if (index < 0) return false;
+    rows.splice(index, 1);
+    return true;
+}
+
+/** Removes one of a person's rules, allergens or dislikes. Throws when the
+ * row is not theirs, so a stale page reads as an error rather than a no-op. */
+export async function removePersonRuleRow(
+    store: RulesStore,
+    kind: PersonRuleKind,
+    ref: PersonRowRef,
+): Promise<void> {
+    const removed =
+        kind === "rule"
+            ? await store.deletePersonRule(ref)
+            : kind === "allergen"
+              ? await store.deleteAllergen(ref)
+              : await store.deleteDislike(ref);
+    if (!removed) {
+        throw new RulesInputError("That entry is already gone.");
+    }
 }
 
 export async function addStoreRule(

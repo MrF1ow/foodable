@@ -392,7 +392,7 @@ test("owner grocery page has a short add-store form and no add-supply", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
         stores: [],
-        isOwner: true,
+        canManage: true,
     });
     expect(html).toContain("<h1>Groceries</h1>");
     expect(html).toContain('class="grocery-add-store"');
@@ -409,7 +409,7 @@ test("owner grocery page has a short add-store form and no add-supply", () => {
 test("owner grocery page keeps the add-store form when a store already exists", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
-        isOwner: true,
+        canManage: true,
         stores: [
             {
                 id: "st-1",
@@ -431,7 +431,7 @@ test("member grocery page does not get the add-store form", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
         stores: [],
-        isOwner: false,
+        canManage: false,
     });
     expect(html).toContain("<h1>Groceries</h1>");
     expect(html).toContain("Household settings");
@@ -444,7 +444,7 @@ test("empty store name error re-renders groceries with the banner", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
         stores: [],
-        isOwner: true,
+        canManage: true,
         error: "Enter a store name.",
     });
     expect(html).toContain("<h1>Groceries</h1>");
@@ -457,7 +457,7 @@ test("empty store name error re-renders groceries with the banner", () => {
 test("grocery lines are rows with a labelled round check button", () => {
     const html = renderGroceryPage({
         chrome: { theme: "light" },
-        isOwner: true,
+        canManage: true,
         locations: [{ id: "l1", name: "Fridge" }],
         stores: [
             {
@@ -519,7 +519,7 @@ test("grocery lines are rows with a labelled round check button", () => {
 test("grocery header actions and modals match fridge patterns", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
-        isOwner: true,
+        canManage: true,
         locations: [{ id: "l1", name: "Fridge" }],
         stores: [
             {
@@ -577,7 +577,7 @@ test("grocery header actions and modals match fridge patterns", () => {
 test("member grocery page has no add-store trigger or form", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
-        isOwner: false,
+        canManage: false,
         stores: [
             {
                 id: "st-1",
@@ -626,7 +626,7 @@ test("a server error reopens the grocery modal that submitted the form", () => {
     const addStore = renderGroceryPage({
         chrome: groceryChrome,
         stores: [],
-        isOwner: true,
+        canManage: true,
         error: "Enter a store name.",
         openModalId: "grocery-add-store",
     });
@@ -635,7 +635,7 @@ test("a server error reopens the grocery modal that submitted the form", () => {
     );
     const clearChecked = renderGroceryPage({
         chrome: groceryChrome,
-        isOwner: true,
+        canManage: true,
         locations: [{ id: "l1", name: "Fridge" }],
         stores: [
             {
@@ -684,7 +684,7 @@ test("a server error reopens the grocery modal that submitted the form", () => {
     );
     const addFood = renderGroceryPage({
         chrome: groceryChrome,
-        isOwner: true,
+        canManage: true,
         stores: [
             {
                 id: "st-1",
@@ -766,7 +766,7 @@ test("owner with no stores does not auto-open the add-store modal", () => {
     const html = renderGroceryPage({
         chrome: groceryChrome,
         stores: [],
-        isOwner: true,
+        canManage: true,
     });
     expect(html).toContain('id="grocery-add-store"');
     expect(html).not.toMatch(

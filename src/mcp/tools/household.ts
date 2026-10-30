@@ -2,6 +2,7 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { HOUSEHOLD_CANNOT_DELETE_ACCOUNT } from "../../auth-context.js";
 import {
+    MEMBER_ROLES,
     householdConfigToWire,
     mergeHouseholdConfig,
     parseHouseholdConfigPatch,
@@ -23,7 +24,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         auth,
         requireUser,
         callerHouseholdId,
-        callerOwnerHouseholdId,
+        callerManagerHouseholdId,
         analytics,
     } = ctx;
     const LIST_MEMBERS_OUTPUT_SCHEMA = z.object({
@@ -31,7 +32,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
             z.object({
                 user_id: z.string(),
                 display_name: z.string(),
-                role: z.enum(["owner", "member"]),
+                role: z.enum(MEMBER_ROLES),
             }),
         ),
     });
@@ -149,7 +150,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Update Household Config",
             description:
-                "Merge household name, recipe search places, or shared preferences. Only the household owner or the household bot may call this. Places are labels only, not a recipe table.",
+                "Merge household name, recipe search places, or shared preferences. Only the household owner, an admin, or the household bot may call this. Places are labels only, not a recipe table.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -183,7 +184,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const parsed = parseHouseholdConfigPatch(args);
                     if (!parsed.ok) throw new Error(parsed.error);
-                    const householdId = await callerOwnerHouseholdId();
+                    const householdId = await callerManagerHouseholdId();
                     const current = await getHouseholdConfig(householdId);
                     const config = householdConfigToWire(
                         await updateHouseholdConfig(
@@ -211,7 +212,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Delete Account",
             description:
-                "Permanently delete the user's account and all associated data (meals, tokens, auth). This action is irreversible. Always confirm with the user before calling this tool. Shared household data (fridge, grocery, recipes, foods) stays. If the user owns the household, ownership passes to the member with the oldest account; mention that before confirming, and suggest they hand ownership to someone in Settings → Household first if they prefer.",
+                "Permanently delete the user's account and all associated data (meals, tokens, auth). This action is irreversible. Always confirm with the user before calling this tool. Shared household data (fridge, grocery, recipes, foods) stays. If the user owns the household, ownership passes to an admin, or else the member with the oldest account; mention that before confirming, and suggest they hand ownership to someone in Settings → Household first if they prefer.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: true,

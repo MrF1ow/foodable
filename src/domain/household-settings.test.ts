@@ -41,6 +41,8 @@ test("household settings use modals instead of add/edit disclosures", () => {
             { member: alice, rules: [], allergens: [], dislikes: [] },
         ],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
     } as never);
     expect(html).not.toMatch(
         /<details class="more">[\s\S]*(?:Add household member|Add store|Edit rules|Add store rule|Manage)/,
@@ -63,6 +65,8 @@ test("household server error reopens add-member and remove confirm modals", () =
         stores: [],
         memberRules: [],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
         error: "Password must be at least 8 characters.",
         openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     } as never);
@@ -79,6 +83,8 @@ test("household server error reopens add-member and remove confirm modals", () =
         stores: [],
         memberRules: [],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
         error: "Tick the box to confirm removing Bob.",
         openModalId: "household-remove-u2",
     } as never);
@@ -118,6 +124,8 @@ const ownerHouseholdBase = {
     ],
     memberRules: [{ member: bob, rules: [], allergens: [], dislikes: [] }],
     isOwner: true,
+    canManage: true,
+    viewerUserId: alice.userId,
 } as const;
 
 test("household modal errors render inside the reopening dialog", () => {
@@ -169,6 +177,8 @@ test("household page banner when openModalId is unknown", () => {
         stores: [],
         memberRules: [],
         isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
         error: "Could not update household settings.",
         openModalId: "household-gone",
     } as never);
