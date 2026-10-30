@@ -79,9 +79,21 @@ function modalError(view: FridgePageView, id: string): string {
 const FRIDGE_EDIT_FOOD_ID = "fridge-edit-food";
 const FRIDGE_EDIT_SUPPLY_ID = "fridge-edit-supply";
 const FRIDGE_DELETE_ITEM_ID = "fridge-delete-item";
+/** One add/remove dialog for every location. Filled from the location row. */
+const FRIDGE_ADD_FOOD_ID = "fridge-add-food";
+const FRIDGE_ADD_SUPPLY_ID = "fridge-add-supply";
+const FRIDGE_REMOVE_LOCATION_ID = "fridge-remove-location";
+const ADD_FOOD_PREFIX = "fridge-add-food-";
+const ADD_SUPPLY_PREFIX = "fridge-add-supply-";
+const REMOVE_LOCATION_PREFIX = "fridge-remove-location-";
+const FRIDGE_FOOD_PICKER_ID = "fridge-food-picker";
 
 function findItem(view: FridgePageView, id: string): FridgeItem | null {
     return view.items.find((item) => item.id === id) ?? null;
+}
+
+function findLocation(view: FridgePageView, id: string): FridgeLocation | null {
+    return view.locations.find((location) => location.id === id) ?? null;
 }
 
 /**
@@ -104,6 +116,42 @@ function sharedItemErrorId(view: FridgePageView): string | null {
         lookup: (id) => findItem(view, id),
     });
     return remove ? remove.openModalId : null;
+}
+
+/**
+ * Routes still reopen with `fridge-add-food-<locationId>`,
+ * `fridge-add-supply-<locationId>`, and `fridge-remove-location-<locationId>`.
+ * A known location reports that id so the banner stays inside the shared
+ * dialog. An unknown id stays off the list and the page banner shows it.
+ */
+function sharedLocationErrorId(view: FridgePageView): string | null {
+    if (!view.error) return null;
+    for (const prefix of [
+        ADD_FOOD_PREFIX,
+        ADD_SUPPLY_PREFIX,
+        REMOVE_LOCATION_PREFIX,
+    ]) {
+        const match = sharedDialogItem({
+            openModalId: view.openModalId,
+            prefix,
+            lookup: (id) => findLocation(view, id),
+        });
+        if (match) return match.openModalId;
+    }
+    return null;
+}
+
+function reopenLocation(
+    view: FridgePageView,
+    prefix: string,
+): FridgeLocation | null {
+    return (
+        sharedDialogItem({
+            openModalId: view.openModalId,
+            prefix,
+            lookup: (id) => findLocation(view, id),
+        })?.item ?? null
+    );
 }
 
 function editReopenItem(
@@ -244,82 +292,74 @@ function sharedDeleteModal(view: FridgePageView): string {
     });
 }
 
+function locationFill(
+    location: FridgeLocation,
+    mode: "food" | "supply" | "remove",
+): ModalFill {
+    if (mode === "remove") {
+        return {
+            action: `/fridge/locations/${location.id}/delete`,
+            message: `Remove ${location.name} and everything in it?`,
+        };
+    }
+    if (mode === "supply") {
+        return {
+            action: "/fridge/items",
+            title: `Add household item to ${location.name}`,
+            fields: {
+                location_id: location.id,
+                kind: "supply",
+                name: "",
+                qty_amount: "",
+                qty_unit: "roll",
+            },
+        };
+    }
+    return {
+        action: "/fridge/items",
+        title: `Add food to ${location.name}`,
+        fields: {
+            location_id: location.id,
+            kind: "food",
+            barcode: "",
+            food_name: "",
+            qty_amount: "",
+            qty_unit: "g",
+        },
+    };
+}
+
 function locationSection(
     location: FridgeLocation,
     items: FridgeItem[],
-    view: FridgePageView,
     today: string,
-): { section: string; modals: string; modalIds: string[] } {
+): string {
     const locItems = items.filter((item) => item.locationId === location.id);
     const rows = locItems.map((item) => itemRow(item, today)).join("");
     const empty = locItems.length
         ? ""
         : emptyState(`Add an item to ${location.name}.`, "add-item-prompt");
-    const pickerId = `picker-${location.id}`;
-    const foodModalId = `fridge-add-food-${location.id}`;
-    const supplyModalId = `fridge-add-supply-${location.id}`;
-    const removeModalId = `fridge-remove-location-${location.id}`;
-    const locationModals =
-        modal({
-            id: foodModalId,
-            title: "Add food",
-            openOnLoad: modalOpen(view, foodModalId),
-            body: `${modalError(view, foodModalId)}${renderFoodPicker({
-                id: pickerId,
-                action: "/fridge/items",
-                method: "post",
-                hiddenFields: { kind: "food", location_id: location.id },
-                includeQuantity: true,
-            })}`,
-        }) +
-        modal({
-            id: supplyModalId,
-            title: "Add household item",
-            openOnLoad: modalOpen(view, supplyModalId),
-            body: `${modalError(view, supplyModalId)}<form class="fridge-add-supply" method="post" action="/fridge/items">
-<input type="hidden" name="kind" value="supply" />
-<input type="hidden" name="location_id" value="${escapeHtml(location.id)}" />
-<label for="supply-name-${escapeHtml(location.id)}">Name</label>
-<input id="supply-name-${escapeHtml(location.id)}" name="name" type="text" required autocomplete="off" />
-${renderQuantityField({
-    kind: "supply",
-    unit: "roll",
-    units: SUPPLY_UNITS,
-    idPrefix: `supply-qty-${location.id}`,
-    namePrefix: "qty",
-    required: true,
-})}
-<button type="submit" class="btn-primary">Add household item</button>
-</form>`,
-        }) +
-        confirmModal({
-            id: removeModalId,
-            title: "Remove location",
-            message: `Remove ${location.name} and everything in it?`,
-            action: `/fridge/locations/${location.id}/delete`,
-            confirmLabel: "Remove",
-            openOnLoad: modalOpen(view, removeModalId),
-            bodyPrefix: modalError(view, removeModalId),
-        });
-    const locationModalIds = [foodModalId, supplyModalId, removeModalId];
     const headActions = `<div class="row-actions">
 ${modalTrigger({
-    target: foodModalId,
+    target: FRIDGE_ADD_FOOD_ID,
     label: "Add food",
     className: "btn-sm",
+    fill: locationFill(location, "food"),
 })}
 <span class="fridge-supply-action">${modalTrigger({
-        target: supplyModalId,
+        target: FRIDGE_ADD_SUPPLY_ID,
         label: "Add household item",
         className: "btn-sm",
+        fill: locationFill(location, "supply"),
     })}</span>
 ${modalTrigger({
-    target: removeModalId,
+    target: FRIDGE_REMOVE_LOCATION_ID,
     label: "Remove",
     className: "btn-sm btn-danger",
+    fill: locationFill(location, "remove"),
 })}
 </div>`;
-    const section = `<section class="fridge-location panel" data-location-id="${escapeHtml(location.id)}">
+    return `<section class="fridge-location panel" data-location-id="${escapeHtml(location.id)}">
 <div class="fridge-location-head row">
 <h2 class="row-title">${escapeHtml(location.name)}</h2>
 ${headActions}
@@ -327,11 +367,76 @@ ${headActions}
 ${empty}
 <ul class="fridge-items list">${rows}</ul>
 </section>`;
-    return {
-        section,
-        modals: locationModals,
-        modalIds: locationModalIds,
-    };
+}
+
+function sharedAddFoodModal(view: FridgePageView): string {
+    if (view.locations.length === 0) return "";
+    const location = reopenLocation(view, ADD_FOOD_PREFIX);
+    const openId = location ? `${ADD_FOOD_PREFIX}${location.id}` : "";
+    const open = location != null && modalOpen(view, openId);
+    return modal({
+        id: FRIDGE_ADD_FOOD_ID,
+        title: location ? `Add food to ${location.name}` : "Add food",
+        openOnLoad: open,
+        submitDisabled: location == null,
+        body: `${open ? modalError(view, openId) : ""}${renderFoodPicker({
+            id: FRIDGE_FOOD_PICKER_ID,
+            action: location ? "/fridge/items" : "",
+            method: "post",
+            hiddenFields: { kind: "food", location_id: location?.id ?? "" },
+            includeQuantity: true,
+        })}`,
+    });
+}
+
+function sharedAddSupplyModal(view: FridgePageView): string {
+    if (view.locations.length === 0) return "";
+    const location = reopenLocation(view, ADD_SUPPLY_PREFIX);
+    const openId = location ? `${ADD_SUPPLY_PREFIX}${location.id}` : "";
+    const open = location != null && modalOpen(view, openId);
+    const action = location ? "/fridge/items" : "";
+    return modal({
+        id: FRIDGE_ADD_SUPPLY_ID,
+        title: location
+            ? `Add household item to ${location.name}`
+            : "Add household item",
+        openOnLoad: open,
+        submitDisabled: location == null,
+        body: `${open ? modalError(view, openId) : ""}<form class="fridge-add-supply" method="post" action="${escapeHtml(action)}">
+<input type="hidden" name="kind" value="supply" />
+<input type="hidden" name="location_id" value="${escapeHtml(location?.id ?? "")}" />
+<label for="supply-name">Name</label>
+<input id="supply-name" name="name" type="text" required autocomplete="off" />
+${renderQuantityField({
+    kind: "supply",
+    unit: "roll",
+    units: SUPPLY_UNITS,
+    idPrefix: "supply-qty",
+    namePrefix: "qty",
+    required: true,
+})}
+<button type="submit" class="btn-primary">Add household item</button>
+</form>`,
+    });
+}
+
+function sharedRemoveLocationModal(view: FridgePageView): string {
+    if (view.locations.length === 0) return "";
+    const location = reopenLocation(view, REMOVE_LOCATION_PREFIX);
+    const openId = location ? `${REMOVE_LOCATION_PREFIX}${location.id}` : "";
+    const open = location != null && modalOpen(view, openId);
+    return confirmModal({
+        id: FRIDGE_REMOVE_LOCATION_ID,
+        title: "Remove location",
+        message: location
+            ? `Remove ${location.name} and everything in it?`
+            : "Remove this location and everything in it?",
+        action: location ? `/fridge/locations/${location.id}/delete` : "",
+        confirmLabel: "Remove",
+        openOnLoad: open,
+        bodyPrefix: open ? modalError(view, openId) : "",
+        submitDisabled: location == null,
+    });
 }
 
 export function renderFridgePage(view: FridgePageView): string {
@@ -348,16 +453,16 @@ export function renderFridgePage(view: FridgePageView): string {
             expiresOn: item.expiresOn ?? "",
         })),
     );
-    const locationParts = view.locations.map((loc) =>
-        locationSection(loc, view.items, view, today),
-    );
+    const sections = view.locations
+        .map((loc) => locationSection(loc, view.items, today))
+        .join("");
+    const locationErrorId = sharedLocationErrorId(view);
     const itemErrorId = sharedItemErrorId(view);
     const modalIds = [
         addLocationId,
-        ...locationParts.flatMap((part) => part.modalIds),
+        ...(locationErrorId ? [locationErrorId] : []),
         ...(itemErrorId ? [itemErrorId] : []),
     ];
-    const sections = locationParts.map((part) => part.section).join("");
     const modals =
         modal({
             id: addLocationId,
@@ -369,7 +474,9 @@ export function renderFridgePage(view: FridgePageView): string {
 <button type="submit" class="btn-primary">Add location</button>
 </form>`,
         }) +
-        locationParts.map((part) => part.modals).join("") +
+        sharedAddFoodModal(view) +
+        sharedAddSupplyModal(view) +
+        sharedRemoveLocationModal(view) +
         sharedEditModal("food", view.locations, view) +
         sharedEditModal("supply", view.locations, view) +
         sharedDeleteModal(view);

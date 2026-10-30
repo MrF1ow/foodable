@@ -217,7 +217,7 @@ test("the Fridge page ships the picker logic once", async () => {
         items: [],
         chrome: { theme: "light" },
     });
-    expect((html.match(/data-food-picker/g) ?? []).length).toBe(2);
+    expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
     expect(html).not.toContain("/api/foods/search");
     const picker = (
         await Bun.file("./src/web/client/food-picker.js").text()
