@@ -176,7 +176,7 @@ fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     try {
-        await deleteFridgeItemAdjust(
+        const removed = await deleteFridgeItemAdjust(
             liveFridgeStore(),
             liveStockStore(),
             liveFoodsStore(),
@@ -186,6 +186,9 @@ fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
                 actorUserId: userId,
             },
         );
+        if (!removed) {
+            throw new StockInputError("That item is no longer in the fridge.");
+        }
     } catch (err) {
         const page = await fridgeFormError(
             userId,
@@ -204,7 +207,7 @@ fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
     const store = liveFridgeStore();
     const itemId = c.req.param("id");
     try {
-        await updateFridgeItemQuantityAdjust(
+        const updated = await updateFridgeItemQuantityAdjust(
             store,
             liveStockStore(),
             liveFoodsStore(),
@@ -216,6 +219,9 @@ fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
                 actorUserId: userId,
             },
         );
+        if (!updated) {
+            throw new StockInputError("That item is no longer in the fridge.");
+        }
         const locationId = formText(body, "location_id");
         if (locationId) {
             await moveItem(store, member.householdId, itemId, locationId);
