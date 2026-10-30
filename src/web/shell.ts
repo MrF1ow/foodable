@@ -75,6 +75,7 @@ export function appHead(
 <meta name="foodable-theme-chrome" content="${themeChrome}" />
 <meta name="turbo-refresh-method" content="morph" />
 <meta name="turbo-refresh-scroll" content="preserve" />
+<meta name="turbo-cache-control" content="no-preview" />
 ${themeColorMeta(theme, themeChrome)}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
