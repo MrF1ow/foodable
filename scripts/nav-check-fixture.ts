@@ -412,6 +412,14 @@ function findChromium(): string | null {
     return null;
 }
 
+// Warm the asset hashes before writing pages. A later re-render (a shared
+// dialog's server-error response) goes through renderAppShell, which stamps
+// /app.css?v= and /app.js?v= once the bundles exist. If the page the browser
+// loaded omitted those queries, Turbo treats the 400 as a tracked-element
+// mismatch and full-reloads the unfilled page.
+await getAppCss();
+await getAppJs();
+
 const names: string[] = [];
 for (const theme of ["light", "dark"] as const) {
     for (const [name, html] of Object.entries(await pages(theme))) {
@@ -504,6 +512,28 @@ async function loginDocument() {
         .replaceAll("{{CONNECT_HINT}}", "");
 }
 
+function renderFailedModal(pathname: string, modalId: string): string | null {
+    if (!modalId || pathname !== "/fridge") return null;
+    const view = fridgeView(
+        viewerChromeFromProfile({ theme: themeFileSuffix() }),
+    );
+    const itemId = (prefix: string) =>
+        modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
+    const hasItem = (id: string) =>
+        id.length > 0 && view.items.some((item) => item.id === id);
+    if (
+        !hasItem(itemId("fridge-edit-")) &&
+        !hasItem(itemId("fridge-delete-"))
+    ) {
+        return null;
+    }
+    return renderFridgePage({
+        ...view,
+        error: "Name is required",
+        openModalId: modalId,
+    } as never);
+}
+
 function injectModal(html: string, id: string) {
     if (!id) return html;
     const re = new RegExp(`(<dialog\\b[^>]*\\bid="${id}"[^>]*)>`);
@@ -554,12 +584,12 @@ function patchFridgeItemQty(
             `$1${label} · `,
         );
         next = next.replace(
-            /data-item-amount="[^"]*"/g,
-            `data-item-amount="${escapeHtml(String(amount))}"`,
+            /data-fill-field-qty_amount="[^"]*"/g,
+            `data-fill-field-qty_amount="${escapeHtml(String(amount))}"`,
         );
         next = next.replace(
-            /data-item-unit="[^"]*"/g,
-            `data-item-unit="${escapeHtml(unit)}"`,
+            /data-fill-field-qty_unit="[^"]*"/g,
+            `data-fill-field-qty_unit="${escapeHtml(unit)}"`,
         );
         return next;
     });
@@ -743,7 +773,14 @@ const server = Bun.serve({
             }
             const item = path.split("/")[3] || "";
             if (postMode === "fail" || postMode === "modal") {
-                html = injectModal(html, modalId);
+                const rendered = renderFailedModal(dest.pathname, modalId);
+                if (rendered) {
+                    html = applyAccountTheme(
+                        stamp(rendered, destKey + "#post"),
+                    );
+                } else {
+                    html = injectModal(html, modalId);
+                }
                 html = html.replace(
                     "</main>",
                     `<script>window.__xss=1</script></main>`,

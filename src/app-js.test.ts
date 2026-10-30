@@ -22,7 +22,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         "./src/web/client/food-picker.js",
         "./src/web/client/nutrition-log.js",
         "./src/web/client/grocery.js",
-        "./src/web/client/fridge.js",
+        "./src/web/client/dialog-fill.js",
         "./src/web/client/modal.js",
         "./src/web/client/arrange.js",
     ]);
@@ -230,6 +230,7 @@ type FridgeListener = (event: { source?: FakeNode | null }) => void;
 
 type FakeNode = {
     tag: string;
+    tagName: string;
     id: string;
     className: string;
     attrs: Record<string, string>;
@@ -237,6 +238,9 @@ type FakeNode = {
     parent: FakeNode | null;
     textContent: string;
     value: string;
+    type: string;
+    checked: boolean;
+    disabled: boolean;
     open: boolean;
     listeners: Record<string, FridgeListener[]>;
     getAttribute(name: string): string | null;
@@ -314,6 +318,7 @@ function fakeNode(
 ): FakeNode {
     const node = {
         tag: tag.toUpperCase(),
+        tagName: tag.toUpperCase(),
         id: attrs.id ?? "",
         className: attrs.class ?? "",
         attrs: { ...attrs },
@@ -321,9 +326,20 @@ function fakeNode(
         parent: null,
         textContent: text,
         value: attrs.value ?? "",
+        type: attrs.type ?? "",
+        checked: false,
+        disabled: false,
         open: false,
         listeners: {},
     } as FakeNode;
+    Object.defineProperty(node, "attributes", {
+        get() {
+            return Object.entries(node.attrs).map(([name, value]) => ({
+                name,
+                value,
+            }));
+        },
+    });
     node.getAttribute = (name) =>
         Object.prototype.hasOwnProperty.call(node.attrs, name)
             ? node.attrs[name]!
@@ -413,35 +429,28 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
     const editButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-edit-food",
-        "data-item-id": "it-1",
-        "data-item-name": hostile,
-        "data-item-kind": "food",
-        "data-item-amount": "6",
-        "data-item-unit": "each",
-        "data-item-location": "loc-1",
-        "data-item-expires": "2026-11-02",
+        "data-fill-action": "/fridge/items/it-1",
+        "data-fill-title": `Edit ${hostile}`,
+        "data-fill-field-qty_amount": "6",
+        "data-fill-field-qty_unit": "each",
+        "data-fill-field-location_id": "loc-1",
+        "data-fill-field-expires_on": "2026-11-02",
     });
     const deleteButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-delete-item",
-        "data-item-id": "it-1",
-        "data-item-name": "Eggs",
-        "data-item-kind": "food",
-        "data-item-amount": "6",
-        "data-item-unit": "each",
-        "data-item-location": "loc-1",
-        "data-item-expires": "2026-11-02",
+        "data-fill-action": "/fridge/items/it-1/delete",
+        "data-fill-message": "Remove Eggs from the fridge?",
     });
     const supplyButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-edit-supply",
-        "data-item-id": "it-sup",
-        "data-item-name": "Paper towels",
-        "data-item-kind": "supply",
-        "data-item-amount": "3",
-        "data-item-unit": "roll",
-        "data-item-location": "loc-2",
-        "data-item-expires": "",
+        "data-fill-action": "/fridge/items/it-sup",
+        "data-fill-title": "Edit Paper towels",
+        "data-fill-field-qty_amount": "3",
+        "data-fill-field-qty_unit": "roll",
+        "data-fill-field-location_id": "loc-2",
+        "data-fill-field-expires_on": "",
     });
     const document = fakeNode("document", {}, [
         foodDialog,
@@ -465,7 +474,7 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
             },
         },
     };
-    const src = await Bun.file("./src/web/client/fridge.js").text();
+    const src = await Bun.file("./src/web/client/dialog-fill.js").text();
     new Function("document", "window", src)(document, window);
 
     editButton.click();
@@ -492,7 +501,7 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
     expect(supplyExpires.value).toBe("");
     expect(supplyTitle.textContent).toBe("Edit Paper towels");
 
-    editButton.setAttribute("data-item-amount", "9");
+    editButton.setAttribute("data-fill-field-qty_amount", "9");
     for (const fn of foodDialog.listeners.command ?? []) {
         fn({ source: editButton });
     }
@@ -509,4 +518,93 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
     window.FoodableApp.reinit(document);
     expect(editButton.listeners.click?.length).toBe(1);
     expect(foodDialog.listeners.command?.length).toBe(1);
+
+    const kept = fakeNode("p", { class: "error-banner" }, [], "Kept");
+    foodDialog.children.push(kept);
+    kept.parent = foodDialog;
+    for (const fn of foodDialog.listeners.command ?? []) {
+        fn({ source: editButton });
+    }
+    expect(foodDialog.querySelector(".error-banner")?.textContent).toBe("Kept");
+    editButton.setAttribute("data-fill-action", "/fridge/items/it-2");
+    for (const fn of foodDialog.listeners.command ?? []) {
+        fn({ source: editButton });
+    }
+    expect(foodDialog.querySelector(".error-banner")).toBeNull();
+    expect(foodForm.getAttribute("action")).toBe("/fridge/items/it-2");
+});
+
+test("dialog fill checks boxes and falls back to the first select option", async () => {
+    const milk = fakeNode("input", {
+        type: "checkbox",
+        name: "allergens",
+        value: "milk",
+    });
+    const egg = fakeNode("input", {
+        type: "checkbox",
+        name: "allergens",
+        value: "egg",
+    });
+    const archived = fakeNode("input", {
+        type: "checkbox",
+        name: "archived",
+        value: "1",
+    });
+    const unit = fakeNode("select", { name: "qty_unit", value: "g" });
+    const options = ["g", "ml"];
+    let index = 0;
+    (unit as { options?: { value: string }[] }).options = options.map(
+        (value) => ({ value }),
+    );
+    Object.defineProperty(unit, "value", {
+        get: () => (index >= 0 ? options[index]! : ""),
+        set: (value: string) => {
+            index = options.indexOf(value);
+        },
+    });
+    Object.defineProperty(unit, "selectedIndex", {
+        get: () => index,
+        set: (value: number) => {
+            index = value;
+        },
+    });
+    const submit = fakeNode("button", { type: "submit" });
+    submit.disabled = true;
+    const form = fakeNode("form", { action: "" }, [
+        milk,
+        egg,
+        archived,
+        unit,
+        submit,
+    ]);
+    const dialog = fakeNode("dialog", { id: "food-edit", class: "modal" }, [
+        form,
+    ]);
+    const button = fakeNode("button", {
+        command: "show-modal",
+        commandfor: "food-edit",
+        "data-fill-action": "/settings/foods/f1",
+        "data-fill-field-allergens": "milk",
+        "data-fill-field-archived": "true",
+        "data-fill-field-qty_unit": "nope",
+    });
+    const document = fakeNode("document", {}, [dialog, button]);
+    document.getElementById = (id) =>
+        queryFridge(document, `#${id}`)[0] ?? null;
+    const window = {
+        FoodableApp: {
+            onLoad(fn: (root: FakeNode) => void) {
+                fn(document);
+            },
+        },
+    };
+    const src = await Bun.file("./src/web/client/dialog-fill.js").text();
+    new Function("document", "window", src)(document, window);
+    button.click();
+    expect(milk.checked).toBe(true);
+    expect(egg.checked).toBe(false);
+    expect(archived.checked).toBe(true);
+    expect(unit.value).toBe("g");
+    expect(submit.disabled).toBe(false);
+    expect(form.getAttribute("action")).toBe("/settings/foods/f1");
 });

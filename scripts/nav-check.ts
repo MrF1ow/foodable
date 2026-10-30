@@ -347,7 +347,7 @@ try {
             location: form?.querySelector("select[name='location_id']")?.value ?? null,
             expires: form?.querySelector("input[name='expires_on']")?.value ?? null,
             title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            expectedExpires: trigger?.getAttribute("data-item-expires") ?? null,
+            expectedExpires: trigger?.getAttribute("data-fill-field-expires_on") ?? null,
         };
     })()`);
     await ev(`document.getElementById("fridge-edit-food")?.close()`);
@@ -375,6 +375,30 @@ try {
         };
     })()`);
     await ev(`document.getElementById("fridge-edit-supply")?.close()`);
+    await clickSel('button[aria-label="Edit Yogurt"]');
+    await sleep(40);
+    const yogurtEdit = await ev<{
+        open: boolean;
+        action: string | null;
+        amount: string | null;
+        unit: string | null;
+        location: string | null;
+        title: string | null;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-edit-food");
+        const form = dialog?.querySelector("form.fridge-item-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
+            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
+            location: form?.querySelector("select[name='location_id']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    await ev(`document.getElementById("fridge-edit-food")?.close()`);
     await clickSel('button[aria-label="Edit Eggs"]');
     await sleep(40);
     await ev(`(() => {
@@ -412,6 +436,13 @@ try {
             supplyEdit.location === "l2" &&
             supplyEdit.expires === "" &&
             supplyEdit.title === "Edit Paper towels" &&
+            yogurtEdit.open === true &&
+            yogurtEdit.action === "/fridge/items/i3" &&
+            yogurtEdit.amount === "2" &&
+            yogurtEdit.unit === "each" &&
+            yogurtEdit.location === "l1" &&
+            yogurtEdit.title === "Edit Yogurt" &&
+            yogurtEdit.error == null &&
             afterEdit.marker === "stay" &&
             afterEdit.href.endsWith("/fridge") &&
             afterEdit.open.length === 0 &&
@@ -432,9 +463,48 @@ try {
             editPost,
             eggsQty,
             reopened,
+            yogurtEdit,
             ex: drain(),
         },
     );
+
+    await control("post=fail&modal=fridge-edit-i2&reset=posts&delay=0");
+    await goto("/fridge");
+    await setMarker();
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    await clickSel("#fridge-edit-food button[type='submit']");
+    await sleep(700);
+    const editError = await ev<{
+        open: boolean;
+        action: string | null;
+        amount: string | null;
+        title: string | null;
+        banners: number;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-edit-food");
+        const form = dialog?.querySelector("form.fridge-item-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            banners: document.querySelectorAll(".error-banner").length,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    record(
+        "fridge shared edit server error",
+        editError.open === true &&
+            editError.action === "/fridge/items/i2" &&
+            editError.amount === "6" &&
+            editError.title === "Edit Eggs" &&
+            editError.error === "Name is required" &&
+            editError.banners === 1,
+        { editError, ex: drain() },
+    );
+    await control("post=ok&modal=&reset=posts&delay=0");
 
     await goto("/fridge");
     await setMarker();
