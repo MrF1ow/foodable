@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
-import { escapeHtml } from "../html.js";
-import { TOASTS, type ToastKey, type ToastKind } from "../copy/toasts.js";
+import { escapeHtml } from "../../html.js";
+import { TOASTS, type ToastKey, type ToastKind } from "../../copy/toasts.js";
 
 export const TOAST_COOKIE = "foodable_toast";
 const FLASH_MAX_AGE = 60;

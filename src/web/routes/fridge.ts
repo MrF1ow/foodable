@@ -35,7 +35,7 @@ import {
     MealItemsError,
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
-import { redirectWithToast } from "../toast.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const fridgeRoutes = new Hono();
 

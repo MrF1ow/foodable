@@ -1,5 +1,5 @@
-import type { ToastKey } from "../copy/toasts.js";
-import type { PersonRuleKind } from "../domain/rules.js";
+import type { ToastKey } from "../../copy/toasts.js";
+import type { PersonRuleKind } from "../../domain/rules.js";
 import type { ToastParams } from "./toast.js";
 
 export type ToastFlashChoice = {

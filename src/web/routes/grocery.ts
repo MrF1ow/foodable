@@ -28,8 +28,8 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
 import { findFoodById } from "../../domain/foods.js";
-import { groceryLineCheckToastKey } from "../toast-flash.js";
-import { redirectWithToast } from "../toast.js";
+import { groceryLineCheckToastKey } from "../components/toast-flash.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const groceryRoutes = new Hono();
 

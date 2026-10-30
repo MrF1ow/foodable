@@ -68,8 +68,8 @@ import {
     HOUSEHOLD_ADD_STORE_MODAL_ID,
 } from "../pages/household.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
-import { householdPersonRuleRemovedKey } from "../toast-flash.js";
-import { redirectWithToast } from "../toast.js";
+import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const settingsRoutes = new Hono();
 

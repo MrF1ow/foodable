@@ -2,7 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { Hono } from "hono";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { TOASTS, type ToastKey } from "../copy/toasts.js";
+import { TOASTS, type ToastKey } from "../../copy/toasts.js";
 import {
     decodeToastFlash,
     encodeToastFlash,
@@ -20,7 +20,7 @@ import {
     groceryLineCheckToastKey,
     householdPersonRuleRemovedKey,
 } from "./toast-flash.js";
-import { renderBarePage } from "./shell.js";
+import { renderBarePage } from "../shell.js";
 
 describe("toast flash codec", () => {
     test("round-trips a catalog key with params", () => {
@@ -197,7 +197,7 @@ test("redirectWithToast sets flash cookie", async () => {
 });
 
 test("every TOASTS key is referenced in web routes or client", () => {
-    const routeDir = join(import.meta.dir, "routes");
+    const routeDir = join(import.meta.dir, "../routes");
     const routeSources = readdirSync(routeDir)
         .filter((f) => f.endsWith(".ts"))
         .map((f) => readFileSync(join(routeDir, f), "utf8"))
@@ -207,7 +207,7 @@ test("every TOASTS key is referenced in web routes or client", () => {
         "utf8",
     );
     const clientSources = readFileSync(
-        join(import.meta.dir, "client/toast.js"),
+        join(import.meta.dir, "../client/toast.js"),
         "utf8",
     );
     const haystack = `${routeSources}\n${flashSource}\n${clientSources}`;
@@ -217,7 +217,7 @@ test("every TOASTS key is referenced in web routes or client", () => {
 });
 
 test("no bare successful POST c.redirect(..., 303) in web routes", () => {
-    const routeDir = join(import.meta.dir, "routes");
+    const routeDir = join(import.meta.dir, "../routes");
     const bareRedirectRe = /return\s+c\.redirect\([\s\S]*?,\s*303\s*\)/g;
     for (const file of readdirSync(routeDir).filter((f) => f.endsWith(".ts"))) {
         const src = readFileSync(join(routeDir, file), "utf8");

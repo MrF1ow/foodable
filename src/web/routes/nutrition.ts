@@ -26,7 +26,7 @@ import {
     NUTRITION_LOG_WATER_MODAL_ID,
     NUTRITION_LOG_WEIGHT_MODAL_ID,
 } from "../pages/nutrition.js";
-import { redirectWithToast } from "../toast.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const nutritionRoutes = new Hono();
 

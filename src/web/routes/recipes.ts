@@ -40,8 +40,8 @@ import { cookRecipe } from "../../domain/stock.js";
 import {
     addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
-} from "../toast-flash.js";
-import { redirectWithToast } from "../toast.js";
+} from "../components/toast-flash.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const recipesRoutes = new Hono();
 
