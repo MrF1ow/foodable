@@ -377,10 +377,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ],
             isOwner: true,
         } as never),
-        foods: renderFoodsSettingsPage({
-            chrome,
-            foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
-        } as never),
+        foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
         help: renderSettingsHelpPage({ chrome } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
@@ -512,26 +509,45 @@ async function loginDocument() {
         .replaceAll("{{CONNECT_HINT}}", "");
 }
 
+function foodsSettingsFixture(chrome: unknown) {
+    return {
+        chrome,
+        foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
+    };
+}
+
 function renderFailedModal(pathname: string, modalId: string): string | null {
-    if (!modalId || pathname !== "/fridge") return null;
-    const view = fridgeView(
-        viewerChromeFromProfile({ theme: themeFileSuffix() }),
-    );
-    const itemId = (prefix: string) =>
-        modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
-    const hasItem = (id: string) =>
-        id.length > 0 && view.items.some((item) => item.id === id);
-    if (
-        !hasItem(itemId("fridge-edit-")) &&
-        !hasItem(itemId("fridge-delete-"))
-    ) {
-        return null;
+    if (!modalId) return null;
+    const chrome = viewerChromeFromProfile({ theme: themeFileSuffix() });
+    if (pathname === "/fridge") {
+        const view = fridgeView(chrome);
+        const itemId = (prefix: string) =>
+            modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
+        const hasItem = (id: string) =>
+            id.length > 0 && view.items.some((item) => item.id === id);
+        if (
+            !hasItem(itemId("fridge-edit-")) &&
+            !hasItem(itemId("fridge-delete-"))
+        ) {
+            return null;
+        }
+        return renderFridgePage({
+            ...view,
+            error: "Name is required",
+            openModalId: modalId,
+        } as never);
     }
-    return renderFridgePage({
-        ...view,
-        error: "Name is required",
-        openModalId: modalId,
-    } as never);
+    if (pathname === "/settings/foods" && modalId.startsWith("food-edit-")) {
+        const id = modalId.slice("food-edit-".length);
+        const view = foodsSettingsFixture(chrome);
+        if (!id || !view.foods.some((item) => item.id === id)) return null;
+        return renderFoodsSettingsPage({
+            ...view,
+            error: "Name is required",
+            openModalId: modalId,
+        } as never);
+    }
+    return null;
 }
 
 function injectModal(html: string, id: string) {

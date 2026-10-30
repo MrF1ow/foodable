@@ -506,6 +506,80 @@ try {
     );
     await control("post=ok&modal=&reset=posts&delay=0");
 
+    await goto("/settings/foods");
+    await setMarker();
+    await clickSel('button[data-fill-title="Edit Eggs"]');
+    await sleep(40);
+    await ev(`document.getElementById("food-edit")?.close()`);
+    await clickSel('button[data-fill-title="Edit Milk"]');
+    await sleep(40);
+    const milkEdit = await ev<{
+        open: boolean;
+        action: string | null;
+        name: string | null;
+        calories: string | null;
+        title: string | null;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("food-edit");
+        const form = dialog?.querySelector("form.food-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            name: form?.querySelector("input[name='name']")?.value ?? null,
+            calories: form?.querySelector("input[name='calories']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    record(
+        "foods shared edit dialog",
+        milkEdit.open === true &&
+            milkEdit.action === "/settings/foods/f2" &&
+            milkEdit.name === "Milk" &&
+            milkEdit.calories === "64" &&
+            milkEdit.title === "Edit Milk" &&
+            milkEdit.error == null,
+        { milkEdit, ex: drain() },
+    );
+    await ev(`document.getElementById("food-edit")?.close()`);
+    await control("post=fail&modal=food-edit-f1&reset=posts&delay=0");
+    await goto("/settings/foods");
+    await clickSel('button[data-fill-title="Edit Eggs"]');
+    await sleep(40);
+    await clickSel("#food-edit button[type='submit']");
+    await sleep(700);
+    const foodEditError = await ev<{
+        open: boolean;
+        action: string | null;
+        name: string | null;
+        title: string | null;
+        banners: number;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("food-edit");
+        const form = dialog?.querySelector("form.food-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            name: form?.querySelector("input[name='name']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            banners: document.querySelectorAll(".error-banner").length,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    record(
+        "foods shared edit server error",
+        foodEditError.open === true &&
+            foodEditError.action === "/settings/foods/f1" &&
+            foodEditError.name === "Eggs" &&
+            foodEditError.title === "Edit Eggs" &&
+            foodEditError.error === "Name is required" &&
+            foodEditError.banners === 1,
+        { foodEditError, ex: drain() },
+    );
+    await control("post=ok&modal=&reset=posts&delay=0");
+
     await goto("/fridge");
     await setMarker();
     await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");

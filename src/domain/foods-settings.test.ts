@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+    FOOD_EDIT_MODAL_ID,
     FOODS_MERGE_MODAL_ID,
     renderFoodsSettingsPage,
 } from "../web/pages/foods.js";
@@ -40,10 +41,36 @@ test("foods settings use modals for edit and merge", () => {
         foods: [food, { ...food, id: "f2", name: "Milk" }],
     });
     expect(html).not.toContain('<details class="more">');
-    expect(html).toContain('commandfor="food-edit-f1"');
+    expect(html).toContain(`commandfor="${FOOD_EDIT_MODAL_ID}"`);
+    expect(html).not.toContain('commandfor="food-edit-f1"');
+    expect(html).toContain('data-fill-action="/settings/foods/f1"');
+    expect(html).toContain('data-fill-title="Edit Eggs"');
+    expect(html).toContain('data-fill-field-name="Eggs"');
     expect(html).toContain(`commandfor="${FOODS_MERGE_MODAL_ID}"`);
     expect(html).toContain('class="food-edit"');
     expect(html).toContain('action="/settings/foods/merge"');
+    expect(html).toContain(
+        '<button type="submit" class="btn-primary" disabled>Save food</button>',
+    );
+    expect((html.match(/<dialog/g) ?? []).length).toBe(2);
+});
+
+test("food edit dialog count does not grow with the catalog", () => {
+    const few = renderFoodsSettingsPage({
+        chrome,
+        foods: [food, { ...food, id: "f2", name: "Milk" }],
+    });
+    const many = renderFoodsSettingsPage({
+        chrome,
+        foods: Array.from({ length: 40 }, (_, i) => ({
+            ...food,
+            id: `f${i}`,
+            name: `Food ${i}`,
+        })),
+    });
+    const dialogs = (html: string) => (html.match(/<dialog/g) ?? []).length;
+    expect(dialogs(few)).toBe(dialogs(many));
+    expect(dialogs(many)).toBe(2);
 });
 
 function expectErrorOnceInModal(
@@ -68,9 +95,16 @@ test("foods server error reopens edit and merge modals", () => {
         openModalId: "food-edit-f1",
     });
     expect(editHtml).toMatch(
-        /<dialog class="modal" id="food-edit-f1"[^>]*data-modal-open-on-load/,
+        new RegExp(
+            `<dialog class="modal" id="${FOOD_EDIT_MODAL_ID}"[^>]*data-modal-open-on-load`,
+        ),
     );
-    expectErrorOnceInModal(editHtml, "food-edit-f1", "Enter a name.");
+    expect(editHtml).toContain('action="/settings/foods/f1"');
+    expect(editHtml).toContain(">Edit Eggs</h2>");
+    expect(editHtml).not.toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expectErrorOnceInModal(editHtml, FOOD_EDIT_MODAL_ID, "Enter a name.");
     const mergeHtml = renderFoodsSettingsPage({
         chrome,
         foods: [food, { ...food, id: "f2", name: "Milk" }],

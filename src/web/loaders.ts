@@ -375,12 +375,11 @@ export async function renderSettingsFoodsPage(
     const householdId = gate.viewer.householdId;
     const store = liveFoodsStore();
     const foods = await store.listFoods(householdId);
-    const withAliases = await Promise.all(
-        foods.map(async (food) => ({
-            ...food,
-            aliases: await store.listAliases(householdId, food.id),
-        })),
-    );
+    const aliasMap = await store.listAllAliases(householdId);
+    const withAliases = foods.map((food) => ({
+        ...food,
+        aliases: aliasMap.get(food.id) ?? [],
+    }));
     return {
         status: 200,
         html: renderFoodsSettingsPage({

@@ -148,11 +148,63 @@ export function liveFoodsStore(): FoodsStore {
                 .from("food_aliases")
                 .select("alias")
                 .eq("household_id", householdId)
-                .eq("food_id", foodId);
+                .eq("food_id", foodId)
+                .order("alias", { ascending: true });
             if (error) {
                 throw new Error(`Failed to list aliases: ${error.message}`);
             }
             return (data ?? []).map((row) => String(row.alias));
+        },
+        async listAllAliases(householdId) {
+            const sb = getSupabase();
+            const { count, error: countError } = await sb
+                .from("food_aliases")
+                .select("alias", { count: "exact", head: true })
+                .eq("household_id", householdId);
+            if (countError) {
+                throw new Error(
+                    `Failed to list aliases: ${countError.message}`,
+                );
+            }
+            // A missing count still pages; only a reported count is checked.
+            const expected = count ?? null;
+            const grouped = new Map<string, string[]>();
+            if (expected === 0) return grouped;
+            // PostgREST caps an unbounded select at 1000 rows. Page on a
+            // stable (food_id, alias) order and refuse a short read.
+            const pageSize = 1000;
+            const rows: { food_id: string; alias: string }[] = [];
+            for (let from = 0; ; from += pageSize) {
+                const { data, error } = await sb
+                    .from("food_aliases")
+                    .select("food_id, alias")
+                    .eq("household_id", householdId)
+                    .order("food_id", { ascending: true })
+                    .order("alias", { ascending: true })
+                    .range(from, from + pageSize - 1);
+                if (error) {
+                    throw new Error(`Failed to list aliases: ${error.message}`);
+                }
+                const page = data ?? [];
+                for (const row of page) {
+                    rows.push({
+                        food_id: String(row.food_id),
+                        alias: String(row.alias),
+                    });
+                }
+                if (page.length < pageSize) break;
+            }
+            if (expected != null && rows.length < expected) {
+                throw new Error(
+                    `listAllAliases: fetched ${rows.length} aliases but count reported ${expected}`,
+                );
+            }
+            for (const row of rows) {
+                const list = grouped.get(row.food_id);
+                if (list) list.push(row.alias);
+                else grouped.set(row.food_id, [row.alias]);
+            }
+            return grouped;
         },
         async setAlias(householdId, alias, foodId) {
             const { error } = await getSupabase().from("food_aliases").upsert(
@@ -193,9 +245,10 @@ export function liveFoodsStore(): FoodsStore {
             const listed = await store.listFoods(householdId);
             const needle = query.trim().toLowerCase();
             if (!needle) return [];
+            const aliasMap = await store.listAllAliases(householdId);
             const hits = [];
             for (const food of listed) {
-                const aliases = await store.listAliases(householdId, food.id);
+                const aliases = aliasMap.get(food.id) ?? [];
                 const hay = [
                     food.name,
                     food.normalizedName,
