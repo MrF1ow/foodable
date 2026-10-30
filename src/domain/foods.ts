@@ -83,6 +83,8 @@ export type FoodsStore = {
     ): Promise<string[]>;
     getAliasFoodId(householdId: string, alias: string): Promise<string | null>;
     listAliases(householdId: string, foodId: string): Promise<string[]>;
+    /** Every alias in the household, grouped by food id, in `listAliases` order. */
+    listAllAliases(householdId: string): Promise<Map<string, string[]>>;
     setAlias(householdId: string, alias: string, foodId: string): Promise<void>;
     deleteAlias(householdId: string, alias: string): Promise<void>;
     deleteAliasesForFood(
@@ -420,6 +422,16 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 )
                 .map((row) => row.alias);
         },
+        async listAllAliases(householdId) {
+            const grouped = new Map<string, string[]>();
+            for (const row of aliases) {
+                if (row.householdId !== householdId) continue;
+                const list = grouped.get(row.foodId);
+                if (list) list.push(row.alias);
+                else grouped.set(row.foodId, [row.alias]);
+            }
+            return grouped;
+        },
         async setAlias(householdId, alias, foodId) {
             const idx = aliases.findIndex(
                 (row) => row.householdId === householdId && row.alias === alias,
@@ -455,9 +467,10 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             const needle = normalizeFoodName(query);
             if (!needle) return [];
             const listed = await store.listFoods(householdId);
+            const aliasMap = await store.listAllAliases(householdId);
             const hits: Food[] = [];
             for (const food of listed) {
-                const aliasList = await store.listAliases(householdId, food.id);
+                const aliasList = aliasMap.get(food.id) ?? [];
                 const hay = [
                     food.name,
                     food.normalizedName,

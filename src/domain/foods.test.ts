@@ -117,6 +117,24 @@ test("merge moves barcodes, aliases, and tracked refs, then archives the drop", 
     expect(await store.listFoods(HH)).toHaveLength(1);
 });
 
+test("listAllAliases groups a household in listAliases order", async () => {
+    const store = createMemoryFoodsStore();
+    const eggs = await findOrCreateManualFood(store, HH, "food", "Eggs");
+    const milk = await findOrCreateManualFood(store, HH, "food", "Milk");
+    await store.setAlias(HH, "large eggs", eggs.id);
+    await store.setAlias(HH, "dairy", milk.id);
+    await store.setAlias(HH, "jumbo eggs", eggs.id);
+    await store.setAlias("other-household", "nope", eggs.id);
+    const grouped = await store.listAllAliases(HH);
+    expect(grouped.get(eggs.id)).toEqual(["large eggs", "jumbo eggs"]);
+    expect(grouped.get(milk.id)).toEqual(["dairy"]);
+    expect(grouped.has("missing")).toBe(false);
+    expect(await store.listAliases(HH, eggs.id)).toEqual([
+        "large eggs",
+        "jumbo eggs",
+    ]);
+});
+
 test("mapOffAllergenTags maps en: tags onto NAMED_ALLERGENS", () => {
     expect(
         mapOffAllergenTags(["en:milk", "en:peanuts", "en:sesame-seeds"]),
