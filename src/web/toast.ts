@@ -97,8 +97,7 @@ export function formatToastText(key: ToastKey, params?: ToastParams): string {
         for (const name of allowed) {
             const raw = params[name];
             if (raw == null) continue;
-            const safe = escapeHtml(String(raw));
-            text = text.replaceAll(`{${name}}`, safe);
+            text = text.replaceAll(`{${name}}`, String(raw));
         }
     }
     return text;

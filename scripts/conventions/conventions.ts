@@ -146,6 +146,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/mcp/tools/water.ts": "water",
     "public/widgets/src/templates/component-gallery.html": "widgets",
     "src/web/shell.ts": "web",
+    "src/web/toast.ts": "web",
+    "src/web/toast-flash.ts": "web",
     "src/web/form.ts": "web",
     "src/web/loaders.ts": "web",
     "src/web/display-quantity.ts": "web",

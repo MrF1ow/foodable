@@ -37,6 +37,10 @@ import {
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
 import { cookRecipe } from "../../domain/stock.js";
+import {
+    addRecipeToGroceryToastFlash,
+    cookRecipeToastFlash,
+} from "../toast-flash.js";
 import { redirectWithToast } from "../toast.js";
 
 export const recipesRoutes = new Hono();
@@ -201,7 +205,7 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
             portions.reduce((sum, row) => sum + row.portions, 0),
             formOptionalNumber(body, "total_portions"),
         );
-        await cookRecipe(
+        const cooked = await cookRecipe(
             liveRecipesStore(),
             liveFridgeStore(),
             liveStockStore(),
@@ -240,7 +244,21 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
                 });
             }
         }
-        return redirectWithToast(c, `/recipes/${recipeId}`, "recipes.cooked");
+        const flash = cookRecipeToastFlash(
+            deductStock,
+            logMeals,
+            cooked.shortfalls.length,
+        );
+        if (!flash) {
+            // toast: none (no-op)
+            return c.redirect(`/recipes/${recipeId}`, 303);
+        }
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            flash.key,
+            flash.params,
+        );
     } catch (err) {
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-cook-${recipeId}`,
@@ -326,11 +344,8 @@ recipesRoutes.post(
             const direction = formText(body, "direction");
             const swapWith = direction === "up" ? index - 1 : index + 1;
             if (swapWith < 0 || swapWith >= ingredients.length) {
-                return redirectWithToast(
-                    c,
-                    `/recipes/${recipeId}`,
-                    "recipes.ingredient.reordered",
-                );
+                // toast: none (no-op)
+                return c.redirect(`/recipes/${recipeId}`, 303);
             }
             const ids = ingredients.map((row) => row.id);
             const tmp = ids[index]!;
@@ -515,7 +530,7 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             ).map((row) => row.foodId),
             ...fridge.items.map((item) => item.foodId),
         ]);
-        await addRecipeToGrocery({
+        const added = await addRecipeToGrocery({
             recipes,
             grocery: liveGroceryStore(),
             settings: liveSettingsStore(),
@@ -534,9 +549,10 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             ),
             foodsById: foods,
         });
+        const flash = addRecipeToGroceryToastFlash(added.added.length);
+        return redirectWithToast(c, "/grocery", flash.key, flash.params);
     } catch (err) {
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/grocery", "recipes.added-to-grocery");
 });

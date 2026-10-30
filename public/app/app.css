@@ -1661,6 +1661,13 @@ body:not(.has-bottom-nav) .toast-region {
         align-items: flex-end;
     }
 }
+button.toast-item {
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    appearance: none;
+    -webkit-appearance: none;
+}
 .toast-item {
     --toast-depth: 0;
     pointer-events: auto;

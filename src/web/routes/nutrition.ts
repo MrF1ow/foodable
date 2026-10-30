@@ -17,6 +17,7 @@ import {
     moveCard,
     nutritionLayoutOrderErrorMessage,
     orderCards,
+    sameNutritionCardOrder,
     validateNutritionLayoutOrder,
 } from "../../domain/layout.js";
 import {
@@ -139,6 +140,7 @@ nutritionRoutes.post("/log-weight", requireMember, async (c) => {
 });
 
 nutritionRoutes.get("/nutrition", requireSiteUser, async (c) => {
+    // toast: none (canonical)
     return c.redirect("/", 303);
 });
 
@@ -178,6 +180,12 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
                 );
                 return c.html(page.html, page.status);
             }
+            const profile = await getProfile(userId);
+            const current = orderCards(profile?.nutrition_layout);
+            if (sameNutritionCardOrder(current, validated)) {
+                // toast: none (no-op)
+                return c.redirect(nutritionReturnPath(member), 303);
+            }
             await setNutritionLayout(userId, [...validated]);
             return redirectWithToast(
                 c,
@@ -209,6 +217,10 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
         const profile = await getProfile(userId);
         const order = orderCards(profile?.nutrition_layout);
         const next = moveCard(order, card, direction);
+        if (sameNutritionCardOrder(order, next)) {
+            // toast: none (no-op)
+            return c.redirect(nutritionReturnPath(member), 303);
+        }
         await setNutritionLayout(userId, [...next]);
         return redirectWithToast(
             c,

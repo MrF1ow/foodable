@@ -4,14 +4,6 @@ const TOAST_CATALOG = null;
 const TOAST_MAX_VISIBLE = 3;
 const TOAST_AUTO_DISMISS_MS = 4000;
 
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-
 function placeholderNames(text) {
     const names = [];
     const re = /\{([a-z_][a-z0-9_]*)\}/gi;
@@ -36,7 +28,7 @@ function formatCatalogText(key, params) {
             if (!Object.prototype.hasOwnProperty.call(params, name)) continue;
             const raw = params[name];
             if (raw == null) continue;
-            text = text.split("{" + name + "}").join(escapeHtml(String(raw)));
+            text = text.split("{" + name + "}").join(String(raw));
         }
     }
     return { kind: entry.kind, text: text };
@@ -48,12 +40,10 @@ function getToastRegion() {
 
 function stackToasts(region) {
     const items = region.querySelectorAll(".toast-item");
-    const n = items.length;
     for (let i = 0; i < items.length; i++) {
         const el = items[i];
-        const depth = n - 1 - i;
-        el.style.setProperty("--toast-depth", String(depth));
-        if (depth >= TOAST_MAX_VISIBLE) {
+        el.style.setProperty("--toast-depth", String(i));
+        if (i >= TOAST_MAX_VISIBLE) {
             el.hidden = true;
         } else {
             el.hidden = false;
@@ -75,10 +65,9 @@ function showToastMessage(opts) {
     if (!region || !opts || !opts.text) return;
     const kind = opts.kind === "info" ? "info" : "success";
 
-    const el = document.createElement("div");
+    const el = document.createElement("button");
+    el.type = "button";
     el.className = "toast-item toast-item--" + kind;
-    el.setAttribute("role", "status");
-    el.tabIndex = 0;
 
     if (kind === "success") {
         const icon = document.createElement("span");
@@ -95,6 +84,10 @@ function showToastMessage(opts) {
 
     region.insertBefore(el, region.firstChild);
     stackToasts(region);
+
+    while (region.children.length > TOAST_MAX_VISIBLE) {
+        region.removeChild(region.lastChild);
+    }
 
     let timer = null;
     let paused = false;
@@ -135,10 +128,6 @@ function showToastMessage(opts) {
     });
 
     scheduleDismiss();
-
-    while (region.children.length > TOAST_MAX_VISIBLE + 2) {
-        region.removeChild(region.lastChild);
-    }
 }
 
 function consumeToastSeed(root) {

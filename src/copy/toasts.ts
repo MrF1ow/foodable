@@ -15,7 +15,8 @@ export const TOASTS = {
         kind: "success",
         text: "Added to the grocery list",
     },
-    "grocery.line.checked": { kind: "success", text: "Grocery line updated" },
+    "grocery.line.checked": { kind: "success", text: "Checked off" },
+    "grocery.line.unchecked": { kind: "success", text: "Unchecked" },
     "grocery.checked.cleared": {
         kind: "success",
         text: "Checked items cleared",
@@ -36,6 +37,10 @@ export const TOASTS = {
     "recipes.created": { kind: "success", text: "Recipe created" },
     "recipes.portion.logged": { kind: "success", text: "Portion logged" },
     "recipes.cooked": { kind: "success", text: "Recipe cooked" },
+    "recipes.cooked.shortfall": {
+        kind: "info",
+        text: "Recipe cooked — some ingredients were short",
+    },
     "recipes.updated": { kind: "success", text: "Recipe saved" },
     "recipes.ingredient.removed": {
         kind: "success",
@@ -60,7 +65,11 @@ export const TOASTS = {
     },
     "recipes.added-to-grocery": {
         kind: "success",
-        text: "Added to the grocery list",
+        text: "Added to the grocery list ({count})",
+    },
+    "recipes.add-to-grocery.nothing": {
+        kind: "info",
+        text: "Nothing to add — everything is in stock",
     },
 
     "settings.nutrition.saved": {
@@ -113,6 +122,14 @@ export const TOASTS = {
     "settings.household.rule.removed": {
         kind: "success",
         text: "Rule removed",
+    },
+    "settings.household.allergen.removed": {
+        kind: "success",
+        text: "Allergen removed",
+    },
+    "settings.household.dislike.removed": {
+        kind: "success",
+        text: "Dislike removed",
     },
     "settings.household.role.updated": {
         kind: "success",

@@ -69,6 +69,14 @@ export function nutritionLayoutOrderErrorMessage(
     }
 }
 
+export function sameNutritionCardOrder(
+    a: readonly NutritionCard[],
+    b: readonly NutritionCard[],
+): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((card, i) => card === b[i]);
+}
+
 export function moveCard(
     order: readonly NutritionCard[],
     key: NutritionCard,

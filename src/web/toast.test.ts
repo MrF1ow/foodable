@@ -14,6 +14,12 @@ import {
     toastSeedElement,
     TOAST_COOKIE,
 } from "./toast.js";
+import {
+    addRecipeToGroceryToastFlash,
+    cookRecipeToastFlash,
+    groceryLineCheckToastKey,
+    householdPersonRuleRemovedKey,
+} from "./toast-flash.js";
 import { renderBarePage } from "./shell.js";
 
 describe("toast flash codec", () => {
@@ -38,15 +44,69 @@ describe("toast flash codec", () => {
         expect(decodeToastFlash("e30")).toBeNull();
     });
 
-    test("formatToastText escapes param values", () => {
-        const key = "fridge.item.added" satisfies ToastKey;
-        expect(formatToastText(key)).toBe(TOASTS[key].text);
+    test("formatToastText leaves param values as plain text", () => {
+        const raw = '<b>&"';
+        expect(formatToastText("recipes.added-to-grocery", { count: 2 })).toBe(
+            "Added to the grocery list (2)",
+        );
+        expect(
+            formatToastText("recipes.added-to-grocery", { count: raw }),
+        ).toBe(`Added to the grocery list (${raw})`);
+    });
+
+    test("toastSeedElement escapes text once for the attribute", () => {
+        const plain = formatToastText("recipes.added-to-grocery", {
+            count: '<b>&"',
+        });
+        const seed = toastSeedElement("success", plain);
+        expect(seed).toContain(
+            'data-toast-text="Added to the grocery list (&lt;b&gt;&amp;&quot;)',
+        );
     });
 
     test("readToastCookie parses header", () => {
         const encoded = encodeToastFlash({ key: "nutrition.meal.logged" });
         const header = `other=1; ${TOAST_COOKIE}=${encodeURIComponent(encoded!)}`;
         expect(readToastCookie(header)).toBe(encoded);
+    });
+});
+
+describe("toast-flash helpers", () => {
+    test("cookRecipeToastFlash", () => {
+        expect(cookRecipeToastFlash(false, false, 0)).toBeNull();
+        expect(cookRecipeToastFlash(true, false, 0)).toEqual({
+            key: "recipes.cooked",
+        });
+        expect(cookRecipeToastFlash(false, true, 2)).toEqual({
+            key: "recipes.cooked.shortfall",
+        });
+    });
+
+    test("addRecipeToGroceryToastFlash", () => {
+        expect(addRecipeToGroceryToastFlash(0)).toEqual({
+            key: "recipes.add-to-grocery.nothing",
+        });
+        expect(addRecipeToGroceryToastFlash(3)).toEqual({
+            key: "recipes.added-to-grocery",
+            params: { count: 3 },
+        });
+    });
+
+    test("groceryLineCheckToastKey", () => {
+        expect(groceryLineCheckToastKey(true)).toBe("grocery.line.checked");
+        expect(groceryLineCheckToastKey(false)).toBe("grocery.line.unchecked");
+    });
+
+    test("householdPersonRuleRemovedKey", () => {
+        expect(householdPersonRuleRemovedKey("rule")).toBe(
+            "settings.household.rule.removed",
+        );
+        expect(householdPersonRuleRemovedKey("allergen")).toBe(
+            "settings.household.allergen.removed",
+        );
+        expect(householdPersonRuleRemovedKey("dislike")).toBe(
+            "settings.household.dislike.removed",
+        );
     });
 });
 
@@ -136,23 +196,21 @@ test("redirectWithToast sets flash cookie", async () => {
     expect(setCookie).toContain("HttpOnly");
 });
 
-test("toastSeedElement escapes text", () => {
-    expect(toastSeedElement("success", 'Say "hi" & bye')).toContain(
-        "&quot;hi&quot; &amp; bye",
-    );
-});
-
 test("every TOASTS key is referenced in web routes or client", () => {
     const routeDir = join(import.meta.dir, "routes");
     const routeSources = readdirSync(routeDir)
         .filter((f) => f.endsWith(".ts"))
         .map((f) => readFileSync(join(routeDir, f), "utf8"))
         .join("\n");
+    const flashSource = readFileSync(
+        join(import.meta.dir, "toast-flash.ts"),
+        "utf8",
+    );
     const clientSources = readFileSync(
         join(import.meta.dir, "client/toast.js"),
         "utf8",
     );
-    const haystack = `${routeSources}\n${clientSources}`;
+    const haystack = `${routeSources}\n${flashSource}\n${clientSources}`;
     for (const key of Object.keys(TOASTS) as ToastKey[]) {
         expect(haystack).toContain(`"${key}"`);
     }
@@ -160,21 +218,16 @@ test("every TOASTS key is referenced in web routes or client", () => {
 
 test("no bare successful POST c.redirect(..., 303) in web routes", () => {
     const routeDir = join(import.meta.dir, "routes");
+    const bareRedirectRe = /return\s+c\.redirect\([\s\S]*?,\s*303\s*\)/g;
     for (const file of readdirSync(routeDir).filter((f) => f.endsWith(".ts"))) {
         const src = readFileSync(join(routeDir, file), "utf8");
-        const lines = src.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]!;
-            if (!line.includes("c.redirect(") || !line.includes("303"))
-                continue;
-            const before = lines.slice(0, i + 1).join("\n");
-            const lastRoute = [
-                ...before.matchAll(
-                    /(?:nutrition|fridge|grocery|recipes|settings)Routes\.(get|post)\(/g,
-                ),
-            ].pop();
-            if (lastRoute?.[1] !== "post") continue;
-            expect(line).toContain("redirectWithToast");
+        let match: RegExpExecArray | null;
+        while ((match = bareRedirectRe.exec(src)) !== null) {
+            const before = src.slice(0, match.index);
+            const lineNo = before.split("\n").length - 1;
+            const lines = src.split("\n");
+            const prev = lines[lineNo - 1] ?? "";
+            expect(prev).toMatch(/\/\/ toast: none\b/);
         }
     }
 });

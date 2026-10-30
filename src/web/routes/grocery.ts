@@ -28,6 +28,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
 import { findFoodById } from "../../domain/foods.js";
+import { groceryLineCheckToastKey } from "../toast-flash.js";
 import { redirectWithToast } from "../toast.js";
 
 export const groceryRoutes = new Hono();
@@ -212,17 +213,21 @@ groceryRoutes.post("/grocery/lines/:id/check", requireMember, async (c) => {
     const body = await c.req.parseBody();
     const checked = formText(body, "checked") !== "0";
     try {
-        await checkGroceryLine(
+        const line = await checkGroceryLine(
             liveGroceryStore(),
             member.householdId,
             c.req.param("id"),
             checked,
         );
+        if (!line) {
+            // toast: none (no-op)
+            return c.redirect("/grocery", 303);
+        }
     } catch (err) {
         const page = await groceryFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/grocery", "grocery.line.checked");
+    return redirectWithToast(c, "/grocery", groceryLineCheckToastKey(checked));
 });
 
 groceryRoutes.post("/grocery/clear-checked", requireMember, async (c) => {
