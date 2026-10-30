@@ -95,6 +95,7 @@ ${appHead(chrome.title, chrome.theme)}
 ${appBar()}
 <main class="app-main native">${chrome.body}</main>
 ${bottomNav(chrome.active)}
+<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;
 }
@@ -115,6 +116,7 @@ ${appHead(title, theme, "page")}
 <body>
 ${appBar()}
 <main class="app-main native">${body}</main>
+<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;
 }

@@ -130,6 +130,9 @@ test("bare pages stamp page chrome and omit the bottom nav", () => {
         `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
     );
     expect(html).not.toContain("has-bottom-nav");
+    expect(html).toContain(
+        '<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>',
+    );
 });
 
 test("appHead emits foodable-theme for every preference", () => {

@@ -17,6 +17,7 @@
 // Markers resolve relative to public/widgets/src/ and expand recursively.
 
 import { WIDGET_STRINGS } from "./copy/widgets.js";
+import { TOASTS } from "./copy/toasts.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 
 const SRC_DIR = "./public/widgets/src";
@@ -201,6 +202,7 @@ export async function getAppCss(): Promise<string> {
 // they cannot leak into each other. Cached and warmed like getAppCss.
 export const APP_JS_SOURCES = [
     "./src/web/client/shell.js",
+    "./src/web/client/toast.js",
     "./src/web/client/food-picker.js",
     "./src/web/client/nutrition-log.js",
     "./src/web/client/grocery.js",
@@ -248,6 +250,12 @@ export async function getAppJs(): Promise<string> {
                     "const THEME_NAV_BG = null;",
                     `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
                 );
+        }
+        if (path.endsWith("toast.js")) {
+            src = src.replace(
+                "const TOAST_CATALOG = null;",
+                `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
+            );
         }
         parts.push(`(function () {\n${src}\n})();`);
     }

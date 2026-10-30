@@ -17,6 +17,7 @@ import {
     moveCard,
     nutritionLayoutOrderErrorMessage,
     orderCards,
+    sameNutritionCardOrder,
     validateNutritionLayoutOrder,
 } from "../../domain/layout.js";
 import {
@@ -25,6 +26,7 @@ import {
     NUTRITION_LOG_WATER_MODAL_ID,
     NUTRITION_LOG_WEIGHT_MODAL_ID,
 } from "../pages/nutrition.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const nutritionRoutes = new Hono();
 
@@ -91,7 +93,7 @@ nutritionRoutes.post("/log-meal", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/", 303);
+    return redirectWithToast(c, "/", "nutrition.meal.logged");
 });
 
 nutritionRoutes.post("/log-water", requireMember, async (c) => {
@@ -111,7 +113,7 @@ nutritionRoutes.post("/log-water", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/", 303);
+    return redirectWithToast(c, "/", "nutrition.water.logged");
 });
 
 nutritionRoutes.post("/log-weight", requireMember, async (c) => {
@@ -134,10 +136,11 @@ nutritionRoutes.post("/log-weight", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/", 303);
+    return redirectWithToast(c, "/", "nutrition.weight.logged");
 });
 
 nutritionRoutes.get("/nutrition", requireSiteUser, async (c) => {
+    // toast: none (canonical)
     return c.redirect("/", 303);
 });
 
@@ -177,8 +180,18 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
                 );
                 return c.html(page.html, page.status);
             }
+            const profile = await getProfile(userId);
+            const current = orderCards(profile?.nutrition_layout);
+            if (sameNutritionCardOrder(current, validated)) {
+                // toast: none (no-op)
+                return c.redirect(nutritionReturnPath(member), 303);
+            }
             await setNutritionLayout(userId, [...validated]);
-            return c.redirect(nutritionReturnPath(member), 303);
+            return redirectWithToast(
+                c,
+                nutritionReturnPath(member),
+                "nutrition.layout.saved",
+            );
         }
 
         const card = formText(body, "card");
@@ -204,8 +217,16 @@ nutritionRoutes.post("/nutrition/layout", requireSiteUser, async (c) => {
         const profile = await getProfile(userId);
         const order = orderCards(profile?.nutrition_layout);
         const next = moveCard(order, card, direction);
+        if (sameNutritionCardOrder(order, next)) {
+            // toast: none (no-op)
+            return c.redirect(nutritionReturnPath(member), 303);
+        }
         await setNutritionLayout(userId, [...next]);
-        return c.redirect(nutritionReturnPath(member), 303);
+        return redirectWithToast(
+            c,
+            nutritionReturnPath(member),
+            "nutrition.layout.saved",
+        );
     } catch (err) {
         const message =
             err instanceof Error ? err.message : "Could not save card order.";

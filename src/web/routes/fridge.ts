@@ -35,6 +35,7 @@ import {
     MealItemsError,
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
+import { redirectWithToast } from "../components/toast.js";
 
 export const fridgeRoutes = new Hono();
 
@@ -84,7 +85,7 @@ fridgeRoutes.post("/fridge/locations", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err, "fridge-add-location");
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.location.added");
 });
 
 fridgeRoutes.post("/fridge/locations/:id/delete", requireMember, async (c) => {
@@ -101,7 +102,7 @@ fridgeRoutes.post("/fridge/locations/:id/delete", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.location.removed");
 });
 
 fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
@@ -168,7 +169,7 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err, openModalId);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.item.added");
 });
 
 fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
@@ -193,7 +194,7 @@ fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.item.removed");
 });
 
 fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
@@ -236,7 +237,7 @@ fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.item.updated");
 });
 
 fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
@@ -262,7 +263,7 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
                 foodId,
             );
             if (!fridgeEatLogsMeal(food)) {
-                return c.redirect("/fridge", 303);
+                return redirectWithToast(c, "/fridge", "fridge.item.eaten");
             }
             const { built, specs } = await resolveAndBuildMeal({
                 householdId: member.householdId,
@@ -303,7 +304,7 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.item.eaten");
 });
 
 fridgeRoutes.post("/fridge/items/:id/discard", requireMember, async (c) => {
@@ -324,5 +325,5 @@ fridgeRoutes.post("/fridge/items/:id/discard", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return c.redirect("/fridge", 303);
+    return redirectWithToast(c, "/fridge", "fridge.item.discarded");
 });
