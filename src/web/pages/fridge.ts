@@ -73,51 +73,79 @@ function modalError(view: FridgePageView, id: string): string {
     return view.error && modalOpen(view, id) ? errorBanner(view.error) : "";
 }
 
-function itemRow(
-    item: FridgeItem,
-    locations: FridgeLocation[],
+/** One edit dialog per kind; unit lists differ. Filled from the row at open. */
+const FRIDGE_EDIT_FOOD_ID = "fridge-edit-food";
+const FRIDGE_EDIT_SUPPLY_ID = "fridge-edit-supply";
+const FRIDGE_DELETE_ITEM_ID = "fridge-delete-item";
+
+function openItemId(
+    openModalId: string | undefined,
+    prefix: string,
+): string | null {
+    if (!openModalId?.startsWith(prefix)) return null;
+    const id = openModalId.slice(prefix.length);
+    return id.length > 0 ? id : null;
+}
+
+function itemById(view: FridgePageView, id: string | null): FridgeItem | null {
+    if (!id) return null;
+    return view.items.find((item) => item.id === id) ?? null;
+}
+
+/**
+ * Routes still reopen with `fridge-edit-<itemId>` / `fridge-delete-<itemId>`.
+ * When that item is on the page, the matching shared dialog shows the error
+ * and this id is reported to `pageLevelErrorBanner` so the banner is not
+ * repeated under the header. An unknown id stays off the list.
+ */
+function sharedItemErrorId(view: FridgePageView): string | null {
+    if (!view.error || !view.openModalId) return null;
+    const editId = openItemId(view.openModalId, "fridge-edit-");
+    if (editId && itemById(view, editId)) return view.openModalId;
+    const deleteId = openItemId(view.openModalId, "fridge-delete-");
+    if (deleteId && itemById(view, deleteId)) return view.openModalId;
+    return null;
+}
+
+function editReopenItem(
     view: FridgePageView,
-    today: string,
-): { row: string; modals: string; modalIds: string[] } {
-    const qtyId = `qty-${item.id}`;
-    const editId = `fridge-edit-${item.id}`;
-    const deleteId = `fridge-delete-${item.id}`;
-    const qty =
-        item.kind === "food"
-            ? renderQuantityField({
-                  kind: "food",
-                  amount: item.quantity.amount,
-                  unit: item.quantity.unit,
-                  idPrefix: qtyId,
-                  namePrefix: "qty",
-                  required: true,
-              })
-            : renderQuantityField({
-                  kind: "supply",
-                  amount: item.quantity.amount,
-                  unit: item.quantity.unit,
-                  units: SUPPLY_UNITS,
-                  idPrefix: qtyId,
-                  namePrefix: "qty",
-                  required: true,
-              });
-    const editFields = `${qty}
-<label for="move-${escapeHtml(item.id)}">Location</label>
-${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
-<label for="expires-${escapeHtml(item.id)}">Expires</label>
-<input id="expires-${escapeHtml(item.id)}" name="expires_on" type="date" value="${escapeHtml(item.expiresOn ?? "")}" />`;
+    kind: FridgeItem["kind"],
+): FridgeItem | null {
+    const item = itemById(view, openItemId(view.openModalId, "fridge-edit-"));
+    if (!item || item.kind !== kind) return null;
+    return item;
+}
+
+function itemTriggerData(item: FridgeItem): Record<string, string> {
+    return {
+        "item-id": item.id,
+        "item-name": item.displayName,
+        "item-kind": item.kind,
+        "item-amount": String(item.quantity.amount),
+        "item-unit": item.quantity.unit,
+        "item-location": item.locationId,
+        "item-expires": item.expiresOn ?? "",
+    };
+}
+
+function itemRow(item: FridgeItem, today: string): string {
+    const editTarget =
+        item.kind === "supply" ? FRIDGE_EDIT_SUPPLY_ID : FRIDGE_EDIT_FOOD_ID;
+    const data = itemTriggerData(item);
     const rowActions = `${modalTrigger({
-        target: editId,
+        target: editTarget,
         label: `Edit ${item.displayName}`,
         className: "btn-sm btn-icon",
         icon: iconPencil(),
+        data,
     })}${modalTrigger({
-        target: deleteId,
+        target: FRIDGE_DELETE_ITEM_ID,
         label: `Delete ${item.displayName}`,
         className: "btn-sm btn-icon btn-danger",
         icon: iconTrash(),
+        data,
     })}`;
-    const row = renderFridgeItemRow({
+    return renderFridgeItemRow({
         id: item.id,
         kind: item.kind,
         displayName: item.displayName,
@@ -126,42 +154,89 @@ ${locationSelect(locations, item.locationId, "location_id", `move-${item.id}`)}
         expiryLevel: expiryLevel(item.expiresOn, today),
         rowActions,
     });
-    const modals =
-        modal({
-            id: editId,
-            title: `Edit ${item.displayName}`,
-            openOnLoad: modalOpen(view, editId),
-            body: `${modalError(view, editId)}<form class="fridge-item-edit" method="post" action="/fridge/items/${escapeHtml(item.id)}">
-${editFields}
+}
+
+function editFields(
+    kind: FridgeItem["kind"],
+    locations: FridgeLocation[],
+    item: FridgeItem | null,
+): string {
+    const idPrefix = `qty-edit-${kind}`;
+    const locId = `move-edit-${kind}`;
+    const expiresId = `expires-edit-${kind}`;
+    const qty =
+        kind === "food"
+            ? renderQuantityField({
+                  kind: "food",
+                  amount: item?.quantity.amount,
+                  unit: item?.quantity.unit,
+                  idPrefix,
+                  namePrefix: "qty",
+                  required: true,
+              })
+            : renderQuantityField({
+                  kind: "supply",
+                  amount: item?.quantity.amount,
+                  unit: item?.quantity.unit ?? "roll",
+                  units: SUPPLY_UNITS,
+                  idPrefix,
+                  namePrefix: "qty",
+                  required: true,
+              });
+    return `${qty}
+<label for="${locId}">Location</label>
+${locationSelect(locations, item?.locationId ?? "", "location_id", locId)}
+<label for="${expiresId}">Expires</label>
+<input id="${expiresId}" name="expires_on" type="date" value="${escapeHtml(item?.expiresOn ?? "")}" />`;
+}
+
+function sharedEditModal(
+    kind: FridgeItem["kind"],
+    locations: FridgeLocation[],
+    view: FridgePageView,
+): string {
+    const id = kind === "food" ? FRIDGE_EDIT_FOOD_ID : FRIDGE_EDIT_SUPPLY_ID;
+    const item = editReopenItem(view, kind);
+    const openId = item ? `fridge-edit-${item.id}` : "";
+    const open = item != null && modalOpen(view, openId);
+    const action = item ? `/fridge/items/${item.id}` : "";
+    const title = item ? `Edit ${item.displayName}` : "Edit item";
+    return modal({
+        id,
+        title,
+        openOnLoad: open,
+        body: `${open ? modalError(view, openId) : ""}<form class="fridge-item-edit" method="post" action="${escapeHtml(action)}">
+${editFields(kind, locations, item)}
 <button type="submit" class="btn-primary">Save</button>
 </form>`,
-        }) +
-        confirmModal({
-            id: deleteId,
-            title: "Delete item",
-            message: `Remove ${item.displayName} from the fridge?`,
-            action: `/fridge/items/${item.id}/delete`,
-            confirmLabel: "Delete",
-            openOnLoad: modalOpen(view, deleteId),
-            bodyPrefix: modalError(view, deleteId),
-        });
-    return { row, modals, modalIds: [editId, deleteId] };
+    });
+}
+
+function sharedDeleteModal(view: FridgePageView): string {
+    const item = itemById(view, openItemId(view.openModalId, "fridge-delete-"));
+    const openId = item ? `fridge-delete-${item.id}` : "";
+    const open = item != null && modalOpen(view, openId);
+    return confirmModal({
+        id: FRIDGE_DELETE_ITEM_ID,
+        title: "Delete item",
+        message: item
+            ? `Remove ${item.displayName} from the fridge?`
+            : "Remove this item from the fridge?",
+        action: item ? `/fridge/items/${item.id}/delete` : "",
+        confirmLabel: "Delete",
+        openOnLoad: open,
+        bodyPrefix: open ? modalError(view, openId) : "",
+    });
 }
 
 function locationSection(
     location: FridgeLocation,
     items: FridgeItem[],
-    locations: FridgeLocation[],
     view: FridgePageView,
     today: string,
 ): { section: string; modals: string; modalIds: string[] } {
     const locItems = items.filter((item) => item.locationId === location.id);
-    const itemParts = locItems.map((item) =>
-        itemRow(item, locations, view, today),
-    );
-    const rows = itemParts.map((part) => part.row).join("");
-    const itemModals = itemParts.map((part) => part.modals).join("");
-    const itemModalIds = itemParts.flatMap((part) => part.modalIds);
+    const rows = locItems.map((item) => itemRow(item, today)).join("");
     const empty = locItems.length
         ? ""
         : emptyState(`Add an item to ${location.name}.`, "add-item-prompt");
@@ -211,12 +286,7 @@ ${renderQuantityField({
             openOnLoad: modalOpen(view, removeModalId),
             bodyPrefix: modalError(view, removeModalId),
         });
-    const locationModalIds = [
-        foodModalId,
-        supplyModalId,
-        removeModalId,
-        ...itemModalIds,
-    ];
+    const locationModalIds = [foodModalId, supplyModalId, removeModalId];
     const headActions = `<div class="row-actions">
 ${modalTrigger({
     target: foodModalId,
@@ -244,7 +314,7 @@ ${empty}
 </section>`;
     return {
         section,
-        modals: locationModals + itemModals,
+        modals: locationModals,
         modalIds: locationModalIds,
     };
 }
@@ -264,11 +334,13 @@ export function renderFridgePage(view: FridgePageView): string {
         })),
     );
     const locationParts = view.locations.map((loc) =>
-        locationSection(loc, view.items, view.locations, view, today),
+        locationSection(loc, view.items, view, today),
     );
+    const itemErrorId = sharedItemErrorId(view);
     const modalIds = [
         addLocationId,
         ...locationParts.flatMap((part) => part.modalIds),
+        ...(itemErrorId ? [itemErrorId] : []),
     ];
     const sections = locationParts.map((part) => part.section).join("");
     const modals =
@@ -281,7 +353,11 @@ export function renderFridgePage(view: FridgePageView): string {
 <input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />
 <button type="submit" class="btn-primary">Add location</button>
 </form>`,
-        }) + locationParts.map((part) => part.modals).join("");
+        }) +
+        locationParts.map((part) => part.modals).join("") +
+        sharedEditModal("food", view.locations, view) +
+        sharedEditModal("supply", view.locations, view) +
+        sharedDeleteModal(view);
     const body = `
         ${pageHeader({
             title: "Fridge",

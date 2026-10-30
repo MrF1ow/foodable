@@ -14,6 +14,8 @@
  * The server never imports this file.
  */
 import { utcTodayFromDate } from "../src/domain/stock.js";
+import { escapeHtml } from "../src/html.js";
+import { formatQuantityDisplayParts } from "../src/web/display-quantity.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
@@ -530,6 +532,35 @@ function stripItem(html: string, id: string) {
     return html.replace(re, `<p id="done">Item removed</p>`);
 }
 
+/** The 303 page is the fixture's next fridge render, with this edit applied. */
+function patchFridgeItemQty(
+    html: string,
+    id: string,
+    amount: number,
+    unit: string,
+): string {
+    const label = escapeHtml(formatQuantityDisplayParts(amount, unit));
+    const safeId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const liRe = new RegExp(
+        `<li\\b[^>]*class="[^"]*fridge-item[^"]*"[^>]*data-item-id="${safeId}"[\\s\\S]*?</li>`,
+    );
+    return html.replace(liRe, (li) => {
+        let next = li.replace(
+            /(<p class="fridge-item-qty row-meta">)[^<]*? · /,
+            `$1${label} · `,
+        );
+        next = next.replace(
+            /data-item-amount="[^"]*"/g,
+            `data-item-amount="${escapeHtml(String(amount))}"`,
+        );
+        next = next.replace(
+            /data-item-unit="[^"]*"/g,
+            `data-item-unit="${escapeHtml(unit)}"`,
+        );
+        return next;
+    });
+}
+
 const server = Bun.serve({
     port: PORT,
     async fetch(req) {
@@ -704,6 +735,14 @@ const server = Bun.serve({
                 });
             }
             if (path.includes("/delete") && item) html = stripItem(html, item);
+            if (postMode === "ok" && /^\/fridge\/items\/[^/]+$/.test(path)) {
+                const amount = entries.find(([k]) => k === "qty_amount")?.[1];
+                const unit = entries.find(([k]) => k === "qty_unit")?.[1] ?? "";
+                const n = amount == null ? Number.NaN : Number(amount);
+                if (Number.isFinite(n) && unit) {
+                    html = patchFridgeItemQty(html, item, n, unit);
+                }
+            }
             html = html.replace("</main>", `<p id="done">saved</p></main>`);
             pending.set(destKey, { html, status: 200 });
             return new Response(null, {
