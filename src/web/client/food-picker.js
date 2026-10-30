@@ -7,6 +7,50 @@ function esc(s) {
 }
 
 const foodPickerInit = new WeakSet();
+var foodPickerFillResetBound = false;
+
+function resetFoodPicker(root) {
+    root._foodPickerEpoch = (root._foodPickerEpoch || 0) + 1;
+    if (root._foodPickerSearchTimer) {
+        clearTimeout(root._foodPickerSearchTimer);
+        root._foodPickerSearchTimer = null;
+    }
+    var searchInput = root.querySelector("[data-search-input]");
+    if (searchInput) searchInput.value = "";
+    var searchResults = root.querySelector("[data-search-results]");
+    if (searchResults) searchResults.textContent = "";
+    var barcodeResults = root.querySelector("[data-barcode-results]");
+    if (barcodeResults) {
+        barcodeResults.textContent = "";
+        if (typeof barcodeResults.removeAttribute === "function") {
+            barcodeResults.removeAttribute("data-barcode");
+        }
+    }
+    var form = root.querySelector("[data-barcode-form]");
+    if (form && typeof form.removeAttribute === "function") {
+        form.removeAttribute("data-lookup-called");
+    }
+    // A moved dialog opens on the tab a fresh picker starts on.
+    if (root._foodPickerShow && root._foodPickerInitialTab) {
+        root._foodPickerShow(root._foodPickerInitialTab);
+    }
+}
+
+function bindFoodPickerFillReset() {
+    if (foodPickerFillResetBound) return;
+    if (
+        typeof document === "undefined" ||
+        typeof document.addEventListener !== "function"
+    ) {
+        return;
+    }
+    foodPickerFillResetBound = true;
+    document.addEventListener("foodable:dialog-fill", function (event) {
+        var scope = event && event.target;
+        if (!scope || typeof scope.querySelectorAll !== "function") return;
+        scope.querySelectorAll("[data-food-picker]").forEach(resetFoodPicker);
+    });
+}
 
 function initFoodPicker(root) {
     if (foodPickerInit.has(root)) return;
@@ -28,9 +72,13 @@ function initFoodPicker(root) {
             show(tab.getAttribute("data-tab"));
         });
     });
+    var initialTab = root.querySelector('[role="tab"][aria-selected="true"]');
+    root._foodPickerShow = show;
+    root._foodPickerInitialTab = initialTab
+        ? initialTab.getAttribute("data-tab")
+        : null;
     var searchInput = root.querySelector("[data-search-input]");
     var searchResults = root.querySelector("[data-search-results]");
-    var searchTimer = null;
     var hit = root.getAttribute("data-hit");
     function renderHits(target, hits) {
         if (!target) return;
@@ -86,12 +134,16 @@ function initFoodPicker(root) {
     if (searchInput && searchResults) {
         searchInput.addEventListener("input", function () {
             var q = String(searchInput.value || "").trim();
-            if (searchTimer) clearTimeout(searchTimer);
+            if (root._foodPickerSearchTimer) {
+                clearTimeout(root._foodPickerSearchTimer);
+                root._foodPickerSearchTimer = null;
+            }
             if (!q) {
                 searchResults.innerHTML = "";
                 return;
             }
-            searchTimer = setTimeout(function () {
+            var epoch = root._foodPickerEpoch || 0;
+            root._foodPickerSearchTimer = setTimeout(function () {
                 fetch("/api/foods/search?q=" + encodeURIComponent(q), {
                     credentials: "same-origin",
                 })
@@ -99,9 +151,11 @@ function initFoodPicker(root) {
                         return res.ok ? res.json() : { foods: [] };
                     })
                     .then(function (data) {
+                        if ((root._foodPickerEpoch || 0) !== epoch) return;
                         renderHits(searchResults, (data && data.foods) || []);
                     })
                     .catch(function () {
+                        if ((root._foodPickerEpoch || 0) !== epoch) return;
                         searchResults.innerHTML = "";
                     });
             }, 200);
@@ -141,4 +195,7 @@ function initFoodPickers(root) {
     root.querySelectorAll("[data-food-picker]").forEach(initFoodPicker);
 }
 
-window.FoodableApp.onLoad(initFoodPickers);
+window.FoodableApp.onLoad(function (root) {
+    bindFoodPickerFillReset();
+    initFoodPickers(root);
+});

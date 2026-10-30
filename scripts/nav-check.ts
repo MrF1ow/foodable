@@ -679,6 +679,227 @@ try {
     await control("post=ok&modal=&reset=posts&delay=0");
 
     await goto("/fridge");
+    await clickSel(
+        '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
+    );
+    await sleep(40);
+    await ev(`(() => {
+        const picker = document.querySelector("#fridge-add-food [data-food-picker]");
+        picker.querySelector('[role="tab"][data-tab="search"]').click();
+        const search = picker.querySelector("[data-search-input]");
+        search.value = "yogurt";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        const barcode = picker.querySelector("input[name='barcode']");
+        barcode.value = "11111111";
+        const barcodeResults = picker.querySelector("[data-barcode-results]");
+        barcodeResults.textContent = "scanned yogurt";
+        barcodeResults.setAttribute("data-barcode", "11111111");
+        picker.querySelector("[data-barcode-form]").setAttribute("data-lookup-called", "lookupBarcode");
+        picker.querySelector("input[name='food_name']").value = "Old food";
+        picker.querySelector("input[name='qty_amount']").value = "9";
+        const unit = picker.querySelector("select[name='qty_unit']");
+        if (unit) unit.value = "ml";
+    })()`);
+    await ev(`document.getElementById("fridge-add-food")?.close()`);
+    await clickSel(
+        '[data-location-id="l2"] button[data-fill-title="Add food to Pantry"]',
+    );
+    await sleep(400);
+    const pantryFood = await ev<{
+        open: boolean;
+        title: string | null;
+        ids: string[];
+        kinds: string[];
+        units: string[];
+        amounts: string[];
+        names: string[];
+        barcodes: string[];
+        actions: Array<string | null>;
+        search: string | null;
+        searchResults: string | null;
+        barcodeResults: string | null;
+        scanned: string | null;
+        lookup: string | null;
+        tab: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-add-food");
+        const picker = dialog.querySelector("[data-food-picker]");
+        const barcodeResults = picker.querySelector("[data-barcode-results]");
+        return {
+            open: !!dialog.open,
+            title: dialog.querySelector(".modal-title")?.textContent ?? null,
+            ids: [...picker.querySelectorAll("input[name='location_id']")].map((el) => el.value),
+            kinds: [...picker.querySelectorAll("input[name='kind']")].map((el) => el.value),
+            units: [...picker.querySelectorAll("select[name='qty_unit']")].map((el) => el.value),
+            amounts: [...picker.querySelectorAll("input[name='qty_amount']")].map((el) => el.value),
+            names: [...picker.querySelectorAll("input[name='food_name']")].map((el) => el.value),
+            barcodes: [...picker.querySelectorAll("input[name='barcode']")].map((el) => el.value),
+            actions: [...dialog.querySelectorAll("form")].map((form) => form.getAttribute("action")),
+            search: picker.querySelector("[data-search-input]")?.value ?? null,
+            searchResults: picker.querySelector("[data-search-results]")?.textContent ?? null,
+            barcodeResults: barcodeResults?.textContent ?? null,
+            scanned: barcodeResults?.getAttribute("data-barcode") ?? null,
+            lookup: picker.querySelector("[data-barcode-form]")?.getAttribute("data-lookup-called") ?? null,
+            tab: picker.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-tab") ?? null,
+        };
+    })()`);
+    await ev(`(() => {
+        const search = document.querySelector("#fridge-add-food [data-search-input]");
+        search.value = "egg";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await sleep(400);
+    const pantryHits = await ev<string>(
+        `document.querySelector("#fridge-add-food [data-search-results]")?.textContent ?? ""`,
+    );
+    await ev(`document.getElementById("fridge-add-food")?.close()`);
+    await clickSel(
+        '[data-location-id="l1"] button[data-fill-title="Add household item to Fridge"]',
+    );
+    await sleep(40);
+    await ev(`(() => {
+        const name = document.querySelector("#fridge-add-supply input[name='name']");
+        if (name) name.value = "Sponges";
+    })()`);
+    await ev(`document.getElementById("fridge-add-supply")?.close()`);
+    await clickSel(
+        '[data-location-id="l2"] button[data-fill-title="Add household item to Pantry"]',
+    );
+    await sleep(40);
+    const pantrySupply = await ev<{
+        open: boolean;
+        title: string | null;
+        action: string | null;
+        location: string | null;
+        kind: string | null;
+        name: string | null;
+        unit: string | null;
+        amount: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-add-supply");
+        const form = dialog?.querySelector("form.fridge-add-supply");
+        return {
+            open: !!dialog?.open,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            action: form?.getAttribute("action") ?? null,
+            location: form?.querySelector("input[name='location_id']")?.value ?? null,
+            kind: form?.querySelector("input[name='kind']")?.value ?? null,
+            name: form?.querySelector("input[name='name']")?.value ?? null,
+            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
+            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
+        };
+    })()`);
+    await ev(`document.getElementById("fridge-add-supply")?.close()`);
+    await clickSel(
+        '[data-location-id="l1"] button[data-fill-action="/fridge/locations/l1/delete"]',
+    );
+    await sleep(40);
+    await ev(`document.getElementById("fridge-remove-location")?.close()`);
+    await clickSel(
+        '[data-location-id="l2"] button[data-fill-action="/fridge/locations/l2/delete"]',
+    );
+    await sleep(40);
+    const pantryRemove = await ev<{
+        open: boolean;
+        action: string | null;
+        message: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-remove-location");
+        const form = dialog?.querySelector("form");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            message: dialog?.querySelector(".modal-message")?.textContent ?? null,
+        };
+    })()`);
+    const same = (values: string[], expected: string) =>
+        values.length > 0 && values.every((value) => value === expected);
+    record(
+        "fridge shared location dialogs",
+        pantryFood.open === true &&
+            pantryFood.title === "Add food to Pantry" &&
+            pantryFood.tab === "barcode" &&
+            same(pantryFood.ids, "l2") &&
+            same(pantryFood.kinds, "food") &&
+            same(pantryFood.units, "g") &&
+            same(pantryFood.amounts, "") &&
+            same(pantryFood.names, "") &&
+            same(pantryFood.barcodes, "") &&
+            pantryFood.actions.length > 0 &&
+            pantryFood.actions.every((action) => action === "/fridge/items") &&
+            pantryFood.search === "" &&
+            pantryFood.searchResults === "" &&
+            pantryFood.barcodeResults === "" &&
+            pantryFood.scanned == null &&
+            pantryFood.lookup == null &&
+            pantryHits.includes("Eggs") &&
+            pantrySupply.open === true &&
+            pantrySupply.title === "Add household item to Pantry" &&
+            pantrySupply.action === "/fridge/items" &&
+            pantrySupply.location === "l2" &&
+            pantrySupply.kind === "supply" &&
+            pantrySupply.name === "" &&
+            pantrySupply.unit === "roll" &&
+            pantrySupply.amount === "" &&
+            pantryRemove.open === true &&
+            pantryRemove.action === "/fridge/locations/l2/delete" &&
+            pantryRemove.message === "Remove Pantry and everything in it?",
+        { pantryFood, pantryHits, pantrySupply, pantryRemove, ex: drain() },
+    );
+    await ev(`document.getElementById("fridge-remove-location")?.close()`);
+    await control("post=fail&modal=fridge-add-food-l1&reset=posts&delay=0");
+    await goto("/fridge");
+    await clickSel(
+        '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
+    );
+    await sleep(40);
+    await ev(`(() => {
+        const amount = document.querySelector("#fridge-add-food .food-picker-barcode input[name='qty_amount']");
+        if (amount) amount.value = "1";
+    })()`);
+    await clickSel(
+        "#fridge-add-food .food-picker-barcode button[type='submit']",
+    );
+    await sleep(700);
+    const addFoodError = await ev<{
+        open: boolean;
+        title: string | null;
+        location: string | null;
+        banners: number;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("fridge-add-food");
+        return {
+            open: !!dialog?.open,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            location: dialog?.querySelector("input[name='location_id']")?.value ?? null,
+            banners: document.querySelectorAll(".error-banner").length,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    await ev(`(() => {
+        const search = document.querySelector("#fridge-add-food [data-search-input]");
+        if (!search) return;
+        search.value = "egg";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await sleep(400);
+    const morphedHits = await ev<string>(
+        `document.querySelector("#fridge-add-food [data-search-results]")?.textContent ?? ""`,
+    );
+    record(
+        "fridge shared add-food server error",
+        addFoodError.open === true &&
+            addFoodError.title === "Add food to Fridge" &&
+            addFoodError.location === "l1" &&
+            addFoodError.error === "Name is required" &&
+            addFoodError.banners === 1 &&
+            morphedHits.includes("Eggs"),
+        { addFoodError, morphedHits, ex: drain() },
+    );
+    await control("post=ok&modal=&reset=posts&delay=0");
+
+    await goto("/fridge");
     await setMarker();
     await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");
     await clickSel('button[commandfor="fridge-add-location"]');

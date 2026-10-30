@@ -537,9 +537,15 @@ function renderFailedModal(pathname: string, modalId: string): string | null {
             modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
         const hasItem = (id: string) =>
             id.length > 0 && view.items.some((item) => item.id === id);
+        const hasLocation = (id: string) =>
+            id.length > 0 &&
+            view.locations.some((location) => location.id === id);
         if (
             !hasItem(itemId("fridge-edit-")) &&
-            !hasItem(itemId("fridge-delete-"))
+            !hasItem(itemId("fridge-delete-")) &&
+            !hasLocation(itemId("fridge-add-food-")) &&
+            !hasLocation(itemId("fridge-add-supply-")) &&
+            !hasLocation(itemId("fridge-remove-location-"))
         ) {
             return null;
         }

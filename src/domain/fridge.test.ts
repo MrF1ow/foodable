@@ -335,8 +335,17 @@ test("location actions and add-location live in the page header and head rows", 
     } as never);
     expect(html).toContain('<header class="dash-head">');
     expect(html).toContain('commandfor="fridge-add-location"');
-    expect(html).toContain('commandfor="fridge-add-food-loc-1"');
-    expect(html).toContain('commandfor="fridge-add-supply-loc-1"');
+    expect(html).toContain('commandfor="fridge-add-food"');
+    expect(html).toContain('commandfor="fridge-add-supply"');
+    expect(html).not.toContain('commandfor="fridge-add-food-loc-1"');
+    expect(html).toContain('data-fill-title="Add food to Pantry"');
+    expect(html).toContain('data-fill-field-location_id="loc-1"');
+    expect(html).toContain('data-fill-field-qty_unit="g"');
+    expect(html).toContain('data-fill-title="Add household item to Pantry"');
+    expect(html).toContain(
+        'data-fill-message="Remove Pantry and everything in it?"',
+    );
+    expect(html).toContain('data-fill-action="/fridge/locations/loc-1/delete"');
     expect(html).toContain("Add household item");
     expect(html).not.toContain("popovertarget=");
     expect(html).toContain('class="fridge-add-supply"');
@@ -465,15 +474,21 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         /<dialog class="modal" id="fridge-edit-food"[^>]*data-modal-open-on-load/,
     );
     expect(deleteHtml).not.toMatch(
-        /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="fridge-remove-location"[^>]*data-modal-open-on-load/,
     );
     const removeHtml = renderFridgePage({
         ...base,
         openModalId: "fridge-remove-location-loc-1",
     } as never);
     expect(removeHtml).toMatch(
-        /<dialog class="modal" id="fridge-remove-location-loc-1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="fridge-remove-location"[^>]*data-modal-open-on-load/,
     );
+    expect(removeHtml).toContain('action="/fridge/locations/loc-1/delete"');
+    expect(removeHtml).toContain("Remove Fridge and everything in it?");
+    const removeDialog = dialogHtml(removeHtml, "fridge-remove-location");
+    expect(removeDialog).toContain("error-banner");
+    expect(removeDialog).toContain("Cannot remove.");
+    expect(removeHtml.match(/Cannot remove\./g)?.length).toBe(1);
     expect(removeHtml).not.toMatch(
         /<dialog class="modal" id="fridge-delete-item"[^>]*data-modal-open-on-load/,
     );
@@ -504,6 +519,18 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     } as never);
     expect(editGone).toContain("Unknown item.");
     expect(editGone).not.toMatch(/data-modal-open-on-load/);
+    const locationGone = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+        ],
+        items: [],
+        error: "Unknown location.",
+        openModalId: "fridge-add-food-gone",
+    } as never);
+    expect(locationGone).toContain("Unknown location.");
+    expect(locationGone).not.toMatch(/data-modal-open-on-load/);
+    expect(locationGone).toContain('id="fridge-add-food"');
 });
 
 test("a server error reopens the shared edit dialog pre-filled", () => {
@@ -638,7 +665,7 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
     expect(html.match(/id="qty-edit-food-unit"/g)?.length).toBe(1);
     expect(html.match(/id="move-edit-food"/g)?.length).toBe(1);
     expect(html.match(/id="move-edit-supply"/g)?.length).toBe(1);
-    expect(html.match(/<dialog\b/g)?.length).toBe(1 + locations.length * 3 + 3);
+    expect(html.match(/<dialog\b/g)?.length).toBe(7);
     expect(html).toContain(
         'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
@@ -652,4 +679,77 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
     // Each shared dialog's close button also points at it.
     expect(foodTriggers.length).toBe(5);
     expect(supplyTriggers.length).toBe(5);
+});
+
+test("add-food, add-supply, and remove-location dialogs do not grow with locations", () => {
+    function page(count: number) {
+        const locations = Array.from({ length: count }, (_, index) => ({
+            id: `loc-${index + 1}`,
+            householdId: HH,
+            name: `Place ${index + 1}`,
+            sortOrder: index,
+        }));
+        return renderFridgePage({
+            chrome: { theme: "light" },
+            locations,
+            items: [],
+        } as never);
+    }
+    const one = page(1);
+    const six = page(6);
+    const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
+    expect(dialogs(one)).toBe(dialogs(six));
+    expect(dialogs(one)).toBe(7);
+    expect(six.match(/id="fridge-add-food"/g)?.length).toBe(1);
+    expect(six.match(/id="fridge-add-supply"/g)?.length).toBe(1);
+    expect(six.match(/id="fridge-remove-location"/g)?.length).toBe(1);
+    expect(six.match(/data-food-picker/g)?.length).toBe(1);
+    expect(six).toContain('data-fill-title="Add food to Place 6"');
+    expect(six).toContain('data-fill-field-location_id="loc-6"');
+    expect(six).toContain('data-fill-field-qty_unit="roll"');
+    expect(six).toContain('data-fill-title="Add household item to Place 6"');
+    expect(six).toContain(
+        'data-fill-message="Remove Place 6 and everything in it?"',
+    );
+    expect(six).toContain('data-fill-action="/fridge/locations/loc-6/delete"');
+    expect(six).not.toContain('id="fridge-add-food-loc-1"');
+    expect(dialogHtml(six, "fridge-add-food")).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(dialogHtml(six, "fridge-remove-location")).toContain(
+        '<button type="submit" class="btn-danger" disabled>',
+    );
+});
+
+test("a server error reopens the shared add-food dialog for that location", () => {
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
+            { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },
+        ],
+        items: [],
+        error: "Enter an amount.",
+        openModalId: "fridge-add-food-loc-2",
+    } as never);
+    const foodDialog = dialogHtml(html, "fridge-add-food");
+    expect(foodDialog).toMatch(/data-modal-open-on-load/);
+    expect(foodDialog).toContain(">Add food to Pantry</h2>");
+    expect(foodDialog).toContain('action="/fridge/items"');
+    expect(foodDialog).toContain('name="location_id" value="loc-2"');
+    expect(foodDialog).toContain('name="kind" value="food"');
+    expect(foodDialog).toContain("error-banner");
+    expect(foodDialog).toContain("Enter an amount.");
+    expect(html.match(/Enter an amount\./g)?.length).toBe(1);
+    expect(foodDialog).toContain('<button type="submit" class="btn-primary">');
+    expect(dialogHtml(html, "fridge-add-supply")).toContain('action=""');
+    expect(dialogHtml(html, "fridge-add-supply")).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(dialogHtml(html, "fridge-remove-location")).toContain(
+        '<button type="submit" class="btn-danger" disabled>',
+    );
+    expect(html).not.toMatch(
+        /<dialog class="modal" id="fridge-add-supply"[^>]*data-modal-open-on-load/,
+    );
 });
