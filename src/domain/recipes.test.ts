@@ -613,8 +613,11 @@ test("recipe pages use modals for create and detail actions", async () => {
     expect(detail).toContain('commandfor="recipe-delete-r1"');
     expect(detail).toContain('commandfor="recipe-add-ingredient-r1"');
     expect(detail).toContain('commandfor="recipe-cook-r1"');
-    expect(detail).toContain('commandfor="recipe-edit-ingredient-ing1"');
-    expect(detail).toContain('commandfor="recipe-delete-ingredient-ing1"');
+    expect(detail).toContain('commandfor="recipe-edit-ingredient"');
+    expect(detail).toContain('commandfor="recipe-delete-ingredient"');
+    expect(detail).not.toContain('commandfor="recipe-edit-ingredient-ing1"');
+    expect(detail).toContain('data-fill-action="/recipes/r1/ingredients/ing1"');
+    expect(detail).toContain('data-fill-field-amount="400"');
     expect(detail).toContain('action="/recipes/r1/delete"');
     expect(detail).toContain('action="/recipes/r1/ingredients/ing1/delete"');
 });
@@ -753,14 +756,12 @@ test("a server error reopens the recipe modal that submitted the form", () => {
         openModalId: "recipe-edit-ingredient-ing1",
     } as never);
     expect(editIng).toMatch(
-        /<dialog class="modal" id="recipe-edit-ingredient-ing1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="recipe-edit-ingredient"[^>]*data-modal-open-on-load/,
     );
     const amountMsg = "Amount must be positive.";
     expect(editIng).toContain(amountMsg);
     expect(editIng.match(/Amount must be positive\./g)?.length).toBe(1);
-    const editIngDialogStart = editIng.indexOf(
-        'id="recipe-edit-ingredient-ing1"',
-    );
+    const editIngDialogStart = editIng.indexOf('id="recipe-edit-ingredient"');
     const editIngDialogEnd = editIng.indexOf("</dialog>", editIngDialogStart);
     expect(editIng.indexOf(amountMsg)).toBeGreaterThan(editIngDialogStart);
     expect(editIng.indexOf(amountMsg)).toBeLessThan(editIngDialogEnd);

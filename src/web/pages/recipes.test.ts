@@ -71,6 +71,28 @@ test("steps render as a numbered list and edit in their own form", () => {
     expect(editForm).not.toContain('name="instructions"');
 });
 
+test("ingredient dialog count does not grow with the list", () => {
+    const dialogs = (count: number) => {
+        const html = renderRecipeDetailPage({
+            ...detail({}),
+            ingredients: Array.from({ length: count }, (_, i) => ({
+                id: `ing${i}`,
+                recipeId: "r1",
+                foodId: `f${i}`,
+                displayName: `Item ${i}`,
+                quantity: { amount: i + 1, unit: "g" },
+                note: null,
+                sortOrder: i,
+                perPortionAmount: i + 1,
+                personAmount: i + 1,
+            })) as RecipeDetailView["ingredients"],
+        });
+        return (html.match(/<dialog/g) ?? []).length;
+    };
+    expect(dialogs(2)).toBe(dialogs(20));
+    expect(dialogs(20)).toBe(7);
+});
+
 test("a failed steps save reopens the Method modal", () => {
     const html = renderRecipeDetailPage({
         ...detail({}),

@@ -580,6 +580,104 @@ try {
     );
     await control("post=ok&modal=&reset=posts&delay=0");
 
+    await goto("/recipes/r1");
+    await setMarker();
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    await ev(`document.getElementById("recipe-edit-ingredient")?.close()`);
+    await clickSel('button[aria-label="Edit Milk"]');
+    await sleep(40);
+    const milkIngredient = await ev<{
+        open: boolean;
+        action: string | null;
+        note: string | null;
+        amount: string | null;
+        title: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("recipe-edit-ingredient");
+        const form = dialog?.querySelector("form.recipe-ingredient-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            note: form?.querySelector("input[name='note']")?.value ?? null,
+            amount: form?.querySelector("input[name='amount']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+        };
+    })()`);
+    await ev(`document.getElementById("recipe-edit-ingredient")?.close()`);
+    await clickSel('button[aria-label="Remove Eggs"]');
+    await sleep(40);
+    await ev(`document.getElementById("recipe-delete-ingredient")?.close()`);
+    await clickSel('button[aria-label="Remove Milk"]');
+    await sleep(40);
+    const milkDelete = await ev<{
+        open: boolean;
+        action: string | null;
+        message: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("recipe-delete-ingredient");
+        const form = dialog?.querySelector("form");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            message: dialog?.querySelector(".modal-message")?.textContent ?? null,
+        };
+    })()`);
+    record(
+        "recipe shared ingredient dialogs",
+        milkIngredient.open === true &&
+            milkIngredient.action === "/recipes/r1/ingredients/ing2" &&
+            milkIngredient.note === "" &&
+            milkIngredient.amount === "200" &&
+            milkIngredient.title === "Edit Milk" &&
+            milkDelete.open === true &&
+            milkDelete.action === "/recipes/r1/ingredients/ing2/delete" &&
+            milkDelete.message === "Remove Milk from this recipe?",
+        { milkIngredient, milkDelete, ex: drain() },
+    );
+    await ev(`document.getElementById("recipe-delete-ingredient")?.close()`);
+    await control(
+        "post=fail&modal=recipe-edit-ingredient-ing1&reset=posts&delay=0",
+    );
+    await goto("/recipes/r1");
+    await clickSel('button[aria-label="Edit Eggs"]');
+    await sleep(40);
+    await clickSel("#recipe-edit-ingredient button[type='submit']");
+    await sleep(700);
+    const ingredientError = await ev<{
+        open: boolean;
+        action: string | null;
+        note: string | null;
+        amount: string | null;
+        title: string | null;
+        banners: number;
+        error: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("recipe-edit-ingredient");
+        const form = dialog?.querySelector("form.recipe-ingredient-edit");
+        return {
+            open: !!dialog?.open,
+            action: form?.getAttribute("action") ?? null,
+            note: form?.querySelector("input[name='note']")?.value ?? null,
+            amount: form?.querySelector("input[name='amount']")?.value ?? null,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            banners: document.querySelectorAll(".error-banner").length,
+            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
+        };
+    })()`);
+    record(
+        "recipe shared ingredient server error",
+        ingredientError.open === true &&
+            ingredientError.action === "/recipes/r1/ingredients/ing1" &&
+            ingredientError.note === "large" &&
+            ingredientError.amount === "6" &&
+            ingredientError.title === "Edit Eggs" &&
+            ingredientError.error === "Name is required" &&
+            ingredientError.banners === 1,
+        { ingredientError, ex: drain() },
+    );
+    await control("post=ok&modal=&reset=posts&delay=0");
+
     await goto("/fridge");
     await setMarker();
     await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");

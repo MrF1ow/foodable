@@ -314,30 +314,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             members: [ME, SAM],
             viewerId: "u1",
         } as never),
-        recipe: renderRecipeDetailPage({
-            chrome,
-            recipe: RECIPE,
-            ingredients: [
-                {
-                    id: "ing1",
-                    recipeId: "r1",
-                    foodId: "f1",
-                    displayName: "Eggs",
-                    quantity: { amount: 6, unit: "each" },
-                    note: "large",
-                    sortOrder: 0,
-                    perPortionAmount: 1.5,
-                    personAmount: 1.5,
-                },
-            ],
-            members: [ME, SAM],
-            stores: [{ id: "s1", name: "Safeway" }],
-            viewerId: "u1",
-            filterUserId: "u1",
-            portionCount: 1,
-            macros: MACROS,
-            isOwner: true,
-        } as never),
+        recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
         settings: renderSettingsPage({
             chrome,
             displayName: "Ethan",
@@ -516,6 +493,41 @@ function foodsSettingsFixture(chrome: unknown) {
     };
 }
 
+function recipeDetailFixture(chrome: unknown) {
+    const ingredient = (
+        id: string,
+        displayName: string,
+        amount: number,
+        unit: string,
+        note: string | null,
+    ) => ({
+        id,
+        recipeId: "r1",
+        foodId: id,
+        displayName,
+        quantity: { amount, unit },
+        note,
+        sortOrder: 0,
+        perPortionAmount: amount,
+        personAmount: amount,
+    });
+    return {
+        chrome,
+        recipe: RECIPE,
+        ingredients: [
+            ingredient("ing1", "Eggs", 6, "each", "large"),
+            ingredient("ing2", "Milk", 200, "ml", null),
+        ],
+        members: [ME, SAM],
+        stores: [{ id: "s1", name: "Safeway" }],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: MACROS,
+        isOwner: true,
+    };
+}
+
 function renderFailedModal(pathname: string, modalId: string): string | null {
     if (!modalId) return null;
     const chrome = viewerChromeFromProfile({ theme: themeFileSuffix() });
@@ -532,6 +544,25 @@ function renderFailedModal(pathname: string, modalId: string): string | null {
             return null;
         }
         return renderFridgePage({
+            ...view,
+            error: "Name is required",
+            openModalId: modalId,
+        } as never);
+    }
+    if (pathname === "/recipes/r1") {
+        const view = recipeDetailFixture(chrome);
+        const itemId = (prefix: string) =>
+            modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
+        const known = (id: string) =>
+            id.length > 0 &&
+            view.ingredients.some((ingredient) => ingredient.id === id);
+        if (
+            !known(itemId("recipe-edit-ingredient-")) &&
+            !known(itemId("recipe-delete-ingredient-"))
+        ) {
+            return null;
+        }
+        return renderRecipeDetailPage({
             ...view,
             error: "Name is required",
             openModalId: modalId,
