@@ -132,6 +132,8 @@ export function confirmModal(opts: {
     bodyPrefix?: string;
     /** When true, the confirm form opts out of Turbo (non-redirect success HTML). */
     turboFalse?: boolean;
+    /** Render the confirm button disabled (a shared dialog not yet filled). */
+    submitDisabled?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
@@ -148,7 +150,7 @@ export function confirmModal(opts: {
 ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
 <div class="modal-actions">
 <button type="button" command="close" commandfor="${id}">Cancel</button>
-<button type="submit" class="btn-danger">${escapeHtml(opts.confirmLabel)}</button>
+<button type="submit" class="btn-danger"${opts.submitDisabled ? " disabled" : ""}>${escapeHtml(opts.confirmLabel)}</button>
 </div>
 </form>`;
     return modal({

@@ -27,10 +27,15 @@ function clearErrorBanners(dialog) {
     });
 }
 
+// The unfilled template renders its submit disabled, so a dialog this module
+// never filled (JS off, or a throw before onLoad) cannot post to /fridge.
 function setFormAction(form, dialog, action) {
     if (!form) return;
     if (form.getAttribute("action") !== action) clearErrorBanners(dialog);
     form.setAttribute("action", action);
+    form.querySelectorAll('button[type="submit"]').forEach(function (button) {
+        button.disabled = false;
+    });
 }
 
 function fillFridgeDialog(trigger) {
@@ -61,7 +66,12 @@ function fillFridgeDialog(trigger) {
         const amount = form.querySelector('input[name="qty_amount"]');
         if (amount) amount.value = attr(trigger, "data-item-amount");
         const unit = form.querySelector('select[name="qty_unit"]');
-        if (unit) unit.value = attr(trigger, "data-item-unit");
+        if (unit) {
+            // A stored unit missing from the list falls back to the first
+            // option, as the server-rendered select does, rather than blank.
+            unit.value = attr(trigger, "data-item-unit");
+            if (unit.selectedIndex < 0) unit.selectedIndex = 0;
+        }
         const location = form.querySelector('select[name="location_id"]');
         if (location) location.value = attr(trigger, "data-item-location");
         const expires = form.querySelector('input[name="expires_on"]');

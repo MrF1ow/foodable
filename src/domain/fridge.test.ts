@@ -546,6 +546,14 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
         /<dialog class="modal" id="fridge-edit-supply"[^>]*data-modal-open-on-load/,
     );
     expect(dialogHtml(foodHtml, "fridge-edit-supply")).toContain('action=""');
+    // Unfilled templates cannot submit; the reopened one can.
+    expect(dialogHtml(foodHtml, "fridge-edit-supply")).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(dialogHtml(foodHtml, "fridge-delete-item")).toContain(
+        '<button type="submit" class="btn-danger" disabled>',
+    );
+    expect(foodDialog).toContain('<button type="submit" class="btn-primary">');
 
     const supplyHtml = renderFridgePage({
         ...base,

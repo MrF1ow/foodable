@@ -207,7 +207,7 @@ function sharedEditModal(
         openOnLoad: open,
         body: `${open ? modalError(view, openId) : ""}<form class="fridge-item-edit" method="post" action="${escapeHtml(action)}">
 ${editFields(kind, locations, item)}
-<button type="submit" class="btn-primary">Save</button>
+<button type="submit" class="btn-primary"${item ? "" : " disabled"}>Save</button>
 </form>`,
     });
 }
@@ -226,6 +226,7 @@ function sharedDeleteModal(view: FridgePageView): string {
         confirmLabel: "Delete",
         openOnLoad: open,
         bodyPrefix: open ? modalError(view, openId) : "",
+        submitDisabled: item == null,
     });
 }
 
