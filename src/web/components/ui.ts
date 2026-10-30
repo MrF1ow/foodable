@@ -76,6 +76,15 @@ export type ModalFill = {
     title?: string;
     message?: string;
     fields?: Record<string, string | number | boolean | null>;
+    /** Plain text copied onto `[data-fill-slot="<name>"]`. */
+    text?: Record<string, string>;
+    /** `class` copied onto `[data-fill-slot="<name>"]`. Empty string clears it. */
+    classes?: Record<string, string>;
+    /**
+     * Markup copied into `[data-fill-slot="<name>"]`. The caller builds it
+     * the same way as the rest of the page (user text already escaped).
+     */
+    html?: Record<string, string>;
 };
 
 function fillValue(value: string | number | boolean | null): string {
@@ -92,6 +101,15 @@ function fillAttributes(fill: ModalFill | undefined): string {
     if (fill.message != null) attrs.push(["fill-message", fill.message]);
     for (const [name, value] of Object.entries(fill.fields ?? {})) {
         attrs.push([`fill-field-${name}`, fillValue(value)]);
+    }
+    for (const [name, value] of Object.entries(fill.text ?? {})) {
+        attrs.push([`fill-text-${name}`, value]);
+    }
+    for (const [name, value] of Object.entries(fill.classes ?? {})) {
+        attrs.push([`fill-class-${name}`, value]);
+    }
+    for (const [name, value] of Object.entries(fill.html ?? {})) {
+        attrs.push([`fill-html-${name}`, value]);
     }
     return attrs
         .map(
@@ -181,6 +199,8 @@ export function confirmModal(opts: {
     turboFalse?: boolean;
     /** Render the confirm button disabled (a shared dialog not yet filled). */
     submitDisabled?: boolean;
+    /** `data-fill-slot` on the confirm button so a shared dialog can retitle it. */
+    submitSlot?: string;
 }): string {
     const id = escapeHtml(opts.id);
     const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
@@ -197,7 +217,7 @@ export function confirmModal(opts: {
 ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
 <div class="modal-actions">
 <button type="button" command="close" commandfor="${id}">Cancel</button>
-<button type="submit" class="btn-danger"${opts.submitDisabled ? " disabled" : ""}>${escapeHtml(opts.confirmLabel)}</button>
+<button type="submit" class="btn-danger"${opts.submitSlot ? ` data-fill-slot="${escapeHtml(opts.submitSlot)}"` : ""}${opts.submitDisabled ? " disabled" : ""}>${escapeHtml(opts.confirmLabel)}</button>
 </div>
 </form>`;
     return modal({

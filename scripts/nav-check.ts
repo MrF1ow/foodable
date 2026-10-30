@@ -922,25 +922,25 @@ try {
 
     await goto("/grocery");
     await control("post=ok&reset=posts");
-    await clickSel('button[commandfor="grocery-add-food-s1"]');
-    await sleep(40);
     await clickSel(
-        '#grocery-add-food-s1 button[role="tab"][data-tab="manual"]',
+        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
     );
+    await sleep(40);
+    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
     await sleep(30);
     await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food-s1 [data-grocery-section]");
+        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
         if (sel) {
             sel.value = "sec1";
             sel.dispatchEvent(new Event("change", { bubbles: true }));
         }
-        const name = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='qty_amount']");
+        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
+        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
         if (name) name.value = "Kale";
         if (amt) amt.value = "2";
     })()`);
     await clickSel(
-        "#grocery-add-food-s1 .food-picker-manual button[type='submit']",
+        "#grocery-add-food .food-picker-manual button[type='submit']",
     );
     await sleep(400);
     const groceryPosts = await stats();
@@ -958,46 +958,46 @@ try {
 
     await goto("/grocery");
     await control("post=ok&reset=posts");
-    await clickSel('button[commandfor="grocery-add-food-s1"]');
-    await sleep(40);
     await clickSel(
-        '#grocery-add-food-s1 button[role="tab"][data-tab="manual"]',
+        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
     );
+    await sleep(40);
+    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
     await sleep(30);
     await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food-s1 [data-grocery-section]");
+        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
         if (sel) {
             sel.value = "sec1";
             sel.dispatchEvent(new Event("change", { bubbles: true }));
         }
-        const name = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='qty_amount']");
+        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
+        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
         if (name) name.value = "Carrots";
         if (amt) amt.value = "3";
     })()`);
     await clickSel(
-        "#grocery-add-food-s1 .food-picker-manual button[type='submit']",
+        "#grocery-add-food .food-picker-manual button[type='submit']",
     );
     await sleep(500);
-    await clickSel('button[commandfor="grocery-add-food-s1"]');
-    await sleep(40);
     await clickSel(
-        '#grocery-add-food-s1 button[role="tab"][data-tab="manual"]',
+        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
     );
+    await sleep(40);
+    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
     await sleep(30);
     await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food-s1 [data-grocery-section]");
+        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
         if (sel) {
             sel.value = "sec1";
             sel.dispatchEvent(new Event("change", { bubbles: true }));
         }
-        const name = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food-s1 .food-picker-manual input[name='qty_amount']");
+        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
+        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
         if (name) name.value = "Celery";
         if (amt) amt.value = "2";
     })()`);
     await clickSel(
-        "#grocery-add-food-s1 .food-picker-manual button[type='submit']",
+        "#grocery-add-food .food-picker-manual button[type='submit']",
     );
     await sleep(500);
     const groceryPosts2 = await stats();
@@ -1012,6 +1012,189 @@ try {
             ),
         { linePosts: linePosts.map((p) => p.entries), ex: drain() },
     );
+
+    await goto("/grocery");
+    await clickSel(
+        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
+    );
+    await sleep(40);
+    await ev(`(() => {
+        const picker = document.querySelector("#grocery-add-food [data-food-picker]");
+        picker.querySelector('[role="tab"][data-tab="search"]').click();
+        const search = picker.querySelector("[data-search-input]");
+        search.value = "yogurt";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        picker.querySelector("input[name='food_name']").value = "Old food";
+        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
+        if (sel) {
+            sel.value = "sec1";
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+    })()`);
+    await ev(`document.getElementById("grocery-add-food")?.close()`);
+    await clickSel(
+        '[data-store-id="s2"] button[commandfor="grocery-add-food"]',
+    );
+    await sleep(40);
+    const costcoFood = await ev<{
+        open: boolean;
+        options: string[];
+        infer: string | null;
+        stores: string[];
+        sections: string[];
+        search: string | null;
+        names: string[];
+        tab: string | null;
+        units: string[];
+        amounts: string[];
+    }>(`(() => {
+        const dialog = document.getElementById("grocery-add-food");
+        const picker = dialog.querySelector("[data-food-picker]");
+        const sel = dialog.querySelector("[data-grocery-section]");
+        return {
+            open: !!dialog.open,
+            options: [...(sel?.options ?? [])].map((option) => option.value),
+            infer: sel?.getAttribute("data-infer-section") ?? null,
+            stores: [...picker.querySelectorAll("input[name='store_id']")].map((el) => el.value),
+            sections: [...dialog.querySelectorAll("input[name='section_id']")].map((el) => el.value),
+            search: picker.querySelector("[data-search-input]")?.value ?? null,
+            names: [...picker.querySelectorAll("input[name='food_name']")].map((el) => el.value),
+            tab: picker.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-tab") ?? null,
+            units: [...picker.querySelectorAll("select[name='qty_unit']")].map((el) => el.value),
+            amounts: [...picker.querySelectorAll("input[name='qty_amount']")].map((el) => el.value),
+        };
+    })()`);
+    record(
+        "grocery shared store dialogs",
+        costcoFood.open === true &&
+            costcoFood.options.length === 1 &&
+            costcoFood.options[0] === "sec3" &&
+            costcoFood.infer == null &&
+            same(costcoFood.stores, "s2") &&
+            costcoFood.sections.length > 0 &&
+            same(costcoFood.sections, "sec3") &&
+            costcoFood.search === "" &&
+            same(costcoFood.names, "") &&
+            costcoFood.tab === "barcode" &&
+            same(costcoFood.units, "g") &&
+            same(costcoFood.amounts, ""),
+        { costcoFood, ex: drain() },
+    );
+    await ev(`document.getElementById("grocery-add-food")?.close()`);
+
+    await goto("/settings/household");
+    await clickSel('button[data-fill-title="Manage Sam"]');
+    await sleep(40);
+    await clickSel(
+        '#household-manage button[commandfor="household-make-owner"]',
+    );
+    await sleep(40);
+    const samOwner = await ev<string>(
+        `document.querySelector("#household-make-owner .modal-message")?.textContent ?? ""`,
+    );
+    await ev(`document.getElementById("household-make-owner")?.close()`);
+    await clickSel('#household-manage button[commandfor="household-remove"]');
+    await sleep(40);
+    await ev(`(() => {
+        const box = document.querySelector("#household-remove input[name='confirm']");
+        if (box) box.checked = true;
+    })()`);
+    const samRemove = await ev<{
+        title: string | null;
+        copy: string | null;
+        checked: boolean;
+    }>(`(() => {
+        const dialog = document.getElementById("household-remove");
+        const box = dialog?.querySelector("input[name='confirm']");
+        return {
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            copy: dialog?.querySelector("[data-fill-slot='remove-copy']")?.textContent ?? null,
+            checked: !!box?.checked,
+        };
+    })()`);
+    await ev(`document.getElementById("household-remove")?.close()`);
+    await ev(`document.getElementById("household-manage")?.close()`);
+    await clickSel('button[data-fill-title="Manage Riley"]');
+    await sleep(40);
+    const rileyManage = await ev<{
+        open: boolean;
+        title: string | null;
+        blurb: string | null;
+        role: string | null;
+        label: string | null;
+        className: string | null;
+        action: string | null;
+    }>(`(() => {
+        const dialog = document.getElementById("household-manage");
+        const submit = dialog?.querySelector("[data-fill-slot='role-submit']");
+        return {
+            open: !!dialog?.open,
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            blurb: dialog?.querySelector("[data-fill-slot='role-blurb']")?.textContent ?? null,
+            role: dialog?.querySelector("input[name='role']")?.value ?? null,
+            label: submit?.textContent ?? null,
+            className: submit?.getAttribute("class"),
+            action: dialog?.querySelector("form.member-role")?.getAttribute("action") ?? null,
+        };
+    })()`);
+    await clickSel(
+        '#household-manage button[commandfor="household-make-owner"]',
+    );
+    await sleep(40);
+    const rileyOwner = await ev<string>(
+        `document.querySelector("#household-make-owner .modal-message")?.textContent ?? ""`,
+    );
+    await ev(`document.getElementById("household-make-owner")?.close()`);
+    await clickSel('#household-manage button[commandfor="household-remove"]');
+    await sleep(40);
+    const rileyRemove = await ev<{
+        title: string | null;
+        copy: string | null;
+        label: string | null;
+        checked: boolean;
+    }>(`(() => {
+        const dialog = document.getElementById("household-remove");
+        const box = dialog?.querySelector("input[name='confirm']");
+        return {
+            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
+            copy: dialog?.querySelector("[data-fill-slot='remove-copy']")?.textContent ?? null,
+            label: dialog?.querySelector("[data-fill-slot='remove-label']")?.textContent ?? null,
+            checked: !!box?.checked,
+        };
+    })()`);
+    record(
+        "household shared member dialogs",
+        samOwner.includes("Sam becomes the owner") &&
+            samRemove.title === "Remove Sam" &&
+            samRemove.copy ===
+                "Delete Sam's login and their meals, water, weight and goals. This can't be undone." &&
+            samRemove.checked === true &&
+            rileyManage.open === true &&
+            rileyManage.title === "Manage Riley" &&
+            rileyManage.blurb ===
+                "Riley is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner." &&
+            rileyManage.role === "member" &&
+            rileyManage.label === "Make member" &&
+            rileyManage.className === "" &&
+            rileyManage.action === "/settings/household/members/u3/role" &&
+            rileyOwner.includes("Riley becomes the owner") &&
+            !rileyOwner.includes("Sam becomes the owner") &&
+            rileyRemove.title === "Remove Riley" &&
+            rileyRemove.copy ===
+                "Delete Riley's login and their meals, water, weight and goals. This can't be undone." &&
+            rileyRemove.label === "Remove Riley" &&
+            rileyRemove.checked === false,
+        {
+            samOwner,
+            samRemove,
+            rileyManage,
+            rileyOwner,
+            rileyRemove,
+            ex: drain(),
+        },
+    );
+    await ev(`document.getElementById("household-remove")?.close()`);
+    await ev(`document.getElementById("household-manage")?.close()`);
 
     await goto("/");
     await ev(`new Promise((resolve) => {

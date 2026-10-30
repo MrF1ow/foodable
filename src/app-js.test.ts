@@ -608,3 +608,79 @@ test("dialog fill checks boxes and falls back to the first select option", async
     expect(submit.disabled).toBe(false);
     expect(form.getAttribute("action")).toBe("/settings/foods/f1");
 });
+
+test("dialog fill copies text, class, and html slots", async () => {
+    const label = fakeNode(
+        "button",
+        { type: "submit", "data-fill-slot": "label" },
+        [],
+        "Old",
+    );
+    label.disabled = true;
+    const body = fakeNode("div", { "data-fill-slot": "body" });
+    const banner = fakeNode("p", { class: "error-banner" }, [], "Nope");
+    const transient = fakeNode("p", { "data-fill-transient": "" }, [], "Warn");
+    const amount = fakeNode("input", { name: "qty_amount", value: "" });
+    const form = fakeNode("form", { action: "" }, [label, amount]);
+    const dialog = fakeNode("dialog", { id: "shared", class: "modal" }, [
+        banner,
+        transient,
+        form,
+        body,
+    ]);
+    const events: string[] = [];
+    (dialog as { dispatchEvent?: (event: Event) => boolean }).dispatchEvent = (
+        event,
+    ) => {
+        events.push(event.type);
+        return true;
+    };
+    const button = fakeNode("button", {
+        command: "show-modal",
+        commandfor: "shared",
+        "data-fill-action": "/grocery/lines",
+        "data-fill-field-qty_amount": "2",
+        "data-fill-text-label": "Hello",
+        "data-fill-class-label": "btn-primary",
+        "data-fill-html-body": "<p>One</p>",
+    });
+    const document = fakeNode("document", {}, [dialog, button]);
+    document.getElementById = (id) =>
+        queryFridge(document, `#${id}`)[0] ?? null;
+    const window = {
+        FoodableApp: {
+            onLoad(fn: (root: FakeNode) => void) {
+                fn(document);
+            },
+        },
+    };
+    const src = await Bun.file("./src/web/client/dialog-fill.js").text();
+    new Function("document", "window", src)(document, window);
+    button.click();
+    expect(dialog.open).toBe(true);
+    expect(form.getAttribute("action")).toBe("/grocery/lines");
+    expect(amount.value).toBe("2");
+    expect(label.textContent).toBe("Hello");
+    expect(label.getAttribute("class")).toBe("btn-primary");
+    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>One</p>");
+    expect(body.getAttribute("data-filled-html")).toBe("<p>One</p>");
+    expect(dialog.querySelector(".error-banner")).toBeNull();
+    expect(dialog.querySelector("[data-fill-transient]")).toBeNull();
+    expect(label.disabled).toBe(false);
+    expect(events).toEqual(["foodable:dialog-fill"]);
+
+    const kept = fakeNode("p", { class: "error-banner" }, [], "Kept");
+    dialog.children.push(kept);
+    kept.parent = dialog;
+    button.click();
+    expect(dialog.querySelector(".error-banner")?.textContent).toBe("Kept");
+    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>One</p>");
+
+    button.setAttribute("data-fill-html-body", "<p>Two</p>");
+    button.setAttribute("data-fill-class-label", "");
+    button.click();
+    expect(dialog.querySelector(".error-banner")).toBeNull();
+    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>Two</p>");
+    expect(body.getAttribute("data-filled-html")).toBe("<p>Two</p>");
+    expect(label.getAttribute("class")).toBe("");
+});

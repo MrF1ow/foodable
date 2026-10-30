@@ -1,8 +1,13 @@
 // Shared dialogs. A trigger carries data-fill-action, data-fill-title,
-// data-fill-message, and data-fill-field-<name>. This copies them onto the
-// one dialog before it opens. Loaded before modal.js: the command event
-// fires before showModal and before modal.js focuses the first field. The
-// click listener covers browsers without command invokers.
+// data-fill-message, data-fill-field-<name>, data-fill-text-<slot>,
+// data-fill-class-<slot>, and data-fill-html-<slot>. This copies them onto
+// the one dialog before it opens. Text and class land on [data-fill-slot].
+// Html replaces that element's contents; callers pass the same escaped
+// markup the rest of the page would render. A matching data-filled-html
+// value means the slot is already that markup, so a repeat open keeps a
+// server-rendered error. Loaded before modal.js: the command event fires
+// before showModal and before modal.js focuses the first field. The click
+// listener covers browsers without command invokers.
 const dialogFillInit = new WeakSet();
 const dialogFillTriggerInit = new WeakSet();
 
@@ -24,6 +29,27 @@ function clearErrorBanners(dialog) {
     });
 }
 
+function clearTransient(dialog) {
+    dialog.querySelectorAll("[data-fill-transient]").forEach(function (node) {
+        node.remove();
+    });
+}
+
+function fieldNameOk(name) {
+    return /^[\w.-]+$/.test(name);
+}
+
+function hasPrefixed(el, prefix) {
+    const listed = el.attributes;
+    if (!listed) return false;
+    for (let i = 0; i < listed.length; i++) {
+        const name = listed[i].name || "";
+        if (name.indexOf(prefix) !== 0) continue;
+        if (fieldNameOk(name.slice(prefix.length))) return true;
+    }
+    return false;
+}
+
 function isFillTrigger(el) {
     if (!el || typeof el.hasAttribute !== "function") return false;
     if (
@@ -33,31 +59,31 @@ function isFillTrigger(el) {
     ) {
         return true;
     }
-    const listed = el.attributes;
-    if (!listed) return false;
-    for (let i = 0; i < listed.length; i++) {
-        const name = listed[i].name || "";
-        if (name.indexOf("data-fill-field-") === 0) return true;
-    }
-    return false;
+    return (
+        hasPrefixed(el, "data-fill-field-") ||
+        hasPrefixed(el, "data-fill-text-") ||
+        hasPrefixed(el, "data-fill-class-") ||
+        hasPrefixed(el, "data-fill-html-")
+    );
 }
 
-function fieldNameOk(name) {
-    return /^[\w.-]+$/.test(name);
-}
-
-function readFillFields(trigger) {
-    const fields = [];
+function readPrefixed(trigger, prefix) {
+    const entries = [];
     const listed = trigger.attributes;
-    if (!listed) return fields;
+    if (!listed) return entries;
     for (let i = 0; i < listed.length; i++) {
         const name = listed[i].name || "";
-        if (name.indexOf("data-fill-field-") !== 0) continue;
-        const field = name.slice("data-fill-field-".length);
-        if (!fieldNameOk(field)) continue;
-        fields.push({ name: field, value: listed[i].value });
+        if (name.indexOf(prefix) !== 0) continue;
+        const key = name.slice(prefix.length);
+        if (!fieldNameOk(key)) continue;
+        entries.push({ name: key, value: listed[i].value });
     }
-    return fields;
+    return entries;
+}
+
+function slotNodes(dialog, name) {
+    if (!fieldNameOk(name)) return [];
+    return dialog.querySelectorAll('[data-fill-slot="' + name + '"]');
 }
 
 function controlsNamed(dialog, name) {
@@ -115,6 +141,55 @@ function applyControl(control, raw, group) {
     }
 }
 
+function classOf(node) {
+    const value = node.getAttribute("class");
+    return value == null ? "" : value;
+}
+
+function slotsWouldChange(dialog, entries, read) {
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const nodes = slotNodes(dialog, entry.name);
+        let found = false;
+        nodes.forEach(function (node) {
+            found = true;
+            if (read(node) !== entry.value) entry.changed = true;
+        });
+        if (!found) continue;
+        if (entry.changed) return true;
+    }
+    return false;
+}
+
+function applyText(dialog, entries) {
+    entries.forEach(function (entry) {
+        slotNodes(dialog, entry.name).forEach(function (node) {
+            node.textContent = entry.value;
+        });
+    });
+}
+
+function applyClass(dialog, entries) {
+    entries.forEach(function (entry) {
+        slotNodes(dialog, entry.name).forEach(function (node) {
+            node.setAttribute("class", entry.value);
+        });
+    });
+}
+
+function applyHtml(dialog, entries) {
+    let replaced = false;
+    entries.forEach(function (entry) {
+        slotNodes(dialog, entry.name).forEach(function (node) {
+            if (node.getAttribute("data-filled-html") === entry.value) return;
+            node.innerHTML = entry.value;
+            node.setAttribute("data-filled-html", entry.value);
+            replaced = true;
+        });
+    });
+    return replaced;
+}
+
 function fillDialog(trigger) {
     const dialogId = trigger.getAttribute("commandfor");
     if (!dialogId) return;
@@ -124,7 +199,10 @@ function fillDialog(trigger) {
     const action = trigger.hasAttribute("data-fill-action")
         ? attr(trigger, "data-fill-action")
         : null;
-    const fields = readFillFields(trigger);
+    const fields = readPrefixed(trigger, "data-fill-field-");
+    const textSlots = readPrefixed(trigger, "data-fill-text-");
+    const classSlots = readPrefixed(trigger, "data-fill-class-");
+    const htmlSlots = readPrefixed(trigger, "data-fill-html-");
     let changed = false;
     if (action != null) {
         forms.forEach(function (form) {
@@ -138,9 +216,24 @@ function fillDialog(trigger) {
             if (controlWouldChange(node, field.value, group)) changed = true;
         });
     });
-    // A new target drops the previous item's error. The same target keeps a
+    if (
+        slotsWouldChange(dialog, textSlots, function (node) {
+            return node.textContent == null ? "" : String(node.textContent);
+        }) ||
+        slotsWouldChange(dialog, classSlots, classOf) ||
+        slotsWouldChange(dialog, htmlSlots, function (node) {
+            return attr(node, "data-filled-html");
+        })
+    ) {
+        changed = true;
+    }
+    // A new target drops the previous item's error and anything that belonged
+    // only to that render (an allergen retry). The same target keeps a
     // server-rendered banner (the page was just re-rendered with it).
-    if (changed) clearErrorBanners(dialog);
+    if (changed) {
+        clearErrorBanners(dialog);
+        clearTransient(dialog);
+    }
     if (action != null) {
         forms.forEach(function (form) {
             form.setAttribute("action", action);
@@ -161,9 +254,13 @@ function fillDialog(trigger) {
         const message = dialog.querySelector(".modal-message");
         if (message) message.textContent = attr(trigger, "data-fill-message");
     }
+    applyText(dialog, textSlots);
+    applyClass(dialog, classSlots);
+    const htmlReplaced = applyHtml(dialog, htmlSlots);
     dialog.querySelectorAll('button[type="submit"]').forEach(function (button) {
         button.disabled = false;
     });
+    if (htmlReplaced) initDialogFill(dialog);
     if (
         typeof dialog.dispatchEvent === "function" &&
         typeof CustomEvent === "function"

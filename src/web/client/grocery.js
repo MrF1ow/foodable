@@ -22,15 +22,18 @@ function syncGrocerySection(select) {
     });
 }
 
-function initGrocerySections(root) {
-    root.querySelectorAll("[data-grocery-section]").forEach(function (select) {
-        if (grocerySectionInit.has(select)) return;
+function bindGrocerySection(select) {
+    if (!grocerySectionInit.has(select)) {
         grocerySectionInit.add(select);
         select.addEventListener("change", function () {
             syncGrocerySection(select);
         });
-        syncGrocerySection(select);
-    });
+    }
+    syncGrocerySection(select);
+}
+
+function initGrocerySections(root) {
+    root.querySelectorAll("[data-grocery-section]").forEach(bindGrocerySection);
 }
 
 function resyncAllGrocerySections() {
@@ -39,6 +42,23 @@ function resyncAllGrocerySections() {
         .forEach(function (select) {
             syncGrocerySection(select);
         });
+}
+
+// The shared add-food dialog swaps the section <select> in on fill. Bind the
+// new element and copy its value onto the picker forms.
+function onGroceryDialogFill(event) {
+    const scope = event && event.target;
+    if (!scope || typeof scope.querySelectorAll !== "function") return;
+    scope
+        .querySelectorAll("[data-grocery-section]")
+        .forEach(bindGrocerySection);
+}
+
+if (
+    typeof document !== "undefined" &&
+    typeof document.addEventListener === "function"
+) {
+    document.addEventListener("foodable:dialog-fill", onGroceryDialogFill);
 }
 
 window.FoodableApp.onLoad(initGrocerySections);
