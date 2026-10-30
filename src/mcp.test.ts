@@ -5487,6 +5487,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(moveHtml).not.toContain("Fridge item updated");
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
         expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
+        expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
 
     test("POST /fridge/items/:id/delete rejects an item that is already gone", async () => {
