@@ -963,6 +963,24 @@ details.more > summary > :is(h2, h3) {
 .recipe-ingredient-note {
     font-style: italic;
 }
+.recipe-steps {
+    margin: 0;
+    padding-left: 1.4em;
+    display: grid;
+    gap: 10px;
+}
+.recipe-steps > li {
+    padding-left: 4px;
+    line-height: 1.5;
+}
+.recipe-steps > li::marker {
+    color: var(--text-dim);
+    font-weight: 700;
+}
+.recipe-notes {
+    margin: var(--gap-col) 0 0;
+    white-space: pre-line;
+}
 
 /* A wrapping row of .pill list items. */
 .pills {

@@ -46,6 +46,7 @@ export const TOASTS = {
         text: "Recipe cooked — some ingredients were short",
     },
     "recipes.updated": { kind: "success", text: "Recipe saved" },
+    "recipes.steps.saved": { kind: "success", text: "Steps saved" },
     "recipes.ingredient.removed": {
         kind: "success",
         text: "Ingredient removed",

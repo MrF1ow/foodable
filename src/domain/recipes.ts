@@ -231,6 +231,44 @@ function parseOptionalMinutes(
     return value;
 }
 
+const STEP_MARKER = /^(?:step\s*\d+\s*[:.)-]?|\d+[.)](?=\s|$)|[-*•](?=\s))\s*/i;
+
+/**
+ * Splits stored instructions into display steps. Plain lines are one step
+ * each. Once the text uses blank lines or numbering, a step starts at a blank
+ * line or a numbered/bulleted line and following lines wrap into it. Typed or
+ * pasted numbering ("1.", "Step 2:", "-") is dropped because the list numbers
+ * itself.
+ */
+export function recipeSteps(instructions: string | null): string[] {
+    if (!instructions) return [];
+    const lines = instructions
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map((line) => line.trim());
+    const structured =
+        lines.some((line) => STEP_MARKER.test(line)) ||
+        /\n\s*\n/.test(instructions.replace(/\r\n?/g, "\n").trim());
+    const steps: string[] = [];
+    let current: string[] = [];
+    const flush = () => {
+        const step = current.join(" ").trim();
+        if (step) steps.push(step);
+        current = [];
+    };
+    for (const line of lines) {
+        if (!line) {
+            flush();
+            continue;
+        }
+        const marked = STEP_MARKER.test(line);
+        if (!structured || marked) flush();
+        current.push(marked ? line.replace(STEP_MARKER, "") : line);
+    }
+    flush();
+    return steps;
+}
+
 export function normalizeRecipeTags(tags: string[]): string[] {
     const seen = new Set<string>();
     const out: string[] = [];

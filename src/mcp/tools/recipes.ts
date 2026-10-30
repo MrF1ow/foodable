@@ -32,6 +32,7 @@ import {
     updateRecipe,
     updateRecipeIngredient,
     type Recipe,
+    recipeSteps,
     resolveTotalPortions,
 } from "../../domain/recipes.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
@@ -51,6 +52,9 @@ const RECIPE_FIELDS = {
     prep_minutes: z.number().nullable(),
     cook_minutes: z.number().nullable(),
 };
+
+const INSTRUCTIONS_DESCRIPTION =
+    'Method steps, one per line. Leave a blank line between steps to write one step over several lines. Numbering ("1.", "Step 2:") is optional and stripped on display.';
 
 const MACROS_ITEM = z.object({
     calories: z.number().nullable(),
@@ -199,6 +203,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             }),
             outputSchema: z.object({
                 ...RECIPE_FIELDS,
+                steps: z
+                    .array(z.string())
+                    .describe(
+                        "instructions split into steps, as the recipe page numbers them",
+                    ),
                 portion_count: z.number(),
                 macros_per_portion: MACROS_ITEM,
                 ingredients: z.array(
@@ -242,6 +251,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     );
                     const payload = {
                         ...recipeFields(view),
+                        steps: recipeSteps(view.instructions),
                         portion_count: view.portionCount,
                         macros_per_portion: macrosPerPortion,
                         ingredients: view.ingredients.map((ingredient) => ({
@@ -264,7 +274,16 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         (ingredient) =>
                                             `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,
                                     )
-                                    .join("\n")}`,
+                                    .join("\n")}${
+                                    payload.steps.length > 0
+                                        ? `\nMethod:\n${payload.steps
+                                              .map(
+                                                  (step, index) =>
+                                                      `${index + 1}. ${step}`,
+                                              )
+                                              .join("\n")}`
+                                        : ""
+                                }`,
                             },
                         ],
                         structuredContent: payload,
@@ -289,7 +308,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 name: z.string().min(1),
                 yield_portions: z.coerce.number(),
-                instructions: z.string().optional(),
+                instructions: z
+                    .string()
+                    .optional()
+                    .describe(INSTRUCTIONS_DESCRIPTION),
                 source_url: z.string().optional(),
                 tags: z.array(z.string()).optional(),
                 notes: z.string().optional(),
@@ -765,7 +787,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 id: z.string(),
                 name: z.string().optional(),
                 yield_portions: z.coerce.number().optional(),
-                instructions: z.string().nullable().optional(),
+                instructions: z
+                    .string()
+                    .nullable()
+                    .optional()
+                    .describe(`${INSTRUCTIONS_DESCRIPTION} null clears them.`),
                 source_url: z.string().nullable().optional(),
                 tags: z.array(z.string()).optional(),
                 notes: z.string().nullable().optional(),

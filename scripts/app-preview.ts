@@ -327,6 +327,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 ...RECIPE,
                 name: "Banana bread",
                 yieldPortions: 10,
+                instructions:
+                    "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
             },
             ingredients: [
                 {
