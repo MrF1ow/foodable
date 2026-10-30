@@ -122,6 +122,22 @@ test("logs water through insertWater", async () => {
     expect(calls).toEqual([{ userId: USER, input: { amount_ml: 250 } }]);
 });
 
+test("logs a pound weight as grams", async () => {
+    const calls: WeightInput[] = [];
+    await logWeightFromForm(
+        USER,
+        { weight: "180", unit: "lb" },
+        async (_u, input) => {
+            calls.push(input);
+            return {
+                entry: { id: "p1", weight_g: input.weight_g },
+                deduplicated: false,
+            } as WeightInsertResult;
+        },
+    );
+    expect(calls[0]!.weight_g).toBeCloseTo(81646.6, 0);
+});
+
 test("logs weight through insertWeight as kilograms", async () => {
     const calls: { userId: string; input: WeightInput }[] = [];
     const result = await logWeightFromForm(

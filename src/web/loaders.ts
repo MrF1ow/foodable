@@ -181,6 +181,7 @@ export async function renderDashboardPage(
             viewMemberId,
             error,
             openModalId,
+            weightUnit: preferredWeightUnitFromProfile(viewerProfile) ?? "kg",
         }),
     };
 }

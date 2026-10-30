@@ -60,6 +60,8 @@ export type NutritionView = {
     viewMemberId?: string;
     error?: string;
     openModalId?: string;
+    /** The viewer's preferred weight unit; the log-weight form writes as the viewer. */
+    weightUnit?: WeightUnit;
 };
 
 export type LogFormResult = { ok: true } | { ok: false; error: string };
@@ -141,11 +143,11 @@ function logWaterFormBody(): string {
 </form>`;
 }
 
-function logWeightFormBody(): string {
+function logWeightFormBody(unit: WeightUnit): string {
     return `<form class="log-weight inline-form" method="post" action="/log-weight">
-<label for="log-weight-amount">Weight (kg)</label>
+<label for="log-weight-amount">Weight (${unit})</label>
 <input id="log-weight-amount" name="weight" type="number" step="any" inputmode="decimal" />
-<input type="hidden" name="unit" value="kg" />
+<input type="hidden" name="unit" value="${unit}" />
 <button type="submit" class="btn-primary">Log weight</button>
 </form>`;
 }
@@ -176,7 +178,7 @@ function logModals(view: NutritionView): string {
             id: NUTRITION_LOG_WEIGHT_MODAL_ID,
             title: "Log weight",
             openOnLoad: view.openModalId === NUTRITION_LOG_WEIGHT_MODAL_ID,
-            body: `${modalFormError(view, NUTRITION_LOG_WEIGHT_MODAL_ID)}${logWeightFormBody()}`,
+            body: `${modalFormError(view, NUTRITION_LOG_WEIGHT_MODAL_ID)}${logWeightFormBody(view.weightUnit ?? "kg")}`,
         }),
     ].join("");
 }

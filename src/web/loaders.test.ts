@@ -7,6 +7,7 @@ import {
 } from "./loaders.js";
 
 import type { HouseholdMember } from "../household.js";
+import type { NutritionView } from "./pages/nutrition.js";
 import { NUTRITION_CARDS } from "../domain/layout.js";
 
 const defaultCardOrder = [...NUTRITION_CARDS];
@@ -76,6 +77,24 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     expect(html).toContain('action="/log-water"');
     expect(html).toContain('action="/log-weight"');
     expect(html).not.toContain('class="error-banner"');
+});
+
+test("log-weight form follows the viewer's weight unit", async () => {
+    const base: NutritionView = {
+        access: { ok: true, mode: "self", viewer: alice, subject: alice },
+        members: [alice],
+        summary: { locale: "en" },
+        goals: { locale: "en" },
+        trends: { locale: "en" },
+        weight: { locale: "en" },
+        chrome: lightChrome,
+        cardOrder: defaultCardOrder,
+    };
+    const lb = await renderDashboardHtml({ ...base, weightUnit: "lb" });
+    expect(lb).toContain('<label for="log-weight-amount">Weight (lb)</label>');
+    expect(lb).toContain('<input type="hidden" name="unit" value="lb" />');
+    const unset = await renderDashboardHtml(base);
+    expect(unset).toContain('<input type="hidden" name="unit" value="kg" />');
 });
 
 test("self dashboard logs through header modals", async () => {
