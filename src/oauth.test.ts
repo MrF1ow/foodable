@@ -33,6 +33,7 @@ const {
     renderLoginPage,
     resolveApproveUser,
     classifySignInFailure,
+    logRejectedRedirect,
 } = await import("./oauth.js");
 const { _resetBuckets } = await import("./rate-limit.js");
 
@@ -450,17 +451,76 @@ test("/register omits client_secret and validates redirect_uris", async () => {
     expect(body).not.toHaveProperty("client_secret");
     expect(body.token_endpoint_auth_method).toBe("none");
 
-    const bad = await app.request("http://localhost/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-            redirect_uris: ["https://evil.example/cb"],
-        }),
-    });
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+        warns.push(String(args[0]));
+    };
+    let bad: Response;
+    try {
+        bad = await app.request("http://localhost/register", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                client_name: "Some App",
+                redirect_uris: [ALLOWED_REDIRECT, "https://evil.example/cb"],
+            }),
+        });
+    } finally {
+        console.warn = originalWarn;
+    }
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error?: string }).error).toBe(
         "invalid_redirect_uri",
     );
+    // Only the rejected callback is logged, so an operator can allow-list it.
+    expect(warns).toEqual([
+        '[auth] register: redirect_uri rejected ["https://evil.example/cb"] client_name="Some App"',
+    ]);
+});
+
+test("/authorize logs a rejected redirect_uri", async () => {
+    const { app } = buildTestApp();
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+        warns.push(String(args[0]));
+    };
+    let res: Response;
+    try {
+        res = await app.request(
+            `http://localhost${authorizeUrl("https://evil.example/cb")}`,
+        );
+    } finally {
+        console.warn = originalWarn;
+    }
+    expect(res.status).toBe(400);
+    expect(warns).toEqual([
+        '[auth] authorize: redirect_uri rejected ["https://evil.example/cb"] client_name=null',
+    ]);
+});
+
+test("logRejectedRedirect keeps caller input on one capped line", () => {
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+        warns.push(String(args[0]));
+    };
+    try {
+        logRejectedRedirect(
+            "register",
+            ["https://x.example/a\n[auth] forged", "y".repeat(500)],
+            "n".repeat(500),
+        );
+    } finally {
+        console.warn = originalWarn;
+    }
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).not.toContain("\n");
+    expect(warns[0]).toContain('"https://x.example/a\\n[auth] forged"');
+    expect(warns[0]).toContain(`"${"y".repeat(300)}"`);
+    expect(warns[0]).not.toContain("y".repeat(301));
+    expect(warns[0]).toContain(`client_name="${"n".repeat(100)}"`);
 });
 
 test("/token authorization_code requires redirect_uri and code_verifier", async () => {

@@ -180,6 +180,25 @@ export async function resolveApproveUser(args: {
     }
 }
 
+// A client whose callback is not allow-listed fails before anyone signs in,
+// and its callback is published nowhere, so the log line is how an operator
+// learns the exact value to put in ALLOWED_REDIRECT_URIS. The values are
+// caller-supplied: JSON.stringify keeps them on one line and each is capped.
+export function logRejectedRedirect(
+    route: "register" | "authorize",
+    uris: unknown,
+    clientName?: unknown,
+): void {
+    const list = (Array.isArray(uris) ? uris : [uris])
+        .slice(0, 5)
+        .map((uri) => (typeof uri === "string" ? uri.slice(0, 300) : uri));
+    const name =
+        typeof clientName === "string" ? clientName.slice(0, 100) : null;
+    console.warn(
+        `[auth] ${route}: redirect_uri rejected ${JSON.stringify(list)} client_name=${JSON.stringify(name)}`,
+    );
+}
+
 // Every path this router serves. Kept in sync with the oauth.get/oauth.post
 // registrations below — a route added there but missing here is unthrottled.
 export const OAUTH_PATHS = [
@@ -235,6 +254,14 @@ export function createOAuthRouter() {
                     typeof uri === "string" && isAllowedRedirectUri(uri, extra),
             )
         ) {
+            const rejected = Array.isArray(redirectUris)
+                ? redirectUris.filter(
+                      (uri) =>
+                          typeof uri !== "string" ||
+                          !isAllowedRedirectUri(uri, extra),
+                  )
+                : redirectUris;
+            logRejectedRedirect("register", rejected, body.client_name);
             return c.json({ error: "invalid_redirect_uri" }, 400);
         }
 
@@ -276,6 +303,7 @@ export function createOAuthRouter() {
 
         const extra = extraRedirectUris();
         if (!isAllowedRedirectUri(redirectUri, extra)) {
+            logRejectedRedirect("authorize", [redirectUri]);
             return c.json(
                 {
                     error: "invalid_request",
