@@ -252,6 +252,7 @@ type FakeNode = {
     showModal(): void;
     remove(): void;
     click(): void;
+    closest(sel: string): FakeNode | null;
     getElementById?(id: string): FakeNode | null;
 };
 
@@ -367,6 +368,12 @@ function fakeNode(
     };
     node.click = () => {
         for (const fn of node.listeners.click ?? []) fn({ source: node });
+    };
+    node.closest = (sel) => {
+        for (let at: FakeNode | null = node; at; at = at.parent) {
+            if (matchesFridgeSel(at, sel)) return at;
+        }
+        return null;
     };
     for (const child of children) child.parent = node;
     return node;
@@ -683,4 +690,61 @@ test("dialog fill copies text, class, and html slots", async () => {
     expect((body as { innerHTML?: string }).innerHTML).toBe("<p>Two</p>");
     expect(body.getAttribute("data-filled-html")).toBe("<p>Two</p>");
     expect(label.getAttribute("class")).toBe("");
+});
+
+test("dialog fill keeps a same-target allergen retry", async () => {
+    const pickerName = fakeNode("input", { name: "food_name", value: "" });
+    const pickerStore = fakeNode("input", { name: "store_id", value: "s1" });
+    const picker = fakeNode("form", { action: "/grocery/lines" }, [
+        pickerStore,
+        pickerName,
+    ]);
+    const retryName = fakeNode("input", {
+        name: "food_name",
+        value: "Peanut butter",
+    });
+    const retry = fakeNode("div", { "data-fill-transient": "" }, [
+        fakeNode("p", { class: "allergen-warning" }, [], "Contains peanuts"),
+        fakeNode("form", { action: "/grocery/lines" }, [retryName]),
+    ]);
+    const banner = fakeNode("p", { class: "error-banner" }, [], "Allergen");
+    const dialog = fakeNode("dialog", { id: "shared", class: "modal" }, [
+        banner,
+        retry,
+        picker,
+    ]);
+    const same = fakeNode("button", {
+        command: "show-modal",
+        commandfor: "shared",
+        "data-fill-field-store_id": "s1",
+        "data-fill-field-food_name": "",
+    });
+    const other = fakeNode("button", {
+        command: "show-modal",
+        commandfor: "shared",
+        "data-fill-field-store_id": "s2",
+        "data-fill-field-food_name": "",
+    });
+    const document = fakeNode("document", {}, [dialog, same, other]);
+    document.getElementById = (id) =>
+        queryFridge(document, `#${id}`)[0] ?? null;
+    const window = {
+        FoodableApp: {
+            onLoad(fn: (root: FakeNode) => void) {
+                fn(document);
+            },
+        },
+    };
+    const src = await Bun.file("./src/web/client/dialog-fill.js").text();
+    new Function("document", "window", src)(document, window);
+
+    same.click();
+    expect(dialog.querySelector("[data-fill-transient]")).not.toBeNull();
+    expect(dialog.querySelector(".error-banner")?.textContent).toBe("Allergen");
+    expect(retryName.value).toBe("Peanut butter");
+
+    other.click();
+    expect(dialog.querySelector("[data-fill-transient]")).toBeNull();
+    expect(dialog.querySelector(".error-banner")).toBeNull();
+    expect(pickerStore.value).toBe("s2");
 });

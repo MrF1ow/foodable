@@ -1144,6 +1144,9 @@ try {
     const rileyOwner = await ev<string>(
         `document.querySelector("#household-make-owner .modal-message")?.textContent ?? ""`,
     );
+    const rileyOwnerAction = await ev<string | null>(
+        `document.querySelector("#household-make-owner form")?.getAttribute("action") ?? null`,
+    );
     await ev(`document.getElementById("household-make-owner")?.close()`);
     await clickSel('#household-manage button[commandfor="household-remove"]');
     await sleep(40);
@@ -1152,10 +1155,12 @@ try {
         copy: string | null;
         label: string | null;
         checked: boolean;
+        action: string | null;
     }>(`(() => {
         const dialog = document.getElementById("household-remove");
         const box = dialog?.querySelector("input[name='confirm']");
         return {
+            action: dialog?.querySelector("form.remove-member")?.getAttribute("action") ?? null,
             title: dialog?.querySelector(".modal-title")?.textContent ?? null,
             copy: dialog?.querySelector("[data-fill-slot='remove-copy']")?.textContent ?? null,
             label: dialog?.querySelector("[data-fill-slot='remove-label']")?.textContent ?? null,
@@ -1183,12 +1188,15 @@ try {
             rileyRemove.copy ===
                 "Delete Riley's login and their meals, water, weight and goals. This can't be undone." &&
             rileyRemove.label === "Remove Riley" &&
-            rileyRemove.checked === false,
+            rileyRemove.checked === false &&
+            rileyOwnerAction === "/settings/household/members/u3/make-owner" &&
+            rileyRemove.action === "/settings/household/members/u3/remove",
         {
             samOwner,
             samRemove,
             rileyManage,
             rileyOwner,
+            rileyOwnerAction,
             rileyRemove,
             ex: drain(),
         },

@@ -86,8 +86,23 @@ function slotNodes(dialog, name) {
     return dialog.querySelectorAll('[data-fill-slot="' + name + '"]');
 }
 
+// Controls inside [data-fill-transient] belong to the last server render (the
+// allergen "Add anyway" form repeats the submitted values). They are not part
+// of the target, so they never count as a change and are never reset.
+function inTransient(node) {
+    return (
+        typeof node.closest === "function" &&
+        node.closest("[data-fill-transient]") != null
+    );
+}
+
 function controlsNamed(dialog, name) {
-    return dialog.querySelectorAll('[name="' + name + '"]');
+    return Array.prototype.filter.call(
+        dialog.querySelectorAll('[name="' + name + '"]'),
+        function (node) {
+            return !inTransient(node);
+        },
+    );
 }
 
 function checkboxGroup(nodes) {
