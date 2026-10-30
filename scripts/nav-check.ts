@@ -434,10 +434,36 @@ try {
     );
 
     await goto("/");
-    await clickSel('nav.bottom-nav a[href="/fridge"]');
-    await sleep(200);
-    await clickSel('nav.bottom-nav a[href="/"]');
-    await sleep(200);
+    await ev(`new Promise((resolve) => {
+        document.addEventListener("turbo:load", resolve, { once: true });
+        document.querySelector('nav.bottom-nav a[href="/fridge"]').click();
+    })`);
+    // A revisit must render once: a cached-snapshot preview followed by the
+    // fresh page replays the entrance animation, so the tab "loads twice".
+    // Leaving "/" cached it; without that the check passes on a cache miss.
+    // The preview waits a frame and a faster response cancels it, so stall
+    // the response the way a real network does.
+    const rootCached = await ev<boolean>(
+        `Turbo.session.view.snapshotCache.has(new URL("/", location.href))`,
+    );
+    await control("stall=300");
+    const renders = await ev<boolean[]>(`new Promise((resolve) => {
+        const renders = [];
+        const onRender = () => renders.push(
+            document.documentElement.hasAttribute("data-turbo-preview"));
+        document.addEventListener("turbo:render", onRender);
+        document.addEventListener("turbo:load", () => {
+            document.removeEventListener("turbo:render", onRender);
+            resolve(renders);
+        }, { once: true });
+        document.querySelector('nav.bottom-nav a[href="/"]').click();
+    })`);
+    await control("stall=0");
+    record(
+        "tab revisit renders once (no cached preview)",
+        rootCached && renders.length === 1 && renders[0] === false,
+        { rootCached, renders },
+    );
     const orderBefore = await ev<string[]>(
         `[...document.querySelectorAll("#nutrition-arrange .arrange-row")].map(r => r.getAttribute("data-card"))`,
     );
