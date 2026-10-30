@@ -1,3 +1,7 @@
+/** success = green, info = blue, warning = amber, error = red. Form errors
+ *  still render as banners; `error` is for actions that run in the browser. */
+export type ToastKind = "success" | "info" | "warning" | "error";
+
 export const TOASTS = {
     "fridge.location.added": { kind: "success", text: "Location added" },
     "fridge.location.removed": { kind: "success", text: "Location removed" },
@@ -38,7 +42,7 @@ export const TOASTS = {
     "recipes.portion.logged": { kind: "success", text: "Portion logged" },
     "recipes.cooked": { kind: "success", text: "Recipe cooked" },
     "recipes.cooked.shortfall": {
-        kind: "info",
+        kind: "warning",
         text: "Recipe cooked — some ingredients were short",
     },
     "recipes.updated": { kind: "success", text: "Recipe saved" },
@@ -137,7 +141,6 @@ export const TOASTS = {
     },
     "settings.foods.merged": { kind: "success", text: "Foods merged" },
     "settings.foods.updated": { kind: "success", text: "Food saved" },
-} as const;
+} as const satisfies Record<string, { kind: ToastKind; text: string }>;
 
 export type ToastKey = keyof typeof TOASTS;
-export type ToastKind = (typeof TOASTS)[ToastKey]["kind"];

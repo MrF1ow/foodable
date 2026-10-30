@@ -3,6 +3,18 @@ const TOAST_CATALOG = null;
 
 const TOAST_MAX_VISIBLE = 3;
 const TOAST_AUTO_DISMISS_MS = 4000;
+const TOAST_ICONS = {
+    success: "\u2713",
+    info: "i",
+    warning: "!",
+    error: "\u2715",
+};
+
+function toastKind(kind) {
+    return Object.prototype.hasOwnProperty.call(TOAST_ICONS, kind)
+        ? kind
+        : "success";
+}
 
 function placeholderNames(text) {
     const names = [];
@@ -63,19 +75,17 @@ function dismissToast(el, region) {
 function showToastMessage(opts) {
     const region = getToastRegion();
     if (!region || !opts || !opts.text) return;
-    const kind = opts.kind === "info" ? "info" : "success";
+    const kind = toastKind(opts.kind);
 
     const el = document.createElement("button");
     el.type = "button";
     el.className = "toast-item toast-item--" + kind;
 
-    if (kind === "success") {
-        const icon = document.createElement("span");
-        icon.className = "toast-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = "\u2713";
-        el.appendChild(icon);
-    }
+    const icon = document.createElement("span");
+    icon.className = "toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = TOAST_ICONS[kind];
+    el.appendChild(icon);
 
     const msg = document.createElement("span");
     msg.className = "toast-text";
@@ -139,7 +149,7 @@ function consumeToastSeed(root) {
     seed.remove();
     if (!text) return;
     showToastMessage({
-        kind: kind === "info" ? "info" : "success",
+        kind: toastKind(kind),
         text: text,
     });
 }
