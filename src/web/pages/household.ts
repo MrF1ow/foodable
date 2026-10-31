@@ -11,6 +11,7 @@ import {
     type StoreRule,
 } from "../../domain/rules.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
+import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
     emptyState,
@@ -21,6 +22,7 @@ import {
     pageLevelErrorBanner,
     panel,
     row,
+    type ModalFill,
 } from "../components/ui.js";
 
 export type HouseholdStoreView = GroceryStore & {
@@ -56,20 +58,36 @@ export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
 export const HOUSEHOLD_ADD_STORE_MODAL_ID = "household-add-store";
 export const HOUSEHOLD_ROTATE_TOKEN_MODAL_ID = "household-rotate-token";
 
+/** One manage, make-owner, and remove dialog for every member. */
+const HOUSEHOLD_MANAGE_ID = "household-manage";
+const HOUSEHOLD_REMOVE_ID = "household-remove";
+const HOUSEHOLD_MAKE_OWNER_ID = "household-make-owner";
+const MANAGE_PREFIX = "household-manage-";
+const REMOVE_PREFIX = "household-remove-";
+const OWNER_PREFIX = "household-make-owner-";
+
 function modalOpen(view: HouseholdSettingsView, id: string): boolean {
     return view.openModalId === id;
 }
 
-function manageModalId(userId: string): string {
-    return `household-manage-${userId}`;
+function managedMembers(view: HouseholdSettingsView): HouseholdMember[] {
+    if (!view.isOwner) return [];
+    return view.members.filter((member) => member.role !== "owner");
 }
 
-function removeMemberModalId(userId: string): string {
-    return `household-remove-${userId}`;
+function findManagedMember(
+    view: HouseholdSettingsView,
+    id: string,
+): HouseholdMember | null {
+    return managedMembers(view).find((member) => member.userId === id) ?? null;
 }
 
-function makeOwnerModalId(userId: string): string {
-    return `household-make-owner-${userId}`;
+function memberMatch(view: HouseholdSettingsView, prefix: string) {
+    return sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix,
+        lookup: (id) => findManagedMember(view, id),
+    });
 }
 
 function storeRuleModalId(storeId: string): string {
@@ -107,77 +125,180 @@ ${modalError}${addMemberFormBody()}
     });
 }
 
-function memberActionsHtml(
-    member: HouseholdMember,
-    view: HouseholdSettingsView,
-): { actions: string; modals: string } {
-    const id = escapeHtml(member.userId);
-    const name = escapeHtml(member.displayName);
-    const manageId = manageModalId(member.userId);
-    const removeId = removeMemberModalId(member.userId);
-    const ownerId = makeOwnerModalId(member.userId);
-    const removeError =
-        view.error && modalOpen(view, removeId) ? errorBanner(view.error) : "";
-    const manageError =
-        view.error && modalOpen(view, manageId) ? errorBanner(view.error) : "";
-    const isAdmin = member.role === "admin";
-    const roleForm = `<form method="post" action="/settings/household/members/${id}/role" class="member-role">
-<input type="hidden" name="role" value="${isAdmin ? "member" : "admin"}" />
-<p class="muted">${
-        isAdmin
-            ? `${name} is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner.`
-            : `Make ${name} an admin to let them change household settings, stores and everyone's rules, and add people. You stay the owner.`
-    }</p>
-<button type="submit"${isAdmin ? "" : ' class="btn-primary"'}>${
-        isAdmin ? "Make member" : "Make admin"
-    }</button>
-</form>`;
-    const modals =
-        modal({
-            id: manageId,
-            title: `Manage ${member.displayName}`,
-            openOnLoad: modalOpen(view, manageId),
-            body: `${manageError}${roleForm}
-<p class="muted">Transfer ownership or remove this member from the household.</p>
-<div class="modal-actions">
+function roleBlurb(member: HouseholdMember): string {
+    const name = member.displayName;
+    return member.role === "admin"
+        ? `${name} is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner.`
+        : `Make ${name} an admin to let them change household settings, stores and everyone's rules, and add people. You stay the owner.`;
+}
+
+function roleValue(member: HouseholdMember): string {
+    return member.role === "admin" ? "member" : "admin";
+}
+
+function roleSubmitLabel(member: HouseholdMember): string {
+    return member.role === "admin" ? "Make member" : "Make admin";
+}
+
+function roleSubmitClass(member: HouseholdMember): string {
+    return member.role === "admin" ? "" : "btn-primary";
+}
+
+function ownerMessage(member: HouseholdMember): string {
+    return `${member.displayName} becomes the owner. You stay in the household as a member and lose the owner settings.`;
+}
+
+function ownerConfirmLabel(member: HouseholdMember): string {
+    return `Make ${member.displayName} the owner`;
+}
+
+function removeCopy(member: HouseholdMember): string {
+    return `Delete ${member.displayName}'s login and their meals, water, weight and goals. This can't be undone.`;
+}
+
+function removeConfirmLabel(member: HouseholdMember): string {
+    return `Remove ${member.displayName}`;
+}
+
+function ownerFill(member: HouseholdMember): ModalFill {
+    return {
+        action: `/settings/household/members/${member.userId}/make-owner`,
+        message: ownerMessage(member),
+        text: { "owner-label": ownerConfirmLabel(member) },
+    };
+}
+
+function removeFill(member: HouseholdMember): ModalFill {
+    return {
+        action: `/settings/household/members/${member.userId}/remove`,
+        title: `Remove ${member.displayName}`,
+        fields: { confirm: "" },
+        text: {
+            "remove-copy": removeCopy(member),
+            "remove-label": removeConfirmLabel(member),
+        },
+    };
+}
+
+function memberActionButtons(member: HouseholdMember): string {
+    return `${modalTrigger({
+        target: HOUSEHOLD_MAKE_OWNER_ID,
+        label: ownerConfirmLabel(member),
+        fill: ownerFill(member),
+    })}
 ${modalTrigger({
-    target: ownerId,
-    label: `Make ${member.displayName} the owner`,
-})}
-${modalTrigger({
-    target: removeId,
+    target: HOUSEHOLD_REMOVE_ID,
     label: "Remove member",
     className: "btn-danger",
-})}
-</div>`,
+    fill: removeFill(member),
+})}`;
+}
+
+function manageFill(member: HouseholdMember): ModalFill {
+    return {
+        action: `/settings/household/members/${member.userId}/role`,
+        title: `Manage ${member.displayName}`,
+        fields: { role: roleValue(member) },
+        text: {
+            "role-blurb": roleBlurb(member),
+            "role-submit": roleSubmitLabel(member),
+        },
+        classes: { "role-submit": roleSubmitClass(member) },
+        templates: {
+            "member-actions": memberActionsTemplateId(member.userId),
+        },
+    };
+}
+
+function memberActionsTemplateId(userId: string): string {
+    return `household-member-actions-${userId}`;
+}
+
+function memberActionsTemplate(member: HouseholdMember): string {
+    return `<template id="${escapeHtml(memberActionsTemplateId(member.userId))}">${memberActionButtons(member)}</template>`;
+}
+
+function manageFormHtml(member: HouseholdMember | null): string {
+    const action = member
+        ? `/settings/household/members/${member.userId}/role`
+        : "";
+    const role = member ? roleValue(member) : "";
+    const blurb = member ? roleBlurb(member) : "";
+    const label = member ? roleSubmitLabel(member) : "Make admin";
+    const cls = member ? roleSubmitClass(member) : "";
+    const classAttr = cls ? ` class="${cls}"` : "";
+    const disabled = member ? "" : " disabled";
+    return `<form method="post" action="${escapeHtml(action)}" class="member-role">
+<input type="hidden" name="role" value="${escapeHtml(role)}" />
+<p class="muted" data-fill-slot="role-blurb">${escapeHtml(blurb)}</p>
+<button type="submit" data-fill-slot="role-submit"${classAttr}${disabled}>${escapeHtml(label)}</button>
+</form>`;
+}
+
+function memberActionsSlot(member: HouseholdMember | null): string {
+    if (!member) {
+        return `<div class="modal-actions" data-fill-slot="member-actions"></div>`;
+    }
+    const id = memberActionsTemplateId(member.userId);
+    return `<div class="modal-actions" data-fill-slot="member-actions" data-filled-template="${escapeHtml(id)}">${memberActionButtons(member)}</div>`;
+}
+
+function sharedMemberDialogs(view: HouseholdSettingsView): string {
+    if (managedMembers(view).length === 0) return "";
+    const manage = memberMatch(view, MANAGE_PREFIX);
+    const remove = memberMatch(view, REMOVE_PREFIX);
+    const owner = memberMatch(view, OWNER_PREFIX);
+    const manageMember = manage?.item ?? null;
+    const removeMember = remove?.item ?? null;
+    const ownerMember = owner?.item ?? null;
+    const manageOpen = manage != null;
+    const removeOpen = remove != null;
+    const ownerOpen = owner != null;
+    const removeSentence = removeMember
+        ? removeCopy(removeMember)
+        : "Delete this member's login and their meals, water, weight and goals. This can't be undone.";
+    return (
+        modal({
+            id: HOUSEHOLD_MANAGE_ID,
+            title: manageMember
+                ? `Manage ${manageMember.displayName}`
+                : "Manage member",
+            openOnLoad: manageOpen,
+            submitDisabled: manageMember == null,
+            body: `${manageOpen ? errorBanner(view.error) : ""}${manageFormHtml(manageMember)}
+<p class="muted">Transfer ownership or remove this member from the household.</p>
+${memberActionsSlot(manageMember)}`,
         }) +
         confirmModal({
-            id: ownerId,
+            id: HOUSEHOLD_MAKE_OWNER_ID,
             title: "Transfer ownership",
-            message: `${member.displayName} becomes the owner. You stay in the household as a member and lose the owner settings.`,
-            action: `/settings/household/members/${member.userId}/make-owner`,
-            confirmLabel: `Make ${member.displayName} the owner`,
-            openOnLoad: modalOpen(view, ownerId),
-            bodyPrefix:
-                view.error && modalOpen(view, ownerId)
-                    ? errorBanner(view.error)
-                    : "",
+            message: ownerMember
+                ? ownerMessage(ownerMember)
+                : "This member becomes the owner. You stay in the household as a member and lose the owner settings.",
+            action: ownerMember
+                ? `/settings/household/members/${ownerMember.userId}/make-owner`
+                : "",
+            confirmLabel: ownerMember
+                ? ownerConfirmLabel(ownerMember)
+                : "Make the owner",
+            submitSlot: "owner-label",
+            openOnLoad: ownerOpen,
+            bodyPrefix: ownerOpen ? errorBanner(view.error) : "",
+            submitDisabled: ownerMember == null,
         }) +
         modal({
-            id: removeId,
-            title: `Remove ${member.displayName}`,
-            openOnLoad: modalOpen(view, removeId),
-            body: `${removeError}<form method="post" action="/settings/household/members/${id}/remove" class="remove-member">
-<label><input type="checkbox" name="confirm" value="yes" required /> Delete ${name}'s login and their meals, water, weight and goals. This can't be undone.</label>
-<button type="submit" class="btn-danger">Remove ${name}</button>
+            id: HOUSEHOLD_REMOVE_ID,
+            title: removeMember
+                ? `Remove ${removeMember.displayName}`
+                : "Remove member",
+            openOnLoad: removeOpen,
+            submitDisabled: removeMember == null,
+            body: `${removeOpen ? errorBanner(view.error) : ""}<form method="post" action="${escapeHtml(removeMember ? `/settings/household/members/${removeMember.userId}/remove` : "")}" class="remove-member">
+<label><input type="checkbox" name="confirm" value="yes" required /> <span data-fill-slot="remove-copy">${escapeHtml(removeSentence)}</span></label>
+<button type="submit" class="btn-danger" data-fill-slot="remove-label"${removeMember ? "" : " disabled"}>${escapeHtml(removeMember ? removeConfirmLabel(removeMember) : "Remove")}</button>
 </form>`,
-        });
-    const actions = modalTrigger({
-        target: manageId,
-        label: "Manage",
-        className: "btn-sm",
-    });
-    return { actions, modals };
+        })
+    );
 }
 
 function sectionRow(section: GrocerySection, canEdit: boolean): string {
@@ -344,26 +465,29 @@ export function renderHouseholdSettingsPage(
     const token = view.issuedToken
         ? `<p class="token-once">Household bot token (shown once): <code>${escapeHtml(view.issuedToken)}</code></p>`
         : "";
-    let memberModals = "";
+    if (view.error) {
+        for (const prefix of [MANAGE_PREFIX, REMOVE_PREFIX, OWNER_PREFIX]) {
+            const match = memberMatch(view, prefix);
+            if (match) modalIds.push(match.openModalId);
+        }
+    }
+    const memberModals = sharedMemberDialogs(view);
     const members = view.members
         .map((member) => {
             const actions =
                 view.isOwner && member.role !== "owner"
-                    ? memberActionsHtml(member, view)
-                    : null;
-            if (actions) {
-                memberModals += actions.modals;
-                modalIds.push(
-                    manageModalId(member.userId),
-                    removeMemberModalId(member.userId),
-                    makeOwnerModalId(member.userId),
-                );
-            }
+                    ? `${memberActionsTemplate(member)}${modalTrigger({
+                          target: HOUSEHOLD_MANAGE_ID,
+                          label: "Manage",
+                          className: "btn-sm",
+                          fill: manageFill(member),
+                      })}`
+                    : "";
             return `<li class="household-member" data-role="${escapeHtml(member.role)}">${row(
                 {
                     title: member.displayName,
                     meta: member.role,
-                    actions: actions?.actions ?? "",
+                    actions,
                 },
             )}</li>`;
         })

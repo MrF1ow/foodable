@@ -127,11 +127,15 @@ test("owner household page has add-member form on /settings/household only", () 
     expect(html).toContain("Bob");
     expect(html).not.toContain('action="/add-household-member"');
     // Manage controls on Bob's row only: the owner never manages themselves.
+    // The make-owner and remove triggers live in that member's template.
     expect(html).toContain(
-        `action="/settings/household/members/${bob.userId}/make-owner"`,
+        `<template id="household-member-actions-${bob.userId}">`,
     );
     expect(html).toContain(
-        `action="/settings/household/members/${bob.userId}/remove"`,
+        `data-fill-action="/settings/household/members/${bob.userId}/make-owner"`,
+    );
+    expect(html).toContain(
+        `data-fill-action="/settings/household/members/${bob.userId}/remove"`,
     );
     expect(html).not.toContain(
         `/settings/household/members/${alice.userId}/remove`,
@@ -211,9 +215,9 @@ test("owner can make a member an admin without giving up ownership", () => {
         viewerUserId: alice.userId,
     });
     expect(html).toContain(
-        `action="/settings/household/members/${bob.userId}/role"`,
+        `data-fill-action="/settings/household/members/${bob.userId}/role"`,
     );
-    expect(html).toContain('name="role" value="admin"');
+    expect(html).toContain('data-fill-field-role="admin"');
     expect(html).toContain("You stay the owner.");
 });
 

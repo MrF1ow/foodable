@@ -47,6 +47,7 @@ const ME = {
     displayName: "Ethan",
 };
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+const RILEY = { ...ME, userId: "u3", role: "admin", displayName: "Riley" };
 
 // The widget templates carry a SAMPLE payload for standalone preview; reuse it
 // so the nutrition page shows real cards.
@@ -328,7 +329,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             householdName: "Flow house",
             location: "Portland",
-            members: [ME, SAM],
+            members: [ME, SAM, RILEY],
             stores: [
                 {
                     id: "s1",

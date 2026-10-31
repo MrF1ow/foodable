@@ -278,6 +278,47 @@ test("modal, modalTrigger, and confirmModal markup", () => {
     expect(filled).toContain('data-fill-field-note=""');
     expect(filled).not.toContain("<img");
 
+    const slotted = modalTrigger({
+        target: "household-manage",
+        label: "Manage",
+        fill: {
+            text: { "role-blurb": `Make ${hostile} an admin` },
+            classes: { "role-submit": "btn-primary" },
+            templates: {
+                "member-actions": `tpl-"><img src=x onerror=alert(1)>`,
+            },
+        },
+    });
+    expect(slotted).toContain(
+        'data-fill-text-role-blurb="Make &quot;&gt;&lt;img src=x onerror=alert(1)&gt; an admin"',
+    );
+    expect(slotted).toContain('data-fill-class-role-submit="btn-primary"');
+    expect(slotted).toContain(
+        'data-fill-template-member-actions="tpl-&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(slotted).not.toContain("<img");
+    expect(slotted).not.toContain("<button>Remove");
+    expect(
+        modalTrigger({
+            target: "household-manage",
+            label: "Manage",
+            fill: { classes: { "role-submit": "" } },
+        }),
+    ).toContain('data-fill-class-role-submit=""');
+
+    const owned = confirmModal({
+        id: "household-make-owner",
+        title: "Transfer ownership",
+        message: "Bob becomes the owner.",
+        action: "/settings/household/members/u2/make-owner",
+        confirmLabel: "Make Bob the owner",
+        submitSlot: "owner-label",
+        submitDisabled: true,
+    });
+    expect(owned).toContain(
+        '<button type="submit" class="btn-danger" data-fill-slot="owner-label" disabled>Make Bob the owner</button>',
+    );
+
     expect(
         modal({
             id: "shared",

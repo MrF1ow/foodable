@@ -51,9 +51,26 @@ test("household settings use modals instead of add/edit disclosures", () => {
     expect(html).toContain(`commandfor="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
     expect(html).toContain('action="/settings/household"');
     expect(html).toContain('class="add-member"');
-    expect(html).toContain('commandfor="household-manage-u2"');
-    expect(html).toContain('action="/settings/household/members/u2/remove"');
+    expect(html).toContain('commandfor="household-manage"');
+    expect(html).not.toContain('commandfor="household-manage-u2"');
+    expect(html).not.toContain('id="household-manage-u2"');
+    expect(html).not.toContain('id="household-remove-u2"');
+    expect(html).not.toContain('id="household-make-owner-u2"');
+    expect(html).toContain('data-fill-title="Manage Bob"');
+    expect(html).toContain('<template id="household-member-actions-u2">');
+    expect(html).toContain(
+        'data-fill-template-member-actions="household-member-actions-u2"',
+    );
+    expect(html).toContain("/settings/household/members/u2/remove");
     expect(html).toContain('name="confirm" value="yes" required');
+    expect(html.match(/name="confirm" value="yes" required/g)?.length).toBe(1);
+    const remove = dialogHtml(html, "household-remove");
+    expect(remove).toContain(
+        '<button type="submit" class="btn-danger" data-fill-slot="remove-label" disabled>',
+    );
+    expect(remove).not.toContain("Bob");
+    expect(dialogHtml(html, "household-manage")).toContain("disabled");
+    expect(dialogHtml(html, "household-make-owner")).toContain("disabled");
 });
 
 test("household server error reopens add-member and remove confirm modals", () => {
@@ -89,8 +106,23 @@ test("household server error reopens add-member and remove confirm modals", () =
         openModalId: "household-remove-u2",
     } as never);
     expect(removeHtml).toMatch(
-        /<dialog class="modal" id="household-remove-u2"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="household-remove"[^>]*data-modal-open-on-load/,
     );
+    expect(removeHtml).not.toContain('id="household-remove-u2"');
+    const removeDialog = dialogHtml(removeHtml, "household-remove");
+    expect(removeDialog).toContain(
+        "Delete Bob's login and their meals, water, weight and goals. This can't be undone.",
+    );
+    expect(removeDialog).toContain(">Remove Bob</button>");
+    expect(removeDialog).toContain('name="confirm" value="yes" required');
+    expect(removeDialog).toContain("Tick the box to confirm removing Bob.");
+    expect(
+        removeHtml.match(/Tick the box to confirm removing Bob\./g)?.length,
+    ).toBe(1);
+    expect(removeDialog).toContain(
+        '<button type="submit" class="btn-danger" data-fill-slot="remove-label">',
+    );
+    expect(removeDialog).not.toContain("disabled");
 });
 
 function expectErrorOnceInModal(
@@ -156,9 +188,40 @@ test("household modal errors render inside the reopening dialog", () => {
     } as never);
     expectErrorOnceInModal(
         makeOwner,
-        "household-make-owner-u2",
+        "household-make-owner",
         "Cannot transfer ownership.",
     );
+    const ownerDialog = dialogHtml(makeOwner, "household-make-owner");
+    expect(ownerDialog).toContain(
+        "Bob becomes the owner. You stay in the household as a member and lose the owner settings.",
+    );
+    expect(ownerDialog).toContain(">Make Bob the owner</button>");
+    expect(ownerDialog).not.toContain("disabled");
+    const manage = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Could not change the role.",
+        openModalId: "household-manage-u2",
+    } as never);
+    expectErrorOnceInModal(
+        manage,
+        "household-manage",
+        "Could not change the role.",
+    );
+    const manageDialog = dialogHtml(manage, "household-manage");
+    expect(manageDialog).toContain(">Manage Bob</h2>");
+    expect(manageDialog).toContain(
+        'action="/settings/household/members/u2/role"',
+    );
+    expect(manageDialog).toContain('name="role" value="admin"');
+    expect(manageDialog).toContain("Make Bob an admin");
+    expect(manageDialog).toContain(">Make admin</button>");
+    expect(manageDialog).toContain('class="btn-primary"');
+    expect(manageDialog).toContain('commandfor="household-remove"');
+    expect(manageDialog).toContain(
+        'data-filled-template="household-member-actions-u2"',
+    );
+    expect(manageDialog).toContain("Delete Bob's login");
+    expect(manage).not.toContain('id="household-manage-u2"');
     const rulesModal = householdMemberRulesModalId("u2");
     const memberRules = renderHouseholdSettingsPage({
         ...ownerHouseholdBase,
@@ -184,4 +247,90 @@ test("household page banner when openModalId is unknown", () => {
     } as never);
     expect(html).toContain("error-banner");
     expect(html).not.toMatch(/data-modal-open-on-load/);
+});
+
+function dialogHtml(html: string, id: string): string {
+    const dialog = html.match(
+        new RegExp(`<dialog class="modal" id="${id}"[\\s\\S]*?</dialog>`),
+    )?.[0];
+    expect(dialog).toBeDefined();
+    return dialog!;
+}
+
+test("member dialog count does not grow with the household", () => {
+    function page(count: number) {
+        const members: HouseholdMember[] = [
+            alice,
+            ...Array.from({ length: count }, (_, index) => ({
+                householdId: "hh-1",
+                userId: `u-${index + 2}`,
+                role: index === 0 ? ("member" as const) : ("admin" as const),
+                displayName: `Member ${index + 2}`,
+            })),
+        ];
+        return renderHouseholdSettingsPage({
+            ...ownerHouseholdBase,
+            members,
+        } as never);
+    }
+    const one = page(1);
+    const six = page(6);
+    const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
+    expect(dialogs(one)).toBe(dialogs(six));
+    expect(dialogs(one)).toBe(8);
+    expect(six.match(/id="household-manage"/g)?.length).toBe(1);
+    expect(six.match(/id="household-remove"/g)?.length).toBe(1);
+    expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
+    expect(six.match(/commandfor="household-manage"/g)?.length).toBe(7);
+    expect(six).toContain('data-fill-title="Manage Member 7"');
+    expect(six).toContain('<template id="household-member-actions-u-7">');
+    expect(six).toContain(
+        'data-fill-template-member-actions="household-member-actions-u-7"',
+    );
+    expect(six).toContain("Delete Member 7's login");
+    expect(six).not.toContain('id="household-manage-u-2"');
+    expect(six).not.toContain('id="household-remove-u-2"');
+    expect(six).not.toContain('id="household-make-owner-u-2"');
+    expect(dialogHtml(six, "household-manage")).toContain("disabled");
+    expect(dialogHtml(six, "household-remove")).toContain(
+        'name="confirm" value="yes" required',
+    );
+    expect(dialogHtml(six, "household-remove")).not.toContain("Member 7");
+    expect(dialogHtml(six, "household-make-owner")).toContain("disabled");
+    const unknown = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        error: "Could not remove that member.",
+        openModalId: "household-remove-missing",
+    } as never);
+    expect(unknown).toContain("error-banner");
+    expect(unknown).toContain("Could not remove that member.");
+    expect(unknown).not.toMatch(/data-modal-open-on-load/);
+    expect(dialogHtml(unknown, "household-remove")).not.toContain("Bob");
+});
+
+test("member action template escapes a hostile display name", () => {
+    const hostile = `"><img src=x onerror=alert(1)>`;
+    const html = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        members: [
+            alice,
+            {
+                householdId: "hh-1",
+                userId: "u-hostile",
+                role: "member",
+                displayName: hostile,
+            },
+        ],
+    } as never);
+    expect(html).toContain(
+        "Make &quot;&gt;&lt;img src=x onerror=alert(1)&gt; the owner",
+    );
+    expect(html).toContain(
+        'data-fill-title="Manage &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(html).toContain(
+        '<template id="household-member-actions-u-hostile">',
+    );
+    expect(html).not.toContain('"><img src=x');
+    expect(html).not.toContain("onerror=alert(1)>");
 });
