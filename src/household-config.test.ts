@@ -81,6 +81,23 @@ test("a missing preferences object on a row becomes empty preferences", () => {
     });
 });
 
+test("a row without fridge_locations parses with no locations", () => {
+    const parsed = householdConfigFromRow({
+        name: "Home",
+        recipe_search_places: [],
+        household_preferences: {},
+    });
+    expect(parsed).toEqual({
+        ok: true,
+        value: {
+            name: "Home",
+            fridgeLocations: [],
+            recipeSearchPlaces: [],
+            preferences: EMPTY_HOUSEHOLD_PREFERENCES,
+        },
+    });
+});
+
 test("toColumns then fromRow returns the same config", () => {
     const parsed = householdConfigFromRow(householdConfigToColumns(current));
     expect(parsed).toEqual({ ok: true, value: current });

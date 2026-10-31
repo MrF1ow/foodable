@@ -6,7 +6,7 @@ import {
 import { getSupabase } from "./client.js";
 
 const GROCERY_LINE_COLS =
-    "id, household_id, store_id, section_id, kind, display_name, amount, unit, identity, food_id, checked";
+    "id, household_id, store_id, section_id, kind, display_name, amount, unit, food_id, checked";
 
 export function liveGroceryStore(): GroceryListStore {
     return {

@@ -195,9 +195,7 @@ export async function getHouseholdConfig(
 ): Promise<HouseholdConfig> {
     const { data, error } = await getSupabase()
         .from("households")
-        .select(
-            "name, fridge_locations, recipe_search_places, household_preferences",
-        )
+        .select("name, recipe_search_places, household_preferences")
         .eq("id", householdId)
         .maybeSingle();
 
@@ -221,14 +219,11 @@ export async function updateHouseholdConfig(
         .from("households")
         .update({
             name: columns.name,
-            fridge_locations: columns.fridge_locations,
             recipe_search_places: columns.recipe_search_places,
             household_preferences: columns.household_preferences,
         })
         .eq("id", householdId)
-        .select(
-            "name, fridge_locations, recipe_search_places, household_preferences",
-        )
+        .select("name, recipe_search_places, household_preferences")
         .maybeSingle();
 
     if (error) {
