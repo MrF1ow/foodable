@@ -767,7 +767,9 @@ export async function updateFridgeItemQuantityAdjust(
             `${current.displayName} is not linked to a food.`,
         );
     }
-    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    // Stock is kept to 0.1, so an amount that rounds to zero would delete the
+    // item rather than update it.
+    if (!Number.isFinite(input.amount) || roundAmount(input.amount) <= 0) {
         throw new StockInputError("Enter an amount greater than zero.");
     }
     const unit = input.unit?.trim() || current.quantity.unit;
