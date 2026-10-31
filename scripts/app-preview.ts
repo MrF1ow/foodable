@@ -4,7 +4,7 @@
  * without Supabase. The widget equivalent is scripts/widget-harness.ts.
  *
  *   bun run preview:app            # writes tmp/app-preview/*.html, serves :4787
- *   bun run preview:app --shots    # also writes a 430px-wide PNG per page, then exits
+ *   bun run preview:app --shots    # also writes a 430px and a 1280px PNG per page, then exits
  *
  * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
  * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
@@ -552,6 +552,9 @@ if (process.argv.includes("--shots")) {
         const colorScheme = theme === "dark" ? 2 : 1;
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=430,2400 --virtual-time-budget=3000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}.png`);
+        // From 768px the bottom nav becomes the left sidebar.
+        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1280,900 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-wide.png http://localhost:${PORT}/${name}.html`.quiet();
+        console.log(`${OUT}/${name}-wide.png`);
     }
     for (const name of modalShotPages) {
         const theme = name.endsWith("-dark") ? "dark" : "light";

@@ -178,6 +178,25 @@ document.addEventListener("turbo:render", onTurboThemeSync);
 document.addEventListener("turbo:load", onTurboThemeSync);
 document.addEventListener("turbo:morph", onTurboThemeSync);
 
+// Move aria-current to the tapped tab right away, so its icon fades to the
+// accent while the visit loads instead of snapping when the new body lands.
+document.addEventListener("click", (event) => {
+    const link = event.target.closest?.("nav.bottom-nav a[href]");
+    if (
+        !link ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+    )
+        return;
+    for (const a of link.parentElement.querySelectorAll("a[aria-current]"))
+        a.removeAttribute("aria-current");
+    link.setAttribute("aria-current", "page");
+});
+
 // Login during an in-app visit must full-load (never morph into app chrome).
 // preventDefault() stops Turbo from rendering; reload() replaces the visit.
 document.addEventListener("turbo:before-render", (event) => {

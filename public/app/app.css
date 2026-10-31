@@ -270,14 +270,16 @@ html:has(dialog.modal[open]) {
     align-items: center;
     justify-content: center;
     min-width: 0;
-    min-height: 44px;
+    min-height: 52px;
     padding: 8px 4px;
     color: var(--text-dim);
     text-decoration: none;
+    /* No grey iOS tap box; the icon's colour fade is the feedback. */
+    -webkit-tap-highlight-color: transparent;
 }
 .bottom-nav svg {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     display: block;
     flex-shrink: 0;
 }
@@ -1191,11 +1193,13 @@ details.more > summary > :is(h2, h3) {
     color: var(--accent-ink);
 }
 
-/* Frosted bottom nav; --nav-chrome matches theme-color on tabbed pages. */
+/* Docked bottom nav on phones: a solid --nav-chrome and no backdrop-filter.
+   iOS 26 Safari tints the strip under its toolbar from the fixed or sticky
+   box at the bottom edge; a backdrop-filter there stops it sampling and the
+   strip falls back to white in the dark theme. --nav-chrome is opaque, so a
+   blur never showed anyway. */
 .bottom-nav {
     background: var(--nav-chrome);
-    -webkit-backdrop-filter: saturate(1.6) blur(14px);
-    backdrop-filter: saturate(1.6) blur(14px);
     border-top-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
 }
 /* No ::after below the nav: an absolute 100vh box adds a screen of scroll
@@ -1206,14 +1210,46 @@ body.has-bottom-nav {
 html:has(body.has-bottom-nav) {
     background-color: var(--bg);
 }
+/* The current tab colours its icon only, no pill behind it. --accent-ink
+   rather than --accent: without a fill behind it, the logo green is too light
+   to read as an icon on the light page. shell.js moves aria-current on
+   click, so the new tab fades up to the accent before the visit lands. */
 .bottom-nav a {
-    border-radius: 14px;
-    transition:
-        background 0.15s ease,
-        color 0.15s ease;
+    transition: color 0.3s ease;
 }
 .bottom-nav a[aria-current="page"] {
-    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+@media (hover: hover) and (pointer: fine) {
+    .bottom-nav a:not([aria-current="page"]):hover {
+        color: var(--text);
+    }
+}
+
+/* From 768px the nav floats: a frosted pill centred above the bottom edge.
+   Phones keep the docked bar above. The page shows around the pill, so the
+   overscroll area below the page is plain --bg rather than nav chrome. */
+@media (min-width: 768px) {
+    body.has-bottom-nav {
+        box-shadow: none;
+    }
+    .bottom-nav {
+        position: fixed;
+        left: 50%;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        transform: translateX(-50%);
+        width: 400px;
+        padding: 6px 8px;
+        background: color-mix(in srgb, var(--nav-chrome) 82%, transparent);
+        -webkit-backdrop-filter: saturate(1.6) blur(14px);
+        backdrop-filter: saturate(1.6) blur(14px);
+        border: 1px solid
+            color-mix(in srgb, var(--panel-border) 70%, transparent);
+        border-radius: var(--r-999);
+        box-shadow:
+            0 8px 24px rgb(0 0 0 / 0.14),
+            0 1px 3px rgb(0 0 0 / 0.08);
+    }
 }
 
 /* magic-card: a pointer-following glow inside a panel. The shell script sets
@@ -1673,6 +1709,10 @@ body:not(.has-bottom-nav) .toast-region {
     bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 768px) {
+    /* Above the floating nav: 16px gap + 66px pill + 12px. */
+    body.has-bottom-nav .toast-region {
+        bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    }
     .toast-region {
         left: auto;
         right: max(16px, env(safe-area-inset-right, 0px));

@@ -1635,10 +1635,74 @@ try {
         "light",
         "./tmp/nav-recipes-light-bottom.png",
     );
+    // iOS 26 Safari stops tinting the strip under its toolbar from a bottom
+    // bar with a backdrop-filter, and falls back to white.
+    const phoneNavFilter = await ev<string>(
+        `getComputedStyle(document.querySelector("nav.bottom-nav")).backdropFilter`,
+    );
+    record(
+        "phone nav has no backdrop-filter (iOS Safari toolbar tint)",
+        phoneNavFilter === "none",
+        { phoneNavFilter },
+    );
     record(
         "bottom screenshots (fridge and recipes 390x844)",
         fridgeDark && fridgeLight && recipesDark && recipesLight,
         { fridgeDark, fridgeLight, recipesDark, recipesLight, ex: drain() },
+    );
+
+    // From 768px the nav floats near the bottom edge: centred, off the edge,
+    // and kept across a Turbo visit. Phones keep the docked bar.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1280,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await control("session=app");
+    await goto("/fridge");
+    await setMarker();
+    const floatSnap = () =>
+        ev<{
+            centre: number;
+            gap: number;
+            width: number;
+            position: string;
+            active: string | null;
+            activeBg: string;
+        }>(`(() => {
+            const nav = document.querySelector("nav.bottom-nav");
+            const r = nav.getBoundingClientRect();
+            const cur = nav.querySelector("a[aria-current='page']");
+            return {
+                // Offset from the centre of the page, scrollbar excluded.
+                centre: Math.round(
+                    r.left + r.width / 2 - document.documentElement.clientWidth / 2,
+                ),
+                gap: Math.round(innerHeight - r.bottom),
+                width: Math.round(r.width),
+                position: getComputedStyle(nav).position,
+                active: cur?.getAttribute("aria-label") ?? null,
+                activeBg: cur ? getComputedStyle(cur).backgroundColor : "",
+            };
+        })()`);
+    const wideFridge = await floatSnap();
+    await clickSel('nav.bottom-nav a[href="/recipes"]');
+    await sleep(300);
+    const wideRecipes = await floatSnap();
+    const wideMarker = await ev<string | null>(`window.__marker ?? null`);
+    record(
+        "wide screens: floating nav centred at the bottom, kept across a visit",
+        wideFridge.position === "fixed" &&
+            Math.abs(wideFridge.centre) <= 1 &&
+            wideFridge.gap >= 8 &&
+            wideFridge.width <= 400 &&
+            wideFridge.active === "Fridge" &&
+            wideRecipes.active === "Recipes" &&
+            Math.abs(wideRecipes.centre) <= 1 &&
+            wideMarker != null &&
+            ["rgba(0, 0, 0, 0)", "transparent"].includes(wideRecipes.activeBg),
+        { wideFridge, wideRecipes, wideMarker, ex: drain() },
     );
 
     await send("Emulation.setDeviceMetricsOverride", {

@@ -20,15 +20,6 @@ Still open, and not features:
 
 ## Later: planned features
 
-### Sidebar navigation on larger screens
-
-The web app uses the phone layout everywhere: a sticky, frosted, icon-only bottom nav (`bottomNav` in `src/web/components/bottom-nav.ts`, `.bottom-nav` in `public/app/app.css`). On a tablet or desktop that leaves the tabs at the bottom edge of a wide screen.
-
-- From a breakpoint (the app already uses `768px`), swap the bottom nav for a sidebar on the left: the same `APP_TABS` and icons, with the tab labels shown beside them. Phones keep the bottom nav unchanged.
-- Render one nav and switch its layout with CSS, rather than emitting two navs, so there is still one `aria-current` link and one landmark. If two navs turn out simpler, hide the inactive one from assistive tech.
-- `has-bottom-nav`, the `--nav-chrome` overscroll shadow, the bottom-nav `theme-color` (`THEME_NAV_COLOR`) and the toast position (bottom-centre above the nav on phones) all assume the nav is at the bottom. Each needs a wide-screen rule.
-- Keep it inside the brand layer (`app.css`), and cover it in `bun run check:nav` and `bun run preview:app --shots` at both widths. Turbo morphs must keep the sidebar in place without re-animating it.
-
 ### Camera barcode scanning
 
 Scan a barcode with the phone camera in the web app instead of typing the digits. The lookup side already exists: `lookupBarcode` / `normalizeBarcode` (Open Food Facts) behind the web food picker (`runBarcodeLookupAction` in `src/web/components/food-picker.ts`), and the `lookup_barcode` MCP tool, which takes digits typed by the user or read from a photo of the package.
