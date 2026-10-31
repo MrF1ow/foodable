@@ -22,7 +22,7 @@
     "devDependencies": {
         "@modelcontextprotocol/client": "^2.2.0",
         "@types/bun": "latest",
-        "prettier": "^3.9.6"
+        "prettier": "^3.9.10"
     },
     "peerDependencies": {
         "typescript": "^5.9.3"
@@ -50,9 +50,9 @@
     },
     "dependencies": {
         "@hotwired/turbo": "8.0.23",
-        "@modelcontextprotocol/server": "^2.0.0",
-        "@supabase/supabase-js": "^2.116.0",
-        "hono": "^4.13.7",
-        "zod": "^4.5.4"
+        "@modelcontextprotocol/server": "^2.3.1",
+        "@supabase/supabase-js": "^2.118.0",
+        "hono": "^4.13.13",
+        "zod": "^4.6.7"
     }
 }
