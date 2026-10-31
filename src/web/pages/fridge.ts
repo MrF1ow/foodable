@@ -22,6 +22,7 @@ import {
     pageHeader,
     pageLevelErrorBanner,
     type ModalFill,
+    field,
 } from "../components/ui.js";
 import {
     expiryLevel,
@@ -241,10 +242,8 @@ function editFields(
                   required: true,
               });
     return `${qty}
-<label for="${locId}">Location</label>
-${locationSelect(locations, item?.locationId ?? "", "location_id", locId)}
-<label for="${expiresId}">Expires</label>
-<input id="${expiresId}" name="expires_on" type="date" value="${escapeHtml(item?.expiresOn ?? "")}" />`;
+${field({ id: locId, label: "Location", control: locationSelect(locations, item?.locationId ?? "", "location_id", locId) })}
+${field({ id: expiresId, label: "Expires", control: `<input id="${expiresId}" name="expires_on" type="date" value="${escapeHtml(item?.expiresOn ?? "")}" />` })}`;
 }
 
 function sharedEditModal(
@@ -405,8 +404,7 @@ function sharedAddSupplyModal(view: FridgePageView): string {
         body: `${open ? modalError(view, openId) : ""}<form class="fridge-add-supply" method="post" action="${escapeHtml(action)}">
 <input type="hidden" name="kind" value="supply" />
 <input type="hidden" name="location_id" value="${escapeHtml(location?.id ?? "")}" />
-<label for="supply-name">Name</label>
-<input id="supply-name" name="name" type="text" required autocomplete="off" />
+${field({ id: "supply-name", label: "Name", control: `<input id="supply-name" name="name" type="text" required autocomplete="off" />` })}
 ${renderQuantityField({
     kind: "supply",
     unit: "roll",
@@ -469,8 +467,7 @@ export function renderFridgePage(view: FridgePageView): string {
             title: "Add location",
             openOnLoad: modalOpen(view, addLocationId),
             body: `${modalError(view, addLocationId)}<form class="fridge-add-location" method="post" action="/fridge/locations">
-<label for="location_name">Location name</label>
-<input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />
+${field({ id: "location_name", label: "Location name", control: `<input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add location</button>
 </form>`,
         }) +

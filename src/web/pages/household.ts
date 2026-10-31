@@ -23,6 +23,7 @@ import {
     panel,
     row,
     type ModalFill,
+    field,
 } from "../components/ui.js";
 
 export type HouseholdStoreView = GroceryStore & {
@@ -100,13 +101,10 @@ export function householdMemberRulesModalId(userId: string): string {
 
 function addMemberFormBody(error?: string): string {
     return `${errorBanner(error)}
-<label for="add_display_name">Name</label>
-<input id="add_display_name" name="display_name" required maxlength="80" />
-<label for="add_login">Email or username</label>
-<input id="add_login" name="login" required autocomplete="off" autocapitalize="none" spellcheck="false" />
+${field({ id: "add_display_name", label: "Name", control: `<input id="add_display_name" name="display_name" required maxlength="80" />` })}
+${field({ id: "add_login", label: "Email or username", control: `<input id="add_login" name="login" required autocomplete="off" autocapitalize="none" spellcheck="false" />` })}
 <p class="hint">A username has no @: 2–31 letters, digits, dots, dashes or underscores. They sign in with it on the same login page.</p>
-<label for="add_password">Password</label>
-<input id="add_password" name="password" type="password" required minlength="8" autocomplete="new-password" />
+${field({ id: "add_password", label: "Password", control: `<input id="add_password" name="password" type="password" required minlength="8" autocomplete="new-password" />` })}
 <button type="submit" class="btn-primary">Add member</button>`;
 }
 
@@ -336,8 +334,7 @@ function storeCard(
               title: "Add store rule",
               openOnLoad: modalOpen(view, ruleModalId),
               body: `${ruleModalError}<form method="post" action="/settings/household/stores/${escapeHtml(store.id)}/rules" class="store-rule-form">
-<label for="store-rule-${escapeHtml(store.id)}">Store rule</label>
-<textarea id="store-rule-${escapeHtml(store.id)}" name="body" required maxlength="500"></textarea>
+${field({ id: `store-rule-${store.id}`, label: "Store rule", control: `<textarea id="store-rule-${escapeHtml(store.id)}" name="body" required maxlength="500"></textarea>` })}
 <button type="submit" class="btn-primary">Save store rule</button>
 </form>`,
           })
@@ -418,23 +415,23 @@ function memberRulesCard(
               title: `Rules for ${view.member.displayName}`,
               openOnLoad: modalOpen(pageView, rulesModalId),
               body: `${rulesModalError}${currentList}<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
-<label for="allergen-${escapeHtml(view.member.userId)}">Allergen</label>
-<select id="allergen-${escapeHtml(view.member.userId)}" name="allergen">
+${field({
+    id: `allergen-${view.member.userId}`,
+    label: "Allergen",
+    control: `<select id="allergen-${escapeHtml(view.member.userId)}" name="allergen">
 ${allergenOptions}
 <option value="other">Other</option>
-</select>
-<label for="allergen-other-${escapeHtml(view.member.userId)}">Other allergen</label>
-<input id="allergen-other-${escapeHtml(view.member.userId)}" name="other_label" maxlength="80" />
+</select>`,
+})}
+${field({ id: `allergen-other-${view.member.userId}`, label: "Other allergen", control: `<input id="allergen-other-${escapeHtml(view.member.userId)}" name="other_label" maxlength="80" />` })}
 <button type="submit" class="btn-primary">Save allergen</button>
 </form>
 <form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/dislikes" class="dislike-form">
-<label for="dislike-${escapeHtml(view.member.userId)}">Dislike</label>
-<input id="dislike-${escapeHtml(view.member.userId)}" name="display_name" required maxlength="80" />
+${field({ id: `dislike-${view.member.userId}`, label: "Dislike", control: `<input id="dislike-${escapeHtml(view.member.userId)}" name="display_name" required maxlength="80" />` })}
 <button type="submit" class="btn-primary">Save dislike</button>
 </form>
 <form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/rules" class="person-rule-form">
-<label for="person-rule-${escapeHtml(view.member.userId)}">Person rule</label>
-<textarea id="person-rule-${escapeHtml(view.member.userId)}" name="body" required maxlength="500"></textarea>
+${field({ id: `person-rule-${view.member.userId}`, label: "Person rule", control: `<textarea id="person-rule-${escapeHtml(view.member.userId)}" name="body" required maxlength="500"></textarea>` })}
 <button type="submit" class="btn-primary">Save person rule</button>
 </form>`,
           })
@@ -501,13 +498,11 @@ export function renderHouseholdSettingsPage(
         : "";
     const householdCard = view.canManage
         ? `<form method="post" action="/settings/household/name" class="household-name inline-form">
-<label for="household_name">Household name</label>
-<input id="household_name" name="name" value="${escapeHtml(view.householdName)}" required maxlength="80" />
+${field({ id: "household_name", label: "Household name", control: `<input id="household_name" name="name" value="${escapeHtml(view.householdName)}" required maxlength="80" />` })}
 <button type="submit">Save</button>
 </form>
 <form method="post" action="/settings/household/location" class="household-location inline-form">
-<label for="household_location">Household location</label>
-<input id="household_location" name="location" value="${escapeHtml(view.location)}" maxlength="120" />
+${field({ id: "household_location", label: "Household location", control: `<input id="household_location" name="location" value="${escapeHtml(view.location)}" maxlength="120" />` })}
 <button type="submit">Save</button>
 </form>
 ${rotateToken}`
@@ -566,8 +561,7 @@ ${rotateToken}`
                   title: "Add store",
                   openOnLoad: modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID),
                   body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/stores" class="add-store">
-<label for="store_name">Grocery store</label>
-<input id="store_name" name="name" required maxlength="80" autocomplete="off" />
+${field({ id: "store_name", label: "Grocery store", control: `<input id="store_name" name="name" required maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
               })

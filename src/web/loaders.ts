@@ -57,7 +57,7 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
-import { errorBanner, emptyState, pageHeader } from "./components/ui.js";
+import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
 
 function alcoholOf(
@@ -89,10 +89,8 @@ export function createHouseholdFormHtml(
         })}
         ${errorBanner(error)}
         <form method="POST" action="/create-household" class="create-household panel">
-            <label for="household_name">Household name</label>
-            <input id="household_name" name="household_name" required maxlength="80" />
-            <label for="display_name">Your name</label>
-            <input id="display_name" name="display_name" required maxlength="80" />
+            ${field({ id: "household_name", label: "Household name", control: `<input id="household_name" name="household_name" required maxlength="80" />` })}
+            ${field({ id: "display_name", label: "Your name", control: `<input id="display_name" name="display_name" required maxlength="80" />` })}
             <button type="submit" class="btn-primary">Create household</button>
         </form>`,
         theme,

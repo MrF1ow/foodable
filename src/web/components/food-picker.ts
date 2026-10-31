@@ -6,6 +6,7 @@ import {
 } from "../../foods.js";
 import { escapeHtml } from "../shell.js";
 import { renderQuantityField } from "./quantity-field.js";
+import { field } from "./ui.js";
 
 type SearchHooks = Parameters<typeof searchFoodsByName>[2];
 
@@ -82,8 +83,7 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
                   required: true,
               })
             : "";
-    const searchFields = `<label for="${escapeHtml(id)}-search">Search</label>
-<input id="${escapeHtml(id)}-search" type="search" data-search-input autocomplete="off" />
+    const searchFields = `${field({ id: `${id}-search`, label: "Search", control: `<input id="${escapeHtml(id)}-search" type="search" data-search-input autocomplete="off" />` })}
 ${
     method === "post"
         ? `<form class="food-picker-search" data-search-form method="post" action="${escapeHtml(action)}">
@@ -97,13 +97,11 @@ ${searchQty}
         method === "post"
             ? `<form class="food-picker-manual" method="post" action="${escapeHtml(action)}">
 ${extras}
-<label for="${escapeHtml(id)}-name">Name</label>
-<input id="${escapeHtml(id)}-name" name="food_name" type="text" required autocomplete="off" />
+${field({ id: `${id}-name`, label: "Name", control: `<input id="${escapeHtml(id)}-name" name="food_name" type="text" required autocomplete="off" />` })}
 ${manualQty}
 <button type="submit" class="btn-primary">Add food</button>
 </form>`
-            : `<label for="${escapeHtml(id)}-name">Name</label>
-<input id="${escapeHtml(id)}-name" name="food_name" type="text" autocomplete="off" />
+            : `${field({ id: `${id}-name`, label: "Name", control: `<input id="${escapeHtml(id)}-name" name="food_name" type="text" autocomplete="off" />` })}
 ${manualQty}`;
     const hit = method === "post" ? "submit" : "text";
     return `<div class="food-picker" id="${escapeHtml(id)}" data-food-picker data-hit="${hit}">
@@ -115,8 +113,7 @@ ${manualQty}`;
 <div class="food-picker-panel" role="tabpanel" id="${escapeHtml(barcodePanel)}" data-panel="barcode" aria-labelledby="${escapeHtml(id)}-tab-barcode">
 <form class="food-picker-barcode" data-barcode-form data-lookup-path="lookupBarcode" action="${escapeHtml(action)}" method="${method}">
 ${extras}
-<label for="${escapeHtml(id)}-barcode">Barcode</label>
-<input id="${escapeHtml(id)}-barcode" name="barcode" inputmode="numeric" pattern="[0-9]*" autocomplete="off" />
+${field({ id: `${id}-barcode`, label: "Barcode", control: `<input id="${escapeHtml(id)}-barcode" name="barcode" inputmode="numeric" pattern="[0-9]*" autocomplete="off" />` })}
 ${qty}
 <button type="submit" class="btn-primary">${escapeHtml(barcodeSubmit)}</button>
 </form>

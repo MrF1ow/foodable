@@ -51,6 +51,25 @@ ${opts.body}
 </details>`;
 }
 
+/**
+ * A label above its control, wrapped in one `.field` grid. The label-to-control
+ * gap belongs to the field itself, so it holds in any container: a modal body,
+ * a disclosure, a form, or plain block flow. `control` is pre-escaped HTML
+ * whose control carries `id`; `label` is plain text.
+ */
+export function field(opts: {
+    id: string;
+    label: string;
+    control: string;
+    className?: string;
+}): string {
+    const cls = opts.className ? `field ${opts.className}` : "field";
+    return `<div class="${escapeHtml(cls)}">
+<label for="${escapeHtml(opts.id)}">${escapeHtml(opts.label)}</label>
+${opts.control}
+</div>`;
+}
+
 export function errorBanner(error?: string): string {
     return error ? `<p class="error-banner">${escapeHtml(error)}</p>` : "";
 }
