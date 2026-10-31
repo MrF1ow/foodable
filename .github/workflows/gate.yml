@@ -1,36 +1,38 @@
 name: Gate
 
 on:
-    # zizmor: ignore[dangerous-triggers] — no head checkout; does not run pull request code
+    # zizmor: ignore[dangerous-triggers] — checks out the base branch only; does not run pull request code
     pull_request_target:
-        types: [opened, synchronize, reopened]
+        types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
     contents: read
-    pull-requests: read
+    # Strips gate:approved when a new push lands.
+    pull-requests: write
+    # Dates the latest push from the head commit's check suites.
+    checks: read
 
 jobs:
     gate:
         runs-on: ubuntu-latest
         steps:
-            - name: Fail when a gate file changes
+            - name: Checkout code
+              uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.2
+
+            - name: Require a code owner's gate:approved label for gate files
               env:
                   REPO: ${{ github.repository }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
+                  EVENT_ACTION: ${{ github.event.action }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+                  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
                   GH_TOKEN: ${{ github.token }}
-              run: |
-                  set -euo pipefail
-                  list=$(mktemp)
-                  trap 'rm -f "$list"' EXIT
-                  gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)' >"$list"
-                  fail=0
-                  while IFS= read -r path; do
-                      [ -z "$path" ] && continue
-                      case "$path" in
-                          .github/workflows/* | .github/rulesets/* | .github/CODEOWNERS | scripts/conventions/* | scripts/migration-safety/* | scripts/migration-dryrun* | package.json)
-                              echo "gate: $path"
-                              fail=1
-                              ;;
-                      esac
-                  done <"$list"
-                  exit "$fail"
+              run: bun run scripts/conventions/gate.ts
