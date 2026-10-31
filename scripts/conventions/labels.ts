@@ -74,6 +74,12 @@ const STATIC_LABELS: LabelDef[] = [
         description: "Dependency update (e.g. Dependabot)",
     },
     {
+        name: "gate:approved",
+        color: "0e8a16",
+        description:
+            "Code owner approved the gate files at the latest push (apply by hand)",
+    },
+    {
         name: "security",
         color: "ee0701",
         description: "Security-related change (apply by hand)",

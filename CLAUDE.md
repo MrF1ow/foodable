@@ -209,7 +209,7 @@ One shared base, one app brand layer. Colours, type sizes (`--fs-*`) and radii (
 
 # Claude Code Operating Instructions
 
-Other coding agents should follow the architecture rules above and skip this section. Please do not push to `main`, run `gh pr merge --admin`, or create, update, or delete GitHub rulesets; that is a request to contributors, not a guarantee for every tool — [`.claude/settings.json`](.claude/settings.json) binds Claude Code only.
+Other coding agents should follow the architecture rules above and skip this section. Please do not push to `main`, run `gh pr merge --admin`, create, update, or delete GitHub rulesets, or add the `gate:approved` label (it is the code owner's sign-off on gate files, see `CONTRIBUTING.md`); that is a request to contributors, not a guarantee for every tool — [`.claude/settings.json`](.claude/settings.json) binds Claude Code only.
 
 ## Core Philosophy
 

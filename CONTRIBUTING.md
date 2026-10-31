@@ -45,6 +45,12 @@ bun test
 
 If you touched `supabase/migrations/`, also run `bun run db:dryrun` (see below).
 
+### Gate files
+
+Some files control CI and the repo's own guardrails: `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun*`, and `package.json`. A PR that touches any of them fails the **gate** check until a code owner (see `.github/CODEOWNERS`) adds the `gate:approved` label. The label has to go on after the latest push: every push removes it, and an approval older than the head commit does not count.
+
+It is a label and not an approving review because GitHub does not let a PR's author approve it, and the code owner opens most PRs here. The rule lives in `scripts/conventions/gate.ts` and runs from the base branch, so a PR cannot change the check it is judged by.
+
 ## How the code is laid out
 
 [`CLAUDE.md`](CLAUDE.md) is the detailed map of the codebase and its invariants. It's written for AI coding agents but works just as well for people. The short version:
