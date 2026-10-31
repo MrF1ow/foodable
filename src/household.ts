@@ -453,7 +453,7 @@ function parseRecipePlace(value: unknown): ParseResult<RecipeSearchPlace> {
 
 export function householdConfigFromRow(row: {
     name: unknown;
-    fridge_locations: unknown;
+    fridge_locations?: unknown;
     recipe_search_places: unknown;
     household_preferences: unknown;
 }): ParseResult<HouseholdConfig> {
@@ -461,7 +461,7 @@ export function householdConfigFromRow(row: {
         return { ok: false, error: "Enter a household name." };
     }
 
-    const fridgeLocations = asStringArray(row.fridge_locations);
+    const fridgeLocations = asStringArray(row.fridge_locations ?? []);
     if (!fridgeLocations) {
         return {
             ok: false,

@@ -522,7 +522,6 @@ export function fridgeItemFromRow(row: {
     display_name: unknown;
     amount: unknown;
     unit: unknown;
-    identity: unknown;
     food_id?: unknown;
     purchased_on?: unknown;
     opened_on?: unknown;
@@ -541,7 +540,12 @@ export function fridgeItemFromRow(row: {
             amount: Number(row.amount),
             unit: String(row.unit),
         },
-        identity: row.identity as FoodIdentity | SupplyIdentity,
+        // The identity column is no longer read; Phase 8 drops it.
+        identity: catalogIdentity(
+            kind,
+            String(row.food_id),
+            String(row.display_name),
+        ),
         foodId:
             row.food_id == null || row.food_id === ""
                 ? null
@@ -570,7 +574,6 @@ export function fridgeItemToRow(row: FridgeItem) {
         display_name: row.displayName,
         amount: row.quantity.amount,
         unit: row.quantity.unit,
-        identity: row.identity,
         food_id: row.foodId,
         purchased_on: row.purchasedOn ?? null,
         opened_on: row.openedOn ?? null,

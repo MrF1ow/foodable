@@ -12,7 +12,7 @@ import { getSupabase } from "./client.js";
 const RECIPE_COLS =
     "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes";
 const RECIPE_INGREDIENT_COLS =
-    "id, household_id, recipe_id, kind, display_name, amount, unit, identity, food_id, nutrition, sort_order, note";
+    "id, household_id, recipe_id, kind, display_name, amount, unit, food_id, sort_order, note";
 const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
 
 export function liveRecipesStore(): RecipesStore {

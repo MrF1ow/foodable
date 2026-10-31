@@ -405,6 +405,5 @@ export function memberDislikeToRow(row: MemberDislike) {
         household_id: row.householdId,
         user_id: row.userId,
         display_name: row.displayName,
-        identity: null,
     };
 }

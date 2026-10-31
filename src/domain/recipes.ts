@@ -1438,8 +1438,6 @@ export function recipeIngredientFromRow(row: {
     display_name: unknown;
     amount: unknown;
     unit: unknown;
-    identity: unknown;
-    nutrition: unknown;
     sort_order: unknown;
     food_id?: unknown;
     note?: unknown;
@@ -1454,12 +1452,18 @@ export function recipeIngredientFromRow(row: {
             amount: Number(row.amount),
             unit: String(row.unit),
         },
-        identity: row.identity as FoodIdentity | SupplyIdentity,
+        // The identity column is no longer read; Phase 8 drops it.
+        identity: catalogIdentity(
+            "food",
+            String(row.food_id),
+            String(row.display_name),
+        ),
         foodId:
             row.food_id == null || row.food_id === ""
                 ? null
                 : String(row.food_id),
-        nutrition: (row.nutrition as IngredientNutrition | null) ?? null,
+        // Nutrition comes from the food row (food_id is always set).
+        nutrition: null,
         sortOrder: Number(row.sort_order) || 0,
         note: row.note == null || row.note === "" ? null : String(row.note),
     };
@@ -1474,9 +1478,7 @@ export function recipeIngredientToRow(row: RecipeIngredient) {
         display_name: row.displayName,
         amount: row.quantity.amount,
         unit: row.quantity.unit,
-        identity: row.identity,
         food_id: row.foodId,
-        nutrition: row.nutrition,
         sort_order: row.sortOrder,
         note: row.note,
     };
