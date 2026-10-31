@@ -2,12 +2,21 @@ import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
 import { TOASTS } from "./copy/toasts.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
-import { comingSoonPage } from "./web/shell.js";
+import { renderAppShell } from "./web/shell.js";
 import { renderFridgePage } from "./web/pages/fridge.js";
 import { renderGroceryPage } from "./web/pages/grocery.js";
 import { renderNutritionPage } from "./web/pages/nutrition.js";
 import { renderRecipesPage } from "./web/pages/recipes.js";
 import type { HouseholdMember } from "./household.js";
+
+// A bare tab page: the shell around one heading, with no tab content.
+function shellPage(
+    active: "fridge" | "settings" = "fridge",
+    theme: "system" | "light" | "dark" = "system",
+): string {
+    const title = active === "fridge" ? "Fridge" : "Settings";
+    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+}
 
 function scriptBodies(html: string): string[] {
     return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
@@ -180,13 +189,7 @@ test("no app page HTML contains a script with a body except widget frames", asyn
             "weight-trends",
         ],
     });
-    for (const html of [
-        comingSoonPage("fridge"),
-        fridge,
-        grocery,
-        recipes,
-        nutrition,
-    ]) {
+    for (const html of [shellPage(), fridge, grocery, recipes, nutrition]) {
         expect(html).toMatch(
             /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
         );

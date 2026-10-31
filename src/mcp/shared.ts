@@ -1087,7 +1087,6 @@ export async function groceryLineExtras(
     householdId: string,
     line: {
         displayName: string;
-        identity: Parameters<typeof alreadyHaveTag>[0]["identity"];
         quantity: { amount: number; unit: string };
         foodId?: string | null;
     },
@@ -1102,12 +1101,10 @@ export async function groceryLineExtras(
     ]);
     const tag = alreadyHaveTag(
         {
-            identity: line.identity,
             quantity: line.quantity,
             foodId: line.foodId,
         },
         fridge.items.map((item) => ({
-            identity: item.identity,
             quantity: item.quantity,
             foodId: item.foodId,
         })),

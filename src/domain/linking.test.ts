@@ -1,41 +1,21 @@
 import { test, expect } from "bun:test";
-import type { FoodIdentity, SupplyIdentity } from "./food-identity.js";
 import { alreadyHaveTag, recipeToGroceryRemainder } from "./linking.js";
 
-const cottageBarcode: FoodIdentity = {
-    kind: "food",
-    via: "barcode",
-    barcode: "070852010016",
-    displayName: "Good Culture Cottage Cheese",
-};
-
-const sameNameDifferentManual: FoodIdentity = {
-    kind: "food",
-    via: "manual",
-    householdManualId: "hm-cottage-a",
-    displayName: "cottage cheese",
-};
-
-const otherManual: FoodIdentity = {
-    kind: "food",
-    via: "manual",
-    householdManualId: "hm-cottage-b",
-    displayName: "cottage cheese",
-};
+// Matching is by food_id alone. Two foods can share a display name (two
+// cottage cheeses, say), and those must never net against each other.
+const COTTAGE = "food-cottage";
+const OTHER_COTTAGE = "food-cottage-other";
 
 test("full cover when fridge stock meets the grocery need", () => {
     const tag = alreadyHaveTag(
         {
-            identity: cottageBarcode,
             quantity: { amount: 1360.8, unit: "g" },
+            foodId: COTTAGE,
         },
         [
             {
-                identity: {
-                    ...cottageBarcode,
-                    displayName: "Cottage Cheese",
-                },
                 quantity: { amount: 1360.8, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
     );
@@ -45,13 +25,13 @@ test("full cover when fridge stock meets the grocery need", () => {
 test("partial cover converts fridge grams into grocery ounces", () => {
     const tag = alreadyHaveTag(
         {
-            identity: cottageBarcode,
             quantity: { amount: 48, unit: "oz" },
+            foodId: COTTAGE,
         },
         [
             {
-                identity: cottageBarcode,
                 quantity: { amount: 680.4, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
     );
@@ -62,33 +42,27 @@ test("partial cover converts fridge grams into grocery ounces", () => {
     });
 });
 
-test("identity mismatch on the same display name does not silently net", () => {
+test("two foods with the same display name do not net", () => {
     const tag = alreadyHaveTag(
         {
-            identity: sameNameDifferentManual,
             quantity: { amount: 400, unit: "g" },
+            foodId: COTTAGE,
         },
         [
             {
-                identity: otherManual,
                 quantity: { amount: 400, unit: "g" },
+                foodId: OTHER_COTTAGE,
             },
         ],
     );
     expect(tag).toBeNull();
 });
 
-test("supply stock with a matching identity covers the grocery line", () => {
-    const foil: SupplyIdentity = {
-        kind: "supply",
-        via: "manual",
-        householdManualId: "hm-foil",
-        displayName: "Foil",
-    };
+test("supply stock with a matching food covers the grocery line", () => {
     expect(
         alreadyHaveTag(
-            { identity: foil, quantity: { amount: 2, unit: "roll" } },
-            [{ identity: foil, quantity: { amount: 2, unit: "roll" } }],
+            { foodId: "supply-foil", quantity: { amount: 2, unit: "roll" } },
+            [{ foodId: "supply-foil", quantity: { amount: 2, unit: "roll" } }],
         ),
     ).toEqual({ cover: "full" });
 });
@@ -97,17 +71,17 @@ test("recipe grocery remainder sums selected member portions then nets fridge", 
     const plan = recipeToGroceryRemainder({
         ingredients: [
             {
-                identity: cottageBarcode,
                 displayName: "Cottage Cheese",
                 quantity: { amount: 400, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
         yieldPortions: 4,
         portionCounts: [1, 2],
         stock: [
             {
-                identity: cottageBarcode,
                 quantity: { amount: 50, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
     });
@@ -126,17 +100,17 @@ test("recipe grocery remainder skips a fully covered ingredient", () => {
     const plan = recipeToGroceryRemainder({
         ingredients: [
             {
-                identity: cottageBarcode,
                 displayName: "Cottage Cheese",
                 quantity: { amount: 400, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
         yieldPortions: 4,
         portionCounts: [1],
         stock: [
             {
-                identity: cottageBarcode,
                 quantity: { amount: 100, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
     });
@@ -146,21 +120,21 @@ test("recipe grocery remainder skips a fully covered ingredient", () => {
     expect(plan[0]?.tag).toEqual({ cover: "full" });
 });
 
-test("recipe grocery remainder does not net a name-only identity mismatch", () => {
+test("recipe grocery remainder does not net a different food with the same name", () => {
     const plan = recipeToGroceryRemainder({
         ingredients: [
             {
-                identity: sameNameDifferentManual,
                 displayName: "cottage cheese",
                 quantity: { amount: 400, unit: "g" },
+                foodId: COTTAGE,
             },
         ],
         yieldPortions: 2,
         portionCounts: [1],
         stock: [
             {
-                identity: otherManual,
                 quantity: { amount: 400, unit: "g" },
+                foodId: OTHER_COTTAGE,
             },
         ],
     });
@@ -169,30 +143,16 @@ test("recipe grocery remainder does not net a name-only identity mismatch", () =
     expect(plan[0]?.tag).toBeNull();
 });
 
-test("same food_id on eggs covers fridge stock even with different manual ids", () => {
+test("same food_id covers fridge stock", () => {
     const foodId = "food-eggs";
-    const recipeEggs: FoodIdentity = {
-        kind: "food",
-        via: "manual",
-        householdManualId: "hm-recipe-eggs",
-        displayName: "Eggs",
-    };
-    const fridgeEggs: FoodIdentity = {
-        kind: "food",
-        via: "manual",
-        householdManualId: "hm-fridge-eggs",
-        displayName: "eggs",
-    };
     expect(
         alreadyHaveTag(
             {
-                identity: recipeEggs,
                 quantity: { amount: 200, unit: "g" },
                 foodId,
             },
             [
                 {
-                    identity: fridgeEggs,
                     quantity: { amount: 200, unit: "g" },
                     foodId,
                 },
@@ -203,22 +163,14 @@ test("same food_id on eggs covers fridge stock even with different manual ids", 
 
 test("6 eggs needed with 4 in the fridge is partial", () => {
     const foodId = "food-eggs";
-    const eggs: FoodIdentity = {
-        kind: "food",
-        via: "manual",
-        householdManualId: "hm-eggs",
-        displayName: "Eggs",
-    };
     expect(
         alreadyHaveTag(
             {
-                identity: eggs,
                 quantity: { amount: 6, unit: "each" },
                 foodId,
             },
             [
                 {
-                    identity: eggs,
                     quantity: { amount: 4, unit: "each" },
                     foodId,
                 },
@@ -233,23 +185,15 @@ test("6 eggs needed with 4 in the fridge is partial", () => {
 
 test("each vs grams compares through grams when the food has a factor", () => {
     const foodId = "food-eggs";
-    const eggs: FoodIdentity = {
-        kind: "food",
-        via: "manual",
-        householdManualId: "hm-eggs",
-        displayName: "Eggs",
-    };
     const foods = new Map([[foodId, { gramsPerEach: 50, gramsPerMl: null }]]);
     expect(
         alreadyHaveTag(
             {
-                identity: eggs,
                 quantity: { amount: 6, unit: "each" },
                 foodId,
             },
             [
                 {
-                    identity: eggs,
                     quantity: { amount: 200, unit: "g" },
                     foodId,
                 },
@@ -265,22 +209,14 @@ test("each vs grams compares through grams when the food has a factor", () => {
 
 test("cross-dimension stock without a factor is unknown, not zero", () => {
     const foodId = "food-eggs";
-    const eggs: FoodIdentity = {
-        kind: "food",
-        via: "manual",
-        householdManualId: "hm-eggs",
-        displayName: "Eggs",
-    };
     expect(
         alreadyHaveTag(
             {
-                identity: eggs,
                 quantity: { amount: 6, unit: "each" },
                 foodId,
             },
             [
                 {
-                    identity: eggs,
                     quantity: { amount: 200, unit: "g" },
                     foodId,
                 },
@@ -289,10 +225,17 @@ test("cross-dimension stock without a factor is unknown, not zero", () => {
     ).toBeNull();
 });
 
+test("a row without a food_id never matches", () => {
+    expect(
+        alreadyHaveTag({ quantity: { amount: 1, unit: "each" } }, [
+            { quantity: { amount: 1, unit: "each" } },
+        ]),
+    ).toBeNull();
+});
+
 test("recipe grocery remainder: total portions override the members' sum", () => {
     const ingredients = [
         {
-            identity: cottageBarcode,
             displayName: "Cottage Cheese",
             quantity: { amount: 500, unit: "g" },
         },

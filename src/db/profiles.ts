@@ -22,7 +22,6 @@ export interface Profile {
     // until a later contract phase; do not read it to pick UI language.
     locale: string | null;
     theme: "light" | "dark" | null;
-    accent_swatch: string | null;
     /** Null means default nutrition dashboard card order. */
     nutrition_layout: string[] | null;
     created_at: string;
@@ -149,7 +148,6 @@ export async function upsertProfile(
         preferred_drink_unit?: DrinkUnit | null;
         locale?: string;
         theme?: "light" | "dark" | null;
-        accent_swatch?: string | null;
         nutrition_layout?: string[] | null;
     },
 ): Promise<Profile> {
@@ -170,8 +168,6 @@ export async function upsertProfile(
         payload.preferred_drink_unit = patch.preferred_drink_unit;
     if (patch.locale !== undefined) payload.locale = patch.locale;
     if (patch.theme !== undefined) payload.theme = patch.theme;
-    if (patch.accent_swatch !== undefined)
-        payload.accent_swatch = patch.accent_swatch;
     if (patch.nutrition_layout !== undefined)
         payload.nutrition_layout = patch.nutrition_layout;
 

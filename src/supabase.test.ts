@@ -275,7 +275,6 @@ function profile(overrides: Partial<Profile> = {}): Profile {
         preferred_drink_unit: null,
         locale: null,
         theme: null,
-        accent_swatch: null,
         nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",

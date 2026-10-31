@@ -487,7 +487,6 @@ export async function renderRecipesListPage(
             householdId,
             new Map(foods.map((food) => [food.id, food])),
             fridge.items.map((item) => ({
-                identity: item.identity,
                 quantity: item.quantity,
                 foodId: item.foodId,
             })),

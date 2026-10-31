@@ -3,7 +3,6 @@ import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut } from "./components/icons.js";
-import { pageHeader } from "./components/ui.js";
 
 export { bottomNav, escapeHtml };
 
@@ -132,17 +131,4 @@ export function parseAppearanceInput(input: { theme?: unknown }): {
                 ? input.theme
                 : null,
     };
-}
-
-export function comingSoonPage(
-    tab: Exclude<AppTabId, "nutrition">,
-    chrome: ViewerChrome = { theme: "system" },
-): string {
-    const label = APP_TABS.find((t) => t.id === tab)!.label;
-    return renderAppShell({
-        title: label,
-        active: tab,
-        theme: chrome.theme,
-        body: `${pageHeader({ title: label })}<p class="coming-soon">Coming soon.</p>`,
-    });
 }

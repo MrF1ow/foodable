@@ -1,4 +1,3 @@
-import { catalogIdentity } from "./food-identity.js";
 import {
     findFoodById,
     FoodsInputError,
@@ -293,7 +292,6 @@ async function incrementInto(
         kind: food.kind,
         displayName: food.name,
         quantity: { amount, unit: input.unit.trim() },
-        identity: catalogIdentity(food.kind, food.id, food.name),
         foodId: food.id,
         purchasedOn:
             input.purchasedOn ??

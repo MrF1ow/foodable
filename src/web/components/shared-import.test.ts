@@ -208,12 +208,6 @@ test("household pages call shared markup helpers for banners, empty states, and 
                 kind: "food",
                 displayName: "Cottage Cheese",
                 quantity: { amount: 1360.8, unit: "g" },
-                identity: {
-                    kind: "food",
-                    via: "barcode",
-                    barcode: "070852010016",
-                    displayName: "Cottage Cheese",
-                },
                 foodId: null,
             },
         ],
@@ -276,12 +270,6 @@ test("household pages call shared markup helpers for banners, empty states, and 
                                 kind: "food",
                                 displayName: "Cottage Cheese",
                                 quantity: { amount: 100, unit: "g" },
-                                identity: {
-                                    kind: "food",
-                                    via: "barcode",
-                                    barcode: "070852010016",
-                                    displayName: "Cottage Cheese",
-                                },
                                 foodId: null,
                                 checked: false,
                                 alreadyHave: null,
@@ -525,12 +513,6 @@ test("member multi-select, already-have, and store sections still render", () =>
                                 kind: "food",
                                 displayName: "Cottage Cheese",
                                 quantity: { amount: 1360.8, unit: "g" },
-                                identity: {
-                                    kind: "food",
-                                    via: "barcode",
-                                    barcode: "070852010016",
-                                    displayName: "Cottage Cheese",
-                                },
                                 foodId: null,
                                 checked: false,
                                 alreadyHave: {

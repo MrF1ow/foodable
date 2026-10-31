@@ -21,8 +21,17 @@ import { renderFoodsSettingsPage } from "../pages/foods.js";
 import { renderHouseholdSettingsPage } from "../pages/household.js";
 import { renderSettingsHelpPage } from "../pages/settings-help.js";
 import { renderNutritionPage } from "../pages/nutrition.js";
-import { comingSoonPage } from "../shell.js";
+import { renderAppShell } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
+
+// A bare tab page: the shell around one heading, with no tab content.
+function shellPage(
+    active: "fridge" | "settings" = "fridge",
+    theme: "system" | "light" | "dark" = "system",
+): string {
+    const title = active === "fridge" ? "Fridge" : "Settings";
+    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+}
 
 /** Fails when any `<form>` opens before its parent form closes. */
 export function assertNoNestedForms(html: string): void {
@@ -437,7 +446,7 @@ test("every page's h1 comes from pageHeader once", async () => {
         ],
         ["help", renderSettingsHelpPage({ chrome })],
         ["create-household", createHouseholdFormHtml()],
-        ["coming-soon", comingSoonPage("fridge")],
+        ["app-shell", shellPage()],
     ];
     for (const [name, html] of pages) {
         const headings = html.match(/<h1>.*?<\/h1>/g) ?? [];

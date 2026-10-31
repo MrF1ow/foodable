@@ -558,7 +558,6 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             grocery: liveGroceryStore(),
             settings: liveSettingsStore(),
             fridgeItems: fridge.items.map((item) => ({
-                identity: item.identity,
                 quantity: item.quantity,
                 foodId: item.foodId,
             })),

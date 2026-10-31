@@ -1,9 +1,4 @@
 import {
-    identityKey,
-    type FoodIdentity,
-    type SupplyIdentity,
-} from "./food-identity.js";
-import {
     fromGrams,
     toGrams,
     type FoodQuantityFactors,
@@ -18,7 +13,6 @@ import {
 export type LinkedQuantity = { amount: number; unit: string };
 
 export type LinkedNeed = {
-    identity: FoodIdentity | SupplyIdentity;
     quantity: LinkedQuantity;
     foodId?: string | null;
 };
@@ -66,9 +60,7 @@ function amountInUnit(
 }
 
 function sameFood(a: LinkedNeed, b: LinkedNeed): boolean {
-    if (a.foodId && b.foodId) return a.foodId === b.foodId;
-    if (a.foodId || b.foodId) return false;
-    return identityKey(a.identity) === identityKey(b.identity);
+    return Boolean(a.foodId) && a.foodId === b.foodId;
 }
 
 export function alreadyHaveTag(
@@ -101,14 +93,12 @@ export function alreadyHaveTag(
 }
 
 export type RecipeGroceryIngredient = {
-    identity: FoodIdentity | SupplyIdentity;
     displayName: string;
     quantity: LinkedQuantity;
     foodId?: string | null;
 };
 
 export type RecipeGroceryRemainderLine = {
-    identity: FoodIdentity | SupplyIdentity;
     displayName: string;
     need: LinkedQuantity;
     remainder: LinkedQuantity | null;
@@ -139,7 +129,6 @@ export function recipeToGroceryRemainder(input: {
         };
         const tag = alreadyHaveTag(
             {
-                identity: ingredient.identity,
                 quantity: need,
                 foodId: ingredient.foodId,
             },
@@ -148,7 +137,6 @@ export function recipeToGroceryRemainder(input: {
         );
         if (need.amount <= 0 || tag?.cover === "full") {
             return {
-                identity: ingredient.identity,
                 displayName: ingredient.displayName,
                 need,
                 remainder: null,
@@ -159,7 +147,6 @@ export function recipeToGroceryRemainder(input: {
         }
         if (tag?.cover === "partial") {
             return {
-                identity: ingredient.identity,
                 displayName: ingredient.displayName,
                 need,
                 remainder: tag.need,
@@ -169,7 +156,6 @@ export function recipeToGroceryRemainder(input: {
             };
         }
         return {
-            identity: ingredient.identity,
             displayName: ingredient.displayName,
             need,
             remainder: need,

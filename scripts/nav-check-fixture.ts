@@ -88,7 +88,6 @@ function fridgeView(chrome: unknown) {
         kind: food ? "food" : "supply",
         displayName,
         quantity: { amount, unit },
-        identity: {},
         foodId: food ? `f-${id}` : `f-sup-${id}`,
         expiresOn,
     });
@@ -150,7 +149,6 @@ function groceryView(chrome: unknown) {
         kind: "food",
         displayName: name,
         quantity: { amount, unit },
-        identity: {},
         foodId: `f-${id}`,
         checked,
         alreadyHave,

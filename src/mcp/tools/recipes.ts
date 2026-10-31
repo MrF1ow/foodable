@@ -144,7 +144,6 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             householdId,
                             new Map(foods.map((food) => [food.id, food])),
                             fridge.items.map((item) => ({
-                                identity: item.identity,
                                 quantity: item.quantity,
                                 foodId: item.foodId,
                             })),
@@ -577,7 +576,6 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         grocery: liveGroceryStore(),
                         settings: liveSettingsStore(),
                         fridgeItems: fridge.items.map((item) => ({
-                            identity: item.identity,
                             quantity: item.quantity,
                             foodId: item.foodId,
                         })),

@@ -32,6 +32,10 @@ const RERUNNABLE = [
     "20261005010200_fridge_locations_from_household.sql",
 ];
 
+// The backfills above read columns the Phase 8 contract drops, so the re-run
+// happens just before that migration, on the schema they were written for.
+const RERUN_BEFORE = "20261031180000_phase8_contract.sql";
+
 const ROOT = new URL("..", import.meta.url).pathname;
 const MIGRATIONS = `${ROOT}supabase/migrations`;
 const FIXTURES = `${ROOT}scripts/migration-dryrun`;
@@ -152,11 +156,34 @@ try {
         console.log("data: fixture seed.sql");
     }
 
+    let rerunDone = false;
+    async function rerunCheck(applied: string[]): Promise<void> {
+        rerunDone = true;
+        const before = await scalar(COUNTS_SQL);
+        for (const file of RERUNNABLE.filter((f) => applied.includes(f))) {
+            const res = await applyFile(`${MIGRATIONS}/${file}`);
+            if (!res.ok) fail(`re-running ${file} failed:\n${res.out}`);
+        }
+        const after = await scalar(COUNTS_SQL);
+        if (
+            JSON.stringify(JSON.parse(after)) !==
+            JSON.stringify(JSON.parse(before))
+        ) {
+            fail(
+                `re-running changed counts:\n  before ${before}\n  after  ${after}`,
+            );
+        }
+        console.log("re-run: no-op");
+    }
+
     console.log(`pending: ${pending.length} migrations`);
+    const applied: string[] = [];
     for (const file of pending) {
+        if (file === RERUN_BEFORE) await rerunCheck(applied);
         const res = await applyFile(`${MIGRATIONS}/${file}`);
         if (!res.ok) fail(`  FAIL ${file}\n${res.out}`);
         console.log(`  ok   ${file}`);
+        applied.push(file);
     }
 
     const counts = JSON.parse(await scalar(COUNTS_SQL));
@@ -171,17 +198,7 @@ try {
         console.log("fixture expectations: ok");
     }
 
-    for (const file of RERUNNABLE.filter((f) => pending.includes(f))) {
-        const res = await applyFile(`${MIGRATIONS}/${file}`);
-        if (!res.ok) fail(`re-running ${file} failed:\n${res.out}`);
-    }
-    const again = JSON.parse(await scalar(COUNTS_SQL));
-    if (JSON.stringify(again) !== JSON.stringify(counts)) {
-        fail(
-            `re-running changed counts:\n  before ${JSON.stringify(counts)}\n  after  ${JSON.stringify(again)}`,
-        );
-    }
-    console.log("re-run: no-op");
+    if (!rerunDone) await rerunCheck(applied);
     console.log("\ndry run passed");
 } catch (err) {
     if (process.exitCode !== 1) {

@@ -4,14 +4,12 @@ import {
     householdConfigFromRow,
     householdConfigToColumns,
     mergeHouseholdConfig,
-    parseFridgeLocationsInput,
     parseHouseholdConfigPatch,
     type HouseholdConfig,
 } from "./household.js";
 
 const current: HouseholdConfig = {
     name: "Home",
-    fridgeLocations: ["fridge"],
     recipeSearchPlaces: [{ name: "Costco", kind: "grocery", url: null }],
     preferences: {
         constraints: ["nut-free"],
@@ -33,20 +31,6 @@ test("parse rejects an unknown recipe place kind and leaves merge unused", () =>
     expect(mergeHouseholdConfig(current, {})).toEqual(current);
 });
 
-test("fridge replace drops blanks and overwrites the list", () => {
-    const parsed = parseFridgeLocationsInput({
-        locations: ["  freezer  ", "", "door"],
-    });
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-    expect(
-        mergeHouseholdConfig(current, { fridgeLocations: parsed.value }),
-    ).toEqual({
-        ...current,
-        fridgeLocations: ["freezer", "door"],
-    });
-});
-
 test("preference merge keeps unspecified fields", () => {
     const parsed = parseHouseholdConfigPatch({
         preferences: { budget: "ok", shopping_cadence: "monthly" },
@@ -66,7 +50,6 @@ test("preference merge keeps unspecified fields", () => {
 test("a missing preferences object on a row becomes empty preferences", () => {
     const parsed = householdConfigFromRow({
         name: "Home",
-        fridge_locations: [],
         recipe_search_places: [],
         household_preferences: {},
     });
@@ -74,24 +57,6 @@ test("a missing preferences object on a row becomes empty preferences", () => {
         ok: true,
         value: {
             name: "Home",
-            fridgeLocations: [],
-            recipeSearchPlaces: [],
-            preferences: EMPTY_HOUSEHOLD_PREFERENCES,
-        },
-    });
-});
-
-test("a row without fridge_locations parses with no locations", () => {
-    const parsed = householdConfigFromRow({
-        name: "Home",
-        recipe_search_places: [],
-        household_preferences: {},
-    });
-    expect(parsed).toEqual({
-        ok: true,
-        value: {
-            name: "Home",
-            fridgeLocations: [],
             recipeSearchPlaces: [],
             preferences: EMPTY_HOUSEHOLD_PREFERENCES,
         },
@@ -106,7 +71,6 @@ test("toColumns then fromRow returns the same config", () => {
 test("fromRow rejects a donor type place instead of mapping it", () => {
     const parsed = householdConfigFromRow({
         name: "Home",
-        fridge_locations: [],
         recipe_search_places: [{ name: "Costco", type: "grocery" }],
         household_preferences: {},
     });
