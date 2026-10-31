@@ -1,5 +1,3 @@
-import { catalogIdentity } from "./food-identity.js";
-import type { FoodIdentity, SupplyIdentity } from "./food-identity.js";
 import type { FoodResult } from "../foods.js";
 import {
     findFoodById,
@@ -33,7 +31,6 @@ export type GroceryLine = {
     kind: GroceryKind;
     displayName: string;
     quantity: GroceryQuantity;
-    identity: FoodIdentity | SupplyIdentity;
     foodId: string | null;
     checked: boolean;
 };
@@ -488,11 +485,6 @@ async function insertFromFood(
         kind: input.food.kind,
         displayName: input.food.name,
         quantity: { amount: input.amount, unit: input.unit },
-        identity: catalogIdentity(
-            input.food.kind,
-            input.food.id,
-            input.food.name,
-        ),
         foodId: input.food.id,
         checked: false,
     });
@@ -780,12 +772,6 @@ export function groceryLineFromRow(row: {
             amount: Number(row.amount),
             unit: String(row.unit),
         },
-        // The identity column is no longer read; Phase 8 drops it.
-        identity: catalogIdentity(
-            kind,
-            String(row.food_id),
-            String(row.display_name),
-        ),
         foodId:
             row.food_id == null || row.food_id === ""
                 ? null

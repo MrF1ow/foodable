@@ -1,6 +1,15 @@
 import { test, expect } from "bun:test";
 import { getAppCss } from "./widgets.js";
-import { comingSoonPage } from "./web/shell.js";
+import { renderAppShell } from "./web/shell.js";
+
+// A bare tab page: the shell around one heading, with no tab content.
+function shellPage(
+    active: "fridge" | "settings" = "fridge",
+    theme: "system" | "light" | "dark" = "system",
+): string {
+    const title = active === "fridge" ? "Fridge" : "Settings";
+    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+}
 
 const SHARED = ["tokens.css", "base.css", "form.css", "table.css", "seg.css"];
 
@@ -52,9 +61,7 @@ test("seg buttons accept aria-selected as the active state", async () => {
 });
 
 test("the app shell opts its main element into native control styling", () => {
-    expect(comingSoonPage("fridge")).toContain(
-        '<main class="app-main native">',
-    );
+    expect(shellPage()).toContain('<main class="app-main native">');
 });
 
 test("page element defaults never outrank component classes", async () => {

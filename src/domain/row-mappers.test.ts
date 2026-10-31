@@ -4,13 +4,13 @@ import { groceryLineFromRow, groceryLineToRow } from "./grocery.js";
 import { recipeIngredientFromRow, recipeIngredientToRow } from "./recipes.js";
 import { memberDislikeToRow } from "./rules.js";
 
-// Phase 8, step 1: rows no longer carry the legacy identity JSON or the
-// ingredient nutrition snapshot. Identity is derived from food_id on read,
-// and writes leave both columns out so a later migration can drop them.
+// Phase 8 dropped the legacy identity JSON, the ingredient nutrition snapshot
+// and the dislike identity column. Rows name their food by food_id alone, and
+// writes must not send a dropped column back: PostgREST rejects unknown keys.
 
 const FOOD_ID = "11111111-1111-4111-8111-111111111111";
 
-test("a fridge row without identity derives it from food_id", () => {
+test("a fridge row round-trips through food_id alone", () => {
     const item = fridgeItemFromRow({
         id: "i1",
         household_id: "h1",
@@ -21,17 +21,14 @@ test("a fridge row without identity derives it from food_id", () => {
         unit: "each",
         food_id: FOOD_ID,
     });
-    expect(item.identity).toEqual({
-        kind: "supply",
-        via: "catalog",
-        source: "foodable",
-        sourceId: FOOD_ID,
-        displayName: "Foil",
-    });
-    expect(fridgeItemToRow(item)).not.toHaveProperty("identity");
+    expect(item.foodId).toBe(FOOD_ID);
+    expect(item.kind).toBe("supply");
+    const row = fridgeItemToRow(item);
+    expect(row.food_id).toBe(FOOD_ID);
+    expect(row).not.toHaveProperty("identity");
 });
 
-test("a grocery row without identity derives it from food_id", () => {
+test("a grocery row round-trips through food_id alone", () => {
     const line = groceryLineFromRow({
         id: "g1",
         household_id: "h1",
@@ -44,15 +41,13 @@ test("a grocery row without identity derives it from food_id", () => {
         checked: false,
         food_id: FOOD_ID,
     });
-    expect(line.identity).toMatchObject({
-        kind: "food",
-        via: "catalog",
-        sourceId: FOOD_ID,
-    });
-    expect(groceryLineToRow(line)).not.toHaveProperty("identity");
+    expect(line.foodId).toBe(FOOD_ID);
+    const row = groceryLineToRow(line);
+    expect(row.food_id).toBe(FOOD_ID);
+    expect(row).not.toHaveProperty("identity");
 });
 
-test("a recipe ingredient row carries neither identity nor nutrition", () => {
+test("a recipe ingredient row writes neither identity nor nutrition", () => {
     const ingredient = recipeIngredientFromRow({
         id: "r1",
         household_id: "h1",
@@ -64,18 +59,14 @@ test("a recipe ingredient row carries neither identity nor nutrition", () => {
         sort_order: 0,
         food_id: FOOD_ID,
     });
-    expect(ingredient.identity).toMatchObject({
-        kind: "food",
-        via: "catalog",
-        sourceId: FOOD_ID,
-    });
-    expect(ingredient.nutrition).toBeNull();
+    expect(ingredient.foodId).toBe(FOOD_ID);
     const row = recipeIngredientToRow(ingredient);
+    expect(row.food_id).toBe(FOOD_ID);
     expect(row).not.toHaveProperty("identity");
     expect(row).not.toHaveProperty("nutrition");
 });
 
-test("a dislike row no longer writes identity", () => {
+test("a dislike row does not write identity", () => {
     expect(
         memberDislikeToRow({
             id: "d1",

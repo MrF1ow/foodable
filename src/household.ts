@@ -43,7 +43,6 @@ export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
 
 export type HouseholdConfig = {
     name: string;
-    fridgeLocations: string[];
     recipeSearchPlaces: RecipeSearchPlace[];
     preferences: HouseholdPreferences;
 };
@@ -52,7 +51,6 @@ export type Household = HouseholdConfig & { id: string };
 
 export type HouseholdColumns = {
     name: string;
-    fridge_locations: string[];
     recipe_search_places: RecipeSearchPlace[];
     household_preferences: HouseholdPreferences;
 };
@@ -82,7 +80,6 @@ export type HouseholdPreferencesPatch = {
 
 export type HouseholdConfigPatch = {
     name?: string;
-    fridgeLocations?: string[];
     recipeSearchPlaces?: RecipeSearchPlace[];
     preferences?: HouseholdPreferencesPatch;
 };
@@ -139,7 +136,6 @@ function copyHousehold(household: Household): Household {
     return {
         id: household.id,
         name: household.name,
-        fridgeLocations: [...household.fridgeLocations],
         recipeSearchPlaces: household.recipeSearchPlaces.map((place) => ({
             ...place,
         })),
@@ -388,7 +384,6 @@ export function createHousehold(
     store.insertHousehold({
         id: householdId,
         name,
-        fridgeLocations: [],
         recipeSearchPlaces: [],
         preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
     });
@@ -453,20 +448,11 @@ function parseRecipePlace(value: unknown): ParseResult<RecipeSearchPlace> {
 
 export function householdConfigFromRow(row: {
     name: unknown;
-    fridge_locations?: unknown;
     recipe_search_places: unknown;
     household_preferences: unknown;
 }): ParseResult<HouseholdConfig> {
     if (typeof row.name !== "string" || !row.name.trim()) {
         return { ok: false, error: "Enter a household name." };
-    }
-
-    const fridgeLocations = asStringArray(row.fridge_locations ?? []);
-    if (!fridgeLocations) {
-        return {
-            ok: false,
-            error: "Fridge locations must be a list of names.",
-        };
     }
 
     if (!Array.isArray(row.recipe_search_places)) {
@@ -515,7 +501,6 @@ export function householdConfigFromRow(row: {
         ok: true,
         value: {
             name: row.name.trim(),
-            fridgeLocations,
             recipeSearchPlaces,
             preferences: {
                 constraints,
@@ -531,7 +516,6 @@ export function householdConfigToColumns(
 ): HouseholdColumns {
     return {
         name: config.name,
-        fridge_locations: config.fridgeLocations,
         recipe_search_places: config.recipeSearchPlaces,
         household_preferences: config.preferences,
     };
@@ -564,22 +548,6 @@ function parseNameList(value: unknown, error: string): ParseResult<string[]> {
         if (trimmed) items.push(trimmed);
     }
     return { ok: true, value: items };
-}
-
-export function parseFridgeLocationsInput(
-    value: unknown,
-): ParseResult<string[]> {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return {
-            ok: false,
-            error: "Fridge locations must be a list of names.",
-        };
-    }
-    const record = value as { locations?: unknown };
-    return parseNameList(
-        record.locations,
-        "Fridge locations must be a list of names.",
-    );
 }
 
 function parseHouseholdPreferencesPatch(
@@ -680,7 +648,6 @@ export function mergeHouseholdConfig(
 ): HouseholdConfig {
     return {
         name: patch.name ?? current.name,
-        fridgeLocations: patch.fridgeLocations ?? current.fridgeLocations,
         recipeSearchPlaces:
             patch.recipeSearchPlaces ?? current.recipeSearchPlaces,
         preferences: {

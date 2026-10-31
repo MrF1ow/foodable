@@ -27,7 +27,6 @@ function extraHousehold(id: string): Household {
     return {
         id,
         name: "Second kitchen",
-        fridgeLocations: [],
         recipeSearchPlaces: [],
         preferences: {
             constraints: [],
@@ -62,7 +61,6 @@ test("createHousehold inserts the owner and fails if a household exists", () => 
     expect(store.getHousehold()).toEqual({
         id: householdId,
         name: "Home",
-        fridgeLocations: [],
         recipeSearchPlaces: [],
         preferences: {
             constraints: [],

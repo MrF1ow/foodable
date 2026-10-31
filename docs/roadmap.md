@@ -9,23 +9,14 @@ What comes after go-live, in rough order. Each item names the rules it has to ke
 
 ## Next: after the deploy has run for a while
 
-1. **Phase 8, contract.** Two steps, because old code reads the columns and new code no longer writes them, so no single deploy order works.
-    - **Step 1 (done):** the code stops reading and writing the legacy columns, and `20261031120000_relax_legacy_identity` lets `identity` be null. Push that migration before the deploy. Then exercise every write path once in production (fridge, grocery, put-away, recipe ingredients, cook, household config) and check that new rows have a null `identity` and a non-null `food_id`.
-    - **Step 2:** after that soak, take a backup and ship the contract below as one PR with its code cleanup. The dry-run harness needs changes too (`check.sql` asserts on `bootstrap_household`, and the re-run step replays a backfill that reads `identity`), and those files are behind the Gate check. Every destructive statement carries `-- foodable:contract <reason>`.
-    - Drop `fridge_items.identity`, `grocery_lines.identity`, `recipe_ingredients.identity`, `recipe_ingredients.nutrition`, and `member_dislikes.identity`.
-    - Set `fridge_items.food_id`, `grocery_lines.food_id`, and `recipe_ingredients.food_id` to `not null`.
-    - Drop `households.fridge_locations`. `fridgeLocations` still sits on the household config type and mapper in `src/household.ts`. It is not exposed through MCP or the web, and it goes with the column.
-    - Delete `ManualRef` and `householdManualId` from `src/domain/food-identity.ts`, the `identity` fallback in `sameFood` (`src/domain/linking.ts`), and the `identity` and `nutrition` fields left on the domain types.
-    - Drop `bootstrap_household`. Nothing in `src/` calls it.
-    - Drop `profiles.accent_swatch`, and the field from the `Profile` type and `upsertProfile` in `src/db/profiles.ts`.
-    - Remove `comingSoonPage` in `src/web/shell.ts`. Tests are the only callers.
-2. **Weekly household digest (optional).** One tool across the pillars: what expires, what ran out, nutrition against goals per member, and suggested grocery lines from the stock ledger. Today's weekly digest covers nutrition only.
+1. **Weekly household digest (optional).** One tool across the pillars: what expires, what ran out, nutrition against goals per member, and suggested grocery lines from the stock ledger. Today's weekly digest covers nutrition only.
 
 Still open, and not features:
 
 - `groupMealVariations` in `src/search.ts` still groups by meal text, not by the `food_id` set.
 - `package.json` `homepage` and `repository` still say `MrF1ow/nutrition-mcp`. The old URL redirects.
 - Renaming Grocery to "Shopping list" stays deferred: copy only, and the table names stay.
+- `profiles.locale` is unread (English only) and can go in a later contract migration, with the field on the `Profile` type.
 
 ## Later: planned features
 

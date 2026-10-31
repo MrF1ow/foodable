@@ -5,13 +5,22 @@ import {
     APP_TABS,
     appHead,
     bottomNav,
-    comingSoonPage,
+    renderAppShell,
     parseAppearanceInput,
     renderBarePage,
     resolveTheme,
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+
+// A bare tab page: the shell around one heading, with no tab content.
+function shellPage(
+    active: "fridge" | "settings" = "fridge",
+    theme: "system" | "light" | "dark" = "system",
+): string {
+    const title = active === "fridge" ? "Fridge" : "Settings";
+    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+}
 
 const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");
 
@@ -68,10 +77,9 @@ test("unset theme follows the system", () => {
     expect(resolveTheme("light")).toBe("light");
 });
 
-test("fridge stub uses the shell and marks Fridge active", () => {
-    const html = comingSoonPage("fridge");
+test("a tab page uses the shell and marks its tab active", () => {
+    const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
-    expect(html).toContain("Coming soon.");
     expect(html).toContain('href="/fridge" aria-current="page"');
     expect(html).toContain('href="/logout"');
     expect(html).toContain('aria-label="Log out"');
@@ -90,7 +98,7 @@ test("fridge stub uses the shell and marks Fridge active", () => {
 });
 
 test("system theme leaves data-theme off and offers both theme colors", () => {
-    const html = comingSoonPage("fridge");
+    const html = shellPage();
     expect(html).toContain('<html lang="en">');
     expect(html).not.toContain("data-theme");
     expect(html).toContain('<meta name="foodable-theme" content="system" />');
@@ -105,7 +113,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
 });
 
 test("an explicit theme stamps data-theme on html", () => {
-    const html = comingSoonPage("settings", { theme: "dark" });
+    const html = shellPage("settings", "dark");
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain(
         `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,

@@ -39,7 +39,7 @@ The app is set up to run on [Railway](docs/self-hosting.md#railway) against Supa
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Supabase, Railway, an optional Cloudflare domain, and the first-user flow |
 | [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                                   |
-| [docs/roadmap.md](docs/roadmap.md)                   | After go-live: the Phase 8 contract, a plain-Postgres option, and sharing              |
+| [docs/roadmap.md](docs/roadmap.md)                   | What comes next: a plain-Postgres option, sharing, and smaller features                |
 | [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                                  |
 
 ## Connecting an agent

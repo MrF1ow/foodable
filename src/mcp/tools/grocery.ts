@@ -94,7 +94,6 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         ],
                     );
                     const stock = fridge.items.map((item) => ({
-                        identity: item.identity,
                         quantity: item.quantity,
                         foodId: item.foodId,
                     }));
@@ -103,7 +102,6 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     ) => {
                         const tag = alreadyHaveTag(
                             {
-                                identity: line.identity,
                                 quantity: line.quantity,
                                 foodId: line.foodId,
                             },

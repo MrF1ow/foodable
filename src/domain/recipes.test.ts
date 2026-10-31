@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import type { FoodIdentity } from "./food-identity.js";
 import {
     addFoodByBarcode,
     addLocation,
@@ -43,13 +42,6 @@ import type { FoodResult } from "../foods.js";
 const HH = "hh-1";
 const ALICE = "alice";
 const BOB = "bob";
-
-const cottage: FoodIdentity = {
-    kind: "food",
-    via: "barcode",
-    barcode: "070852010016",
-    displayName: "Cottage Cheese",
-};
 
 function food(
     over: Partial<FoodResult> & Pick<FoodResult, "name" | "barcode">,
@@ -345,7 +337,6 @@ test("add-to-grocery writes remainder lines and skips full fridge cover", async 
         { lookup },
     );
     const fridgeItems = (await fridge.listItems(HH)).map((item) => ({
-        identity: item.identity,
         quantity: item.quantity,
         foodId: item.foodId,
     }));
@@ -354,7 +345,6 @@ test("add-to-grocery writes remainder lines and skips full fridge cover", async 
         .ingredients;
     const plan = recipeToGroceryRemainder({
         ingredients: ingredients.map((row) => ({
-            identity: row.identity,
             displayName: row.displayName,
             quantity: row.quantity,
             foodId: row.foodId,
@@ -389,7 +379,6 @@ test("add-to-grocery writes remainder lines and skips full fridge cover", async 
     expect(listed.lines[0]?.displayName).toBe("Cottage Cheese");
     expect(listed.lines[0]?.quantity).toEqual({ amount: 50, unit: "g" });
     expect(listed.lines[0]?.foodId).toBe(cottageLine?.foodId);
-    expect(listed.lines[0]?.identity.via).toBe("catalog");
     const section = listed.sections.find(
         (row) => row.id === listed.lines[0]?.sectionId,
     );
@@ -466,19 +455,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
                 kind: "food",
                 displayName: "Cottage Cheese",
                 quantity: { amount: 400, unit: "g" },
-                identity: cottage,
                 foodId: null,
-                nutrition: {
-                    calories: 98,
-                    protein_g: 11,
-                    carbs_g: 3,
-                    fat_g: 4.3,
-                    fiber_g: 0,
-                    sugar_g: 3,
-                    alcohol_g: null,
-                    basisAmount: 100,
-                    basisUnit: "g",
-                },
                 sortOrder: 0,
                 note: "diced",
                 perPortionAmount: 100,
@@ -945,7 +922,6 @@ test("listRecipesFiltered matches tag, can-make-now, and safe-for", async () => 
         (await foods.listFoods(HH)).map((row) => [row.id, row]),
     );
     const stock = (await fridge.listItems(HH)).map((item) => ({
-        identity: item.identity,
         quantity: item.quantity,
         foodId: item.foodId,
     }));

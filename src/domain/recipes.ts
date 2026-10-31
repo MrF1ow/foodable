@@ -1,5 +1,3 @@
-import { catalogIdentity } from "./food-identity.js";
-import type { FoodIdentity, SupplyIdentity } from "./food-identity.js";
 import type { FoodResult } from "../foods.js";
 import {
     findFoodById,
@@ -63,9 +61,7 @@ export type RecipeIngredient = {
     kind: "food";
     displayName: string;
     quantity: { amount: number; unit: string };
-    identity: FoodIdentity | SupplyIdentity;
     foodId: string | null;
-    nutrition: IngredientNutrition | null;
     sortOrder: number;
     note: string | null;
 };
@@ -315,7 +311,6 @@ function cloneIngredient(row: RecipeIngredient): RecipeIngredient {
     return {
         ...row,
         quantity: { ...row.quantity },
-        nutrition: row.nutrition ? { ...row.nutrition } : null,
     };
 }
 
@@ -418,9 +413,7 @@ export function macrosForPerson(
         const catalog = ingredient.foodId
             ? foodsById.get(ingredient.foodId)
             : undefined;
-        const nutrition = catalog
-            ? nutritionFromCatalogFood(catalog)
-            : ingredient.nutrition;
+        const nutrition = catalog ? nutritionFromCatalogFood(catalog) : null;
         if (!isNutritionComplete(nutrition)) {
             incomplete = true;
             continue;
@@ -827,9 +820,7 @@ export async function addRecipeIngredientById(
             kind: "food",
             displayName: food.name,
             quantity: { amount, unit: storedFoodUnit(input.unit, food) },
-            identity: catalogIdentity("food", food.id, food.name),
             foodId: food.id,
-            nutrition: nutritionFromCatalogFood(food),
             sortOrder: existing.length,
             note: null,
         });
@@ -873,9 +864,7 @@ export async function addRecipeIngredientByBarcode(
             kind: "food",
             displayName: food.name,
             quantity: { amount, unit: storedFoodUnit(input.unit, food) },
-            identity: catalogIdentity("food", food.id, food.name),
             foodId: food.id,
-            nutrition: nutritionFromCatalogFood(food),
             sortOrder: existing.length,
             note: null,
         });
@@ -916,9 +905,7 @@ export async function addRecipeManualIngredient(
             kind: "food",
             displayName: food.name,
             quantity: { amount, unit: storedFoodUnit(input.unit, food) },
-            identity: catalogIdentity("food", food.id, food.name),
             foodId: food.id,
-            nutrition: nutritionFromCatalogFood(food),
             sortOrder: existing.length,
             note: null,
         });
@@ -1046,7 +1033,6 @@ export async function addRecipeToGrocery(opts: {
     }
     const plan = recipeToGroceryRemainder({
         ingredients: ingredients.map((ingredient) => ({
-            identity: ingredient.identity,
             displayName: ingredient.displayName,
             quantity: ingredient.quantity,
             foodId: ingredient.foodId,
@@ -1100,7 +1086,6 @@ export async function addRecipeToGrocery(opts: {
             kind,
             displayName: line.displayName,
             quantity: line.remainder,
-            identity: line.identity,
             foodId,
             checked: false,
         });
@@ -1114,9 +1099,7 @@ export function ingredientGaps(
     food: Food | undefined,
 ): IngredientGapKind[] {
     const missing: IngredientGapKind[] = [];
-    const nutrition = food
-        ? nutritionFromCatalogFood(food)
-        : ingredient.nutrition;
+    const nutrition = food ? nutritionFromCatalogFood(food) : null;
     if (!isNutritionComplete(nutrition)) missing.push("nutrition");
     if (!food) return missing;
     const unit = ingredient.quantity.unit;
@@ -1141,7 +1124,6 @@ export function recipeCanMakeNow(
     return ingredients.every((ingredient) => {
         const tag = alreadyHaveTag(
             {
-                identity: ingredient.identity,
                 quantity: ingredient.quantity,
                 foodId: ingredient.foodId,
             },
@@ -1336,9 +1318,7 @@ export async function importRecipeFromText(
                 kind: "food",
                 displayName: food.name,
                 quantity: { amount, unit },
-                identity: catalogIdentity("food", food.id, food.name),
                 foodId: food.id,
-                nutrition: nutritionFromCatalogFood(food),
                 sortOrder: index,
                 note,
             }),
@@ -1452,18 +1432,10 @@ export function recipeIngredientFromRow(row: {
             amount: Number(row.amount),
             unit: String(row.unit),
         },
-        // The identity column is no longer read; Phase 8 drops it.
-        identity: catalogIdentity(
-            "food",
-            String(row.food_id),
-            String(row.display_name),
-        ),
         foodId:
             row.food_id == null || row.food_id === ""
                 ? null
                 : String(row.food_id),
-        // Nutrition comes from the food row (food_id is always set).
-        nutrition: null,
         sortOrder: Number(row.sort_order) || 0,
         note: row.note == null || row.note === "" ? null : String(row.note),
     };

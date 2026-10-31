@@ -69,6 +69,36 @@ begin
         );
     end if;
 
+    -- Phase 8 contract: the legacy identity shape is gone and every item
+    -- row names its food.
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and (
+              (column_name = 'identity' and table_name in
+                  ('fridge_items', 'grocery_lines', 'recipe_ingredients', 'member_dislikes'))
+              or (table_name = 'recipe_ingredients' and column_name = 'nutrition')
+              or (table_name = 'households' and column_name = 'fridge_locations')
+              or (table_name = 'profiles' and column_name = 'accent_swatch')
+          )
+    ) then
+        raise exception 'a column Phase 8 contracts is still present';
+    end if;
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name in ('fridge_items', 'grocery_lines', 'recipe_ingredients')
+          and column_name = 'food_id'
+          and is_nullable = 'YES'
+    ) then
+        raise exception 'food_id is still nullable on an item table';
+    end if;
+    if to_regprocedure('public.bootstrap_household(text,text)') is not null then
+        raise exception 'bootstrap_household still exists';
+    end if;
+
     if not exists (
         select 1
         from information_schema.columns
@@ -82,8 +112,7 @@ begin
     end if;
 
     if has_function_privilege('anon', 'public.add_household_member(uuid,uuid,text)', 'execute')
-       or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute')
-       or has_function_privilege('anon', 'public.bootstrap_household(text,text)', 'execute') then
+       or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute') then
         raise exception 'household RPCs are still executable by client roles';
     end if;
     if exists (

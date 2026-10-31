@@ -212,7 +212,6 @@ const PROFILE_BASE: actualProfiles.Profile = {
     preferred_drink_unit: null,
     locale: null,
     theme: null,
-    accent_swatch: null,
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
@@ -449,7 +448,6 @@ mock.module("./db/household.js", () => ({
         }
         db.household = {
             name,
-            fridgeLocations: [],
             recipeSearchPlaces: [],
             preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
         };
@@ -628,7 +626,6 @@ beforeEach(() => {
     db.tokenRotations = [];
     db.household = {
         name: "Home",
-        fridgeLocations: [],
         recipeSearchPlaces: [],
         preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
     };
@@ -3308,7 +3305,6 @@ describe("household config tools", () => {
             const names = await list();
             expect(names).not.toContain("update_fridge_locations");
         });
-        expect(db.household?.fridgeLocations).toEqual([]);
     });
 
     test("member OAuth config write is refused", async () => {
@@ -3333,7 +3329,6 @@ describe("household config tools", () => {
     test("invalid recipe place kind errors and leaves config unchanged", async () => {
         db.household = {
             name: "Home",
-            fridgeLocations: ["fridge"],
             recipeSearchPlaces: [],
             preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
         };
@@ -3343,7 +3338,6 @@ describe("household config tools", () => {
             });
             expect(r.isError).toBe(true);
         });
-        expect(db.household?.fridgeLocations).toEqual(["fridge"]);
         expect(db.household?.recipeSearchPlaces).toEqual([]);
     });
 
@@ -4968,7 +4962,6 @@ describe("authenticated dashboard HTTP", () => {
         db.profile = { ...PROFILE_BASE, user_id: alice };
         db.household = {
             name: "Home",
-            fridgeLocations: ["fridge"],
             recipeSearchPlaces: [],
             preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
         };

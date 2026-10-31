@@ -95,13 +95,6 @@ test("add food by barcode mock stores grams", async () => {
     expect(item.kind).toBe("food");
     expect(item.quantity).toEqual({ amount: 1360.8, unit: "g" });
     expect(item.foodId).toBeTruthy();
-    expect(item.identity).toEqual({
-        kind: "food",
-        via: "catalog",
-        source: "foodable",
-        sourceId: item.foodId!,
-        displayName: "Good Culture Cottage Cheese",
-    });
 });
 
 test("add supply manual requires amount and unit", async () => {
@@ -138,8 +131,6 @@ test("add supply manual requires amount and unit", async () => {
     expect(item.displayName).toBe("Foil");
     expect(item.quantity).toEqual({ amount: 2, unit: "roll" });
     expect(item.foodId).toBeTruthy();
-    expect(item.identity.kind).toBe("supply");
-    expect(item.identity.via).toBe("catalog");
 });
 
 test("edit quantity updates the stored amount", async () => {
@@ -223,12 +214,6 @@ test("fridge page reuses quantity field and food picker", () => {
                 kind: "food",
                 displayName: "Cottage Cheese",
                 quantity: { amount: 1360.8, unit: "g" },
-                identity: {
-                    kind: "food",
-                    via: "barcode",
-                    barcode: "070852010016",
-                    displayName: "Cottage Cheese",
-                },
                 foodId: null,
             },
             {
@@ -238,12 +223,6 @@ test("fridge page reuses quantity field and food picker", () => {
                 kind: "supply",
                 displayName: "Foil",
                 quantity: { amount: 2, unit: "roll" },
-                identity: {
-                    kind: "supply",
-                    via: "manual",
-                    householdManualId: "hm-foil",
-                    displayName: "Foil",
-                },
                 foodId: null,
             },
         ],
@@ -276,7 +255,6 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
                 kind: "food",
                 displayName: "Eggs",
                 quantity: { amount: 6, unit: "each" },
-                identity: { kind: "food", via: "manual", displayName: "Eggs" },
                 foodId: "f-1",
                 expiresOn,
             },
@@ -366,7 +344,6 @@ test("expiring soon is a closed details block with a count", () => {
                 kind: "food",
                 displayName: "Milk",
                 quantity: { amount: 1, unit: "l" },
-                identity: { kind: "food", via: "manual", displayName: "Milk" },
                 foodId: "f-1",
                 expiresOn: utcTodayFromDate(),
             },
@@ -392,11 +369,6 @@ test("supply items omit the eat icon action", () => {
                 kind: "supply",
                 displayName: "Paper towels",
                 quantity: { amount: 2, unit: "roll" },
-                identity: {
-                    kind: "supply",
-                    via: "manual",
-                    displayName: "Paper towels",
-                },
                 foodId: "f-sup",
                 expiresOn: null,
             },
@@ -449,7 +421,6 @@ test("a server error reopens delete and remove-location confirm modals only", ()
                 kind: "food",
                 displayName: "Milk",
                 quantity: { amount: 1, unit: "l" },
-                identity: { kind: "food", via: "manual", displayName: "Milk" },
                 foodId: "f-1",
                 expiresOn: null,
             },
@@ -554,7 +525,6 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
                 kind: "food",
                 displayName: "Eggs",
                 quantity: { amount: 6, unit: "each" },
-                identity: { kind: "food", via: "manual", displayName: "Eggs" },
                 foodId: "f-1",
                 expiresOn,
             },
@@ -596,11 +566,6 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
                 kind: "supply",
                 displayName: "Paper towels",
                 quantity: { amount: 2, unit: "roll" },
-                identity: {
-                    kind: "supply",
-                    via: "manual",
-                    displayName: "Paper towels",
-                },
                 foodId: "f-sup",
                 expiresOn: null,
             },
@@ -643,11 +608,6 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
             quantity: supply
                 ? { amount: 2, unit: "roll" }
                 : { amount: 4, unit: "each" },
-            identity: {
-                kind: supply ? "supply" : "food",
-                via: "manual",
-                displayName: index === 0 ? hostile : `Item ${index + 1}`,
-            },
             foodId: `f-${index + 1}`,
             expiresOn: supply ? null : "2026-12-01",
         };
