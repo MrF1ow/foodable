@@ -1,5 +1,5 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
-import { errorBanner, pageHeader } from "../components/ui.js";
+import { errorBanner, pageHeader, field } from "../components/ui.js";
 import { DRINK_UNITS, isDrinkUnit, type DrinkUnit } from "../../alcohol.js";
 import {
     WEIGHT_UNITS,
@@ -93,15 +93,17 @@ export function renderSettingsPage(view: SettingsPageView): string {
     }).join("");
     const widgetsChecked = view.widgetsEnabled ? " checked" : "";
     const alcoholChecked = view.alcoholTrackingEnabled ? " checked" : "";
+    // The account form saves the theme, so it opts out of Turbo: iOS Safari
+    // colours its toolbar from the page once per load, and an in-place theme
+    // switch left the toolbar in the old theme.
     const body = `
         ${pageHeader({ title: "Settings" })}
         ${errorBanner(view.error)}
         ${renderSettingsNav("account")}
-        <form method="POST" action="/settings" class="appearance panel">
+        <form method="POST" action="/settings" class="appearance panel" data-turbo="false">
             <input type="hidden" name="group" value="account" />
             <h2>Account</h2>
-            <label for="display_name">Display name</label>
-            <input id="display_name" name="display_name" value="${escapeHtml(view.displayName)}" maxlength="80" autocomplete="nickname" />
+            ${field({ id: "display_name", label: "Display name", control: `<input id="display_name" name="display_name" value="${escapeHtml(view.displayName)}" maxlength="80" autocomplete="nickname" />` })}
             <fieldset class="choice-row">
                 <legend>Theme</legend>
                 ${themes}
@@ -111,14 +113,11 @@ export function renderSettingsPage(view: SettingsPageView): string {
         <form method="POST" action="/settings" class="appearance nutrition-prefs panel">
             <input type="hidden" name="group" value="nutrition" />
             <h2>Nutrition prefs</h2>
-            <label for="timezone">Timezone</label>
-            <input id="timezone" name="timezone" value="${escapeHtml(view.timezone)}" placeholder="America/Los_Angeles" autocomplete="off" />
-            <label for="preferred_weight_unit">Weight unit</label>
-            <select id="preferred_weight_unit" name="preferred_weight_unit">${optionList(WEIGHT_UNITS, view.weightUnit)}</select>
+            ${field({ id: "timezone", label: "Timezone", control: `<input id="timezone" name="timezone" value="${escapeHtml(view.timezone)}" placeholder="America/Los_Angeles" autocomplete="off" />` })}
+            ${field({ id: "preferred_weight_unit", label: "Weight unit", control: `<select id="preferred_weight_unit" name="preferred_weight_unit">${optionList(WEIGHT_UNITS, view.weightUnit)}</select>` })}
             <label><input type="checkbox" name="widgets_enabled" value="true"${widgetsChecked} /> Show in-chat widgets</label>
             <label><input type="checkbox" name="alcohol_tracking_enabled" value="true"${alcoholChecked} /> Alcohol tracking</label>
-            <label for="preferred_drink_unit">Drink unit</label>
-            <select id="preferred_drink_unit" name="preferred_drink_unit">${optionList(DRINK_UNITS, view.drinkUnit, { us: "US drinks", uk: "UK units" })}</select>
+            ${field({ id: "preferred_drink_unit", label: "Drink unit", control: `<select id="preferred_drink_unit" name="preferred_drink_unit">${optionList(DRINK_UNITS, view.drinkUnit, { us: "US drinks", uk: "UK units" })}</select>` })}
             <button type="submit" class="btn-primary">Save nutrition prefs</button>
         </form>
     `;

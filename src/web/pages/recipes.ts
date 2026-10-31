@@ -24,6 +24,7 @@ import {
     pageLevelErrorBanner,
     panel,
     type ModalFill,
+    field,
 } from "../components/ui.js";
 
 export type RecipeMember = { userId: string; displayName: string };
@@ -193,10 +194,8 @@ export function renderRecipesPage(view: RecipesPageView): string {
         title: "New recipe",
         openOnLoad: modalOpen(view, NEW_RECIPE_MODAL_ID),
         body: `${modalFormError(view, NEW_RECIPE_MODAL_ID)}<form class="recipe-create" method="post" action="/recipes">
-                <label for="recipe-name">Name</label>
-                <input id="recipe-name" name="name" type="text" required maxlength="80" autocomplete="off" />
-                <label for="recipe-yield">Yield</label>
-                <input id="recipe-yield" name="yield_portions" type="number" min="0" step="any" required value="4" />
+                ${field({ id: "recipe-name", label: "Name", control: `<input id="recipe-name" name="name" type="text" required maxlength="80" autocomplete="off" />` })}
+                ${field({ id: "recipe-yield", label: "Yield", control: `<input id="recipe-yield" name="yield_portions" type="number" min="0" step="any" required value="4" />` })}
                 <button type="submit" class="btn-primary">Create recipe</button>
             </form>`,
     });
@@ -214,14 +213,12 @@ export function renderRecipesPage(view: RecipesPageView): string {
             summary: "Filter",
             open: filtering,
             body: `<form class="recipe-list-filters" method="get" action="/recipes">
-                <label for="recipe-tag">Tag</label>
-                <input id="recipe-tag" name="tag" type="text" value="${escapeHtml(filter.tag)}" autocomplete="off" />
+                ${field({ id: "recipe-tag", label: "Tag", control: `<input id="recipe-tag" name="tag" type="text" value="${escapeHtml(filter.tag)}" autocomplete="off" />` })}
                 <label class="recipe-filter-check">
                     <input type="checkbox" name="can_make_now" value="1"${filter.canMakeNow ? " checked" : ""} />
                     Can make now
                 </label>
-                <label for="recipe-safe-for">Safe for</label>
-                <select id="recipe-safe-for" name="safe_for">${memberOptions}</select>
+                ${field({ id: "recipe-safe-for", label: "Safe for", control: `<select id="recipe-safe-for" name="safe_for">${memberOptions}</select>` })}
                 <button type="submit" class="btn-primary">Filter</button>
             </form>`,
         })}
@@ -286,10 +283,8 @@ function sharedIngredientModals(view: RecipeDetailView): string {
             openOnLoad: editOpen,
             submitDisabled: editItem == null,
             body: `${editOpen ? modalFormError(view, `${EDIT_INGREDIENT_PREFIX}${editItem?.id}`) : ""}<form class="recipe-ingredient-edit" method="post" action="${editItem ? `/recipes/${recipeId}/ingredients/${editId}` : ""}">
-<label for="recipe-ingredient-note">Note</label>
-<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />
-<label for="recipe-ingredient-amount">Amount</label>
-<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" required value="${editItem ? escapeHtml(String(editItem.quantity.amount)) : ""}" />
+${field({ id: "recipe-ingredient-note", label: "Note", control: `<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />` })}
+${field({ id: "recipe-ingredient-amount", label: "Amount", control: `<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" required value="${editItem ? escapeHtml(String(editItem.quantity.amount)) : ""}" />` })}
 <button type="submit" class="btn-primary">Save ingredient</button>
 </form>`,
         }) +
@@ -372,8 +367,7 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
         .join("");
     const portion = viewingSelf
         ? `<form class="recipe-portion inline-form" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/portions">
-<label for="portion-count">Your portion</label>
-<input id="portion-count" name="portion_count" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />
+${field({ id: "portion-count", label: "Your portion", control: `<input id="portion-count" name="portion_count" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />` })}
 <button type="submit">Save</button>
 </form>`
         : `<p class="person-portion muted" data-portion-count="${escapeHtml(String(view.portionCount))}" data-readonly="true">Portion ${escapeHtml(String(view.portionCount))}</p>`;
@@ -391,10 +385,8 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
               )
             : `<form class="recipe-add-grocery" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/add-to-grocery">
 ${renderMemberMultiSelect(view.members, [view.viewerId])}
-<label for="recipe-store">Store</label>
-<select id="recipe-store" name="store_id" required>${storeOptions}</select>
-<label for="recipe-total-portions">Total portions</label>
-<input id="recipe-total-portions" name="total_portions" type="number" min="0" step="any" placeholder="${escapeHtml(String(view.recipe.yieldPortions))} for the whole recipe" />
+${field({ id: "recipe-store", label: "Store", control: `<select id="recipe-store" name="store_id" required>${storeOptions}</select>` })}
+${field({ id: "recipe-total-portions", label: "Total portions", control: `<input id="recipe-total-portions" name="total_portions" type="number" min="0" step="any" placeholder="${escapeHtml(String(view.recipe.yieldPortions))} for the whole recipe" />` })}
 <p class="muted">Leave blank to shop for the people above. Enter more for a whole batch or leftovers.</p>
 <button type="submit" class="btn-primary">Add to grocery</button>
 </form>`;
@@ -448,20 +440,13 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
             title: "Edit recipe",
             openOnLoad: modalOpen(view, editId),
             body: `${modalFormError(view, editId)}<form class="recipe-edit" method="post" action="/recipes/${recipeIdEsc}">
-                <label for="edit-name">Name</label>
-                <input id="edit-name" name="name" type="text" required maxlength="80" value="${escapeHtml(view.recipe.name)}" />
-                <label for="edit-yield">Yield</label>
-                <input id="edit-yield" name="yield_portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.recipe.yieldPortions))}" />
-                <label for="edit-source">Source URL</label>
-                <input id="edit-source" name="source_url" type="text" value="${escapeHtml(view.recipe.sourceUrl ?? "")}" />
-                <label for="edit-tags">Tags</label>
-                <input id="edit-tags" name="tags" type="text" value="${tagsValue}" placeholder="dinner, vegetarian" />
-                <label for="edit-prep">Prep minutes</label>
-                <input id="edit-prep" name="prep_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.prepMinutes == null ? "" : String(view.recipe.prepMinutes))}" />
-                <label for="edit-cook">Cook minutes</label>
-                <input id="edit-cook" name="cook_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.cookMinutes == null ? "" : String(view.recipe.cookMinutes))}" />
-                <label for="edit-notes">Notes</label>
-                <textarea id="edit-notes" name="notes" rows="3">${escapeHtml(view.recipe.notes ?? "")}</textarea>
+                ${field({ id: "edit-name", label: "Name", control: `<input id="edit-name" name="name" type="text" required maxlength="80" value="${escapeHtml(view.recipe.name)}" />` })}
+                ${field({ id: "edit-yield", label: "Yield", control: `<input id="edit-yield" name="yield_portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.recipe.yieldPortions))}" />` })}
+                ${field({ id: "edit-source", label: "Source URL", control: `<input id="edit-source" name="source_url" type="text" value="${escapeHtml(view.recipe.sourceUrl ?? "")}" />` })}
+                ${field({ id: "edit-tags", label: "Tags", control: `<input id="edit-tags" name="tags" type="text" value="${tagsValue}" placeholder="dinner, vegetarian" />` })}
+                ${field({ id: "edit-prep", label: "Prep minutes", control: `<input id="edit-prep" name="prep_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.prepMinutes == null ? "" : String(view.recipe.prepMinutes))}" />` })}
+                ${field({ id: "edit-cook", label: "Cook minutes", control: `<input id="edit-cook" name="cook_minutes" type="number" min="0" step="1" value="${escapeHtml(view.recipe.cookMinutes == null ? "" : String(view.recipe.cookMinutes))}" />` })}
+                ${field({ id: "edit-notes", label: "Notes", control: `<textarea id="edit-notes" name="notes" rows="3">${escapeHtml(view.recipe.notes ?? "")}</textarea>` })}
                 <button type="submit" class="btn-primary">Save recipe</button>
             </form>`,
         }) +
@@ -490,8 +475,7 @@ ${renderMemberMultiSelect(view.members, [view.viewerId])}
             title: "Method",
             openOnLoad: modalOpen(view, methodId),
             body: `${modalFormError(view, methodId)}<form class="recipe-method-form" method="post" action="/recipes/${recipeIdEsc}/instructions">
-                <label for="method-instructions">Steps</label>
-                <textarea id="method-instructions" name="instructions" rows="12" placeholder="Boil a large pot of salted water.\nCook the pasta until al dente.">${escapeHtml(view.recipe.instructions ?? "")}</textarea>
+                ${field({ id: "method-instructions", label: "Steps", control: `<textarea id="method-instructions" name="instructions" rows="12" placeholder="Boil a large pot of salted water.\nCook the pasta until al dente.">${escapeHtml(view.recipe.instructions ?? "")}</textarea>` })}
                 <p class="muted">One step per line. Leave a blank line between steps to write a step over several lines.</p>
                 <button type="submit" class="btn-primary">Save steps</button>
             </form>`,
@@ -572,8 +556,7 @@ ${modalTrigger({
         ${panel({
             title: "Nutrition",
             body: `<form class="recipe-filter inline-form" method="get" action="/recipes/${recipeIdEsc}" data-filter-member="${escapeHtml(view.filterUserId)}">
-                <label for="recipe-member">Filter by person</label>
-                <select id="recipe-member" name="member">${memberOptions}</select>
+                ${field({ id: "recipe-member", label: "Filter by person", control: `<select id="recipe-member" name="member">${memberOptions}</select>` })}
                 <button type="submit">View</button>
             </form>
             ${portion}

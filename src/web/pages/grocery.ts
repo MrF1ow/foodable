@@ -18,6 +18,7 @@ import {
     pageHeader,
     pageLevelErrorBanner,
     type ModalFill,
+    field,
 } from "../components/ui.js";
 
 export type GroceryLineView = GroceryLine & {
@@ -107,8 +108,11 @@ function sectionOptionsHtml(store: GroceryStoreView): string {
             return `<option value="${escapeHtml(section.id)}"${sel}>${escapeHtml(section.name)}</option>`;
         })
         .join("");
-    return `<label for="${GROCERY_SECTION_SELECT_ID}">Section</label>
-<select id="${GROCERY_SECTION_SELECT_ID}" data-grocery-section${inferAttr}>${options}</select>`;
+    return field({
+        id: GROCERY_SECTION_SELECT_ID,
+        label: "Section",
+        control: `<select id="${GROCERY_SECTION_SELECT_ID}" data-grocery-section${inferAttr}>${options}</select>`,
+    });
 }
 
 function sectionTemplateId(storeId: string): string {
@@ -341,8 +345,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
                 title: "Add store",
                 openOnLoad: modalOpen(view, ADD_STORE_MODAL_ID),
                 body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/grocery/stores">
-<label for="grocery_store_name">Grocery store</label>
-<input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />
+${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
             }),

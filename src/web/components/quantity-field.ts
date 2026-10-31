@@ -4,6 +4,7 @@ import {
 } from "../../domain/quantity.js";
 import { quantityUnitOptionLabel } from "../display-quantity.js";
 import { escapeHtml } from "../shell.js";
+import { field } from "./ui.js";
 
 export type QuantityFieldKind = "food" | "supply";
 
@@ -49,10 +50,18 @@ export function renderQuantityField(opts: QuantityFieldOptions): string {
             return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
         })
         .join("");
+    const amountId = `${idPrefix}-amount`;
+    const unitId = `${idPrefix}-unit`;
     return `<div class="quantity-field" data-kind="${opts.kind}">
-<label class="quantity-field-amount" for="${escapeHtml(idPrefix)}-amount">Amount</label>
-<input id="${escapeHtml(idPrefix)}-amount" name="${escapeHtml(prefix)}_amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHtml(amountValue)}"${req} />
-<label class="quantity-field-unit" for="${escapeHtml(idPrefix)}-unit">Unit</label>
-<select id="${escapeHtml(idPrefix)}-unit" name="${escapeHtml(prefix)}_unit"${req}>${options}</select>
+${field({
+    id: amountId,
+    label: "Amount",
+    control: `<input id="${escapeHtml(amountId)}" name="${escapeHtml(prefix)}_amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHtml(amountValue)}"${req} />`,
+})}
+${field({
+    id: unitId,
+    label: "Unit",
+    control: `<select id="${escapeHtml(unitId)}" name="${escapeHtml(prefix)}_unit"${req}>${options}</select>`,
+})}
 </div>`;
 }

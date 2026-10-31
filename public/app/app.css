@@ -323,10 +323,14 @@ html:has(dialog.modal[open]) {
      --gap-label  4px   a label to its own control
      --gap-col    8px   side-by-side fields, and a control beside its button
      --gap-field 12px   one field (or button, or form) to the next
-   A field is either a wrapping label (<label>Text<input></label>) or a label
-   followed by its control. Every form container stacks its fields on
-   --gap-field; a label that sits right before its control pulls the control up
-   to --gap-label with a negative margin, so both markups read the same. */
+   A field is either a .field (field() in src/web/components/ui.ts renders
+   the shared form.css block: a label then its control) or a wrapping label (<label>Text<input></label>). Both are
+   one grid that owns its --gap-label, so the label-to-control gap never
+   depends on the container. Containers stack fields on --gap-field. No rule
+   here uses a negative margin: a pair that leaned on its parent's gap broke
+   wherever the parent was not a gapped grid (the add-food modal's Section
+   select rode up over its label). A bare label-then-control pair is caught
+   by src/web/components/field.test.ts. */
 .native {
     --gap-label: 4px;
     --gap-col: 8px;
@@ -337,9 +341,14 @@ html:has(dialog.modal[open]) {
     font-weight: 600;
     color: var(--text-dim);
 }
-:where(.native label:has(+ :is(input, select, textarea))) {
-    display: block;
-    margin-bottom: calc(var(--gap-label) - var(--gap-field));
+/* .field is the shared label-over-control block from form.css; in the app
+   its gap is --gap-label and the container's gap does the stacking, so the
+   widget's own margin-bottom goes. */
+.native .field {
+    display: grid;
+    gap: var(--gap-label);
+    min-width: 0;
+    margin: 0;
 }
 :where(
     .native
@@ -603,13 +612,11 @@ details.more > summary .count {
 
 /* ---- shared form components ---- */
 
-/* Amount and unit side by side, each label above its control. */
+/* Amount and unit side by side, two .field columns. */
 .quantity-field {
     display: grid;
-    grid-template-rows: auto auto;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: var(--gap-field) var(--gap-col);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap-col);
 }
 
 .food-picker,
@@ -769,8 +776,7 @@ details.more[open] > summary::after {
     transform: translateY(1px) rotate(-135deg);
 }
 /* The opened body: every block below the summary (a form, a picker, a
-   second form such as Delete) starts --gap-field below the one before. Block
-   flow, so a label-then-control pair here collapses to --gap-label. */
+   second form such as Delete) starts --gap-field below the one before. */
 details.more > :not(summary) {
     margin-top: var(--gap-field);
 }
@@ -880,9 +886,9 @@ details.more > summary > :is(h2, h3) {
 
 /* ---- compact form layouts ---- */
 
-/* Label on its own line, then the control and its button side by side.
+/* A field and its button side by side, the button level with the control.
    Single-field add forms whose class is pinned by tests take the same layout
-   by name. */
+   by name. A bare (visually hidden) label still spans the row. */
 .inline-form,
 .fridge-add-location,
 .grocery-add-store {
@@ -1529,53 +1535,9 @@ body.auth {
     padding: 16px;
     overflow: auto;
     overscroll-behavior: contain;
-    --gap-label: 4px;
-    --gap-col: 8px;
-    --gap-field: 12px;
     display: grid;
     gap: var(--gap-field);
     align-content: start;
-}
-.modal-body :where(label) {
-    font-size: var(--fs-12-5);
-    font-weight: 600;
-    color: var(--text-dim);
-}
-.modal-body :where(label:has(+ :is(input, select, textarea))) {
-    display: block;
-    margin-bottom: calc(var(--gap-label) - var(--gap-field));
-}
-.modal-body
-    :where(
-        label:has(
-            > :is(
-                input:not([type="checkbox"], [type="radio"]),
-                select,
-                textarea
-            )
-        )
-    ) {
-    display: grid;
-    gap: var(--gap-label);
-}
-.modal-body :where(form) {
-    display: grid;
-    gap: var(--gap-field);
-    margin: 0;
-}
-.modal-body :where(fieldset) {
-    display: grid;
-    gap: var(--gap-field);
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-}
-.modal-body .food-picker,
-.modal-body .food-picker-panel,
-.modal-body .food-picker-panel > form {
-    display: grid;
-    gap: var(--gap-field);
 }
 .modal-body .seg {
     margin: 0;

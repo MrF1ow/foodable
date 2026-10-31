@@ -32,6 +32,7 @@ import {
     modalTrigger,
     pageHeader,
     pageLevelErrorBanner,
+    field,
 } from "../components/ui.js";
 import type { MealFormItem } from "../form.js";
 import type { NutritionCard } from "../../domain/layout.js";
@@ -91,13 +92,16 @@ async function widgetCard(
 }
 
 function mealTypeSelect(): string {
-    return `<label for="log-meal-type">Meal type</label>
-            <select id="log-meal-type" name="meal_type">
+    return field({
+        id: "log-meal-type",
+        label: "Meal type",
+        control: `<select id="log-meal-type" name="meal_type">
                 <option value="breakfast">Breakfast</option>
                 <option value="lunch">Lunch</option>
                 <option value="dinner">Dinner</option>
                 <option value="snack" selected>Snack</option>
-            </select>`;
+            </select>`,
+    });
 }
 
 const MEAL_ITEM_UNITS = ["g", "each", "oz", "ml", "cup"] as const;
@@ -129,8 +133,7 @@ ${mealItemRowHtml()}
 <button type="button" class="btn-sm" data-add-meal-item>Add another food</button>
 </div>
 <p class="muted">Or describe it</p>
-<label for="log-meal-description">Description</label>
-<input id="log-meal-description" name="description" type="text" autocomplete="off" />
+${field({ id: "log-meal-description", label: "Description", control: `<input id="log-meal-description" name="description" type="text" autocomplete="off" />` })}
 <div class="field-grid">
 <label>Calories<input id="log-meal-calories" name="calories" type="number" min="0" step="any" inputmode="decimal" /></label>
 <label>Protein (g)<input id="log-meal-protein" name="protein_g" type="number" min="0" step="any" inputmode="decimal" /></label>
@@ -143,16 +146,14 @@ ${mealItemRowHtml()}
 
 function logWaterFormBody(): string {
     return `<form class="log-water inline-form" method="post" action="/log-water">
-<label for="log-water-amount">Water (ml)</label>
-<input id="log-water-amount" name="amount_ml" type="number" step="any" inputmode="decimal" />
+${field({ id: "log-water-amount", label: "Water (ml)", control: `<input id="log-water-amount" name="amount_ml" type="number" step="any" inputmode="decimal" />` })}
 <button type="submit" class="btn-primary">Log water</button>
 </form>`;
 }
 
 function logWeightFormBody(unit: WeightUnit): string {
     return `<form class="log-weight inline-form" method="post" action="/log-weight">
-<label for="log-weight-amount">Weight (${unit})</label>
-<input id="log-weight-amount" name="weight" type="number" step="any" inputmode="decimal" />
+${field({ id: "log-weight-amount", label: `Weight (${unit})`, control: `<input id="log-weight-amount" name="weight" type="number" step="any" inputmode="decimal" />` })}
 <input type="hidden" name="unit" value="${unit}" />
 <button type="submit" class="btn-primary">Log weight</button>
 </form>`;
