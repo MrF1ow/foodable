@@ -8,6 +8,7 @@ import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderAlreadyHaveTag } from "../components/already-have-tag.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderGroceryLineRow } from "../components/page-markup.js";
+import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
     emptyState,
@@ -16,6 +17,7 @@ import {
     modalTrigger,
     pageHeader,
     pageLevelErrorBanner,
+    type ModalFill,
 } from "../components/ui.js";
 
 export type GroceryLineView = GroceryLine & {
@@ -52,6 +54,11 @@ export type GroceryPageView = {
 
 const ADD_STORE_MODAL_ID = "grocery-add-store";
 const CLEAR_CHECKED_MODAL_ID = "grocery-clear-checked";
+/** One add-food dialog for every store. Filled from the store row. */
+const GROCERY_ADD_FOOD_ID = "grocery-add-food";
+const ADD_FOOD_PREFIX = "grocery-add-food-";
+const GROCERY_FOOD_PICKER_ID = "grocery-food-picker";
+const GROCERY_SECTION_SELECT_ID = "grocery-add-section";
 
 function quantityLabel(line: GroceryLine): string {
     return formatQuantityDisplayParts(line.quantity.amount, line.quantity.unit);
@@ -87,7 +94,8 @@ function grocerySectionFieldHtml(store: GroceryStoreView): string {
     return `<input type="hidden" name="section_id" value="${escapeHtml(sec.id)}" data-grocery-section-field />`;
 }
 
-function storeSectionSelect(store: GroceryStoreView): string {
+/** Section `<select>` for one store. Rendered in that store's template. */
+function sectionOptionsHtml(store: GroceryStoreView): string {
     const other = store.sections.find((section) => section.isOther);
     const inferAttr = other
         ? ` data-infer-section="${escapeHtml(other.id)}"`
@@ -99,8 +107,47 @@ function storeSectionSelect(store: GroceryStoreView): string {
             return `<option value="${escapeHtml(section.id)}"${sel}>${escapeHtml(section.name)}</option>`;
         })
         .join("");
-    return `<label for="section-${escapeHtml(store.id)}">Section</label>
-<select id="section-${escapeHtml(store.id)}" data-grocery-section${inferAttr}>${options}</select>`;
+    return `<label for="${GROCERY_SECTION_SELECT_ID}">Section</label>
+<select id="${GROCERY_SECTION_SELECT_ID}" data-grocery-section${inferAttr}>${options}</select>`;
+}
+
+function sectionTemplateId(storeId: string): string {
+    return `grocery-sections-${storeId}`;
+}
+
+function sectionTemplate(store: GroceryStoreView): string {
+    return `<template id="${escapeHtml(sectionTemplateId(store.id))}">${sectionOptionsHtml(store)}</template>`;
+}
+
+function sectionSlot(store: GroceryStoreView | null): string {
+    if (!store) return `<div data-fill-slot="sections"></div>`;
+    const id = sectionTemplateId(store.id);
+    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store)}</div>`;
+}
+
+function storeFill(store: GroceryStoreView): ModalFill {
+    return {
+        action: "/grocery/lines",
+        fields: {
+            store_id: store.id,
+            kind: "food",
+            barcode: "",
+            food_name: "",
+            qty_amount: "",
+            qty_unit: "g",
+        },
+        templates: { sections: sectionTemplateId(store.id) },
+    };
+}
+
+function reopenStore(view: GroceryPageView): GroceryStoreView | null {
+    return (
+        sharedDialogItem({
+            openModalId: view.openModalId,
+            prefix: ADD_FOOD_PREFIX,
+            lookup: (id) => view.stores.find((store) => store.id === id),
+        })?.item ?? null
+    );
 }
 
 function allergenModalBlock(
@@ -122,12 +169,12 @@ function allergenModalBlock(
                 `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
         )
         .join("\n");
-    return `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>
+    return `<div data-fill-transient><p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>
 <form class="grocery-allergen-override" method="post" action="/grocery/lines">
 ${hidden}
 <input type="hidden" name="confirm_allergen" value="1" />
 <button type="submit" class="btn-sm">Add anyway</button>
-</form>`;
+</form></div>`;
 }
 
 function alreadyHaveHtml(tag: AlreadyHaveTag | null): string {
@@ -173,8 +220,7 @@ function lineRow(
 function storeSection(
     store: GroceryStoreView,
     locations: { id: string; name: string }[],
-    view: GroceryPageView,
-): { section: string; modals: string; modalId: string } {
+): string {
     const rules = store.rules
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
         .join("");
@@ -190,34 +236,16 @@ function storeSection(
 </section>`;
         })
         .join("");
-    const pickerId = `picker-${store.id}`;
-    const addFoodModalId = `grocery-add-food-${store.id}`;
-    const hidden: Record<string, string> = {
-        kind: "food",
-        store_id: store.id,
-    };
-    const addFoodModal = modal({
-        id: addFoodModalId,
-        title: "Add food",
-        openOnLoad: modalOpen(view, addFoodModalId),
-        body: `${modalFormError(view, addFoodModalId)}${allergenModalBlock(view, store.id, addFoodModalId)}${storeSectionSelect(store)}
-${renderFoodPicker({
-    id: pickerId,
-    action: "/grocery/lines",
-    method: "post",
-    hiddenFields: hidden,
-    formExtras: grocerySectionFieldHtml(store),
-    includeQuantity: true,
-})}`,
-    });
     const headActions = `<div class="row-actions">
 ${modalTrigger({
-    target: addFoodModalId,
+    target: GROCERY_ADD_FOOD_ID,
     label: "Add food",
     className: "btn-sm",
+    fill: storeFill(store),
 })}
 </div>`;
-    const section = `<section class="grocery-store panel" data-store-id="${escapeHtml(store.id)}">
+    return `<section class="grocery-store panel" data-store-id="${escapeHtml(store.id)}">
+${sectionTemplate(store)}
 <div class="grocery-store-head row">
 <h2 class="row-title">${escapeHtml(store.name)}</h2>
 ${headActions}
@@ -225,7 +253,34 @@ ${headActions}
 ${rules ? `<ul class="store-rule-list muted">${rules}</ul>` : ""}
 ${sections}
 </section>`;
-    return { section, modals: addFoodModal, modalId: addFoodModalId };
+}
+
+/**
+ * Routes still reopen with `grocery-add-food-<storeId>`. A known store fills
+ * this dialog and reports that id so the banner stays inside it.
+ */
+function sharedAddFoodModal(view: GroceryPageView): string {
+    if (view.stores.length === 0) return "";
+    const store = reopenStore(view);
+    const reopenId = store ? `${ADD_FOOD_PREFIX}${store.id}` : "";
+    const open = store != null && modalOpen(view, reopenId);
+    return modal({
+        id: GROCERY_ADD_FOOD_ID,
+        title: "Add food",
+        openOnLoad: open,
+        submitDisabled: store == null,
+        body: `${open ? modalFormError(view, reopenId) : ""}${
+            store ? allergenModalBlock(view, store.id, reopenId) : ""
+        }${sectionSlot(store)}
+${renderFoodPicker({
+    id: GROCERY_FOOD_PICKER_ID,
+    action: store ? "/grocery/lines" : "",
+    method: "post",
+    hiddenFields: { kind: "food", store_id: store?.id ?? "" },
+    formExtras: store ? grocerySectionFieldHtml(store) : "",
+    includeQuantity: true,
+})}`,
+    });
 }
 
 export function renderGroceryPage(view: GroceryPageView): string {
@@ -246,12 +301,16 @@ export function renderGroceryPage(view: GroceryPageView): string {
 <p><a href="/settings/household">Household settings</a></p>`
             : "";
     const locations = view.locations ?? [];
-    const storeParts = view.stores.map((store) =>
-        storeSection(store, locations, view),
-    );
-    const stores = storeParts.map((part) => part.section).join("");
-    const storeModals = storeParts.map((part) => part.modals).join("");
-    const modalIds = storeParts.map((part) => part.modalId);
+    const stores = view.stores
+        .map((store) => storeSection(store, locations))
+        .join("");
+    const addFoodMatch = sharedDialogItem({
+        openModalId: view.openModalId,
+        prefix: ADD_FOOD_PREFIX,
+        lookup: (id) => view.stores.find((store) => store.id === id),
+    });
+    const modalIds: string[] = [];
+    if (view.error && addFoodMatch) modalIds.push(addFoodMatch.openModalId);
 
     const headerActions: string[] = [];
     if (view.canManage) {
@@ -317,7 +376,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
         ${empty}
         ${stores}
         ${pageModals.join("")}
-        ${storeModals}
+        ${sharedAddFoodModal(view)}
     `;
     return renderAppShell({
         title: "Groceries",

@@ -5712,11 +5712,10 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('name="confirm_allergen" value="1"');
         expect(html).toContain("Add anyway");
         const modal = html.match(
-            new RegExp(
-                `<dialog class="modal" id="grocery-add-food-${store.id}"[\\s\\S]*?</dialog>`,
-            ),
+            /<dialog class="modal" id="grocery-add-food"[\s\S]*?<\/dialog>/,
         )?.[0];
         expect(modal).toContain("allergen-warning");
+        expect(modal).toContain(`name="store_id" value="${store.id}"`);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 

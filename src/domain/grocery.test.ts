@@ -374,7 +374,8 @@ test("grocery page groups by store then section and shows already-have", () => {
     expect(html).toContain('href="/grocery" aria-current="page"');
     expect(html).toContain('action="/grocery/lines"');
     expect(html).not.toContain('action="/grocery/clear-checked"');
-    expect(html).toContain('commandfor="grocery-add-food-st-1"');
+    expect(html).toContain('commandfor="grocery-add-food"');
+    expect(html).toContain('data-fill-field-store_id="st-1"');
     expect(html).not.toMatch(/<details class="more"/);
     expect(html).not.toContain("<h3>Add supply</h3>");
     expect(html).not.toContain("grocery-add-supply");
@@ -508,8 +509,10 @@ test("grocery lines are rows with a labelled round check button", () => {
         '<button type="submit" class="btn-sm btn-primary">Put away</button>',
     );
     expect(html).not.toMatch(/id="put-away-tip-/);
-    expect(html).toContain('commandfor="grocery-add-food-st-1"');
-    expect(html).toContain('id="grocery-add-food-st-1"');
+    expect(html).toContain('commandfor="grocery-add-food"');
+    expect(html).toContain('data-fill-field-store_id="st-1"');
+    expect(html).toContain('id="grocery-add-food"');
+    expect(html).not.toContain('id="grocery-add-food-st-1"');
     expect(html).toContain('commandfor="grocery-clear-checked"');
     expect(html).toContain('action="/grocery/clear-checked"');
     expect(html).toContain("grocery-clear-checked");
@@ -569,7 +572,8 @@ test("grocery header actions and modals match fridge patterns", () => {
     );
     expect(html).toContain('<div class="grocery-line-put-away">');
     expect(html).toContain("Remove every checked item from the list?");
-    expect(html).toContain('commandfor="grocery-add-food-st-1"');
+    expect(html).toContain('commandfor="grocery-add-food"');
+    expect(html).toContain('data-fill-field-store_id="st-1"');
     expect(html).toContain('<form class="grocery-put-away row-actions"');
     expect(html).not.toMatch(/<details class="more"/);
 });
@@ -710,8 +714,19 @@ test("a server error reopens the grocery modal that submitted the form", () => {
         openModalId: "grocery-add-food-st-1",
     } as never);
     expect(addFood).toMatch(
-        /<dialog class="modal" id="grocery-add-food-st-1"[^>]*data-modal-open-on-load/,
+        /<dialog class="modal" id="grocery-add-food"[^>]*data-modal-open-on-load/,
     );
+    expect(addFood).not.toContain('id="grocery-add-food-st-1"');
+    const foodDialog = dialogHtml(addFood, "grocery-add-food");
+    expect(foodDialog).toContain('name="store_id" value="st-1"');
+    expect(foodDialog).toContain("data-grocery-section");
+    expect(foodDialog).toContain('data-infer-section="sec-other"');
+    expect(foodDialog).toContain('<label for="grocery-add-section">');
+    expect(foodDialog).toContain("error-banner");
+    expect(foodDialog).toContain("Pick a food.");
+    expect(addFood.match(/Pick a food\./g)?.length).toBe(1);
+    expect(foodDialog).toContain('<button type="submit" class="btn-primary">');
+    expect(foodDialog).not.toContain('name="section_id"');
 });
 
 test("add-food modal contains the section select with picker forms", () => {
@@ -749,17 +764,24 @@ test("add-food modal contains the section select with picker forms", () => {
             },
         ],
     } as never);
-    const modal = html.match(
-        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
-    )?.[0];
-    expect(modal).toBeDefined();
-    expect(modal!).toContain("data-grocery-section");
-    expect(modal!).toContain('data-infer-section="sec-other"');
-    expect(modal!).not.toContain("popovertarget=");
-    expect(modal!).toContain('<label for="section-st-1">');
-    expect(modal!).toContain('class="food-picker"');
-    expect(modal!).toContain('action="/grocery/lines"');
-    expect(modal!).not.toContain('name="section_id"');
+    const modal = dialogHtml(html, "grocery-add-food");
+    expect(modal).toContain('class="food-picker"');
+    expect(modal).toContain('action=""');
+    expect(modal).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(modal).not.toContain("data-grocery-section");
+    expect(modal).not.toContain('name="section_id"');
+    expect(html).toContain(
+        'data-fill-template-sections="grocery-sections-st-1"',
+    );
+    expect(html).toContain('<template id="grocery-sections-st-1">');
+    expect(html).toContain("data-grocery-section");
+    expect(html).toContain('data-infer-section="sec-other"');
+    expect(html).toContain('value="sec-produce"');
+    expect(html).toContain('for="grocery-add-section"');
+    expect(html).not.toContain("popovertarget=");
+    expect(html).toContain('data-fill-action="/grocery/lines"');
 });
 
 test("owner with no stores does not auto-open the add-store modal", () => {
@@ -815,11 +837,151 @@ test("blocking allergen warning and Add anyway form render inside the reopened a
     expect(html).not.toMatch(
         /<header class="dash-head">[\s\S]*class="allergen-warning"/,
     );
-    const modal = html.match(
-        /<dialog class="modal" id="grocery-add-food-st-1"[\s\S]*?<\/dialog>/,
-    )?.[0];
+    const modal = dialogHtml(html, "grocery-add-food");
     expect(modal).toContain('class="allergen-warning"');
+    expect(modal).toContain("data-fill-transient");
     expect(modal).toContain('name="confirm_allergen" value="1"');
     expect(modal).toContain("Add anyway");
     expect(modal).toContain('name="food_name" value="Peanut Butter"');
+    expect(modal).toContain('name="store_id" value="st-1"');
+    expect(html).not.toContain('id="grocery-add-food-st-1"');
+});
+
+function dialogHtml(html: string, id: string): string {
+    const dialog = html.match(
+        new RegExp(`<dialog class="modal" id="${id}"[\\s\\S]*?</dialog>`),
+    )?.[0];
+    expect(dialog).toBeDefined();
+    return dialog!;
+}
+
+test("add-food dialog count does not grow with stores", () => {
+    function page(count: number) {
+        const stores = Array.from({ length: count }, (_, index) => ({
+            id: `st-${index + 1}`,
+            householdId: HH,
+            name: `Store ${index + 1}`,
+            sortOrder: index,
+            rules: [],
+            sections: [
+                {
+                    id: `sec-st-${index + 1}`,
+                    householdId: HH,
+                    storeId: `st-${index + 1}`,
+                    name:
+                        index === count - 1
+                            ? `"><img src=x onerror=alert(1)>`
+                            : "Produce",
+                    sortOrder: 0,
+                    hidden: false,
+                    isOther: false,
+                    lines: [],
+                },
+            ],
+        }));
+        return renderGroceryPage({
+            chrome: groceryChrome,
+            canManage: true,
+            stores,
+        } as never);
+    }
+    const one = page(1);
+    const six = page(6);
+    const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
+    expect(dialogs(one)).toBe(dialogs(six));
+    expect(dialogs(one)).toBe(2);
+    expect(six.match(/id="grocery-add-food"/g)?.length).toBe(1);
+    expect(six.match(/data-food-picker/g)?.length).toBe(1);
+    expect(six.match(/commandfor="grocery-add-food"/g)?.length).toBe(7);
+    expect(six).toContain('data-fill-field-store_id="st-6"');
+    expect(six).toContain(
+        'data-fill-template-sections="grocery-sections-st-6"',
+    );
+    expect(six).toContain('<template id="grocery-sections-st-6">');
+    expect(six).toContain('value="sec-st-6"');
+    expect(six).not.toContain('id="grocery-add-food-st-1"');
+    expect(six).toContain("&quot;&gt;&lt;img src=x onerror=alert(1)&gt;");
+    expect(six).not.toContain('"><img src=x');
+    expect(six).not.toContain("onerror=alert(1)>");
+    expect(dialogHtml(six, "grocery-add-food")).toContain(
+        '<button type="submit" class="btn-primary" disabled>',
+    );
+    expect(dialogHtml(six, "grocery-add-food")).not.toContain(
+        "data-grocery-section",
+    );
+
+    const reopened = renderGroceryPage({
+        chrome: groceryChrome,
+        canManage: true,
+        stores: [
+            {
+                id: "st-1",
+                householdId: HH,
+                name: "Safeway",
+                sortOrder: 0,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-produce",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Produce",
+                        sortOrder: 0,
+                        hidden: false,
+                        isOther: false,
+                        lines: [],
+                    },
+                    {
+                        id: "sec-other",
+                        householdId: HH,
+                        storeId: "st-1",
+                        name: "Other",
+                        sortOrder: 8,
+                        hidden: false,
+                        isOther: true,
+                        lines: [],
+                    },
+                ],
+            },
+            {
+                id: "st-2",
+                householdId: HH,
+                name: "Costco",
+                sortOrder: 1,
+                rules: [],
+                sections: [
+                    {
+                        id: "sec-dairy",
+                        householdId: HH,
+                        storeId: "st-2",
+                        name: "Dairy",
+                        sortOrder: 0,
+                        hidden: false,
+                        isOther: false,
+                        lines: [],
+                    },
+                ],
+            },
+        ],
+        error: "Pick a food.",
+        openModalId: "grocery-add-food-st-2",
+    } as never);
+    const costco = dialogHtml(reopened, "grocery-add-food");
+    expect(costco).toMatch(/data-modal-open-on-load/);
+    expect(costco).toContain('data-filled-template="grocery-sections-st-2"');
+    expect(costco).toContain('value="sec-dairy"');
+    expect(costco).toContain(">Dairy</option>");
+    expect(costco).not.toContain("sec-produce");
+    expect(costco).not.toContain("data-infer-section");
+    expect(costco).toContain(
+        '<input type="hidden" name="section_id" value="sec-dairy" data-grocery-section-field />',
+    );
+    expect(costco).toContain('name="store_id" value="st-2"');
+    expect(costco).toContain("Pick a food.");
+    expect(reopened.match(/Pick a food\./g)?.length).toBe(1);
+    expect(reopened).toContain('<template id="grocery-sections-st-1">');
+    expect(reopened).toContain('value="sec-produce"');
+    expect(reopened).toContain(
+        'data-fill-template-sections="grocery-sections-st-1"',
+    );
 });
