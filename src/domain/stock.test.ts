@@ -436,3 +436,31 @@ test("manual delete writes an adjust movement and the ledger matches stock", asy
         }),
     ).toBe(false);
 });
+
+test("manual update rejects an amount that rounds to zero", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: salt.id,
+        amount: 1,
+        unit: "g",
+        locationId: loc.id,
+    });
+    await expect(
+        updateFridgeItemQuantityAdjust(fridge, stock, foods, {
+            householdId: HH,
+            itemId: added.item!.id,
+            amount: 0.04,
+            unit: "g",
+        }),
+    ).rejects.toThrow("Enter an amount greater than zero.");
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items.map((item) => item.quantity)).toEqual([
+        { amount: 1, unit: "g" },
+    ]);
+    expect(await stock.listMovements(HH, salt.id)).toHaveLength(1);
+});

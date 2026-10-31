@@ -5443,6 +5443,78 @@ describe("authenticated dashboard HTTP", () => {
         ).toBe(true);
     });
 
+    test("POST /fridge/items/:id rejects an item that is already gone", async () => {
+        const missing = "00000000-0000-4000-8000-000000000099";
+        const edit = await postForm(
+            `/fridge/items/${missing}`,
+            alice,
+            "qty_amount=1",
+        );
+        expect(edit.status).toBe(400);
+        expect(edit.headers.get("location")).toBeNull();
+        expect(edit.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
+        const html = await edit.text();
+        expect(html).toContain('class="error-banner"');
+        expect(html).toContain("That item is no longer in the fridge.");
+        expect(
+            html.match(/That item is no longer in the fridge\./g)?.length,
+        ).toBe(1);
+        expect(html).not.toContain("Fridge item updated");
+        expect(html).not.toMatch(/data-modal-open-on-load/);
+        const head = html.indexOf('class="dash-head"');
+        const banner = html.indexOf('class="error-banner"');
+        expect(head).toBeGreaterThan(-1);
+        expect(banner).toBeGreaterThan(head);
+        expect(banner).toBeLessThan(html.indexOf("<dialog"));
+        expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
+        expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
+
+        const withMove = await postForm(
+            `/fridge/items/${missing}`,
+            alice,
+            "qty_amount=1&qty_unit=g&location_id=not-a-location&expires_on=2026-12-01",
+        );
+        expect(withMove.status).toBe(400);
+        expect(withMove.headers.get("location")).toBeNull();
+        expect(withMove.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
+        const moveHtml = await withMove.text();
+        expect(moveHtml).toContain("That item is no longer in the fridge.");
+        expect(moveHtml).not.toContain("Unknown location.");
+        expect(moveHtml).not.toContain("Fridge item updated");
+        expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
+        expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
+        expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
+    });
+
+    test("POST /fridge/items/:id/delete rejects an item that is already gone", async () => {
+        const missing = "00000000-0000-4000-8000-000000000099";
+        const del = await postForm(`/fridge/items/${missing}/delete`, alice);
+        expect(del.status).toBe(400);
+        expect(del.headers.get("location")).toBeNull();
+        expect(del.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
+        const html = await del.text();
+        expect(html).toContain('class="error-banner"');
+        expect(html).toContain("That item is no longer in the fridge.");
+        expect(
+            html.match(/That item is no longer in the fridge\./g)?.length,
+        ).toBe(1);
+        expect(html).not.toContain("Removed from the fridge");
+        expect(html).not.toMatch(/data-modal-open-on-load/);
+        const head = html.indexOf('class="dash-head"');
+        const banner = html.indexOf('class="error-banner"');
+        expect(head).toBeGreaterThan(-1);
+        expect(banner).toBeGreaterThan(head);
+        expect(banner).toBeLessThan(html.indexOf("<dialog"));
+        expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
+        expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
+    });
+
     test("GET /fridge is 403 for a non-member", async () => {
         const r = await siteApp.request("http://x/fridge", {
             headers: { cookie: cookieFor(outsider) },
