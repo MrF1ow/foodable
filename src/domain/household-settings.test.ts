@@ -57,6 +57,10 @@ test("household settings use modals instead of add/edit disclosures", () => {
     expect(html).not.toContain('id="household-remove-u2"');
     expect(html).not.toContain('id="household-make-owner-u2"');
     expect(html).toContain('data-fill-title="Manage Bob"');
+    expect(html).toContain('<template id="household-member-actions-u2">');
+    expect(html).toContain(
+        'data-fill-template-member-actions="household-member-actions-u2"',
+    );
     expect(html).toContain("/settings/household/members/u2/remove");
     expect(html).toContain('name="confirm" value="yes" required');
     expect(html.match(/name="confirm" value="yes" required/g)?.length).toBe(1);
@@ -213,6 +217,9 @@ test("household modal errors render inside the reopening dialog", () => {
     expect(manageDialog).toContain(">Make admin</button>");
     expect(manageDialog).toContain('class="btn-primary"');
     expect(manageDialog).toContain('commandfor="household-remove"');
+    expect(manageDialog).toContain(
+        'data-filled-template="household-member-actions-u2"',
+    );
     expect(manageDialog).toContain("Delete Bob's login");
     expect(manage).not.toContain('id="household-manage-u2"');
     const rulesModal = householdMemberRulesModalId("u2");
@@ -276,6 +283,10 @@ test("member dialog count does not grow with the household", () => {
     expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
     expect(six.match(/commandfor="household-manage"/g)?.length).toBe(7);
     expect(six).toContain('data-fill-title="Manage Member 7"');
+    expect(six).toContain('<template id="household-member-actions-u-7">');
+    expect(six).toContain(
+        'data-fill-template-member-actions="household-member-actions-u-7"',
+    );
     expect(six).toContain("Delete Member 7's login");
     expect(six).not.toContain('id="household-manage-u-2"');
     expect(six).not.toContain('id="household-remove-u-2"');
@@ -295,4 +306,31 @@ test("member dialog count does not grow with the household", () => {
     expect(unknown).toContain("Could not remove that member.");
     expect(unknown).not.toMatch(/data-modal-open-on-load/);
     expect(dialogHtml(unknown, "household-remove")).not.toContain("Bob");
+});
+
+test("member action template escapes a hostile display name", () => {
+    const hostile = `"><img src=x onerror=alert(1)>`;
+    const html = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        members: [
+            alice,
+            {
+                householdId: "hh-1",
+                userId: "u-hostile",
+                role: "member",
+                displayName: hostile,
+            },
+        ],
+    } as never);
+    expect(html).toContain(
+        "Make &quot;&gt;&lt;img src=x onerror=alert(1)&gt; the owner",
+    );
+    expect(html).toContain(
+        'data-fill-title="Manage &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
+    );
+    expect(html).toContain(
+        '<template id="household-member-actions-u-hostile">',
+    );
+    expect(html).not.toContain('"><img src=x');
+    expect(html).not.toContain("onerror=alert(1)>");
 });

@@ -254,6 +254,7 @@ type FakeNode = {
     click(): void;
     closest(sel: string): FakeNode | null;
     getElementById?(id: string): FakeNode | null;
+    replaceChildren(...nodes: FakeNode[]): void;
 };
 
 function matchesFridgeSel(node: FakeNode, sel: string): boolean {
@@ -374,6 +375,26 @@ function fakeNode(
             if (matchesFridgeSel(at, sel)) return at;
         }
         return null;
+    };
+    node.replaceChildren = (...incoming) => {
+        for (const child of node.children) child.parent = null;
+        const next: FakeNode[] = [];
+        for (const nodeIn of incoming) {
+            const parts =
+                nodeIn.tag === "#DOCUMENT-FRAGMENT"
+                    ? nodeIn.children.splice(0)
+                    : [nodeIn];
+            for (const part of parts) {
+                if (part.parent && part.parent !== node) {
+                    part.parent.children = part.parent.children.filter(
+                        (child) => child !== part,
+                    );
+                }
+                part.parent = node;
+                next.push(part);
+            }
+        }
+        node.children = next;
     };
     for (const child of children) child.parent = node;
     return node;
@@ -616,7 +637,22 @@ test("dialog fill checks boxes and falls back to the first select option", async
     expect(form.getAttribute("action")).toBe("/settings/foods/f1");
 });
 
-test("dialog fill copies text, class, and html slots", async () => {
+function fakeTemplate(id: string, build: () => FakeNode[]): FakeNode {
+    const template = fakeNode("template", { id });
+    (
+        template as FakeNode & {
+            content: { cloneNode(deep: boolean): FakeNode };
+        }
+    ).content = {
+        cloneNode(deep: boolean) {
+            if (deep !== true) throw new Error("expected a deep clone");
+            return fakeNode("#document-fragment", {}, build());
+        },
+    };
+    return template;
+}
+
+test("dialog fill copies text, class, and template slots", async () => {
     const label = fakeNode(
         "button",
         { type: "submit", "data-fill-slot": "label" },
@@ -642,6 +678,18 @@ test("dialog fill copies text, class, and html slots", async () => {
         events.push(event.type);
         return true;
     };
+    const one = fakeTemplate("tpl-one", () => [
+        fakeNode("p", {}, [], "One"),
+        fakeNode("button", {
+            command: "show-modal",
+            commandfor: "other",
+            "data-fill-action": "/grocery/lines",
+        }),
+    ]);
+    const two = fakeTemplate("tpl-two", () => [fakeNode("p", {}, [], "Two")]);
+    const decoy = fakeNode("div", { id: "not-tpl" }, [
+        fakeNode("p", {}, [], "Nope"),
+    ]);
     const button = fakeNode("button", {
         command: "show-modal",
         commandfor: "shared",
@@ -649,9 +697,15 @@ test("dialog fill copies text, class, and html slots", async () => {
         "data-fill-field-qty_amount": "2",
         "data-fill-text-label": "Hello",
         "data-fill-class-label": "btn-primary",
-        "data-fill-html-body": "<p>One</p>",
+        "data-fill-template-body": "tpl-one",
     });
-    const document = fakeNode("document", {}, [dialog, button]);
+    const document = fakeNode("document", {}, [
+        dialog,
+        button,
+        one,
+        two,
+        decoy,
+    ]);
     document.getElementById = (id) =>
         queryFridge(document, `#${id}`)[0] ?? null;
     const window = {
@@ -664,13 +718,16 @@ test("dialog fill copies text, class, and html slots", async () => {
     const src = await Bun.file("./src/web/client/dialog-fill.js").text();
     new Function("document", "window", src)(document, window);
     button.click();
+    const filled = body.querySelector("p");
+    const cloned = body.querySelector("button");
     expect(dialog.open).toBe(true);
     expect(form.getAttribute("action")).toBe("/grocery/lines");
     expect(amount.value).toBe("2");
     expect(label.textContent).toBe("Hello");
     expect(label.getAttribute("class")).toBe("btn-primary");
-    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>One</p>");
-    expect(body.getAttribute("data-filled-html")).toBe("<p>One</p>");
+    expect(filled?.textContent).toBe("One");
+    expect(cloned?.listeners.click?.length).toBe(1);
+    expect(body.getAttribute("data-filled-template")).toBe("tpl-one");
     expect(dialog.querySelector(".error-banner")).toBeNull();
     expect(dialog.querySelector("[data-fill-transient]")).toBeNull();
     expect(label.disabled).toBe(false);
@@ -681,15 +738,41 @@ test("dialog fill copies text, class, and html slots", async () => {
     kept.parent = dialog;
     button.click();
     expect(dialog.querySelector(".error-banner")?.textContent).toBe("Kept");
-    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>One</p>");
+    expect(body.querySelector("p")).toBe(filled);
 
-    button.setAttribute("data-fill-html-body", "<p>Two</p>");
+    button.setAttribute("data-fill-template-body", "tpl-two");
     button.setAttribute("data-fill-class-label", "");
     button.click();
     expect(dialog.querySelector(".error-banner")).toBeNull();
-    expect((body as { innerHTML?: string }).innerHTML).toBe("<p>Two</p>");
-    expect(body.getAttribute("data-filled-html")).toBe("<p>Two</p>");
+    expect(body.querySelector("p")?.textContent).toBe("Two");
+    expect(body.querySelector("p")).not.toBe(filled);
+    expect(body.getAttribute("data-filled-template")).toBe("tpl-two");
     expect(label.getAttribute("class")).toBe("");
+
+    const still = fakeNode("p", { class: "error-banner" }, [], "Still");
+    dialog.children.push(still);
+    still.parent = dialog;
+    const keptChild = body.querySelector("p");
+    button.setAttribute("data-fill-template-body", "not-tpl");
+    button.click();
+    expect(dialog.querySelector(".error-banner")?.textContent).toBe("Still");
+    expect(body.querySelector("p")).toBe(keptChild);
+    expect(body.querySelector("p")?.textContent).toBe("Two");
+    expect(body.getAttribute("data-filled-template")).toBe("tpl-two");
+    expect(decoy.querySelector("p")?.textContent).toBe("Nope");
+});
+
+test("dialog fill does not parse markup strings", async () => {
+    const src = await Bun.file("./src/web/client/dialog-fill.js").text();
+    for (const sink of [
+        "innerHTML",
+        "insertAdjacentHTML",
+        "outerHTML",
+        "DOMParser",
+        "document.write",
+    ]) {
+        expect(src).not.toContain(sink);
+    }
 });
 
 test("dialog fill keeps a same-target allergen retry", async () => {

@@ -204,8 +204,18 @@ function manageFill(member: HouseholdMember): ModalFill {
             "role-submit": roleSubmitLabel(member),
         },
         classes: { "role-submit": roleSubmitClass(member) },
-        html: { "member-actions": memberActionButtons(member) },
+        templates: {
+            "member-actions": memberActionsTemplateId(member.userId),
+        },
     };
+}
+
+function memberActionsTemplateId(userId: string): string {
+    return `household-member-actions-${userId}`;
+}
+
+function memberActionsTemplate(member: HouseholdMember): string {
+    return `<template id="${escapeHtml(memberActionsTemplateId(member.userId))}">${memberActionButtons(member)}</template>`;
 }
 
 function manageFormHtml(member: HouseholdMember | null): string {
@@ -226,9 +236,11 @@ function manageFormHtml(member: HouseholdMember | null): string {
 }
 
 function memberActionsSlot(member: HouseholdMember | null): string {
-    const html = member ? memberActionButtons(member) : "";
-    const applied = member ? ` data-filled-html="${escapeHtml(html)}"` : "";
-    return `<div class="modal-actions" data-fill-slot="member-actions"${applied}>${html}</div>`;
+    if (!member) {
+        return `<div class="modal-actions" data-fill-slot="member-actions"></div>`;
+    }
+    const id = memberActionsTemplateId(member.userId);
+    return `<div class="modal-actions" data-fill-slot="member-actions" data-filled-template="${escapeHtml(id)}">${memberActionButtons(member)}</div>`;
 }
 
 function sharedMemberDialogs(view: HouseholdSettingsView): string {
@@ -464,12 +476,12 @@ export function renderHouseholdSettingsPage(
         .map((member) => {
             const actions =
                 view.isOwner && member.role !== "owner"
-                    ? modalTrigger({
+                    ? `${memberActionsTemplate(member)}${modalTrigger({
                           target: HOUSEHOLD_MANAGE_ID,
                           label: "Manage",
                           className: "btn-sm",
                           fill: manageFill(member),
-                      })
+                      })}`
                     : "";
             return `<li class="household-member" data-role="${escapeHtml(member.role)}">${row(
                 {

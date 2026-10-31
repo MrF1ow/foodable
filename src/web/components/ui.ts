@@ -81,10 +81,10 @@ export type ModalFill = {
     /** `class` copied onto `[data-fill-slot="<name>"]`. Empty string clears it. */
     classes?: Record<string, string>;
     /**
-     * Markup copied into `[data-fill-slot="<name>"]`. The caller builds it
-     * the same way as the rest of the page (user text already escaped).
+     * `<template>` id cloned into `[data-fill-slot="<name>"]`. The template
+     * holds the same escaped markup the rest of the page would render.
      */
-    html?: Record<string, string>;
+    templates?: Record<string, string>;
 };
 
 function fillValue(value: string | number | boolean | null): string {
@@ -108,8 +108,8 @@ function fillAttributes(fill: ModalFill | undefined): string {
     for (const [name, value] of Object.entries(fill.classes ?? {})) {
         attrs.push([`fill-class-${name}`, value]);
     }
-    for (const [name, value] of Object.entries(fill.html ?? {})) {
-        attrs.push([`fill-html-${name}`, value]);
+    for (const [name, value] of Object.entries(fill.templates ?? {})) {
+        attrs.push([`fill-template-${name}`, value]);
     }
     return attrs
         .map(

@@ -284,8 +284,8 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         fill: {
             text: { "role-blurb": `Make ${hostile} an admin` },
             classes: { "role-submit": "btn-primary" },
-            html: {
-                "member-actions": `<button>Remove &lt;img</button>`,
+            templates: {
+                "member-actions": `tpl-"><img src=x onerror=alert(1)>`,
             },
         },
     });
@@ -294,7 +294,7 @@ test("modal, modalTrigger, and confirmModal markup", () => {
     );
     expect(slotted).toContain('data-fill-class-role-submit="btn-primary"');
     expect(slotted).toContain(
-        'data-fill-html-member-actions="&lt;button&gt;Remove &amp;lt;img&lt;/button&gt;"',
+        'data-fill-template-member-actions="tpl-&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
     expect(slotted).not.toContain("<img");
     expect(slotted).not.toContain("<button>Remove");

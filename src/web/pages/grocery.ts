@@ -94,7 +94,7 @@ function grocerySectionFieldHtml(store: GroceryStoreView): string {
     return `<input type="hidden" name="section_id" value="${escapeHtml(sec.id)}" data-grocery-section-field />`;
 }
 
-/** The section `<select>` for one store. The trigger carries this markup. */
+/** Section `<select>` for one store. Rendered in that store's template. */
 function sectionOptionsHtml(store: GroceryStoreView): string {
     const other = store.sections.find((section) => section.isOther);
     const inferAttr = other
@@ -111,10 +111,18 @@ function sectionOptionsHtml(store: GroceryStoreView): string {
 <select id="${GROCERY_SECTION_SELECT_ID}" data-grocery-section${inferAttr}>${options}</select>`;
 }
 
+function sectionTemplateId(storeId: string): string {
+    return `grocery-sections-${storeId}`;
+}
+
+function sectionTemplate(store: GroceryStoreView): string {
+    return `<template id="${escapeHtml(sectionTemplateId(store.id))}">${sectionOptionsHtml(store)}</template>`;
+}
+
 function sectionSlot(store: GroceryStoreView | null): string {
-    const html = store ? sectionOptionsHtml(store) : "";
-    const applied = store ? ` data-filled-html="${escapeHtml(html)}"` : "";
-    return `<div data-fill-slot="sections"${applied}>${html}</div>`;
+    if (!store) return `<div data-fill-slot="sections"></div>`;
+    const id = sectionTemplateId(store.id);
+    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store)}</div>`;
 }
 
 function storeFill(store: GroceryStoreView): ModalFill {
@@ -128,7 +136,7 @@ function storeFill(store: GroceryStoreView): ModalFill {
             qty_amount: "",
             qty_unit: "g",
         },
-        html: { sections: sectionOptionsHtml(store) },
+        templates: { sections: sectionTemplateId(store.id) },
     };
 }
 
@@ -237,6 +245,7 @@ ${modalTrigger({
 })}
 </div>`;
     return `<section class="grocery-store panel" data-store-id="${escapeHtml(store.id)}">
+${sectionTemplate(store)}
 <div class="grocery-store-head row">
 <h2 class="row-title">${escapeHtml(store.name)}</h2>
 ${headActions}

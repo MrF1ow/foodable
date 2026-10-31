@@ -1,11 +1,12 @@
 // Shared dialogs. A trigger carries data-fill-action, data-fill-title,
 // data-fill-message, data-fill-field-<name>, data-fill-text-<slot>,
-// data-fill-class-<slot>, and data-fill-html-<slot>. This copies them onto
-// the one dialog before it opens. Text and class land on [data-fill-slot].
-// Html replaces that element's contents; callers pass the same escaped
-// markup the rest of the page would render. A matching data-filled-html
-// value means the slot is already that markup, so a repeat open keeps a
-// server-rendered error. Loaded before modal.js: the command event fires
+// data-fill-class-<slot>, and data-fill-template-<slot>. This copies them
+// onto the one dialog before it opens. Text and class land on
+// [data-fill-slot]. A template attribute names a <template> on the page;
+// the filler clones that template's content into the slot. A matching
+// data-filled-template means the slot already shows that item, so a repeat
+// open keeps a server-rendered error. An id that is missing or not a
+// <template> is ignored. Loaded before modal.js: the command event fires
 // before showModal and before modal.js focuses the first field. The click
 // listener covers browsers without command invokers.
 const dialogFillInit = new WeakSet();
@@ -63,7 +64,7 @@ function isFillTrigger(el) {
         hasPrefixed(el, "data-fill-field-") ||
         hasPrefixed(el, "data-fill-text-") ||
         hasPrefixed(el, "data-fill-class-") ||
-        hasPrefixed(el, "data-fill-html-")
+        hasPrefixed(el, "data-fill-template-")
     );
 }
 
@@ -192,13 +193,62 @@ function applyClass(dialog, entries) {
     });
 }
 
-function applyHtml(dialog, entries) {
+function templateContent(id) {
+    if (
+        typeof document === "undefined" ||
+        typeof document.getElementById !== "function"
+    ) {
+        return null;
+    }
+    const node = document.getElementById(id);
+    if (!node || String(node.tagName || "").toUpperCase() !== "TEMPLATE") {
+        return null;
+    }
+    const content = node.content;
+    if (!content || typeof content.cloneNode !== "function") return null;
+    return content;
+}
+
+function replaceSlot(node, clone) {
+    if (typeof node.replaceChildren === "function") {
+        node.replaceChildren(clone);
+        return;
+    }
+    while (node.firstChild) node.removeChild(node.firstChild);
+    node.appendChild(clone);
+}
+
+// A different template id is a change. The same id is not, even when the
+// template is gone, so a server-rendered slot keeps its error. An id that
+// does not resolve to a template is not a change and is not applied.
+function templatesWouldChange(dialog, entries) {
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const nodes = slotNodes(dialog, entry.name);
+        let found = false;
+        let differs = false;
+        nodes.forEach(function (node) {
+            found = true;
+            if (attr(node, "data-filled-template") !== entry.value) {
+                differs = true;
+            }
+        });
+        if (!found || !differs) continue;
+        if (!templateContent(entry.value)) continue;
+        return true;
+    }
+    return false;
+}
+
+function applyTemplates(dialog, entries) {
     let replaced = false;
     entries.forEach(function (entry) {
+        const content = templateContent(entry.value);
+        if (!content) return;
         slotNodes(dialog, entry.name).forEach(function (node) {
-            if (node.getAttribute("data-filled-html") === entry.value) return;
-            node.innerHTML = entry.value;
-            node.setAttribute("data-filled-html", entry.value);
+            if (attr(node, "data-filled-template") === entry.value) return;
+            replaceSlot(node, content.cloneNode(true));
+            node.setAttribute("data-filled-template", entry.value);
             replaced = true;
         });
     });
@@ -217,7 +267,7 @@ function fillDialog(trigger) {
     const fields = readPrefixed(trigger, "data-fill-field-");
     const textSlots = readPrefixed(trigger, "data-fill-text-");
     const classSlots = readPrefixed(trigger, "data-fill-class-");
-    const htmlSlots = readPrefixed(trigger, "data-fill-html-");
+    const templateSlots = readPrefixed(trigger, "data-fill-template-");
     let changed = false;
     if (action != null) {
         forms.forEach(function (form) {
@@ -236,9 +286,7 @@ function fillDialog(trigger) {
             return node.textContent == null ? "" : String(node.textContent);
         }) ||
         slotsWouldChange(dialog, classSlots, classOf) ||
-        slotsWouldChange(dialog, htmlSlots, function (node) {
-            return attr(node, "data-filled-html");
-        })
+        templatesWouldChange(dialog, templateSlots)
     ) {
         changed = true;
     }
@@ -271,11 +319,11 @@ function fillDialog(trigger) {
     }
     applyText(dialog, textSlots);
     applyClass(dialog, classSlots);
-    const htmlReplaced = applyHtml(dialog, htmlSlots);
+    const templateReplaced = applyTemplates(dialog, templateSlots);
     dialog.querySelectorAll('button[type="submit"]').forEach(function (button) {
         button.disabled = false;
     });
-    if (htmlReplaced) initDialogFill(dialog);
+    if (templateReplaced) initDialogFill(dialog);
     if (
         typeof dialog.dispatchEvent === "function" &&
         typeof CustomEvent === "function"

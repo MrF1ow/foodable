@@ -127,11 +127,15 @@ test("owner household page has add-member form on /settings/household only", () 
     expect(html).toContain("Bob");
     expect(html).not.toContain('action="/add-household-member"');
     // Manage controls on Bob's row only: the owner never manages themselves.
+    // The make-owner and remove triggers live in that member's template.
     expect(html).toContain(
-        `data-fill-action=&quot;/settings/household/members/${bob.userId}/make-owner&quot;`,
+        `<template id="household-member-actions-${bob.userId}">`,
     );
     expect(html).toContain(
-        `data-fill-action=&quot;/settings/household/members/${bob.userId}/remove&quot;`,
+        `data-fill-action="/settings/household/members/${bob.userId}/make-owner"`,
+    );
+    expect(html).toContain(
+        `data-fill-action="/settings/household/members/${bob.userId}/remove"`,
     );
     expect(html).not.toContain(
         `/settings/household/members/${alice.userId}/remove`,

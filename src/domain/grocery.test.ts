@@ -772,11 +772,14 @@ test("add-food modal contains the section select with picker forms", () => {
     );
     expect(modal).not.toContain("data-grocery-section");
     expect(modal).not.toContain('name="section_id"');
-    expect(html).toContain('data-fill-html-sections="');
+    expect(html).toContain(
+        'data-fill-template-sections="grocery-sections-st-1"',
+    );
+    expect(html).toContain('<template id="grocery-sections-st-1">');
     expect(html).toContain("data-grocery-section");
-    expect(html).toContain("data-infer-section=&quot;sec-other&quot;");
-    expect(html).toContain("value=&quot;sec-produce&quot;");
-    expect(html).toContain("for=&quot;grocery-add-section&quot;");
+    expect(html).toContain('data-infer-section="sec-other"');
+    expect(html).toContain('value="sec-produce"');
+    expect(html).toContain('for="grocery-add-section"');
     expect(html).not.toContain("popovertarget=");
     expect(html).toContain('data-fill-action="/grocery/lines"');
 });
@@ -891,9 +894,13 @@ test("add-food dialog count does not grow with stores", () => {
     expect(six.match(/data-food-picker/g)?.length).toBe(1);
     expect(six.match(/commandfor="grocery-add-food"/g)?.length).toBe(7);
     expect(six).toContain('data-fill-field-store_id="st-6"');
-    expect(six).toContain("value=&quot;sec-st-6&quot;");
+    expect(six).toContain(
+        'data-fill-template-sections="grocery-sections-st-6"',
+    );
+    expect(six).toContain('<template id="grocery-sections-st-6">');
+    expect(six).toContain('value="sec-st-6"');
     expect(six).not.toContain('id="grocery-add-food-st-1"');
-    expect(six).toContain("&amp;lt;img src=x onerror=alert(1)");
+    expect(six).toContain("&quot;&gt;&lt;img src=x onerror=alert(1)&gt;");
     expect(six).not.toContain('"><img src=x');
     expect(six).not.toContain("onerror=alert(1)>");
     expect(dialogHtml(six, "grocery-add-food")).toContain(
@@ -961,6 +968,7 @@ test("add-food dialog count does not grow with stores", () => {
     } as never);
     const costco = dialogHtml(reopened, "grocery-add-food");
     expect(costco).toMatch(/data-modal-open-on-load/);
+    expect(costco).toContain('data-filled-template="grocery-sections-st-2"');
     expect(costco).toContain('value="sec-dairy"');
     expect(costco).toContain(">Dairy</option>");
     expect(costco).not.toContain("sec-produce");
@@ -971,5 +979,9 @@ test("add-food dialog count does not grow with stores", () => {
     expect(costco).toContain('name="store_id" value="st-2"');
     expect(costco).toContain("Pick a food.");
     expect(reopened.match(/Pick a food\./g)?.length).toBe(1);
-    expect(reopened).toContain("value=&quot;sec-produce&quot;");
+    expect(reopened).toContain('<template id="grocery-sections-st-1">');
+    expect(reopened).toContain('value="sec-produce"');
+    expect(reopened).toContain(
+        'data-fill-template-sections="grocery-sections-st-1"',
+    );
 });
