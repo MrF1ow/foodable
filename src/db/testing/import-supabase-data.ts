@@ -19,13 +19,46 @@ export type PgDatabaseIdentity = {
     database: string;
 };
 
+// First component of a numeric IPv4 host the way libpq / inet_aton read it
+// (0x… hex, a leading 0 octal), or null when the host is not numeric IPv4.
+function ipv4FirstOctet(host: string): number | null {
+    const parts = host.split(".");
+    if (parts.length < 1 || parts.length > 4) return null;
+    if (!parts.every((p) => /^(0x[0-9a-f]+|[0-9]+)$/.test(p))) return null;
+    const first = parts[0]!;
+    const value = first.startsWith("0x")
+        ? Number.parseInt(first.slice(2), 16)
+        : first.length > 1 && first.startsWith("0")
+          ? Number.parseInt(first, 8)
+          : Number.parseInt(first, 10);
+    if (parts.length === 1) return Math.floor(value / 2 ** 24);
+    return Number.isNaN(value) ? null : value;
+}
+
+// Every spelling of this machine collapses to "loopback": localhost, the
+// whole 127.0.0.0/8 range in any inet_aton form (127.1, 127.000.000.001),
+// ::1, and IPv4-mapped loopback (::ffff:127.0.0.1, which the URL parser
+// rewrites to ::ffff:7f00:1).
 function normalizePgHost(hostname: string): string {
     const h = hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
-    if (h === "localhost" || h === "127.0.0.1" || h === "::1") {
+    if (h === "localhost" || h === "::1") return "loopback";
+    if (ipv4FirstOctet(h) === 127) return "loopback";
+    const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(h);
+    if (mapped && Number.parseInt(mapped[1]!, 16) >> 8 === 127) {
         return "loopback";
     }
     return h;
 }
+
+// libpq lets these query keys pick a different server or database than the
+// URL's host and path, so the identity check could compare the wrong target.
+const TARGET_SELECTING_QUERY_KEYS = [
+    "dbname",
+    "host",
+    "hostaddr",
+    "port",
+    "service",
+];
 
 /** Normalised host, port, and database name for same-DB checks. */
 export function pgDatabaseIdentity(urlString: string): PgDatabaseIdentity {
@@ -33,10 +66,18 @@ export function pgDatabaseIdentity(urlString: string): PgDatabaseIdentity {
     try {
         parsed = new URL(urlString);
     } catch {
-        throw new Error(`Invalid database URL: ${urlString}`);
+        // Never echo the URL: it may carry a password.
+        throw new Error("Invalid database URL");
     }
     if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
-        throw new Error(`Not a postgres URL: ${urlString}`);
+        throw new Error(`Not a postgres URL (scheme ${parsed.protocol})`);
+    }
+    for (const key of TARGET_SELECTING_QUERY_KEYS) {
+        if (parsed.searchParams.has(key)) {
+            throw new Error(
+                `Database URL must not set "${key}" as a query parameter; put the host, port and database in the URL itself.`,
+            );
+        }
     }
     const database = decodeURIComponent(
         parsed.pathname.replace(/^\//, "") || "postgres",

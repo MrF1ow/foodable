@@ -168,6 +168,39 @@ test("pgDatabaseIdentity treats loopback hosts as equal", () => {
     expect(a).toEqual(c);
 });
 
+test("pgDatabaseIdentity folds every loopback spelling together", () => {
+    const base = pgDatabaseIdentity("postgres://u@127.0.0.1:5432/foodable");
+    for (const host of [
+        "127.1",
+        "127.000.000.001",
+        "127.5.6.7",
+        "0177.0.0.1",
+        "[::ffff:127.0.0.1]",
+        "LOCALHOST",
+        "[0:0:0:0:0:0:0:1]",
+    ]) {
+        expect(
+            pgDatabaseIdentity(`postgres://u@${host}:5432/foodable`),
+        ).toEqual(base);
+    }
+    expect(
+        pgDatabaseIdentity("postgres://u@128.0.0.1:5432/foodable"),
+    ).not.toEqual(base);
+});
+
+test("pgDatabaseIdentity rejects query keys that pick another target", () => {
+    for (const key of ["dbname", "host", "hostaddr", "port", "service"]) {
+        expect(() =>
+            pgDatabaseIdentity(`postgres://u@127.0.0.1:5432/foodable?${key}=x`),
+        ).toThrow(`"${key}"`);
+    }
+    expect(
+        pgDatabaseIdentity(
+            "postgres://u@127.0.0.1:5432/foodable?sslmode=disable&application_name=x",
+        ).database,
+    ).toBe("foodable");
+});
+
 test("assertDistinctDatabaseUrls rejects same database", () => {
     const url = "postgres://postgres@127.0.0.1:54399/foodable";
     expect(() =>
