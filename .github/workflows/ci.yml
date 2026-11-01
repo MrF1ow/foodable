@@ -46,6 +46,20 @@ jobs:
             - name: Typecheck src/
               run: bun run typecheck
 
+            - name: Install PostgreSQL for database tests
+              run: |
+                  echo "postgresql binaries:"
+                  ls /usr/lib/postgresql || true
+                  shopt -s nullglob
+                  bins=(/usr/lib/postgresql/*/bin/initdb)
+                  if [ ${#bins[@]} -eq 0 ]; then
+                    sudo apt-get update
+                    sudo apt-get install -y postgresql
+                    bins=(/usr/lib/postgresql/*/bin/initdb)
+                  fi
+                  PG_BIN=$(dirname "${bins[0]}")
+                  echo "PG_BIN=$PG_BIN" >> "$GITHUB_ENV"
+
             - name: Run tests
               run: bun test
 
