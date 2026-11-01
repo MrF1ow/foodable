@@ -5,71 +5,126 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
 export type MigrationFile = { version: string; name: string; path: string };
 
-/** Matches a full-line SQL transaction control statement (after comment/dollar-quote strip). */
-const TX_CONTROL_LINE =
-    /^\s*(?:(?:begin(?:\s+(?:work|transaction))?|start\s+transaction)(?:\s+(?:isolation\s+level\s+\S+(?:\s+\S+)?|read\s+(?:only|write)|(?:not\s+)?deferrable|[\w,]+))*\s*;|(?:commit|end|rollback)(?:\s+(?:work|transaction))?\s*;|abort\s*;)\s*$/i;
-
-function stripDollarQuotedBodies(sql: string): string {
-    let out = "";
+/**
+ * Split SQL into top-level statements the way the server will, skipping
+ * quoted strings ('…', E'…'), quoted identifiers ("…"), comments (-- and
+ * nested /* *\/) and dollar-quoted bodies ($$…$$, $tag$…$tag$). A single
+ * linear pass: no backtracking regex, so a hostile file cannot stall it.
+ */
+export function splitSqlStatements(sqlText: string): string[] {
+    const statements: string[] = [];
+    let current = "";
     let i = 0;
-    while (i < sql.length) {
-        if (sql[i] === "$") {
-            const head = sql.slice(i).match(/^\$([A-Za-z0-9_]*)\$/);
-            if (head) {
-                const tag = head[1];
-                const open = head[0];
-                const bodyStart = i + open.length;
-                const close = `$${tag}$`;
-                const closeAt = sql.indexOf(close, bodyStart);
-                if (closeAt === -1) {
-                    out += sql[i];
+    const n = sqlText.length;
+    const flush = () => {
+        const text = current.trim();
+        if (text) statements.push(text);
+        current = "";
+    };
+    while (i < n) {
+        const c = sqlText[i];
+        const next = sqlText[i + 1];
+        if (c === "-" && next === "-") {
+            while (i < n && sqlText[i] !== "\n") i++;
+            current += " ";
+            continue;
+        }
+        if (c === "/" && next === "*") {
+            let depth = 1;
+            i += 2;
+            while (i < n && depth > 0) {
+                if (sqlText[i] === "/" && sqlText[i + 1] === "*") {
+                    depth++;
+                    i += 2;
+                } else if (sqlText[i] === "*" && sqlText[i + 1] === "/") {
+                    depth--;
+                    i += 2;
+                } else {
                     i++;
-                    continue;
                 }
-                const body = sql.slice(bodyStart, closeAt);
-                out +=
-                    " ".repeat(open.length) +
-                    body.replace(/[^\n]/g, " ") +
-                    " ".repeat(close.length);
-                i = closeAt + close.length;
+            }
+            current += " ";
+            continue;
+        }
+        if (c === "'") {
+            const escapes = /[eE]/.test(sqlText[i - 1] ?? "");
+            current += c;
+            i++;
+            while (i < n) {
+                const d = sqlText[i];
+                current += d;
+                i++;
+                if (escapes && d === "\\") {
+                    if (i < n) current += sqlText[i++];
+                } else if (d === "'") {
+                    if (sqlText[i] === "'") current += sqlText[i++];
+                    else break;
+                }
+            }
+            continue;
+        }
+        if (c === '"') {
+            current += c;
+            i++;
+            while (i < n) {
+                const d = sqlText[i];
+                current += d;
+                i++;
+                if (d === '"') {
+                    if (sqlText[i] === '"') current += sqlText[i++];
+                    else break;
+                }
+            }
+            continue;
+        }
+        if (c === "$" && !/[A-Za-z0-9_]/.test(sqlText[i - 1] ?? "")) {
+            let j = i + 1;
+            while (j < n && /[A-Za-z0-9_]/.test(sqlText[j] ?? "")) j++;
+            const tag = sqlText.slice(i, j + 1);
+            if (sqlText[j] === "$" && !/^\$[0-9]/.test(tag)) {
+                const closeAt = sqlText.indexOf(tag, j + 1);
+                const end = closeAt === -1 ? n : closeAt + tag.length;
+                current += sqlText.slice(i, end);
+                i = end;
                 continue;
             }
         }
-        out += sql[i];
-        i++;
-    }
-    return out;
-}
-
-function stripSqlComments(sql: string): string {
-    let out = "";
-    let i = 0;
-    while (i < sql.length) {
-        if (sql[i] === "-" && sql[i + 1] === "-") {
-            while (i < sql.length && sql[i] !== "\n") i++;
+        if (c === ";") {
+            flush();
+            i++;
             continue;
         }
-        if (sql[i] === "/" && sql[i + 1] === "*") {
-            i += 2;
-            while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) {
-                i++;
-            }
-            i += 2;
-            continue;
-        }
-        out += sql[i];
+        current += c;
         i++;
     }
-    return out;
+    flush();
+    return statements;
 }
 
-function sqlTextForTxScan(sqlText: string): string {
-    return stripSqlComments(stripDollarQuotedBodies(sqlText));
-}
+// Leading keywords of a top-level statement that starts, ends or hands off a
+// transaction. Inside a migration any of them would commit or abort the
+// runner's own per-file transaction early. PL/pgSQL begin/end only ever
+// appear inside dollar-quoted bodies, which splitSqlStatements keeps whole.
+const TX_CONTROL_FIRST_WORDS = new Set([
+    "begin",
+    "start",
+    "commit",
+    "end",
+    "rollback",
+    "abort",
+]);
 
-function findTransactionControlLine(scannable: string): string | null {
-    for (const line of scannable.split("\n")) {
-        if (TX_CONTROL_LINE.test(line)) return line.trim();
+export function findTransactionControlStatement(
+    sqlText: string,
+): string | null {
+    for (const statement of splitSqlStatements(sqlText)) {
+        const [first = "", second = ""] = statement
+            .toLowerCase()
+            .split(/\s+/, 2);
+        if (TX_CONTROL_FIRST_WORDS.has(first)) return statement;
+        if (first === "prepare" && second === "transaction") {
+            return statement;
+        }
     }
     return null;
 }
@@ -157,7 +212,7 @@ function splitAppliedPending(
 }
 
 function assertNoNestedTransaction(sqlText: string, file: MigrationFile): void {
-    const hit = findTransactionControlLine(sqlTextForTxScan(sqlText));
+    const hit = findTransactionControlStatement(sqlText);
     if (hit) {
         throw new Error(
             `Migration ${migrationLabel(file)} contains begin/commit; nested transactions are not supported`,
@@ -189,6 +244,14 @@ export async function migrate(
         return { applied: alreadyApplied, pending: toApply };
     }
 
+    const pendingFiles = files.filter((f) => !recorded.has(f.version));
+    const pendingText = new Map<string, string>();
+    for (const file of pendingFiles) {
+        const sqlText = await Bun.file(file.path).text();
+        assertNoNestedTransaction(sqlText, file);
+        pendingText.set(file.version, sqlText);
+    }
+
     if (!(await authSchemaExists(sql))) {
         const bootstrap = await Bun.file(bootstrapPath).text();
         await sql.unsafe(bootstrap).simple();
@@ -199,9 +262,8 @@ export async function migrate(
 
     const applied: string[] = [];
 
-    for (const file of files.filter((f) => !recorded.has(f.version))) {
-        const sqlText = await Bun.file(file.path).text();
-        assertNoNestedTransaction(sqlText, file);
+    for (const file of pendingFiles) {
+        const sqlText = pendingText.get(file.version)!;
         const label = migrationLabel(file);
 
         try {

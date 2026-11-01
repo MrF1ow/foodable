@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { SQL } from "bun";
-import { listMigrationFiles, migrate } from "./migrate.js";
+import {
+    findTransactionControlStatement,
+    listMigrationFiles,
+    migrate,
+    splitSqlStatements,
+} from "./migrate.js";
 import { describeDb } from "./testing/pg.js";
 import { findPgBin, startTempPostgres } from "./testing/pg-temp.js";
 
@@ -16,6 +21,86 @@ if (!pgAvailable) {
     }
     console.warn("database tests skipped: no initdb (set PG_BIN)");
 }
+
+describe("splitSqlStatements", () => {
+    test("splits on top-level semicolons only", () => {
+        expect(
+            splitSqlStatements(`select 'a;b'; select "x;y" from t; select 1`),
+        ).toEqual([`select 'a;b'`, `select "x;y" from t`, "select 1"]);
+    });
+
+    test("keeps dollar-quoted bodies whole, including custom tags", () => {
+        const fn = `create function f() returns int language plpgsql as $fn$
+begin
+  commit;
+  return 1;
+end;
+$fn$`;
+        expect(splitSqlStatements(`${fn}; select 2;`)).toEqual([
+            fn,
+            "select 2",
+        ]);
+    });
+
+    test("drops comments, including nested block comments", () => {
+        expect(
+            splitSqlStatements(`-- commit;
+/* outer /* inner */ commit; */ select 1;`),
+        ).toEqual(["select 1"]);
+    });
+
+    test("handles doubled quotes and E-string escapes", () => {
+        expect(
+            splitSqlStatements(`select 'it''s;'; select E'a\\';b'; select 3`),
+        ).toEqual([`select 'it''s;'`, `select E'a\\';b'`, "select 3"]);
+    });
+
+    test("does not treat positional parameters as dollar quotes", () => {
+        expect(splitSqlStatements("select $1; select 2")).toEqual([
+            "select $1",
+            "select 2",
+        ]);
+    });
+});
+
+describe("findTransactionControlStatement", () => {
+    test.each([
+        "create table t(id int); commit;",
+        "create table t(id int);\ncommit\n;",
+        "commit and chain;",
+        "end and no chain;",
+        "rollback to savepoint s;",
+        "prepare transaction 'x';",
+        "select '/*'; commit; select '*/';",
+        "select '$fn$'; commit; select '$fn$';",
+        "BEGIN ISOLATION LEVEL READ COMMITTED, READ ONLY;",
+        "  Start Transaction;",
+        "abort",
+    ])("finds the control statement in %p", (sqlText) => {
+        expect(findTransactionControlStatement(sqlText)).not.toBeNull();
+    });
+
+    test.each([
+        "select 'commit;';",
+        "-- commit;\nselect 1;",
+        "/* /* nested */ commit; */ select 1;",
+        `do $$ begin perform 1; end $$;`,
+        "create table public.ending(id int);",
+        "alter table t add column begin_at timestamptz;",
+    ])("accepts %p", (sqlText) => {
+        expect(findTransactionControlStatement(sqlText)).toBeNull();
+    });
+
+    test("no current migration contains one", async () => {
+        for (const file of listMigrationFiles()) {
+            const text = await Bun.file(file.path).text();
+            expect([file.name, findTransactionControlStatement(text)]).toEqual([
+                file.name,
+                null,
+            ]);
+        }
+    });
+});
 
 describe("listMigrationFiles", () => {
     test("parses version and name", () => {
@@ -184,39 +269,41 @@ select * from table_does_not_exist;`,
         }
     });
 
-    test.each(TX_FORMS)(
-        "rejects nested transaction form %s before applying",
-        async (stmt) => {
-            const pg = await startTempPostgres();
-            const sql = new SQL(pg.url, { prepare: false, max: 1 });
-            try {
-                const dir = mkdtempSync(join(tmpdir(), "foodable-mig-tx-"));
-                writeFileSync(
-                    join(dir, "20260101120000_nested.sql"),
-                    `${stmt}
+    test.each(TX_FORMS)("guard finds nested transaction form %s", (stmt) => {
+        expect(
+            findTransactionControlStatement(`${stmt}
+create table public.work_row(id int);`),
+        ).not.toBeNull();
+    });
+
+    test("a nested transaction is rejected before anything runs", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-tx-"));
+            writeFileSync(
+                join(dir, "20260101120000_nested.sql"),
+                `begin work;
 create table public.work_row(id int);
+commit work;
 select * from missing_relation;`,
-                );
+            );
 
-                await expect(
-                    migrate(sql, { dir, log: () => {} }),
-                ).rejects.toThrow("nested transactions");
+            await expect(migrate(sql, { dir, log: () => {} })).rejects.toThrow(
+                "nested transactions",
+            );
 
-                const recorded = (await sql`
-                    select version from supabase_migrations.schema_migrations
-                `) as { version: string }[];
-                expect(recorded).toEqual([]);
-
-                const leaked = await pg.scalar(
-                    `select to_regclass('public.work_row') is null`,
-                );
-                expect(leaked).toBe("t");
-            } finally {
-                await sql.close();
-                await pg.stop();
-            }
-        },
-    );
+            const untouched = await pg.scalar(
+                `select to_regclass('public.work_row') is null
+                    and to_regclass('supabase_migrations.schema_migrations') is null
+                    and to_regnamespace('auth') is null`,
+            );
+            expect(untouched).toBe("t");
+        } finally {
+            await sql.close();
+            await pg.stop();
+        }
+    });
 
     test("allows begin/end inside dollar-quoted function bodies", async () => {
         const pg = await startTempPostgres();
@@ -246,6 +333,33 @@ $$;`,
                 `select to_regprocedure('public.tx_guard_probe()') is not null`,
             );
             expect(exists).toBe("t");
+        } finally {
+            await sql.close();
+            await pg.stop();
+        }
+    });
+    test("rejects a bad pending file before applying any earlier one", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-upfront-"));
+            writeFileSync(
+                join(dir, "20260101120000_good.sql"),
+                "create table public.good_first(id int);",
+            );
+            writeFileSync(
+                join(dir, "20260101120100_bad.sql"),
+                "create table public.bad_second(id int); commit;",
+            );
+
+            await expect(migrate(sql, { dir, log: () => {} })).rejects.toThrow(
+                "nested transactions",
+            );
+
+            const created = await pg.scalar(
+                `select to_regclass('public.good_first') is null`,
+            );
+            expect(created).toBe("t");
         } finally {
             await sql.close();
             await pg.stop();
