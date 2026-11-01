@@ -7,6 +7,7 @@ import {
     insertReturning,
     maybeOne,
     one,
+    pgCode,
     pgError,
     rows,
     run,
@@ -353,6 +354,23 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
                 { timeoutMs: 100 },
             ),
         ).rejects.toThrow();
+    });
+
+    test("pgCode reads SQLSTATE from errno", async () => {
+        const { sql } = ctx();
+        setSqlForTests(sql);
+
+        await run(async (tx) => {
+            try {
+                await tx`
+                    create temp table _sql_unique (id int primary key) on commit drop
+                `;
+                await tx`insert into _sql_unique values (1)`;
+                await tx`insert into _sql_unique values (1)`;
+            } catch (err) {
+                expect(pgCode(err)).toBe("23505");
+            }
+        });
     });
 
     test("pgError wraps postgres failures", async () => {
