@@ -1,0 +1,370 @@
+import { SQL } from "bun";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+    countMealItems,
+    countMeals,
+    deleteMeal,
+    existingIdempotencyKeys,
+    existingMealIds,
+    getAllMealItems,
+    getMealsByDate,
+    getMealsInRange,
+    insertMeal,
+    listMealItems,
+    searchMeals,
+    updateMeal,
+    type Meal,
+} from "./nutrition.js";
+import { describeDb } from "./testing/pg.js";
+import { seedHousehold } from "./testing/fixtures.js";
+import { findPgBin } from "./testing/pg-temp.js";
+import { run, setSqlForTests } from "./sql.js";
+
+const pgAvailable = await findPgBin();
+
+async function raceInsertMeal(opts: {
+    url: string;
+    sql: SQL;
+    userId: string;
+    key: string;
+}): Promise<
+    [
+        { meal: Meal; deduplicated: boolean },
+        { meal: Meal; deduplicated: boolean },
+    ]
+> {
+    const holder = new SQL(opts.url, { prepare: false, max: 1 });
+    const left = new SQL(opts.url, { prepare: false, max: 1 });
+    const right = new SQL(opts.url, { prepare: false, max: 1 });
+    let releaseLock!: () => void;
+    const lockReleased = new Promise<void>((r) => (releaseLock = r));
+    let lockTaken!: () => void;
+    const lockHeld = new Promise<void>((r) => (lockTaken = r));
+    const holding = holder.begin(async (tx) => {
+        await tx`select pg_advisory_xact_lock(424242)`;
+        lockTaken();
+        await lockReleased;
+    });
+    const input = {
+        description: "Race meal",
+        meal_type: "snack" as const,
+        idempotency_key: opts.key,
+        logged_at: "2024-06-01T12:00:00.000Z",
+    };
+    try {
+        await lockHeld;
+        setSqlForTests(left);
+        const first = insertMeal(opts.userId, input);
+        setSqlForTests(right);
+        const second = insertMeal(opts.userId, input);
+        setSqlForTests(opts.sql);
+        releaseLock();
+        await holding;
+        return await Promise.all([first, second]);
+    } finally {
+        releaseLock();
+        await Promise.allSettled([holding]);
+        setSqlForTests(opts.sql);
+        await Promise.all([holder.close(), left.close(), right.close()]);
+    }
+}
+
+describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
+    let userId: string;
+    let otherUserId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        ({ userId } = await seedHousehold(sql));
+        otherUserId = crypto.randomUUID();
+        await sql`
+            insert into auth.users (id, email)
+            values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
+        `;
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+    });
+
+    test("insertMeal returns full row shape", async () => {
+        const { meal, deduplicated } = await insertMeal(userId, {
+            description: "Oatmeal",
+            meal_type: "breakfast",
+            calories: 388.7,
+            protein_g: 12.5,
+            carbs_g: null,
+            fat_g: 8,
+            fiber_g: 4,
+            sugar_g: 1,
+            alcohol_g: null,
+            caffeine_mg: 95,
+            notes: "with berries",
+            logged_at: "2024-05-10T08:30:00+00:00",
+            idempotency_key: "client:race-1",
+        });
+        expect(deduplicated).toBe(false);
+        expect(meal).toEqual({
+            id: meal.id,
+            user_id: userId,
+            logged_at: "2024-05-10T08:30:00+00:00",
+            meal_type: "breakfast",
+            description: "Oatmeal",
+            calories: 389,
+            protein_g: 12.5,
+            carbs_g: null,
+            fat_g: 8,
+            fiber_g: 4,
+            sugar_g: 1,
+            alcohol_g: null,
+            caffeine_mg: 95,
+            notes: "with berries",
+            idempotency_key: "client:race-1",
+        });
+        expect(meal.id).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        );
+    });
+
+    test("insertMeal deduplicates on idempotency_key", async () => {
+        const input = {
+            description: "Toast",
+            meal_type: "breakfast" as const,
+            idempotency_key: "dup-key",
+            logged_at: "2024-05-11T09:00:00.000Z",
+        };
+        const first = await insertMeal(userId, input);
+        const second = await insertMeal(userId, input);
+        expect(first.deduplicated).toBe(false);
+        expect(second.deduplicated).toBe(true);
+        expect(second.meal.id).toBe(first.meal.id);
+    });
+
+    test("concurrent insertMeal with same key yields one winner", async () => {
+        const { pg, sql } = getCtx();
+        const [a, b] = await raceInsertMeal({
+            url: pg.url,
+            sql,
+            userId,
+            key: "concurrent-meal-key",
+        });
+        const flags = [a.deduplicated, b.deduplicated].sort();
+        expect(flags).toEqual([false, true]);
+        expect(a.meal.id).toBe(b.meal.id);
+    });
+
+    test("insertMeal with items keeps meal and items together", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Item meal",
+            meal_type: "lunch",
+            logged_at: "2024-05-12T12:00:00.000Z",
+            items: [
+                {
+                    household_id: null,
+                    food_id: null,
+                    recipe_id: null,
+                    label: "Apple",
+                    amount: 1,
+                    unit: "each",
+                    grams: 180,
+                    portions: null,
+                    calories: 95,
+                    protein_g: 0.5,
+                    carbs_g: 25,
+                    fat_g: 0.3,
+                    fiber_g: 4,
+                    sugar_g: 19,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                },
+            ],
+        });
+        expect(meal.items).toHaveLength(1);
+        expect(meal.items![0]!.label).toBe("Apple");
+        expect(meal.items![0]!.meal_id).toBe(meal.id);
+    });
+
+    test("listMealItems orders by sort_order", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Sorted items",
+            meal_type: "dinner",
+            logged_at: "2024-05-13T18:00:00.000Z",
+            items: [
+                {
+                    household_id: null,
+                    food_id: null,
+                    recipe_id: null,
+                    label: "Second",
+                    amount: null,
+                    unit: null,
+                    grams: null,
+                    portions: null,
+                    calories: null,
+                    protein_g: null,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 2,
+                },
+                {
+                    household_id: null,
+                    food_id: null,
+                    recipe_id: null,
+                    label: "First",
+                    amount: null,
+                    unit: null,
+                    grams: null,
+                    portions: null,
+                    calories: null,
+                    protein_g: null,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 1,
+                },
+            ],
+        });
+        const items = await listMealItems(userId, [meal.id]);
+        expect(items.map((i) => i.label)).toEqual(["First", "Second"]);
+    });
+
+    test("getMealsByDate uses inclusive start and exclusive end", async () => {
+        await insertMeal(userId, {
+            description: "Early",
+            meal_type: "breakfast",
+            logged_at: "2024-06-01T00:00:00.000Z",
+        });
+        await insertMeal(userId, {
+            description: "Late",
+            meal_type: "snack",
+            logged_at: "2024-06-01T23:59:59.000Z",
+        });
+        await insertMeal(userId, {
+            description: "Next day",
+            meal_type: "breakfast",
+            logged_at: "2024-06-02T00:00:00.000Z",
+        });
+        const day = await getMealsByDate(userId, "2024-06-01", "UTC");
+        expect(day.map((m) => m.description).sort()).toEqual(["Early", "Late"]);
+    });
+
+    test("getMealsInRange spans days", async () => {
+        await insertMeal(userId, {
+            description: "A",
+            meal_type: "breakfast",
+            logged_at: "2024-07-01T12:00:00.000Z",
+        });
+        await insertMeal(userId, {
+            description: "B",
+            meal_type: "lunch",
+            logged_at: "2024-07-02T12:00:00.000Z",
+        });
+        const range = await getMealsInRange(
+            userId,
+            "2024-07-01",
+            "2024-07-02",
+            "UTC",
+        );
+        expect(range.map((m) => m.description)).toEqual(["A", "B"]);
+    });
+
+    test("meals scoped by user_id", async () => {
+        await insertMeal(userId, {
+            description: "Mine",
+            meal_type: "snack",
+            logged_at: "2024-08-01T12:00:00.000Z",
+        });
+        await insertMeal(otherUserId, {
+            description: "Theirs",
+            meal_type: "snack",
+            logged_at: "2024-08-01T12:00:00.000Z",
+        });
+        expect(await countMeals(userId)).toBe(1);
+        expect(await countMeals(otherUserId)).toBe(1);
+    });
+
+    test("existingIdempotencyKeys and existingMealIds", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Keys",
+            meal_type: "snack",
+            idempotency_key: "key-a",
+            logged_at: "2024-08-02T12:00:00.000Z",
+        });
+        expect(
+            await existingIdempotencyKeys(userId, ["key-a", "missing"]),
+        ).toEqual(new Set(["key-a"]));
+        expect(
+            await existingMealIds(userId, [meal.id, "not-a-uuid", meal.id]),
+        ).toEqual(new Set([meal.id.toLowerCase()]));
+    });
+
+    test("searchMeals matches ilike metacharacters literally", async () => {
+        await insertMeal(userId, {
+            description: "100%_real\\food",
+            meal_type: "snack",
+            logged_at: "2024-09-01T12:00:00.000Z",
+        });
+        await insertMeal(userId, {
+            description: "100X real food",
+            meal_type: "snack",
+            logged_at: "2024-09-01T13:00:00.000Z",
+        });
+        const hits = await searchMeals(userId, ["100%_real\\food"]);
+        expect(hits.map((m) => m.description)).toEqual(["100%_real\\food"]);
+    });
+
+    test("deleteMeal false for unknown or other user", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Delete me",
+            meal_type: "snack",
+            logged_at: "2024-09-02T12:00:00.000Z",
+        });
+        expect(await deleteMeal(userId, crypto.randomUUID())).toBe(false);
+        expect(await deleteMeal(otherUserId, meal.id)).toBe(false);
+        expect(await deleteMeal(userId, meal.id)).toBe(true);
+    });
+
+    test("updateMeal not found", async () => {
+        await expect(
+            updateMeal(userId, crypto.randomUUID(), { notes: "nope" }),
+        ).rejects.toThrow("Failed to update meal: meal not found");
+    });
+
+    test("getAllMealItems crosses page boundary", async () => {
+        const { sql } = getCtx();
+        await sql`
+            insert into meals (user_id, description, meal_type, logged_at, idempotency_key)
+            select
+                ${userId},
+                'bulk',
+                'snack',
+                ${"2024-01-01T12:00:00.000Z"}::timestamptz
+                    + (g * interval '1 second'),
+                'bulk:' || g::text
+            from generate_series(1, 1001) as g
+        `;
+        await sql`
+            insert into meal_items (
+                meal_id,
+                user_id,
+                label,
+                sort_order
+            )
+            select m.id, ${userId}, 'item', 0
+            from meals m
+            where m.user_id = ${userId}
+        `;
+        expect(await countMealItems(userId)).toBe(1001);
+        const all = await getAllMealItems(userId);
+        expect(all).toHaveLength(1001);
+    });
+});

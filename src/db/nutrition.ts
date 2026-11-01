@@ -1,9 +1,62 @@
+import type { SQL } from "bun";
 import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
 import { liveExportArchiveStore } from "./exports.js";
 import { getSupabase } from "./client.js";
+import {
+    definedColumns,
+    insertReturning,
+    maybeOne,
+    one,
+    pgCode,
+    rows,
+    run,
+    type Tx,
+} from "./sql.js";
+
+const MEALS = "meals";
+const MEAL_ITEMS = "meal_items";
+const WATER_LOG = "water_log";
+const WEIGHT_LOG = "weight_log";
+const NUTRITION_GOALS = "nutrition_goals";
+
+function nutritionFailed(context: string, err: unknown): Error {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Error(`Failed to ${context}: ${message}`);
+}
+
+function patchKeys(keys: string[]): [string, ...string[]] {
+    return keys as [string, ...string[]];
+}
+
+function sqlState(err: unknown): string | undefined {
+    return (
+        pgCode(err) ?? (err instanceof Error ? pgCode(err.cause) : undefined)
+    );
+}
+
+async function countForUser(
+    tx: Tx,
+    table: string,
+    userId: string,
+    context: string,
+): Promise<number> {
+    try {
+        const [row] = await rows<{ count: number }>(
+            tx,
+            tx`
+                select count(*)::int as count
+                from ${tx.unsafe(table)}
+                where user_id = ${userId}
+            `,
+        );
+        return row?.count ?? 0;
+    } catch (err) {
+        throw nutritionFailed(context, err);
+    }
+}
 
 // ---------- Idempotency ----------
 
@@ -224,8 +277,6 @@ export async function insertMeal(
     userId: string,
     input: MealInput,
 ): Promise<MealInsertResult> {
-    const sb = getSupabase();
-
     // calories is an integer column and Postgres rejects a fractional value
     // outright (22P02), so round before anything else reads the input — the
     // digest below included, or re-logging the same meal would derive a key
@@ -242,22 +293,28 @@ export async function insertMeal(
     const idempotencyKey =
         meal.idempotency_key ?? mealIdempotencyKey(userId, meal, loggedAt);
 
-    const { data: existing, error: selErr } = await sb
-        .from("meals")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("idempotency_key", idempotencyKey)
-        .maybeSingle();
-    if (selErr) throw new Error(`Failed to look up meal: ${selErr.message}`);
-    if (existing) {
-        const found = existing as Meal;
-        found.items = await listMealItems(userId, [found.id]);
-        return { meal: found, deduplicated: true };
-    }
+    return run(async (tx) => {
+        let existing: Meal | null;
+        try {
+            existing = await maybeOne<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and idempotency_key = ${idempotencyKey}
+                `,
+                "look up meal",
+            );
+        } catch (err) {
+            throw nutritionFailed("look up meal", err);
+        }
+        if (existing) {
+            existing.items = await listMealItemsInTx(tx, userId, [existing.id]);
+            return { meal: existing, deduplicated: true };
+        }
 
-    const { data, error } = await sb
-        .from("meals")
-        .insert({
+        const payload = {
             user_id: userId,
             description: decodeEscapeSequences(meal.description),
             meal_type: meal.meal_type,
@@ -273,56 +330,96 @@ export async function insertMeal(
             notes:
                 meal.notes != null ? decodeEscapeSequences(meal.notes) : null,
             idempotency_key: idempotencyKey,
-        })
-        .select()
-        .single();
+        };
 
-    if (error) {
-        // Concurrent retry with the same idempotency key — the other request
-        // already inserted the row. Fetch and return it instead of failing.
-        if (error.code === "23505") {
-            const { data: raced, error: raceErr } = await sb
-                .from("meals")
-                .select("*")
-                .eq("user_id", userId)
-                .eq("idempotency_key", idempotencyKey)
-                .maybeSingle();
-            if (raceErr)
-                throw new Error(
-                    `Failed to resolve idempotent meal: ${raceErr.message}`,
-                );
-            if (raced) {
-                const found = raced as Meal;
-                found.items = await listMealItems(userId, [found.id]);
-                return { meal: found, deduplicated: true };
+        let saved: Meal;
+        try {
+            saved = await tx.savepoint(async (sp) =>
+                insertReturning<Meal>(
+                    sp as Tx,
+                    MEALS,
+                    payload,
+                    "*",
+                    "insert meal",
+                ),
+            );
+        } catch (err) {
+            // Concurrent retry with the same idempotency key — the other request
+            // already inserted the row. Fetch and return it instead of failing.
+            if (sqlState(err) === "23505") {
+                let raced: Meal | null;
+                try {
+                    raced = await maybeOne<Meal>(
+                        tx,
+                        tx`
+                            select *
+                            from ${tx.unsafe(MEALS)}
+                            where user_id = ${userId}
+                              and idempotency_key = ${idempotencyKey}
+                        `,
+                        "resolve idempotent meal",
+                    );
+                } catch (raceErr) {
+                    throw nutritionFailed("resolve idempotent meal", raceErr);
+                }
+                if (raced) {
+                    raced.items = await listMealItemsInTx(tx, userId, [
+                        raced.id,
+                    ]);
+                    return { meal: raced, deduplicated: true };
+                }
             }
+            if (
+                err instanceof Error &&
+                err.message.startsWith("Failed to insert meal:")
+            ) {
+                throw err;
+            }
+            throw nutritionFailed("insert meal", err);
         }
-        throw new Error(`Failed to insert meal: ${error.message}`);
-    }
-    const saved = data as Meal;
-    if (input.items && input.items.length > 0) {
-        await replaceMealItems(userId, saved.id, input.items);
-        saved.items = await listMealItems(userId, [saved.id]);
-    }
-    return { meal: saved, deduplicated: false };
+
+        if (input.items && input.items.length > 0) {
+            saved.items = await replaceMealItemsInTx(
+                tx,
+                userId,
+                saved.id,
+                input.items,
+            );
+        }
+        return { meal: saved, deduplicated: false };
+    });
 }
 
 const MEAL_ITEM_COLS =
     "id, meal_id, user_id, household_id, food_id, recipe_id, label, amount, unit, grams, portions, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, sort_order, created_at";
 
-export async function listMealItems(
+async function listMealItemsInTx(
+    tx: Tx,
     userId: string,
     mealIds: string[],
 ): Promise<MealItem[]> {
     if (mealIds.length === 0) return [];
-    const { data, error } = await getSupabase()
-        .from("meal_items")
-        .select(MEAL_ITEM_COLS)
-        .eq("user_id", userId)
-        .in("meal_id", mealIds)
-        .order("sort_order", { ascending: true });
-    if (error) throw new Error(`Failed to list meal items: ${error.message}`);
-    return (data as MealItem[]) ?? [];
+    try {
+        return await rows<MealItem>(
+            tx,
+            tx`
+                select ${tx.unsafe(MEAL_ITEM_COLS)}
+                from ${tx.unsafe(MEAL_ITEMS)}
+                where user_id = ${userId}
+                  and meal_id = any(${tx.array(mealIds, "uuid")})
+                order by sort_order asc
+            `,
+        );
+    } catch (err) {
+        throw nutritionFailed("list meal items", err);
+    }
+}
+
+export async function listMealItems(
+    userId: string,
+    mealIds: string[],
+): Promise<MealItem[]> {
+    return run(async (tx) => listMealItemsInTx(tx, userId, mealIds));
 }
 
 export async function attachMealItems(
@@ -345,75 +442,104 @@ export async function attachMealItems(
     return meals;
 }
 
+async function replaceMealItemsInTx(
+    tx: Tx,
+    userId: string,
+    mealId: string,
+    items: MealItemWrite[],
+): Promise<MealItem[]> {
+    try {
+        await tx`
+            delete from ${tx.unsafe(MEAL_ITEMS)}
+            where user_id = ${userId}
+              and meal_id = ${mealId}
+        `;
+    } catch (err) {
+        throw nutritionFailed("replace meal items", err);
+    }
+    if (items.length === 0) return [];
+    const inserted: MealItem[] = [];
+    for (let index = 0; index < items.length; index++) {
+        const item = items[index]!;
+        try {
+            const row = await insertReturning<MealItem>(
+                tx,
+                MEAL_ITEMS,
+                {
+                    meal_id: mealId,
+                    user_id: userId,
+                    household_id: item.household_id,
+                    food_id: item.food_id,
+                    recipe_id: item.recipe_id,
+                    label: item.label,
+                    amount: item.amount,
+                    unit: item.unit,
+                    grams: item.grams,
+                    portions: item.portions,
+                    calories: item.calories,
+                    protein_g: item.protein_g,
+                    carbs_g: item.carbs_g,
+                    fat_g: item.fat_g,
+                    fiber_g: item.fiber_g,
+                    sugar_g: item.sugar_g,
+                    alcohol_g: item.alcohol_g,
+                    caffeine_mg: item.caffeine_mg,
+                    sort_order: item.sort_order ?? index,
+                },
+                MEAL_ITEM_COLS,
+                "insert meal items",
+            );
+            inserted.push(row);
+        } catch (err) {
+            if (
+                err instanceof Error &&
+                err.message.startsWith("Failed to insert meal items:")
+            ) {
+                throw err;
+            }
+            throw nutritionFailed("insert meal items", err);
+        }
+    }
+    inserted.sort((a, b) => a.sort_order - b.sort_order);
+    return inserted;
+}
+
 export async function replaceMealItems(
     userId: string,
     mealId: string,
     items: MealItemWrite[],
 ): Promise<MealItem[]> {
-    const sb = getSupabase();
-    const { error: delErr } = await sb
-        .from("meal_items")
-        .delete()
-        .eq("user_id", userId)
-        .eq("meal_id", mealId);
-    if (delErr)
-        throw new Error(`Failed to replace meal items: ${delErr.message}`);
-    if (items.length === 0) return [];
-    const { data, error } = await sb
-        .from("meal_items")
-        .insert(
-            items.map((item, index) => ({
-                meal_id: mealId,
-                user_id: userId,
-                household_id: item.household_id,
-                food_id: item.food_id,
-                recipe_id: item.recipe_id,
-                label: item.label,
-                amount: item.amount,
-                unit: item.unit,
-                grams: item.grams,
-                portions: item.portions,
-                calories: item.calories,
-                protein_g: item.protein_g,
-                carbs_g: item.carbs_g,
-                fat_g: item.fat_g,
-                fiber_g: item.fiber_g,
-                sugar_g: item.sugar_g,
-                alcohol_g: item.alcohol_g,
-                caffeine_mg: item.caffeine_mg,
-                sort_order: item.sort_order ?? index,
-            })),
-        )
-        .select(MEAL_ITEM_COLS)
-        .order("sort_order", { ascending: true });
-    if (error) throw new Error(`Failed to insert meal items: ${error.message}`);
-    return (data as MealItem[]) ?? [];
+    return run(async (tx) => replaceMealItemsInTx(tx, userId, mealId, items));
 }
 
 export async function countMealItems(userId: string): Promise<number> {
-    const { count, error } = await getSupabase()
-        .from("meal_items")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-    if (error) throw new Error(`Failed to count meal items: ${error.message}`);
-    return count ?? 0;
+    return run(async (tx) =>
+        countForUser(tx, MEAL_ITEMS, userId, "count meal items"),
+    );
 }
 
 export async function getAllMealItems(userId: string): Promise<MealItem[]> {
     const expected = await countMealItems(userId);
     if (expected === 0) return [];
     const items = await fetchAllPages<MealItem>(async (from, to) => {
-        const { data, error } = await getSupabase()
-            .from("meal_items")
-            .select(MEAL_ITEM_COLS)
-            .eq("user_id", userId)
-            .order("meal_id", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to);
-        if (error)
-            throw new Error(`Failed to get meal items: ${error.message}`);
-        return (data as MealItem[]) ?? [];
+        const limit = to - from + 1;
+        return run(async (tx) => {
+            try {
+                return await rows<MealItem>(
+                    tx,
+                    tx`
+                        select ${tx.unsafe(MEAL_ITEM_COLS)}
+                        from ${tx.unsafe(MEAL_ITEMS)}
+                        where user_id = ${userId}
+                        order by meal_id asc, sort_order asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                );
+            } catch (err) {
+                throw nutritionFailed("get meal items", err);
+            }
+        });
     });
     if (items.length < expected) {
         throw new Error(
@@ -473,16 +599,24 @@ export async function getMealsByDate(
     const startUtc = zonedDayStartUtc(date, tz);
     const endUtc = zonedNextDayStartUtc(date, tz);
 
-    const { data, error } = await getSupabase()
-        .from("meals")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get meals: ${error.message}`);
-    return attachMealItems(userId, (data as Meal[]) ?? []);
+    const meals = await run(async (tx) => {
+        try {
+            return await rows<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get meals", err);
+        }
+    });
+    return attachMealItems(userId, meals);
 }
 
 export async function getMealsInRange(
@@ -494,16 +628,24 @@ export async function getMealsInRange(
     const startUtc = zonedDayStartUtc(startDate, tz);
     const endUtc = zonedNextDayStartUtc(endDate, tz);
 
-    const { data, error } = await getSupabase()
-        .from("meals")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get meals: ${error.message}`);
-    return attachMealItems(userId, (data as Meal[]) ?? []);
+    const meals = await run(async (tx) => {
+        try {
+            return await rows<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get meals", err);
+        }
+    });
+    return attachMealItems(userId, meals);
 }
 
 /**
@@ -512,13 +654,7 @@ export async function getMealsInRange(
  * rows for a single limiter hit.
  */
 export async function countMeals(userId: string): Promise<number> {
-    const { count, error } = await getSupabase()
-        .from("meals")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-
-    if (error) throw new Error(`Failed to count meals: ${error.message}`);
-    return count ?? 0;
+    return run(async (tx) => countForUser(tx, MEALS, userId, "count meals"));
 }
 
 /**
@@ -531,17 +667,23 @@ export async function existingIdempotencyKeys(
 ): Promise<Set<string>> {
     if (keys.length === 0) return new Set();
 
-    const { data, error } = await getSupabase()
-        .from("meals")
-        .select("idempotency_key")
-        .eq("user_id", userId)
-        .in("idempotency_key", keys);
-
-    if (error) {
-        throw new Error(`Failed to check existing meals: ${error.message}`);
-    }
+    const data = await run(async (tx) => {
+        try {
+            return await rows<{ idempotency_key: string | null }>(
+                tx,
+                tx`
+                    select idempotency_key
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and idempotency_key = any(${tx.array(keys, "text")})
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("check existing meals", err);
+        }
+    });
     return new Set(
-        ((data as { idempotency_key: string | null }[]) ?? [])
+        data
             .map((r) => r.idempotency_key)
             .filter((k): k is string => k !== null),
     );
@@ -568,18 +710,22 @@ export async function existingMealIds(
     const uuids = ids.filter((id) => UUID_RE.test(id));
     if (uuids.length === 0) return new Set();
 
-    const { data, error } = await getSupabase()
-        .from("meals")
-        .select("id")
-        .eq("user_id", userId)
-        .in("id", uuids);
-
-    if (error) {
-        throw new Error(`Failed to check existing meals: ${error.message}`);
-    }
-    return new Set(
-        ((data as { id: string }[]) ?? []).map((r) => r.id.toLowerCase()),
-    );
+    const data = await run(async (tx) => {
+        try {
+            return await rows<{ id: string }>(
+                tx,
+                tx`
+                    select id
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and id = any(${tx.array(uuids, "uuid")})
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("check existing meals", err);
+        }
+    });
+    return new Set(data.map((r) => r.id.toLowerCase()));
 }
 
 /**
@@ -618,16 +764,24 @@ export async function getAllMeals(userId: string): Promise<Meal[]> {
     if (expected === 0) return [];
 
     const meals = await fetchAllPages<Meal>(async (from, to) => {
-        const { data, error } = await getSupabase()
-            .from("meals")
-            .select("*")
-            .eq("user_id", userId)
-            .order("logged_at", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to);
-
-        if (error) throw new Error(`Failed to get meals: ${error.message}`);
-        return (data as Meal[]) ?? [];
+        const limit = to - from + 1;
+        return run(async (tx) => {
+            try {
+                return await rows<Meal>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(MEALS)}
+                        where user_id = ${userId}
+                        order by logged_at asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                );
+            } catch (err) {
+                throw nutritionFailed("get meals", err);
+            }
+        });
     });
 
     if (meals.length < expected) {
@@ -644,6 +798,46 @@ export async function getAllMeals(userId: string): Promise<Meal[]> {
 // avoid PostgREST's .or() — its logic-tree grammar treats commas/parens inside
 // values as structure and supabase-js does not quote them — and instead run
 // one cheap per-user query per (alternative × column) and merge in code.
+async function searchMealsQuery(
+    userId: string,
+    tokens: string[],
+    column: "description" | "notes",
+    opts: { limit: number; sinceIso?: string },
+): Promise<Meal[]> {
+    return run(async (tx) => {
+        try {
+            const conditions: SQL.Query<unknown>[] = [tx`user_id = ${userId}`];
+            if (opts.sinceIso) {
+                conditions.push(tx`logged_at >= ${opts.sinceIso}`);
+            }
+            for (const token of tokens) {
+                const pattern = `%${escapeLikePattern(token)}%`;
+                if (column === "description") {
+                    conditions.push(tx`description ilike ${pattern}`);
+                } else {
+                    conditions.push(tx`notes ilike ${pattern}`);
+                }
+            }
+            const where = conditions.reduce(
+                (acc, part, i) => (i === 0 ? part : tx`${acc} and ${part}`),
+                conditions[0]!,
+            );
+            return await rows<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where ${where}
+                    order by logged_at desc
+                    limit ${opts.limit}
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("search meals", err);
+        }
+    });
+}
+
 export async function searchMeals(
     userId: string,
     queries: string[],
@@ -655,29 +849,23 @@ export async function searchMeals(
         .filter((tokens) => tokens.length > 0);
     if (tokenized.length === 0) return [];
 
-    const buildQuery = (tokens: string[], column: "description" | "notes") => {
-        let q = getSupabase().from("meals").select("*").eq("user_id", userId);
-        if (opts.sinceIso) q = q.gte("logged_at", opts.sinceIso);
-        for (const token of tokens) {
-            q = q.ilike(column, `%${escapeLikePattern(token)}%`);
-        }
-        return q.order("logged_at", { ascending: false }).limit(limit);
-    };
-
     const results = await Promise.all(
         tokenized.flatMap((tokens) => [
-            buildQuery(tokens, "description"),
-            buildQuery(tokens, "notes"),
+            searchMealsQuery(userId, tokens, "description", {
+                limit,
+                sinceIso: opts.sinceIso,
+            }),
+            searchMealsQuery(userId, tokens, "notes", {
+                limit,
+                sinceIso: opts.sinceIso,
+            }),
         ]),
     );
 
     const seen = new Set<string>();
     const merged: Meal[] = [];
-    for (const { data, error } of results) {
-        if (error) {
-            throw new Error(`Failed to search meals: ${error.message}`);
-        }
-        for (const meal of (data as Meal[]) ?? []) {
+    for (const page of results) {
+        for (const meal of page) {
             if (!seen.has(meal.id)) {
                 seen.add(meal.id);
                 merged.push(meal);
@@ -691,15 +879,22 @@ export async function searchMeals(
 /** True when a row matched and was deleted; false when the id is unknown or
  *  belongs to another user — the handler must not claim success either way. */
 export async function deleteMeal(userId: string, id: string): Promise<boolean> {
-    const { data, error } = await getSupabase()
-        .from("meals")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select("id");
-
-    if (error) throw new Error(`Failed to delete meal: ${error.message}`);
-    return (data?.length ?? 0) > 0;
+    return run(async (tx) => {
+        try {
+            const data = await rows<{ id: string }>(
+                tx,
+                tx`
+                    delete from ${tx.unsafe(MEALS)}
+                    where id = ${id}
+                      and user_id = ${userId}
+                    returning id
+                `,
+            );
+            return data.length > 0;
+        } catch (err) {
+            throw nutritionFailed("delete meal", err);
+        }
+    });
 }
 
 export async function updateMeal(
@@ -707,58 +902,82 @@ export async function updateMeal(
     id: string,
     fields: Partial<MealInput>,
 ): Promise<Meal> {
-    const sb = getSupabase();
+    return run(async (tx) => {
+        let existing: Meal | null;
+        try {
+            existing = await maybeOne<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where id = ${id}
+                      and user_id = ${userId}
+                `,
+                "update meal",
+            );
+        } catch (err) {
+            throw nutritionFailed("update meal", err);
+        }
+        if (!existing) throw new Error("Failed to update meal: meal not found");
 
-    const { data: existing, error: selErr } = await sb
-        .from("meals")
-        .select("*")
-        .eq("id", id)
-        .eq("user_id", userId)
-        .maybeSingle();
-    if (selErr) throw new Error(`Failed to update meal: ${selErr.message}`);
-    if (!existing) throw new Error("Failed to update meal: meal not found");
+        const update: Record<string, unknown> = {};
+        if (fields.description !== undefined)
+            update.description = decodeEscapeSequences(fields.description);
+        if (fields.meal_type !== undefined) update.meal_type = fields.meal_type;
+        // Integer column — see toStoredInteger.
+        if (fields.calories !== undefined)
+            update.calories = toStoredInteger(fields.calories);
+        if (fields.protein_g !== undefined) update.protein_g = fields.protein_g;
+        if (fields.carbs_g !== undefined) update.carbs_g = fields.carbs_g;
+        if (fields.fat_g !== undefined) update.fat_g = fields.fat_g;
+        if (fields.fiber_g !== undefined) update.fiber_g = fields.fiber_g;
+        if (fields.sugar_g !== undefined) update.sugar_g = fields.sugar_g;
+        if (fields.alcohol_g !== undefined) update.alcohol_g = fields.alcohol_g;
+        if (fields.caffeine_mg !== undefined)
+            update.caffeine_mg = fields.caffeine_mg;
+        if (fields.logged_at !== undefined) update.logged_at = fields.logged_at;
+        if (fields.notes !== undefined)
+            update.notes =
+                fields.notes != null
+                    ? decodeEscapeSequences(fields.notes)
+                    : fields.notes;
 
-    const update: Record<string, unknown> = {};
-    if (fields.description !== undefined)
-        update.description = decodeEscapeSequences(fields.description);
-    if (fields.meal_type !== undefined) update.meal_type = fields.meal_type;
-    // Integer column — see toStoredInteger.
-    if (fields.calories !== undefined)
-        update.calories = toStoredInteger(fields.calories);
-    if (fields.protein_g !== undefined) update.protein_g = fields.protein_g;
-    if (fields.carbs_g !== undefined) update.carbs_g = fields.carbs_g;
-    if (fields.fat_g !== undefined) update.fat_g = fields.fat_g;
-    if (fields.fiber_g !== undefined) update.fiber_g = fields.fiber_g;
-    if (fields.sugar_g !== undefined) update.sugar_g = fields.sugar_g;
-    if (fields.alcohol_g !== undefined) update.alcohol_g = fields.alcohol_g;
-    if (fields.caffeine_mg !== undefined)
-        update.caffeine_mg = fields.caffeine_mg;
-    if (fields.logged_at !== undefined) update.logged_at = fields.logged_at;
-    if (fields.notes !== undefined)
-        update.notes =
-            fields.notes != null
-                ? decodeEscapeSequences(fields.notes)
-                : fields.notes;
+        const newKey = updatedMealIdempotencyKey(userId, existing, fields);
+        if (newKey !== null) update.idempotency_key = newKey;
 
-    const newKey = updatedMealIdempotencyKey(userId, existing as Meal, fields);
-    if (newKey !== null) update.idempotency_key = newKey;
+        const { row: patch, keys } = definedColumns(update);
+        let saved: Meal;
+        try {
+            if (keys.length === 0) {
+                saved = existing;
+            } else {
+                saved = await one<Meal>(
+                    tx,
+                    tx`
+                        update ${tx.unsafe(MEALS)} set ${tx(patch, ...patchKeys(keys))}
+                        where id = ${id}
+                          and user_id = ${userId}
+                        returning *
+                    `,
+                    "update meal",
+                );
+            }
+        } catch (err) {
+            throw nutritionFailed("update meal", err);
+        }
 
-    const { data, error } = await sb
-        .from("meals")
-        .update(update)
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select()
-        .single();
-
-    if (error) throw new Error(`Failed to update meal: ${error.message}`);
-    const saved = data as Meal;
-    if (fields.items) {
-        saved.items = await replaceMealItems(userId, saved.id, fields.items);
-    } else {
-        saved.items = await listMealItems(userId, [saved.id]);
-    }
-    return saved;
+        if (fields.items) {
+            saved.items = await replaceMealItemsInTx(
+                tx,
+                userId,
+                saved.id,
+                fields.items,
+            );
+        } else {
+            saved.items = await listMealItemsInTx(tx, userId, [saved.id]);
+        }
+        return saved;
+    });
 }
 
 // ---------- Nutrition goals ----------
@@ -799,53 +1018,79 @@ export async function upsertNutritionGoals(
     userId: string,
     input: NutritionGoalsInput,
 ): Promise<NutritionGoals> {
-    const { data, error } = await getSupabase()
-        .from("nutrition_goals")
-        .upsert(
-            {
-                user_id: userId,
-                // daily_calories and daily_water_ml are integer columns; the
-                // gram targets are numeric(6,2) and daily_caffeine_mg is
-                // numeric(7,2). See toStoredInteger — a water goal converted
-                // from "half a gallon" arrives fractional.
-                daily_calories:
-                    input.daily_calories == null
-                        ? null
-                        : toStoredInteger(input.daily_calories),
-                daily_protein_g: input.daily_protein_g ?? null,
-                daily_carbs_g: input.daily_carbs_g ?? null,
-                daily_fat_g: input.daily_fat_g ?? null,
-                daily_fiber_g: input.daily_fiber_g ?? null,
-                daily_sugar_g: input.daily_sugar_g ?? null,
-                daily_alcohol_g: input.daily_alcohol_g ?? null,
-                daily_caffeine_mg: input.daily_caffeine_mg ?? null,
-                daily_water_ml:
-                    input.daily_water_ml == null
-                        ? null
-                        : toStoredInteger(input.daily_water_ml),
-                target_weight_g: input.target_weight_g ?? null,
-                updated_at: new Date().toISOString(),
-            },
-            { onConflict: "user_id" },
-        )
-        .select()
-        .single();
+    const payload: Record<string, unknown> = {
+        user_id: userId,
+        updated_at: new Date().toISOString(),
+    };
+    if (input.daily_calories !== undefined) {
+        payload.daily_calories =
+            input.daily_calories == null
+                ? null
+                : toStoredInteger(input.daily_calories);
+    }
+    if (input.daily_protein_g !== undefined)
+        payload.daily_protein_g = input.daily_protein_g;
+    if (input.daily_carbs_g !== undefined)
+        payload.daily_carbs_g = input.daily_carbs_g;
+    if (input.daily_fat_g !== undefined)
+        payload.daily_fat_g = input.daily_fat_g;
+    if (input.daily_fiber_g !== undefined)
+        payload.daily_fiber_g = input.daily_fiber_g;
+    if (input.daily_sugar_g !== undefined)
+        payload.daily_sugar_g = input.daily_sugar_g;
+    if (input.daily_alcohol_g !== undefined)
+        payload.daily_alcohol_g = input.daily_alcohol_g;
+    if (input.daily_caffeine_mg !== undefined)
+        payload.daily_caffeine_mg = input.daily_caffeine_mg;
+    if (input.daily_water_ml !== undefined) {
+        payload.daily_water_ml =
+            input.daily_water_ml == null
+                ? null
+                : toStoredInteger(input.daily_water_ml);
+    }
+    if (input.target_weight_g !== undefined)
+        payload.target_weight_g = input.target_weight_g;
 
-    if (error) throw new Error(`Failed to save goals: ${error.message}`);
-    return data as NutritionGoals;
+    return run(async (tx) => {
+        const { row, keys } = definedColumns(payload);
+        const updateKeys = keys.filter((k) => k !== "user_id");
+        const setClause = updateKeys
+            .map((k) => `${k} = excluded.${k}`)
+            .join(", ");
+        try {
+            return await one<NutritionGoals>(
+                tx,
+                tx`
+                    insert into ${tx.unsafe(NUTRITION_GOALS)} ${tx(row, ...patchKeys(keys))}
+                    on conflict (user_id) do update set ${tx.unsafe(setClause)}
+                    returning *
+                `,
+                "save goals",
+            );
+        } catch (err) {
+            throw nutritionFailed("save goals", err);
+        }
+    });
 }
 
 export async function getNutritionGoals(
     userId: string,
 ): Promise<NutritionGoals | null> {
-    const { data, error } = await getSupabase()
-        .from("nutrition_goals")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (error) throw new Error(`Failed to get goals: ${error.message}`);
-    return (data as NutritionGoals | null) ?? null;
+    return run(async (tx) => {
+        try {
+            return await maybeOne<NutritionGoals>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(NUTRITION_GOALS)}
+                    where user_id = ${userId}
+                `,
+                "get goals",
+            );
+        } catch (err) {
+            throw nutritionFailed("get goals", err);
+        }
+    });
 }
 
 // ---------- Water log ----------
@@ -876,8 +1121,6 @@ export async function insertWater(
     userId: string,
     input: WaterInput,
 ): Promise<WaterInsertResult> {
-    const sb = getSupabase();
-
     // Resolve logged_at once so the digest and the persisted row agree.
     const loggedAt = input.logged_at ?? new Date().toISOString();
     // Always populate the key: use the client's if given, otherwise derive a
@@ -886,48 +1129,71 @@ export async function insertWater(
         input.idempotency_key ??
         deriveIdempotencyKey([userId, input.amount_ml, input.notes, loggedAt]);
 
-    const { data: existing, error: selErr } = await sb
-        .from("water_log")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("idempotency_key", idempotencyKey)
-        .maybeSingle();
-    if (selErr) throw new Error(`Failed to look up water: ${selErr.message}`);
-    if (existing) return { entry: existing as WaterEntry, deduplicated: true };
+    return run(async (tx) => {
+        let existing: WaterEntry | null;
+        try {
+            existing = await maybeOne<WaterEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WATER_LOG)}
+                    where user_id = ${userId}
+                      and idempotency_key = ${idempotencyKey}
+                `,
+                "look up water",
+            );
+        } catch (err) {
+            throw nutritionFailed("look up water", err);
+        }
+        if (existing) return { entry: existing, deduplicated: true };
 
-    const { data, error } = await sb
-        .from("water_log")
-        .insert({
+        const payload = {
             user_id: userId,
             amount_ml: input.amount_ml,
             logged_at: loggedAt,
             notes: input.notes ?? null,
             idempotency_key: idempotencyKey,
-        })
-        .select()
-        .single();
+        };
 
-    if (error) {
-        if (error.code === "23505") {
-            const { data: existing, error: raceErr } = await sb
-                .from("water_log")
-                .select("*")
-                .eq("user_id", userId)
-                .eq("idempotency_key", idempotencyKey)
-                .maybeSingle();
-            if (raceErr)
-                throw new Error(
-                    `Failed to resolve idempotent water: ${raceErr.message}`,
-                );
-            if (existing)
-                return {
-                    entry: existing as WaterEntry,
-                    deduplicated: true,
-                };
+        try {
+            const entry = await tx.savepoint(async (sp) =>
+                insertReturning<WaterEntry>(
+                    sp as Tx,
+                    WATER_LOG,
+                    payload,
+                    "*",
+                    "insert water",
+                ),
+            );
+            return { entry, deduplicated: false };
+        } catch (err) {
+            if (sqlState(err) === "23505") {
+                let raced: WaterEntry | null;
+                try {
+                    raced = await maybeOne<WaterEntry>(
+                        tx,
+                        tx`
+                            select *
+                            from ${tx.unsafe(WATER_LOG)}
+                            where user_id = ${userId}
+                              and idempotency_key = ${idempotencyKey}
+                        `,
+                        "resolve idempotent water",
+                    );
+                } catch (raceErr) {
+                    throw nutritionFailed("resolve idempotent water", raceErr);
+                }
+                if (raced) return { entry: raced, deduplicated: true };
+            }
+            if (
+                err instanceof Error &&
+                err.message.startsWith("Failed to insert water:")
+            ) {
+                throw err;
+            }
+            throw nutritionFailed("insert water", err);
         }
-        throw new Error(`Failed to insert water: ${error.message}`);
-    }
-    return { entry: data as WaterEntry, deduplicated: false };
+    });
 }
 
 export async function getWaterByDate(
@@ -938,16 +1204,23 @@ export async function getWaterByDate(
     const startUtc = zonedDayStartUtc(date, tz);
     const endUtc = zonedNextDayStartUtc(date, tz);
 
-    const { data, error } = await getSupabase()
-        .from("water_log")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get water: ${error.message}`);
-    return (data as WaterEntry[]) ?? [];
+    return run(async (tx) => {
+        try {
+            return await rows<WaterEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WATER_LOG)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get water", err);
+        }
+    });
 }
 
 export async function getWaterInRange(
@@ -959,16 +1232,23 @@ export async function getWaterInRange(
     const startUtc = zonedDayStartUtc(startDate, tz);
     const endUtc = zonedNextDayStartUtc(endDate, tz);
 
-    const { data, error } = await getSupabase()
-        .from("water_log")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get water: ${error.message}`);
-    return (data as WaterEntry[]) ?? [];
+    return run(async (tx) => {
+        try {
+            return await rows<WaterEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WATER_LOG)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get water", err);
+        }
+    });
 }
 
 /**
@@ -976,13 +1256,9 @@ export async function getWaterInRange(
  * `getAllWater` to prove the paged fetch came back whole.
  */
 export async function countWater(userId: string): Promise<number> {
-    const { count, error } = await getSupabase()
-        .from("water_log")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-
-    if (error) throw new Error(`Failed to count water: ${error.message}`);
-    return count ?? 0;
+    return run(async (tx) =>
+        countForUser(tx, WATER_LOG, userId, "count water"),
+    );
 }
 
 /**
@@ -999,16 +1275,24 @@ export async function getAllWater(userId: string): Promise<WaterEntry[]> {
     if (expected === 0) return [];
 
     const entries = await fetchAllPages<WaterEntry>(async (from, to) => {
-        const { data, error } = await getSupabase()
-            .from("water_log")
-            .select("*")
-            .eq("user_id", userId)
-            .order("logged_at", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to);
-
-        if (error) throw new Error(`Failed to get water: ${error.message}`);
-        return (data as WaterEntry[]) ?? [];
+        const limit = to - from + 1;
+        return run(async (tx) => {
+            try {
+                return await rows<WaterEntry>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(WATER_LOG)}
+                        where user_id = ${userId}
+                        order by logged_at asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                );
+            } catch (err) {
+                throw nutritionFailed("get water", err);
+            }
+        });
     });
 
     if (entries.length < expected) {
@@ -1024,15 +1308,22 @@ export async function deleteWater(
     userId: string,
     id: string,
 ): Promise<boolean> {
-    const { data, error } = await getSupabase()
-        .from("water_log")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select("id");
-
-    if (error) throw new Error(`Failed to delete water: ${error.message}`);
-    return (data?.length ?? 0) > 0;
+    return run(async (tx) => {
+        try {
+            const data = await rows<{ id: string }>(
+                tx,
+                tx`
+                    delete from ${tx.unsafe(WATER_LOG)}
+                    where id = ${id}
+                      and user_id = ${userId}
+                    returning id
+                `,
+            );
+            return data.length > 0;
+        } catch (err) {
+            throw nutritionFailed("delete water", err);
+        }
+    });
 }
 
 // ---------- Weight log ----------
@@ -1063,8 +1354,6 @@ export async function insertWeight(
     userId: string,
     input: WeightInput,
 ): Promise<WeightInsertResult> {
-    const sb = getSupabase();
-
     // Resolve logged_at once so the digest and the persisted row agree.
     const loggedAt = input.logged_at ?? new Date().toISOString();
     // Always populate the key: use the client's if given, otherwise derive a
@@ -1073,48 +1362,71 @@ export async function insertWeight(
         input.idempotency_key ??
         deriveIdempotencyKey([userId, input.weight_g, input.notes, loggedAt]);
 
-    const { data: existing, error: selErr } = await sb
-        .from("weight_log")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("idempotency_key", idempotencyKey)
-        .maybeSingle();
-    if (selErr) throw new Error(`Failed to look up weight: ${selErr.message}`);
-    if (existing) return { entry: existing as WeightEntry, deduplicated: true };
+    return run(async (tx) => {
+        let existing: WeightEntry | null;
+        try {
+            existing = await maybeOne<WeightEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WEIGHT_LOG)}
+                    where user_id = ${userId}
+                      and idempotency_key = ${idempotencyKey}
+                `,
+                "look up weight",
+            );
+        } catch (err) {
+            throw nutritionFailed("look up weight", err);
+        }
+        if (existing) return { entry: existing, deduplicated: true };
 
-    const { data, error } = await sb
-        .from("weight_log")
-        .insert({
+        const payload = {
             user_id: userId,
             weight_g: input.weight_g,
             logged_at: loggedAt,
             notes: input.notes ?? null,
             idempotency_key: idempotencyKey,
-        })
-        .select()
-        .single();
+        };
 
-    if (error) {
-        if (error.code === "23505") {
-            const { data: existing, error: raceErr } = await sb
-                .from("weight_log")
-                .select("*")
-                .eq("user_id", userId)
-                .eq("idempotency_key", idempotencyKey)
-                .maybeSingle();
-            if (raceErr)
-                throw new Error(
-                    `Failed to resolve idempotent weight: ${raceErr.message}`,
-                );
-            if (existing)
-                return {
-                    entry: existing as WeightEntry,
-                    deduplicated: true,
-                };
+        try {
+            const entry = await tx.savepoint(async (sp) =>
+                insertReturning<WeightEntry>(
+                    sp as Tx,
+                    WEIGHT_LOG,
+                    payload,
+                    "*",
+                    "insert weight",
+                ),
+            );
+            return { entry, deduplicated: false };
+        } catch (err) {
+            if (sqlState(err) === "23505") {
+                let raced: WeightEntry | null;
+                try {
+                    raced = await maybeOne<WeightEntry>(
+                        tx,
+                        tx`
+                            select *
+                            from ${tx.unsafe(WEIGHT_LOG)}
+                            where user_id = ${userId}
+                              and idempotency_key = ${idempotencyKey}
+                        `,
+                        "resolve idempotent weight",
+                    );
+                } catch (raceErr) {
+                    throw nutritionFailed("resolve idempotent weight", raceErr);
+                }
+                if (raced) return { entry: raced, deduplicated: true };
+            }
+            if (
+                err instanceof Error &&
+                err.message.startsWith("Failed to insert weight:")
+            ) {
+                throw err;
+            }
+            throw nutritionFailed("insert weight", err);
         }
-        throw new Error(`Failed to insert weight: ${error.message}`);
-    }
-    return { entry: data as WeightEntry, deduplicated: false };
+    });
 }
 
 export async function getWeightByDate(
@@ -1125,16 +1437,23 @@ export async function getWeightByDate(
     const startUtc = zonedDayStartUtc(date, tz);
     const endUtc = zonedNextDayStartUtc(date, tz);
 
-    const { data, error } = await getSupabase()
-        .from("weight_log")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get weight: ${error.message}`);
-    return (data as WeightEntry[]) ?? [];
+    return run(async (tx) => {
+        try {
+            return await rows<WeightEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WEIGHT_LOG)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get weight", err);
+        }
+    });
 }
 
 export async function getWeightInRange(
@@ -1146,16 +1465,23 @@ export async function getWeightInRange(
     const startUtc = zonedDayStartUtc(startDate, tz);
     const endUtc = zonedNextDayStartUtc(endDate, tz);
 
-    const { data, error } = await getSupabase()
-        .from("weight_log")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("logged_at", startUtc.toISOString())
-        .lt("logged_at", endUtc.toISOString())
-        .order("logged_at", { ascending: true });
-
-    if (error) throw new Error(`Failed to get weight: ${error.message}`);
-    return (data as WeightEntry[]) ?? [];
+    return run(async (tx) => {
+        try {
+            return await rows<WeightEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WEIGHT_LOG)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get weight", err);
+        }
+    });
 }
 
 /**
@@ -1163,13 +1489,9 @@ export async function getWeightInRange(
  * `getAllWeight` to prove the paged fetch came back whole.
  */
 export async function countWeight(userId: string): Promise<number> {
-    const { count, error } = await getSupabase()
-        .from("weight_log")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-
-    if (error) throw new Error(`Failed to count weight: ${error.message}`);
-    return count ?? 0;
+    return run(async (tx) =>
+        countForUser(tx, WEIGHT_LOG, userId, "count weight"),
+    );
 }
 
 /**
@@ -1187,16 +1509,24 @@ export async function getAllWeight(userId: string): Promise<WeightEntry[]> {
     if (expected === 0) return [];
 
     const entries = await fetchAllPages<WeightEntry>(async (from, to) => {
-        const { data, error } = await getSupabase()
-            .from("weight_log")
-            .select("*")
-            .eq("user_id", userId)
-            .order("logged_at", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to);
-
-        if (error) throw new Error(`Failed to get weight: ${error.message}`);
-        return (data as WeightEntry[]) ?? [];
+        const limit = to - from + 1;
+        return run(async (tx) => {
+            try {
+                return await rows<WeightEntry>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(WEIGHT_LOG)}
+                        where user_id = ${userId}
+                        order by logged_at asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                );
+            } catch (err) {
+                throw nutritionFailed("get weight", err);
+            }
+        });
     });
 
     if (entries.length < expected) {
@@ -1211,16 +1541,23 @@ export async function getAllWeight(userId: string): Promise<WeightEntry[]> {
 export async function getLatestWeight(
     userId: string,
 ): Promise<WeightEntry | null> {
-    const { data, error } = await getSupabase()
-        .from("weight_log")
-        .select("*")
-        .eq("user_id", userId)
-        .order("logged_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (error) throw new Error(`Failed to get latest weight: ${error.message}`);
-    return (data as WeightEntry | null) ?? null;
+    return run(async (tx) => {
+        try {
+            return await maybeOne<WeightEntry>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(WEIGHT_LOG)}
+                    where user_id = ${userId}
+                    order by logged_at desc
+                    limit 1
+                `,
+                "get latest weight",
+            );
+        } catch (err) {
+            throw nutritionFailed("get latest weight", err);
+        }
+    });
 }
 
 export async function updateWeight(
@@ -1243,17 +1580,46 @@ export async function updateWeight(
     // opaque "JSON object requested, multiple (or no) rows returned" — one
     // round trip, and no window between a check and the update itself where
     // a concurrent delete could reintroduce that same opaque error.
-    const { data, error } = await getSupabase()
-        .from("weight_log")
-        .update(update)
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select();
-
-    if (error) throw new Error(`Failed to update weight: ${error.message}`);
-    if (!data || data.length === 0)
-        throw new Error("Failed to update weight: entry not found");
-    return data[0] as WeightEntry;
+    return run(async (tx) => {
+        const { row: patch, keys } = definedColumns(update);
+        try {
+            if (keys.length === 0) {
+                const existing = await maybeOne<WeightEntry>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(WEIGHT_LOG)}
+                        where id = ${id}
+                          and user_id = ${userId}
+                    `,
+                    "update weight",
+                );
+                if (!existing)
+                    throw new Error("Failed to update weight: entry not found");
+                return existing;
+            }
+            const data = await rows<WeightEntry>(
+                tx,
+                tx`
+                    update ${tx.unsafe(WEIGHT_LOG)} set ${tx(patch, ...patchKeys(keys))}
+                    where id = ${id}
+                      and user_id = ${userId}
+                    returning *
+                `,
+            );
+            if (data.length === 0)
+                throw new Error("Failed to update weight: entry not found");
+            return data[0]!;
+        } catch (err) {
+            if (
+                err instanceof Error &&
+                err.message === "Failed to update weight: entry not found"
+            ) {
+                throw err;
+            }
+            throw nutritionFailed("update weight", err);
+        }
+    });
 }
 
 /** Returns true if an entry was deleted, false if no matching row was found. */
@@ -1261,15 +1627,22 @@ export async function deleteWeight(
     userId: string,
     id: string,
 ): Promise<boolean> {
-    const { data, error } = await getSupabase()
-        .from("weight_log")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select("id");
-
-    if (error) throw new Error(`Failed to delete weight: ${error.message}`);
-    return (data?.length ?? 0) > 0;
+    return run(async (tx) => {
+        try {
+            const data = await rows<{ id: string }>(
+                tx,
+                tx`
+                    delete from ${tx.unsafe(WEIGHT_LOG)}
+                    where id = ${id}
+                      and user_id = ${userId}
+                    returning id
+                `,
+            );
+            return data.length > 0;
+        } catch (err) {
+            throw nutritionFailed("delete weight", err);
+        }
+    });
 }
 
 // ---------- Delete all user data ----------
@@ -1310,89 +1683,43 @@ export function exportStoragePaths(userId: string): string[] {
 }
 
 export async function deleteAllUserData(userId: string): Promise<void> {
-    const sb = getSupabase();
-
-    const { error: analyticsErr } = await sb
-        .from("tool_analytics")
-        .delete()
-        .eq("user_id", userId);
-    if (analyticsErr)
-        throw new Error(`Failed to delete analytics: ${analyticsErr.message}`);
-
-    const { error: waterErr } = await sb
-        .from("water_log")
-        .delete()
-        .eq("user_id", userId);
-    if (waterErr)
-        throw new Error(`Failed to delete water log: ${waterErr.message}`);
-
-    const { error: weightErr } = await sb
-        .from("weight_log")
-        .delete()
-        .eq("user_id", userId);
-    if (weightErr)
-        throw new Error(`Failed to delete weight log: ${weightErr.message}`);
-
-    const { error: goalsErr } = await sb
-        .from("nutrition_goals")
-        .delete()
-        .eq("user_id", userId);
-    if (goalsErr)
-        throw new Error(`Failed to delete goals: ${goalsErr.message}`);
-
-    const { error: profileErr } = await sb
-        .from("profiles")
-        .delete()
-        .eq("user_id", userId);
-    if (profileErr)
-        throw new Error(`Failed to delete profile: ${profileErr.message}`);
-
-    // Remove any export file from the "exports" storage bucket. Missing paths
-    // are not an error, so this is a no-op for users who never exported.
+    // Export removal is idempotent and lives outside Postgres; run it first so
+    // a later DB failure does not leave a downloadable archive for an account
+    // we failed to erase. GoTrue deleteUser runs last so every public row is
+    // gone before auth.users disappears.
     await liveExportArchiveStore().remove(exportStoragePaths(userId));
 
-    // recipe_portions.user_id carries no foreign key, so the auth delete below
-    // would leave these rows behind. The recipes themselves are household
-    // data and stay.
-    const { error: portionsErr } = await sb
-        .from("recipe_portions")
-        .delete()
-        .eq("user_id", userId);
-    if (portionsErr)
-        throw new Error(
-            `Failed to delete recipe portions: ${portionsErr.message}`,
-        );
+    await run(async (tx) => {
+        const deleteUserRows = async (
+            table: string,
+            context: string,
+        ): Promise<void> => {
+            try {
+                await tx`
+                    delete from ${tx.unsafe(table)}
+                    where user_id = ${userId}
+                `;
+            } catch (err) {
+                throw nutritionFailed(context, err);
+            }
+        };
 
-    const { error: mealsErr } = await sb
-        .from("meals")
-        .delete()
-        .eq("user_id", userId);
-    if (mealsErr)
-        throw new Error(`Failed to delete meals: ${mealsErr.message}`);
+        await deleteUserRows("tool_analytics", "delete analytics");
+        await deleteUserRows(WATER_LOG, "delete water log");
+        await deleteUserRows(WEIGHT_LOG, "delete weight log");
+        await deleteUserRows(NUTRITION_GOALS, "delete goals");
+        await deleteUserRows("profiles", "delete profile");
+        // recipe_portions.user_id carries no foreign key, so the auth delete below
+        // would leave these rows behind. The recipes themselves are household
+        // data and stay.
+        await deleteUserRows("recipe_portions", "delete recipe portions");
+        await deleteUserRows(MEALS, "delete meals");
+        await deleteUserRows("oauth_tokens", "delete tokens");
+        await deleteUserRows("refresh_tokens", "delete refresh tokens");
+        await deleteUserRows("auth_codes", "delete auth codes");
+    });
 
-    const { error: tokensErr } = await sb
-        .from("oauth_tokens")
-        .delete()
-        .eq("user_id", userId);
-    if (tokensErr)
-        throw new Error(`Failed to delete tokens: ${tokensErr.message}`);
-
-    const { error: refreshErr } = await sb
-        .from("refresh_tokens")
-        .delete()
-        .eq("user_id", userId);
-    if (refreshErr)
-        throw new Error(
-            `Failed to delete refresh tokens: ${refreshErr.message}`,
-        );
-
-    const { error: authErr } = await sb
-        .from("auth_codes")
-        .delete()
-        .eq("user_id", userId);
-    if (authErr)
-        throw new Error(`Failed to delete auth codes: ${authErr.message}`);
-
-    const { error: userErr } = await sb.auth.admin.deleteUser(userId);
+    const { error: userErr } =
+        await getSupabase().auth.admin.deleteUser(userId);
     if (userErr) throw new Error(`Failed to delete user: ${userErr.message}`);
 }
