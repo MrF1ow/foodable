@@ -32,9 +32,15 @@ describeDb(pgAvailable !== null, "foods listAllAliases guard", (getCtx) => {
         );
 
         try {
-            await expect(
-                liveFoodsStore().listAllAliases(householdId),
-            ).rejects.toThrow(
+            const err = await liveFoodsStore()
+                .listAllAliases(householdId)
+                .then(
+                    () => null,
+                    (e: unknown) => e,
+                );
+            // Exact text, not a substring: the old adapter threw the guard
+            // unwrapped, never as "Failed to list aliases: …".
+            expect((err as Error).message).toBe(
                 "listAllAliases: fetched 1 aliases but count reported 2",
             );
         } finally {

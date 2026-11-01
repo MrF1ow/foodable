@@ -381,7 +381,12 @@ $$;`,
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
             const dir = mkdtempSync(join(tmpdir(), "foodable-mig-leak-"));
-            writeFileSync(join(dir, "20260101120000_ok.sql"), "select 1;");
+            // Session-level settings, like the pg_dump preamble: they survive
+            // the file's commit, so only discard-on-failure clears them.
+            writeFileSync(
+                join(dir, "20260101120000_ok.sql"),
+                "select set_config('search_path', '', false); set row_security = off;",
+            );
             writeFileSync(
                 join(dir, "20260101130000_bad.sql"),
                 `create table public.leak_probe (id int);
@@ -400,6 +405,9 @@ select * from table_does_not_exist;`,
                 ),
             );
             expect(searchPath!.search_path).toBe('"$user", public');
+            const [rls] =
+                await sql`select current_setting('row_security') as v`;
+            expect(rls.v).toBe("on");
         } finally {
             setSqlForTests(null);
             await sql.close();

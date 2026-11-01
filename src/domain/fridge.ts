@@ -60,6 +60,15 @@ export class FridgeInputError extends Error {
 
 type MemoryFridgeItem = FridgeItem & { createdAt: string };
 
+// createdAt only orders the memory list, like the live store's
+// `order by created_at`; it is not part of FridgeItem, so it never leaves.
+function publicItem({
+    createdAt: _createdAt,
+    ...row
+}: MemoryFridgeItem): FridgeItem {
+    return { ...row, quantity: { ...row.quantity } };
+}
+
 export function createMemoryFridgeStore(): FridgeStore {
     const locations: FridgeLocation[] = [];
     const items: MemoryFridgeItem[] = [];
@@ -113,7 +122,7 @@ export function createMemoryFridgeStore(): FridgeStore {
                 .filter((row) => row.householdId === householdId)
                 .slice()
                 .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-                .map((row) => ({ ...row, quantity: { ...row.quantity } }));
+                .map(publicItem);
         },
         async insertItem(row) {
             const saved: MemoryFridgeItem = {
@@ -125,10 +134,7 @@ export function createMemoryFridgeStore(): FridgeStore {
                 createdAt: new Date().toISOString(),
             };
             items.push(saved);
-            return {
-                ...saved,
-                quantity: { ...saved.quantity },
-            };
+            return publicItem(saved);
         },
         async updateItem(row) {
             const idx = items.findIndex(

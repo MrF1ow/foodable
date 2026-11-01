@@ -13,22 +13,26 @@ export function runGroceryListStoreContract(
             await reset();
             const c = ctx();
             const store = createStore();
+            // Created order (bread first) differs from both insert order and
+            // name order, so only `order by created_at` passes.
             const milk = sampleGroceryLine(c, {
                 id: crypto.randomUUID(),
-                displayName: "Milk",
+                displayName: "Apple",
             });
             const bread = sampleGroceryLine(c, {
                 id: crypto.randomUUID(),
-                displayName: "Bread",
+                displayName: "Zucchini",
             });
-            await store.insertLine(milk);
-            await store.insertLine(bread);
+            // Whole-object equality: a store must return exactly the domain
+            // shape, with no extra internal fields.
+            expect(await store.insertLine(milk)).toEqual(milk);
+            expect(await store.insertLine(bread)).toEqual(bread);
             if (c.setLineCreatedAt) {
                 await c.setLineCreatedAt(milk.id, "2026-02-02T00:00:00+00:00");
                 await c.setLineCreatedAt(bread.id, "2026-02-01T00:00:00+00:00");
             }
             const listed = await store.listLines(c.householdId);
-            expect(listed.map((l) => l.displayName)).toEqual(["Bread", "Milk"]);
+            expect(listed).toEqual([bread, milk]);
 
             expect(await store.listLines(c.otherHouseholdId)).toEqual([]);
 

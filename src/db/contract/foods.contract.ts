@@ -1,6 +1,32 @@
 import { describe, expect, test } from "bun:test";
-import type { FoodsStore } from "../../domain/foods.js";
+import type { FoodsStore, MemoryFoodsStore } from "../../domain/foods.js";
 import { sampleFood, type StoreContractCtx } from "./helpers.js";
+
+// A row elsewhere that names `foodId` (a dislike on the live side, the memory
+// store's own ref list otherwise); returns a reader for its current food_id.
+async function trackFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+): Promise<() => Promise<string | null>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId);
+        return async () => row.foodId;
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const id = crypto.randomUUID();
+    await sql`
+        insert into public.member_dislikes (id, household_id, user_id, display_name, food_id)
+        values (${id}, ${c.householdId}, ${c.userId}, 'ref', ${foodId})
+    `;
+    return async () => {
+        const [row] = await sql`
+            select food_id from public.member_dislikes where id = ${id}
+        `;
+        return row?.food_id ?? null;
+    };
+}
 
 export function runFoodsStoreContract(
     label: string,
@@ -125,11 +151,19 @@ export function runFoodsStoreContract(
             await store.insertFood(b);
             await store.setAlias(c.householdId, "fruit", a.id);
             await store.setAlias(c.householdId, "zest", a.id);
+            await store.setAlias(c.householdId, "apple", a.id);
+            // Inserted fruit, zest, apple: only `order by alias` gives this.
+            expect(await store.listAliases(c.householdId, a.id)).toEqual([
+                "apple",
+                "fruit",
+                "zest",
+            ]);
             await store.setAlias(c.householdId, "fruit", b.id);
             expect(await store.getAliasFoodId(c.householdId, "fruit")).toBe(
                 b.id,
             );
             expect(await store.listAliases(c.householdId, a.id)).toEqual([
+                "apple",
                 "zest",
             ]);
             expect(
@@ -160,7 +194,13 @@ export function runFoodsStoreContract(
             await store.setAlias(c.householdId, "merged", from.id);
             const hits = await store.searchFoods(c.householdId, "merge");
             expect(hits.some((f) => f.id === from.id)).toBe(true);
+            // Inner whitespace is not collapsed, matching the old PostgREST code.
+            expect(await store.searchFoods(c.householdId, "merge  me")).toEqual(
+                [],
+            );
+            const refFoodId = await trackFoodRef(store, c, from.id);
             await store.repointFoodRefs(c.householdId, from.id, to.id);
+            expect(await refFoodId()).toBe(to.id);
             expect(await store.getFood(c.householdId, from.id)).toBeTruthy();
         });
 

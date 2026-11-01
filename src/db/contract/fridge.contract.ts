@@ -92,16 +92,20 @@ export function runFridgeStoreContract(
             await reset();
             const c = ctx();
             const store = createStore();
+            // Created order (earlier first) differs from both insert order and
+            // name order, so only `order by created_at` passes.
             const later = sampleFridgeItem(c, {
                 id: crypto.randomUUID(),
-                displayName: "Later",
+                displayName: "Apple",
             });
             const earlier = sampleFridgeItem(c, {
                 id: crypto.randomUUID(),
-                displayName: "Earlier",
+                displayName: "Zucchini",
             });
-            await store.insertItem(later);
-            await store.insertItem(earlier);
+            // Whole-object equality: a store must return exactly the domain
+            // shape, with no extra internal fields.
+            expect(await store.insertItem(later)).toEqual(later);
+            expect(await store.insertItem(earlier)).toEqual(earlier);
             if (c.setFridgeItemCreatedAt) {
                 await c.setFridgeItemCreatedAt(
                     later.id,
@@ -112,10 +116,10 @@ export function runFridgeStoreContract(
                     "2026-02-01T00:00:00+00:00",
                 );
             }
-            const names = (await store.listItems(c.householdId)).map(
-                (i) => i.displayName,
-            );
-            expect(names).toEqual(["Earlier", "Later"]);
+            expect(await store.listItems(c.householdId)).toEqual([
+                earlier,
+                later,
+            ]);
         });
 
         test("household scoping", async () => {

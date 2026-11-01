@@ -472,7 +472,9 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             return removed;
         },
         async searchFoods(householdId, query) {
-            const needle = normalizeFoodName(query);
+            // Same needle as the live store: trim and lower case only, so
+            // "oat  milk" does not match "oat milk" here either.
+            const needle = query.trim().toLowerCase();
             if (!needle) return [];
             const listed = await store.listFoods(householdId);
             const aliasMap = await store.listAllAliases(householdId);

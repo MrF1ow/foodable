@@ -57,8 +57,9 @@ export function runRulesStoreContract(
             await reset();
             const c = ctx();
             const store = createStore();
-            const second = sampleAllergen(c, { allergen: "milk" });
-            const first = sampleAllergen(c, { allergen: "egg" });
+            // Created order (first) differs from insert and name order.
+            const second = sampleAllergen(c, { allergen: "egg" });
+            const first = sampleAllergen(c, { allergen: "milk" });
             await store.insertAllergen(second);
             await store.insertAllergen(first);
             if (c.setAllergenCreatedAt) {
@@ -75,7 +76,7 @@ export function runRulesStoreContract(
                 (await store.listAllergens(c.householdId, c.userId)).map(
                     (a) => a.allergen,
                 ),
-            ).toEqual(["egg", "milk"]);
+            ).toEqual(["milk", "egg"]);
             expect(
                 await store.deleteAllergen({
                     householdId: c.householdId,
@@ -89,8 +90,9 @@ export function runRulesStoreContract(
             await reset();
             const c = ctx();
             const store = createStore();
-            const second = sampleDislike(c, { displayName: "Z" });
-            const first = sampleDislike(c, { displayName: "A" });
+            // Created order (first) differs from insert and name order.
+            const second = sampleDislike(c, { displayName: "A" });
+            const first = sampleDislike(c, { displayName: "Z" });
             await store.insertDislike(second);
             await store.insertDislike(first);
             if (c.setDislikeCreatedAt) {
@@ -107,7 +109,7 @@ export function runRulesStoreContract(
                 (await store.listDislikes(c.householdId, c.userId)).map(
                     (d) => d.displayName,
                 ),
-            ).toEqual(["A", "Z"]);
+            ).toEqual(["Z", "A"]);
             expect(
                 await store.deleteDislike({
                     householdId: c.householdId,

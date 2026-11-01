@@ -69,6 +69,15 @@ export class GroceryInputError extends Error {
 
 type MemoryGroceryLine = GroceryLine & { createdAt: string };
 
+// createdAt only orders the memory list, like the live store's
+// `order by created_at`; it is not part of GroceryLine, so it never leaves.
+function publicLine({
+    createdAt: _createdAt,
+    ...row
+}: MemoryGroceryLine): GroceryLine {
+    return { ...row, quantity: { ...row.quantity } };
+}
+
 export function createMemoryGroceryStore(): GroceryListStore {
     const lines: MemoryGroceryLine[] = [];
     const store: GroceryListStore & {
@@ -79,10 +88,7 @@ export function createMemoryGroceryStore(): GroceryListStore {
                 .filter((row) => row.householdId === householdId)
                 .slice()
                 .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-                .map((row) => ({
-                    ...row,
-                    quantity: { ...row.quantity },
-                }));
+                .map(publicLine);
         },
         async insertLine(row) {
             const saved: MemoryGroceryLine = {
@@ -91,7 +97,7 @@ export function createMemoryGroceryStore(): GroceryListStore {
                 createdAt: new Date().toISOString(),
             };
             lines.push(saved);
-            return { ...saved, quantity: { ...saved.quantity } };
+            return publicLine(saved);
         },
         async updateLine(row) {
             const idx = lines.findIndex(
