@@ -40,6 +40,7 @@
         "format:check": "bunx prettier --check .",
         "typecheck": "bun run scripts/typecheck.ts",
         "db:dryrun": "bun run scripts/migration-dryrun.ts",
+        "db:migrate": "bun run scripts/migrate.ts",
         "pr:check": "bun run scripts/pr-lint.ts",
         "labels:sync": "bun run scripts/sync-labels.ts",
         "gen:pages": "bun run scripts/gen-login.ts",
