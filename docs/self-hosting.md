@@ -51,6 +51,57 @@ For upgrading an existing deploy when new migrations land:
 
 Any other Postgres (Railway, Neon, RDS, a local `initdb` cluster) works the same way: set `DATABASE_URL` and run `bun run db:migrate`.
 
+### Local Postgres (no Docker)
+
+For day-to-day development without Supabase containers, use a persistent local cluster:
+
+```bash
+bun run db:dev init          # creates ~/.local/share/foodable/pg, migrates, prints DATABASE_URL
+# paste DATABASE_URL into .env (default port 54330, database foodable)
+bun --watch src/index.ts
+```
+
+Override paths with `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` (default **54330**, chosen to avoid Supabase **54321–54324** and the dry-run default **54329**). Logs live in `postgres.log` inside the data directory. Other commands: `start`, `stop`, `status`, `url`, `migrate`. Set `PG_BIN` when `initdb` is not on your `PATH`.
+
+**Docker Compose** alternative (Postgres 17 + app):
+
+```bash
+cp .env.example .env         # fill OAuth secrets
+docker compose up --build
+```
+
+A one-shot `migrate` service runs `bun run db:migrate` before the app starts.
+
+**Moving an existing Supabase database** (local or cloud) into plain Postgres:
+
+1. Apply this repo’s migrations on the Supabase project first (`supabase db push` or `bun run db:migrate` against its session pooler).
+2. Initialize plain Postgres (`bun run db:dev init`).
+3. Copy data:
+
+    ```bash
+    bun run db:import-supabase --from "$OLD_DATABASE_URL"
+    ```
+
+The importer checks migration parity and refuses a non-empty target.
+
+**systemd user unit** to start Postgres at login (adjust paths):
+
+```ini
+[Unit]
+Description=Foodable dev Postgres
+After=network.target
+
+[Service]
+Type=forking
+WorkingDirectory=/path/to/foodable
+ExecStart=/usr/bin/bun run db:dev start
+ExecStop=/usr/bin/bun run db:dev stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
+```
+
 ## Environment variables
 
 | Variable                | Required     | Purpose                                                                                                                     |

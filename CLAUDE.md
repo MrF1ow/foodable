@@ -53,6 +53,8 @@ Schema lives only in `supabase/migrations/`. Apply them with `bun run db:migrate
 - `bun run format` - Format code with Prettier (4-space indentation)
 - `bun run format:check` - Verify the tree is prettier-clean (CI runs this on every PR)
 - `bun run db:dryrun` - Apply the pending migrations to a throwaway local Postgres and check the backfill (see "Migrations" below)
+- `bun run db:dev` - Persistent local Postgres for development (`init`, `start`, `stop`, `status`, `url`, `migrate`)
+- `bun run db:import-supabase` - Copy `--from` a migrated Supabase/Postgres URL into `--to` plain Postgres (default: `db:dev` URL)
 - `bun run typecheck` - Typecheck `src/` (CI runs this on every PR; it is scoped to `src/`, so a type error in a test file or under `scripts/` will not be caught)
 - `bun run gen:tokens` - Write `public/widgets/src/shared/tokens.css` from `src/tokens.ts`
 
