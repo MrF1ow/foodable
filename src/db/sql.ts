@@ -1,0 +1,114 @@
+/**
+ * PostgREST-shaped reads: every row set is wrapped with
+ * `with w as (<query>) select coalesce(json_agg(w), '[]'::json) as rows from w`.
+ * Bun.sql fragments nest in the `w as (...)` slot; a plain `from (<select>) r` subquery
+ * fails for data-modifying `returning` statements, so the CTE form is used for all reads.
+ */
+import { SQL, type TransactionSQL } from "bun";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+export type Tx = TransactionSQL;
+
+let cached: SQL | undefined;
+let testSql: SQL | undefined;
+
+const activeTx = new AsyncLocalStorage<Tx>();
+
+export function getSql(): SQL {
+    if (testSql) return testSql;
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("Missing DATABASE_URL");
+    if (!cached) {
+        cached = new SQL(url, {
+            prepare: false,
+            max: 10,
+            idleTimeout: 30,
+            connectionTimeout: 15,
+        });
+    }
+    return cached;
+}
+
+export function setSqlForTests(sql: SQL | null): void {
+    testSql = sql ?? undefined;
+}
+
+export async function closeSql(): Promise<void> {
+    if (cached) {
+        await cached.close();
+        cached = undefined;
+    }
+}
+
+export async function run<T>(
+    fn: (tx: Tx) => Promise<T>,
+    opts?: { timeoutMs?: number },
+): Promise<T> {
+    const outer = activeTx.getStore();
+    // Phase 2 multi-step writes call run from inside run; reusing the outer tx
+    // keeps one atomic unit and avoids opening another pool connection.
+    if (outer) return fn(outer);
+
+    const sql = getSql();
+    return sql.begin(async (tx) =>
+        activeTx.run(tx, async () => {
+            await tx`
+                select set_config('statement_timeout', ${String(opts?.timeoutMs ?? 15_000)}, true),
+                       set_config('TimeZone', 'UTC', true)
+            `;
+            // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
+            // Supabase sessions are UTC; a plain Postgres host often is not, which would
+            // shift every timestamp string the *FromRow mappers see.
+            return fn(tx);
+        }),
+    );
+}
+
+function parseRowsPayload(rows: unknown): unknown[] {
+    if (rows == null) return [];
+    if (Array.isArray(rows)) return rows;
+    if (typeof rows === "string") return JSON.parse(rows) as unknown[];
+    return [];
+}
+
+export async function rows<T = Record<string, unknown>>(
+    tx: Tx,
+    query: SQL.Query<unknown>,
+): Promise<T[]> {
+    const [row] = await tx`
+        with w as (${query})
+        select coalesce(json_agg(w), '[]'::json) as rows
+        from w
+    `;
+    return parseRowsPayload(row.rows) as T[];
+}
+
+export async function one<T = Record<string, unknown>>(
+    tx: Tx,
+    query: SQL.Query<unknown>,
+    what: string,
+): Promise<T> {
+    const got = await rows<T>(tx, query);
+    if (got.length !== 1) {
+        throw new Error(`${what}: expected 1 row, got ${got.length}`);
+    }
+    return got[0]!;
+}
+
+export async function maybeOne<T = Record<string, unknown>>(
+    tx: Tx,
+    query: SQL.Query<unknown>,
+    what: string,
+): Promise<T | null> {
+    const got = await rows<T>(tx, query);
+    if (got.length === 0) return null;
+    if (got.length !== 1) {
+        throw new Error(`${what}: expected 1 row, got ${got.length}`);
+    }
+    return got[0]!;
+}
+
+export function pgError(context: string, err: unknown): Error {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Error(`Failed to ${context}: ${message}`, { cause: err });
+}
