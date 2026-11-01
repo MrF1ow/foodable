@@ -150,7 +150,7 @@ export type AlcoholDisplay = DrinkUnit | null;
 // log_meal for that date fail the SDK's outputSchema validation (those schemas
 // are z.number(), which refuses Infinity) until the row was deleted by hand.
 //
-// The ceilings themselves live in src/import.ts and are re-exported here, so
+// The ceilings themselves live in src/domain/import.ts and are re-exported here, so
 // the same figure is accepted whichever way a meal arrives. They were briefly
 // duplicated with a test that grepped the other file to catch drift; sharing
 // one declaration removes the drift instead of detecting it.

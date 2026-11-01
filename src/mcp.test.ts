@@ -715,7 +715,7 @@ const textOf = (r: ToolResult) => r.content.map((c) => c.text).join("\n");
 describe("write-tool numeric bounds", () => {
     // These bounds must equal the ones bulk_import_meals enforces, or the same
     // figure is accepted through one door and refused at the other. There is no
-    // drift test because there is nothing to drift: src/import.ts owns the three
+    // drift test because there is nothing to drift: src/domain/import.ts owns the three
     // constants and src/mcp.ts re-exports them, so both doors read one value.
 
     // numeric(6,2) — one more digit is a Postgres "numeric field overflow",
@@ -1167,7 +1167,7 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
     });
 
     // The digest is frozen (CONTRACT, and the "DO NOT ADD" comments in
-    // src/supabase.ts and src/import.ts). Adding caffeine_mg to it would orphan
+    // src/db/nutrition.ts and src/domain/import.ts). Adding caffeine_mg to it would orphan
     // every `auto:` key already stored, so the same meal logged with and
     // without a caffeine figure must still derive one key — and that key must
     // still be the literal value the pre-caffeine code produced.
@@ -1281,7 +1281,7 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
 
 // IMPORT_ROW_SCHEMA is a plain z.object, so zod STRIPS any key it does not
 // declare — exactly the silent failure the source_id block below pins. Drop
-// caffeine_mg from that schema and src/import.ts's unit tests all still pass
+// caffeine_mg from that schema and src/domain/import.ts's unit tests all still pass
 // while every imported milligram is discarded on the way in.
 describe("bulk_import_meals carries caffeine_mg through the row schema", () => {
     const call = (

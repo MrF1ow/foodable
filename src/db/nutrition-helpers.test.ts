@@ -142,7 +142,7 @@ describe("mealIdempotencyKey", () => {
         );
     });
 
-    test("stays in step with rowContentDigest in src/import.ts", () => {
+    test("stays in step with rowContentDigest in src/domain/import.ts", () => {
         // The two frozen arrays are mirrors: same fields, same order, same
         // hash. If either drifts, meals written through log_meal and the same
         // meals written through bulk_import_meals stop deduping against each

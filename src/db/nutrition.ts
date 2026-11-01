@@ -192,7 +192,7 @@ export function mealIdempotencyKey(
     // have would get a duplicate row instead of a clean no-op, and every
     // "auto:" key already stored would be orphaned. This repo has shipped
     // that bug once already (see CLAUDE.md, "Bulk meal import"); the mirror
-    // of this array is rowContentDigest in src/import.ts, which carries the
+    // of this array is rowContentDigest in src/domain/import.ts, which carries the
     // same warning.
     //
     // Item-backed meals are the one additive exception: `item_digest` is

@@ -123,12 +123,12 @@ async function finishAuthorization(
 }
 
 // Why a sign-in failed, as far as the login page should say.
-// - "credentials": Supabase's invalid_credentials (wrong password or unknown
-//   login). A 400 with no code is read the same way, for older Auth servers.
+// - "credentials": signIn throws SignInError with code invalid_credentials
+//   (GoTrue's message kept for parity). A 400 with no code is read the same way.
 // - "account": any other 4xx with a code (email_not_confirmed, user_banned).
-//   Retyping will not help, so Supabase's own message is shown.
-// - "unavailable": no status (timeout, network), 429 or 5xx. Not the person's
-//   fault, so it must never read as a wrong password.
+//   Retyping will not help, so the adapter's message is shown.
+// - "unavailable": no status (database unreachable, timeout, network), 429 or
+//   5xx. Not the person's fault, so it must never read as a wrong password.
 export type SignInFailure = "credentials" | "account" | "unavailable";
 
 export function classifySignInFailure(err: unknown): SignInFailure {

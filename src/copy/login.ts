@@ -30,7 +30,7 @@ export interface LoginErrors {
      * in Settings → Household, so there is no separate "sign-up closed" case
      * worth telling apart from a typo. */
     invalidCredentials: string;
-    /** Supabase could not answer (outage, timeout, rate limit). Kept apart
+    /** Auth backend could not answer (database down, timeout, rate limit). Kept apart
      * from invalidCredentials so a right password is never blamed. */
     signInUnavailable: string;
 }

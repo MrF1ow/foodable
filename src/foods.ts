@@ -326,8 +326,8 @@ export async function fetchProductsByNameFromOFF(
 }
 
 // ---------- Cache ----------
-// All cache access is best-effort: any failure (missing table, no Supabase
-// config, transient error) is swallowed and treated as a miss so a cache
+// All cache access is best-effort: any failure (missing DATABASE_URL, Postgres
+// error, transient error) is swallowed and treated as a miss so a cache
 // problem can never break a lookup.
 
 function hydrateCachedPayload(payload: FoodResult): FoodResult {

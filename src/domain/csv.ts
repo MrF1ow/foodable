@@ -522,7 +522,7 @@ export function isDeletedRow(row: string[], deletedColumn: number): boolean {
 // ---------- dates ----------
 //
 // The server only accepts ISO (`YYYY-MM-DD`, see resolveLoggedAt in
-// src/import.ts), so a DD/MM/YYYY or MM/DD/YYYY export fails on every single
+// src/domain/import.ts), so a DD/MM/YYYY or MM/DD/YYYY export fails on every single
 // row until the widget normalises it. Normalising needs two steps, because a
 // single cell can never be trusted on its own: sniff the format across a whole
 // column, then convert each cell with the format the column agreed on.
@@ -705,7 +705,7 @@ export function sniffDateFormat(values: string[]): {
  * Reject calendar dates that do not exist. Date.UTC rolls them over silently
  * (2026-02-31 becomes 2026-03-03), which would turn a day/month swap into a
  * plausible-looking wrong date instead of an error — the same bug class
- * isRealCalendarDate guards in src/import.ts. Round-trip the components to
+ * isRealCalendarDate guards in src/domain/import.ts. Round-trip the components to
  * catch it.
  */
 function isRealDate(year: number, month: number, day: number): boolean {
@@ -758,7 +758,7 @@ export function toIsoDate(
 
 // ---------- times ----------
 //
-// The server's LOCAL_DATETIME_RE (src/import.ts) only accepts zero-padded
+// The server's LOCAL_DATETIME_RE (src/domain/import.ts) only accepts zero-padded
 // 24-hour HH:MM[:SS] — it has to, since it also parses the T-joined form of a
 // full timestamp, where "9:15 AM" would be ambiguous with other fields. But
 // exports hand back whatever their own locale prints: Cronometer's Time

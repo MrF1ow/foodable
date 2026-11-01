@@ -13,7 +13,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 ## Database (Supabase cloud host)
 
 - [x] All 43 migrations are applied on `dapbxswqfiqvxutsobhr` as of 2026-10-25 (`supabase migration list --linked`, local and remote in step), including `20261022180000_explicit_data_api_grants` (#95). That grant migration needs to be on the project before Supabase stops auto-granting table privileges on 2026-10-30. It is. A later migration still goes through `bun run db:dryrun`, then `bun run db:migrate --list` / `bunx supabase db push --dry-run`, then apply with `bun run db:migrate` or `bunx supabase db push`.
-- [ ] `DATABASE_URL` on Railway points at the Supabase **session pooler** URI (port 6543), not the direct connection.
+- [ ] `DATABASE_URL` on Railway is the Supabase **session pooler** URI (port **5432** on `*.pooler.supabase.com`, from Connect → Session pooler), not the direct connection or the transaction pooler (port 6543 — Foodable does not need that).
 - [ ] SQL editor: no security-definer function in `public` is executable by a client role. Every row must be `f` / `f`:
 
     ```sql

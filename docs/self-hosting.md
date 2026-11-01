@@ -28,7 +28,7 @@ On **plain Postgres**, `db/bootstrap.sql` runs automatically first (roles and st
 
 ### Supabase as a Postgres host
 
-[Supabase cloud](https://supabase.com) is a supported host: create a project, copy the **session pooler** connection string from Project Settings → Database into `DATABASE_URL` (port **6543**), then either:
+[Supabase cloud](https://supabase.com) is a supported host: create a project, copy the **session pooler** connection string from the dashboard **Connect → Session pooler** into `DATABASE_URL`. On the shared pooler host (`*.pooler.supabase.com`), port **5432** is session mode (what Foodable wants for a long-lived server); port **6543** is [transaction mode](https://supabase.com/docs/guides/database/connecting-to-postgres) for short-lived serverless clients — you do not need it. The direct `db.<ref>.supabase.co:5432` string is IPv6-only unless the project has the IPv4 add-on. Then either:
 
 - `bun run db:migrate` from this repo, or
 - `supabase link --project-ref <ref>` and `supabase db push` if you already use the Supabase CLI.
