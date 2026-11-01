@@ -99,20 +99,28 @@ describe("marketing HTTP is gone", () => {
     });
 
     test("GET / with an export download token as the site cookie is login HTML", async () => {
-        process.env.SESSION_SECRET ||= "public-site-export-cookie-test!!";
-        const userId = "22222222-2222-4222-8222-222222222222";
-        const exportCookie = signExportToken(
-            userId,
-            Date.now() + 3_600_000,
-            process.env.SESSION_SECRET,
-        );
-        const r = await app.request("http://x/", {
-            headers: { cookie: `${SITE_COOKIE}=${exportCookie}` },
-        });
-        expect(r.status).toBe(200);
-        const body = await r.text();
-        expect(body).toContain('action="/approve"');
-        expect(body).not.toContain("widget-frame");
+        // Set and restore: a leaked value changes the session secret every
+        // later test file signs with.
+        const prevSecret = process.env.SESSION_SECRET;
+        process.env.SESSION_SECRET = "public-site-export-cookie-test!!";
+        try {
+            const userId = "22222222-2222-4222-8222-222222222222";
+            const exportCookie = signExportToken(
+                userId,
+                Date.now() + 3_600_000,
+                process.env.SESSION_SECRET,
+            );
+            const r = await app.request("http://x/", {
+                headers: { cookie: `${SITE_COOKIE}=${exportCookie}` },
+            });
+            expect(r.status).toBe(200);
+            const body = await r.text();
+            expect(body).toContain('action="/approve"');
+            expect(body).not.toContain("widget-frame");
+        } finally {
+            if (prevSecret === undefined) delete process.env.SESSION_SECRET;
+            else process.env.SESSION_SECRET = prevSecret;
+        }
     });
 });
 

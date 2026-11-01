@@ -32,15 +32,25 @@ async function notFoundFingerprint(res: Response) {
     };
 }
 
+// Tests set SESSION_SECRET and put back whatever was there: deleting it
+// would also wipe the value Bun loaded from .env for every later test file.
+let prevSessionSecret: string | undefined;
+
+function restoreSessionSecret(): void {
+    if (prevSessionSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = prevSessionSecret;
+}
+
 describe("GET /exports/:token", () => {
     beforeEach(() => {
+        prevSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = SECRET;
         resetSessionSecretWarningForTest();
         _resetBuckets();
     });
 
     afterEach(() => {
-        delete process.env.SESSION_SECRET;
+        restoreSessionSecret();
     });
 
     test("200 serves the archive with required headers", async () => {
@@ -126,6 +136,7 @@ describeDb(pgAvailable !== null, "GET /exports with live store", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
+        prevSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = SECRET;
         await sql`
             insert into public.users (id, email)
@@ -135,7 +146,7 @@ describeDb(pgAvailable !== null, "GET /exports with live store", (getCtx) => {
 
     afterEach(() => {
         setSqlForTests(null);
-        delete process.env.SESSION_SECRET;
+        restoreSessionSecret();
     });
 
     test("valid token returns bytes from Postgres", async () => {
