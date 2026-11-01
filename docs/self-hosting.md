@@ -92,11 +92,16 @@ Description=Foodable dev Postgres
 After=network.target
 
 [Service]
-Type=forking
+# db:dev start returns once Postgres is up; a oneshot unit that remains
+# "active" keeps the server running in its cgroup until ExecStop.
+Type=oneshot
+RemainAfterExit=yes
 WorkingDirectory=/path/to/foodable
+# systemd's user PATH often lacks a version manager's Postgres (mise, asdf):
+# point PG_BIN at the directory that holds initdb and pg_ctl.
+Environment=PG_BIN=/path/to/postgres/bin
 ExecStart=/usr/bin/bun run db:dev start
 ExecStop=/usr/bin/bun run db:dev stop
-RemainAfterExit=yes
 
 [Install]
 WantedBy=default.target
