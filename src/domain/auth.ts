@@ -100,14 +100,17 @@ export async function signUp(
     password: string,
     hashPassword: PasswordHasher = defaultHash,
 ): Promise<string> {
-    const emailLower = normalizeEmail(email);
-    validateEmailForSignUp(emailLower);
+    // GoTrue's Signup checks the password (validateSignupParams, then
+    // checkPasswordStrength) before validateEmail; keep that order so the
+    // same input gets the same message.
     if (password === "") {
         throw new Error(SIGNUP_PASSWORD_REQUIRED_MESSAGE);
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
         throw new Error(WEAK_PASSWORD_MESSAGE);
     }
+    const emailLower = normalizeEmail(email);
+    validateEmailForSignUp(emailLower);
     const passwordHash = await hashPassword(password);
     try {
         return await store.insertUser({ email: emailLower, passwordHash });

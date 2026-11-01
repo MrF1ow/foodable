@@ -30,6 +30,21 @@ describe("signUp", () => {
         );
     });
 
+    test("password is checked before the email, as GoTrue does", async () => {
+        const store = createMemoryAuthStore();
+        const message = (p: Promise<unknown>) =>
+            p.then(
+                () => null,
+                (e: unknown) => (e as Error).message,
+            );
+        expect(await message(signUp(store, "", ""))).toBe(
+            "Signup requires a valid password",
+        );
+        expect(await message(signUp(store, "not-an-email", "12345"))).toBe(
+            "Password should be at least 6 characters.",
+        );
+    });
+
     test("invalid email uses GoTrue validateEmail message", async () => {
         const store = createMemoryAuthStore();
         await expect(signUp(store, "not-an-email", "secret12")).rejects.toThrow(
