@@ -41,6 +41,7 @@ import * as actualDbSettings from "./db/settings.js";
 import * as actualDbRules from "./db/rules.js";
 import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
+import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 
@@ -58,6 +59,7 @@ const realDbSettings = { ...actualDbSettings };
 const realDbRules = { ...actualDbRules };
 const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
+const realDbAnalytics = { ...actualDbAnalytics };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
@@ -283,17 +285,13 @@ const db = {
 
 mock.module("./db/client.js", () => ({
     ...actualClient,
-    // analytics.ts persists every tool call through getSupabase(); intercept it
-    // so a test never depends on Supabase env vars being present, and so the
-    // rows it would have written can be asserted on.
-    getSupabase: () => ({
-        from: (table: string) => ({
-            insert: async (row: Record<string, unknown>) => {
-                if (table === "tool_analytics") db.analyticsRows.push(row);
-                return { error: null };
-            },
-        }),
-    }),
+}));
+
+mock.module("./db/analytics.js", () => ({
+    ...realDbAnalytics,
+    insertToolAnalytics: (row: Record<string, unknown>) => {
+        db.analyticsRows.push(row);
+    },
 }));
 
 mock.module("./db/nutrition.js", () => ({
@@ -589,6 +587,7 @@ mock.module("./food-search.js", () => ({
 
 afterAll(() => {
     mock.module("./db/client.js", () => realClient);
+    mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
     mock.module("./db/profiles.js", () => realProfiles);
     mock.module("./db/household.js", () => realHousehold);
