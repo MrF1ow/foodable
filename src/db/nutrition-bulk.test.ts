@@ -127,7 +127,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
             duration_ms: 1,
             success: true,
             error_category: null,
-        });
+        } as unknown as import("../analytics.js").AnalyticsRecord);
         await storeRefreshToken("rt-delete-all", userId);
         await new Promise((r) => setTimeout(r, 40));
 
