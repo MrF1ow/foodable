@@ -3,7 +3,10 @@ import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
-import { liveExportArchiveStore } from "./exports.js";
+import {
+    liveExportArchiveStore,
+    type ExportArchiveStore,
+} from "./exports.js";
 import { getSupabase } from "./client.js";
 import {
     definedColumns,
@@ -1682,12 +1685,22 @@ export function exportStoragePaths(userId: string): string[] {
     ];
 }
 
-export async function deleteAllUserData(userId: string): Promise<void> {
+export type DeleteAllUserDataDeps = {
+    exportStore?: ExportArchiveStore;
+    auth?: { deleteUser: (userId: string) => Promise<void> };
+};
+
+export async function deleteAllUserData(
+    userId: string,
+    deps?: DeleteAllUserDataDeps,
+): Promise<void> {
     // Export removal is idempotent and lives outside Postgres; run it first so
     // a later DB failure does not leave a downloadable archive for an account
     // we failed to erase. GoTrue deleteUser runs last so every public row is
     // gone before auth.users disappears.
-    await liveExportArchiveStore().remove(exportStoragePaths(userId));
+    await (deps?.exportStore ?? liveExportArchiveStore()).remove(
+        exportStoragePaths(userId),
+    );
 
     await run(async (tx) => {
         const deleteUserRows = async (
@@ -1719,6 +1732,10 @@ export async function deleteAllUserData(userId: string): Promise<void> {
         await deleteUserRows("auth_codes", "delete auth codes");
     });
 
+    if (deps?.auth) {
+        await deps.auth.deleteUser(userId);
+        return;
+    }
     const { error: userErr } =
         await getSupabase().auth.admin.deleteUser(userId);
     if (userErr) throw new Error(`Failed to delete user: ${userErr.message}`);

@@ -1,4 +1,3 @@
-import { SQL } from "bun";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
     deleteWater,
@@ -17,50 +16,10 @@ import {
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
+import { raceOnUniqueKey } from "./testing/lock-race.js";
 import { setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
-
-async function raceInsertWater(opts: {
-    url: string;
-    sql: SQL;
-    userId: string;
-    key: string;
-}) {
-    const holder = new SQL(opts.url, { prepare: false, max: 1 });
-    const left = new SQL(opts.url, { prepare: false, max: 1 });
-    const right = new SQL(opts.url, { prepare: false, max: 1 });
-    let releaseLock!: () => void;
-    const lockReleased = new Promise<void>((r) => (releaseLock = r));
-    let lockTaken!: () => void;
-    const lockHeld = new Promise<void>((r) => (lockTaken = r));
-    const holding = holder.begin(async (tx) => {
-        await tx`select pg_advisory_xact_lock(515151)`;
-        lockTaken();
-        await lockReleased;
-    });
-    const input = {
-        amount_ml: 250,
-        idempotency_key: opts.key,
-        logged_at: "2024-06-01T08:00:00.000Z",
-    };
-    try {
-        await lockHeld;
-        setSqlForTests(left);
-        const first = insertWater(opts.userId, input);
-        setSqlForTests(right);
-        const second = insertWater(opts.userId, input);
-        setSqlForTests(opts.sql);
-        releaseLock();
-        await holding;
-        return await Promise.all([first, second]);
-    } finally {
-        releaseLock();
-        await Promise.allSettled([holding]);
-        setSqlForTests(opts.sql);
-        await Promise.all([holder.close(), left.close(), right.close()]);
-    }
-}
 
 describeDb(pgAvailable !== null, "nutrition log db", (getCtx) => {
     let userId: string;
@@ -124,11 +83,55 @@ describeDb(pgAvailable !== null, "nutrition log db", (getCtx) => {
         expect(entry.created_at).toMatch(/\+00:00$/);
 
         const { pg, sql } = getCtx();
-        const [a, b] = await raceInsertWater({
+        const key = "water-race";
+        const loggedAt = "2024-06-01T08:00:00.000Z";
+        const input = {
+            amount_ml: 250,
+            idempotency_key: key,
+            logged_at: loggedAt,
+        };
+        const [a, b] = await raceOnUniqueKey({
             url: pg.url,
-            sql,
-            userId,
-            key: "water-race",
+            restoreSql: sql,
+            blockInsert: (tx) =>
+                tx`
+                    insert into water_log (
+                        user_id,
+                        amount_ml,
+                        logged_at,
+                        idempotency_key
+                    )
+                    values (${userId}, ${250}, ${loggedAt}, ${key})
+                `,
+            run: () => insertWater(userId, input),
+        });
+        expect([a.deduplicated, b.deduplicated].sort()).toEqual([false, true]);
+        expect(a.entry.id).toBe(b.entry.id);
+    });
+
+    test("concurrent insertWeight with same key yields one winner", async () => {
+        const { pg, sql } = getCtx();
+        const key = "weight-race";
+        const loggedAt = "2024-06-01T09:00:00.000Z";
+        const input = {
+            weight_g: 71000,
+            idempotency_key: key,
+            logged_at: loggedAt,
+        };
+        const [a, b] = await raceOnUniqueKey({
+            url: pg.url,
+            restoreSql: sql,
+            blockInsert: (tx) =>
+                tx`
+                    insert into weight_log (
+                        user_id,
+                        weight_g,
+                        logged_at,
+                        idempotency_key
+                    )
+                    values (${userId}, ${71000}, ${loggedAt}, ${key})
+                `,
+            run: () => insertWeight(userId, input),
         });
         expect([a.deduplicated, b.deduplicated].sort()).toEqual([false, true]);
         expect(a.entry.id).toBe(b.entry.id);
@@ -198,9 +201,15 @@ describeDb(pgAvailable !== null, "nutrition log db", (getCtx) => {
     });
 
     test("updateWeight not found and null notes", async () => {
-        await expect(
-            updateWeight(userId, crypto.randomUUID(), { weight_g: 1 }),
-        ).rejects.toThrow("Failed to update weight: entry not found");
+        const err = await updateWeight(userId, crypto.randomUUID(), {
+            weight_g: 1,
+        }).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect((err as Error).message).toBe(
+            "Failed to update weight: entry not found",
+        );
 
         const { entry } = await insertWeight(userId, {
             weight_g: 70000,

@@ -1,5 +1,5 @@
-import { SQL } from "bun";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as nutrition from "./nutrition.js";
 import {
     countMealItems,
     countMeals,
@@ -13,61 +13,16 @@ import {
     listMealItems,
     searchMeals,
     updateMeal,
-    type Meal,
+    updatedMealIdempotencyKey,
+    type MealInput,
 } from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { run, setSqlForTests } from "./sql.js";
+import { raceOnUniqueKey } from "./testing/lock-race.js";
+import { setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
-
-async function raceInsertMeal(opts: {
-    url: string;
-    sql: SQL;
-    userId: string;
-    key: string;
-}): Promise<
-    [
-        { meal: Meal; deduplicated: boolean },
-        { meal: Meal; deduplicated: boolean },
-    ]
-> {
-    const holder = new SQL(opts.url, { prepare: false, max: 1 });
-    const left = new SQL(opts.url, { prepare: false, max: 1 });
-    const right = new SQL(opts.url, { prepare: false, max: 1 });
-    let releaseLock!: () => void;
-    const lockReleased = new Promise<void>((r) => (releaseLock = r));
-    let lockTaken!: () => void;
-    const lockHeld = new Promise<void>((r) => (lockTaken = r));
-    const holding = holder.begin(async (tx) => {
-        await tx`select pg_advisory_xact_lock(424242)`;
-        lockTaken();
-        await lockReleased;
-    });
-    const input = {
-        description: "Race meal",
-        meal_type: "snack" as const,
-        idempotency_key: opts.key,
-        logged_at: "2024-06-01T12:00:00.000Z",
-    };
-    try {
-        await lockHeld;
-        setSqlForTests(left);
-        const first = insertMeal(opts.userId, input);
-        setSqlForTests(right);
-        const second = insertMeal(opts.userId, input);
-        setSqlForTests(opts.sql);
-        releaseLock();
-        await holding;
-        return await Promise.all([first, second]);
-    } finally {
-        releaseLock();
-        await Promise.allSettled([holding]);
-        setSqlForTests(opts.sql);
-        await Promise.all([holder.close(), left.close(), right.close()]);
-    }
-}
 
 describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
     let userId: string;
@@ -142,11 +97,35 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
 
     test("concurrent insertMeal with same key yields one winner", async () => {
         const { pg, sql } = getCtx();
-        const [a, b] = await raceInsertMeal({
+        const key = "concurrent-meal-key";
+        const loggedAt = "2024-06-01T12:00:00.000Z";
+        const input = {
+            description: "Race meal",
+            meal_type: "snack" as const,
+            idempotency_key: key,
+            logged_at: loggedAt,
+        };
+        const [a, b] = await raceOnUniqueKey({
             url: pg.url,
-            sql,
-            userId,
-            key: "concurrent-meal-key",
+            restoreSql: sql,
+            blockInsert: (tx) =>
+                tx`
+                    insert into meals (
+                        user_id,
+                        description,
+                        meal_type,
+                        logged_at,
+                        idempotency_key
+                    )
+                    values (
+                        ${userId},
+                        ${"block"},
+                        ${"snack"},
+                        ${loggedAt},
+                        ${key}
+                    )
+                `,
+            run: () => insertMeal(userId, input),
         });
         const flags = [a.deduplicated, b.deduplicated].sort();
         expect(flags).toEqual([false, true]);
@@ -332,37 +311,162 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
     });
 
     test("updateMeal not found", async () => {
-        await expect(
-            updateMeal(userId, crypto.randomUUID(), { notes: "nope" }),
-        ).rejects.toThrow("Failed to update meal: meal not found");
+        const err = await updateMeal(userId, crypto.randomUUID(), {
+            notes: "nope",
+        }).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect((err as Error).message).toBe(
+            "Failed to update meal: meal not found",
+        );
     });
 
-    test("getAllMealItems crosses page boundary", async () => {
+    test("updateMeal recomputes auto idempotency key and respects fields", async () => {
+        const { meal: created } = await insertMeal(userId, {
+            description: "Before",
+            meal_type: "lunch",
+            logged_at: "2024-10-01T12:00:00.000Z",
+        });
+        expect(created.idempotency_key?.startsWith("auto:")).toBe(true);
+
+        const withKey = await updateMeal(userId, created.id, {
+            calories: 500,
+        });
+        expect(withKey.idempotency_key).toBe(
+            updatedMealIdempotencyKey(userId, created, { calories: 500 }),
+        );
+
+        const withNotes = await updateMeal(userId, created.id, {
+            notes: "keep-me",
+        });
+        const caloriesOnly = await updateMeal(userId, withNotes.id, {
+            protein_g: 20,
+        });
+        expect(caloriesOnly.notes).toBe("keep-me");
+
+        const cleared = await updateMeal(userId, caloriesOnly.id, {
+            notes: null,
+        } as unknown as Partial<MealInput>);
+        expect(cleared.notes).toBeNull();
+    });
+
+    test("updateMeal replaces items", async () => {
+        const { meal: created } = await insertMeal(userId, {
+            description: "Items",
+            meal_type: "dinner",
+            logged_at: "2024-10-02T18:00:00.000Z",
+            items: [
+                {
+                    household_id: null,
+                    food_id: null,
+                    recipe_id: null,
+                    label: "Old",
+                    amount: null,
+                    unit: null,
+                    grams: null,
+                    portions: null,
+                    calories: null,
+                    protein_g: null,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                },
+            ],
+        });
+        const updated = await updateMeal(userId, created.id, {
+            items: [
+                {
+                    household_id: null,
+                    food_id: null,
+                    recipe_id: null,
+                    label: "New",
+                    amount: null,
+                    unit: null,
+                    grams: null,
+                    portions: null,
+                    calories: null,
+                    protein_g: null,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                },
+            ],
+        });
+        expect(updated.items).toHaveLength(1);
+        expect(updated.items![0]!.label).toBe("New");
+    });
+
+    test("getAllMealItems crosses page boundary with sort_order tie-breaker", async () => {
         const { sql } = getCtx();
-        await sql`
+        const [meal] = await sql`
             insert into meals (user_id, description, meal_type, logged_at, idempotency_key)
-            select
+            values (
                 ${userId},
-                'bulk',
-                'snack',
-                ${"2024-01-01T12:00:00.000Z"}::timestamptz
-                    + (g * interval '1 second'),
-                'bulk:' || g::text
+                ${"bulk-meal"},
+                ${"snack"},
+                ${"2024-01-01T12:00:00.000Z"},
+                ${"bulk-meal-anchor"}
+            )
+            returning id
+        `;
+        await sql`
+            insert into meal_items (meal_id, user_id, label, sort_order)
+            select ${meal.id}, ${userId}, 'item', 0
             from generate_series(1, 1001) as g
         `;
-        await sql`
-            insert into meal_items (
-                meal_id,
-                user_id,
-                label,
-                sort_order
-            )
-            select m.id, ${userId}, 'item', 0
-            from meals m
-            where m.user_id = ${userId}
-        `;
         expect(await countMealItems(userId)).toBe(1001);
+        const expected = await sql`
+            select id::text as id
+            from meal_items
+            where user_id = ${userId}
+            order by meal_id asc, sort_order asc, id asc
+        `;
         const all = await getAllMealItems(userId);
         expect(all).toHaveLength(1001);
+        const ids = all.map((i) => i.id);
+        expect(ids).toEqual(expected.map((r: { id: string }) => r.id));
+        expect(new Set(ids).size).toBe(1001);
+    });
+
+    test("getAllMealItems truncation guard message", async () => {
+        const { sql } = getCtx();
+        const [meal] = await sql`
+            insert into meals (user_id, description, meal_type, logged_at, idempotency_key)
+            values (
+                ${userId},
+                ${"guard"},
+                ${"snack"},
+                ${"2024-03-04T12:00:00.000Z"},
+                ${"guard-meal"}
+            )
+            returning id
+        `;
+        await sql`
+            insert into meal_items (meal_id, user_id, label, sort_order)
+            values (${meal.id}, ${userId}, ${"one"}, ${0})
+        `;
+        const countSpy = spyOn(nutrition, "countMealItems").mockResolvedValue(
+            2,
+        );
+        try {
+            const err = await getAllMealItems(userId).then(
+                () => null,
+                (e: unknown) => e,
+            );
+            expect((err as Error).message).toBe(
+                "getAllMealItems: fetched 1 items but countMealItems reported 2 — export would be truncated",
+            );
+        } finally {
+            countSpy.mockRestore();
+        }
     });
 });
