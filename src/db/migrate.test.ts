@@ -32,7 +32,7 @@ describe("listMigrationFiles", () => {
     });
 });
 
-describeDb(pgAvailable, "migrate", (ctx) => {
+describeDb(pgAvailable !== null, "migrate", (ctx) => {
     test("fresh database applies every migration file", async () => {
         const { sql } = ctx();
         const files = listMigrationFiles();
