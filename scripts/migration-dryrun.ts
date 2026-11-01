@@ -18,7 +18,7 @@
 // Needs initdb, pg_ctl and psql. Set PG_BIN to their directory when they are
 // not on PATH (pg_config --bindir is tried first).
 
-import { $ } from "bun";
+import { startTempPostgres } from "../src/db/testing/pg-temp.js";
 
 // The fixture (seed.sql) is written against the schema before this version,
 // and everything from here on, including future migrations, runs on top of it.
@@ -39,7 +39,9 @@ const RERUN_BEFORE = "20261031180000_phase8_contract.sql";
 const ROOT = new URL("..", import.meta.url).pathname;
 const MIGRATIONS = `${ROOT}supabase/migrations`;
 const FIXTURES = `${ROOT}scripts/migration-dryrun`;
-const PORT = process.env.PG_DRYRUN_PORT ?? "54329";
+const PORT = process.env.PG_DRYRUN_PORT
+    ? Number(process.env.PG_DRYRUN_PORT)
+    : undefined;
 
 function flag(name: string): string | undefined {
     const i = process.argv.indexOf(name);
@@ -49,51 +51,6 @@ function flag(name: string): string | undefined {
 const dataFile = flag("--data");
 const pendingFrom = flag("--pending-from") ?? DEFAULT_PENDING_FROM;
 const keep = process.argv.includes("--keep");
-
-async function pgBin(): Promise<string> {
-    if (process.env.PG_BIN) return `${process.env.PG_BIN.replace(/\/$/, "")}/`;
-    const res = await $`pg_config --bindir`.quiet().nothrow();
-    if (res.exitCode === 0) return `${res.stdout.toString().trim()}/`;
-    return "";
-}
-
-const bin = await pgBin();
-const tmp = (await $`mktemp -d`.text()).trim();
-const data = `${tmp}/data`;
-
-const psqlBase = [
-    `${bin}psql`,
-    "-h",
-    tmp,
-    "-p",
-    PORT,
-    "-U",
-    "postgres",
-    "-d",
-    "postgres",
-    "-q",
-    "-X",
-    "-v",
-    "ON_ERROR_STOP=1",
-];
-
-async function psql(args: string[]): Promise<{ ok: boolean; out: string }> {
-    const res = await $`${[...psqlBase, ...args]}`.quiet().nothrow();
-    return {
-        ok: res.exitCode === 0,
-        out: (res.stdout.toString() + res.stderr.toString()).trim(),
-    };
-}
-
-async function applyFile(path: string): Promise<{ ok: boolean; out: string }> {
-    return psql(["-1", "-f", path]);
-}
-
-async function scalar(sql: string): Promise<string> {
-    const res = await psql(["-tA", "-c", sql]);
-    if (!res.ok) throw new Error(res.out);
-    return res.out;
-}
 
 function fail(message: string): never {
     console.error(`\n${message}`);
@@ -114,16 +71,12 @@ const COUNTS_SQL = `
         )
     )`;
 
+let pg: Awaited<ReturnType<typeof startTempPostgres>> | undefined;
+
 try {
-    const init = await $`${bin}initdb -D ${data} -U postgres -A trust`
-        .quiet()
-        .nothrow();
-    if (init.exitCode !== 0) {
-        fail(
-            `initdb failed. Set PG_BIN to the Postgres bin directory.\n${init.stderr}`,
-        );
-    }
-    await $`${bin}pg_ctl -D ${data} -l ${tmp}/log -w -o ${`-p ${PORT} -k ${tmp} -c listen_addresses=''`} start`.quiet();
+    pg = await startTempPostgres({ port: PORT });
+    const { applyFile, psql, scalar } = pg;
+
     console.log(`postgres: ${await scalar("show server_version")}`);
 
     const stub = await applyFile(`${FIXTURES}/stub.sql`);
@@ -206,7 +159,5 @@ try {
         process.exitCode = 1;
     }
 } finally {
-    await $`${bin}pg_ctl -D ${data} -m fast stop`.quiet().nothrow();
-    if (keep) console.log(`kept ${tmp}`);
-    else await $`rm -rf ${tmp}`.quiet().nothrow();
+    await pg?.stop({ keep });
 }
