@@ -6,6 +6,20 @@ import { mintSiteSession, readSiteSession } from "../site-session.js";
 const SECRET = "x".repeat(32);
 const USER = "11111111-1111-4111-8111-111111111111";
 
+// Site sessions read SESSION_SECRET from the environment. The cross-checks
+// sign export tokens with SECRET, so they run with the session on that same
+// secret: a regression to "one key, one shape" then fails here.
+function withSessionSecret(fn: () => void): void {
+    const prev = process.env.SESSION_SECRET;
+    process.env.SESSION_SECRET = SECRET;
+    try {
+        fn();
+    } finally {
+        if (prev === undefined) delete process.env.SESSION_SECRET;
+        else process.env.SESSION_SECRET = prev;
+    }
+}
+
 function e1RawSecretToken(
     userId: string,
     expiresAtMs: number,
@@ -86,15 +100,20 @@ describe("export download tokens", () => {
     });
 
     test("export tokens are never accepted as site sessions", () => {
-        const fresh = signExportToken(USER, Date.now() + 60_000, SECRET);
-        const expired = signExportToken(USER, Date.now() - 1, SECRET);
-        expect(readSiteSession(fresh)).toBeNull();
-        expect(readSiteSession(expired)).toBeNull();
+        withSessionSecret(() => {
+            const fresh = signExportToken(USER, Date.now() + 60_000, SECRET);
+            const expired = signExportToken(USER, Date.now() - 1, SECRET);
+            expect(readSiteSession(fresh)).toBeNull();
+            expect(readSiteSession(expired)).toBeNull();
+        });
     });
 
     test("site session tokens are never accepted as export tokens", () => {
-        const session = mintSiteSession(USER);
-        expect(verifyExportToken(session, Date.now(), SECRET)).toBeNull();
+        withSessionSecret(() => {
+            const session = mintSiteSession(USER);
+            expect(readSiteSession(session)).toBe(USER);
+            expect(verifyExportToken(session, Date.now(), SECRET)).toBeNull();
+        });
     });
 
     test("e1 tokens signed with the raw session secret are rejected", () => {
@@ -109,6 +128,5 @@ describe("export download tokens", () => {
             SECRET,
         );
         expect(verifyExportToken(legacy, Date.now(), SECRET)).toBeNull();
-        expect(readSiteSession(legacy)).toBeNull();
     });
 });

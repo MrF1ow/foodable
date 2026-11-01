@@ -36,6 +36,16 @@ describe("redactPathForAccessLog", () => {
         );
     });
 
+    test("redacts odd spellings of the export path", () => {
+        for (const path of [
+            "//exports/e1.abc.def.mac",
+            "/Exports/e1.abc.def.mac",
+            "/EXPORTS//e1.abc.def.mac",
+        ]) {
+            expect(redactPathForAccessLog(path)).toBe("/exports/[redacted]");
+        }
+    });
+
     test("leaves other paths unchanged", () => {
         expect(redactPathForAccessLog("/mcp")).toBe("/mcp");
         expect(redactPathForAccessLog("/exports")).toBe("/exports");
