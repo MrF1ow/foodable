@@ -149,7 +149,6 @@ async function seedDeleteAllUserRows(
 
 const deleteAllDeps = {
     exportStore: createMemoryExportArchiveStore(),
-    auth: { deleteUser: async () => {} },
 };
 
 describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
