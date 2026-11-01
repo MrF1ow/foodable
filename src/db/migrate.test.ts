@@ -11,6 +11,7 @@ import {
 } from "./migrate.js";
 import { describeDb } from "./testing/pg.js";
 import { findPgBin, startTempPostgres } from "./testing/pg-temp.js";
+import { rows, run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 if (!pgAvailable) {
@@ -338,6 +339,74 @@ $$;`,
             await pg.stop();
         }
     });
+    test("migrate does not leak session state to the caller connection", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            await migrate(sql);
+            setSqlForTests(sql);
+
+            const settings = await run(async (tx) => {
+                const [row] = await rows<{
+                    search_path: string;
+                    row_security: string;
+                    statement_timeout: string;
+                }>(
+                    tx,
+                    tx`
+                        select current_setting('search_path') as search_path,
+                               current_setting('row_security') as row_security,
+                               current_setting('statement_timeout') as statement_timeout
+                    `,
+                );
+                return {
+                    searchPath: row!.search_path,
+                    rowSecurity: row!.row_security,
+                    timeout: row!.statement_timeout,
+                };
+            });
+
+            expect(settings.searchPath).toBe('"$user", public');
+            expect(settings.rowSecurity).toBe("on");
+            expect(settings.timeout).not.toBe("0");
+        } finally {
+            setSqlForTests(null);
+            await sql.close();
+            await pg.stop();
+        }
+    });
+
+    test("a failing migration still leaves the caller connection clean", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-leak-"));
+            writeFileSync(join(dir, "20260101120000_ok.sql"), "select 1;");
+            writeFileSync(
+                join(dir, "20260101130000_bad.sql"),
+                `create table public.leak_probe (id int);
+select * from table_does_not_exist;`,
+            );
+
+            await expect(migrate(sql, { dir, log: () => {} })).rejects.toThrow(
+                "20260101130000_bad",
+            );
+
+            setSqlForTests(sql);
+            const [searchPath] = await run(async (tx) =>
+                rows<{ search_path: string }>(
+                    tx,
+                    tx`select current_setting('search_path') as search_path`,
+                ),
+            );
+            expect(searchPath!.search_path).toBe('"$user", public');
+        } finally {
+            setSqlForTests(null);
+            await sql.close();
+            await pg.stop();
+        }
+    });
+
     test("rejects a bad pending file before applying any earlier one", async () => {
         const pg = await startTempPostgres();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });

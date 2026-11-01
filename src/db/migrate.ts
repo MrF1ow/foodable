@@ -252,43 +252,56 @@ export async function migrate(
         pendingText.set(file.version, sqlText);
     }
 
-    if (!(await authSchemaExists(sql))) {
-        const bootstrap = await Bun.file(bootstrapPath).text();
-        await sql.unsafe(bootstrap).simple();
-        log(`ok bootstrap`);
-    }
-
-    await ensureHistoryTable(sql);
-
-    const applied: string[] = [];
-
-    for (const file of pendingFiles) {
-        const sqlText = pendingText.get(file.version)!;
-        const label = migrationLabel(file);
-
-        try {
-            await sql.begin(async (tx) => {
-                await tx.unsafe(sqlText).simple();
-                await tx.unsafe(
-                    `insert into supabase_migrations.schema_migrations (
-                        version,
-                        name,
-                        statements
-                    )
-                    values ($1, $2, ARRAY[$3::text])`,
-                    [file.version, file.name, sqlText],
-                );
-            });
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`Migration ${label} failed: ${message}`, {
-                cause: err,
-            });
+    const reserved = await sql.reserve();
+    try {
+        if (!(await authSchemaExists(reserved))) {
+            const bootstrap = await Bun.file(bootstrapPath).text();
+            await reserved.unsafe(bootstrap).simple();
+            log(`ok bootstrap`);
         }
 
-        applied.push(label);
-        log(`ok ${label}`);
-    }
+        await ensureHistoryTable(reserved);
 
-    return { applied, pending: toApply.filter((p) => !applied.includes(p)) };
+        const applied: string[] = [];
+
+        for (const file of pendingFiles) {
+            const sqlText = pendingText.get(file.version)!;
+            const label = migrationLabel(file);
+
+            try {
+                await reserved.begin(async (tx) => {
+                    await tx.unsafe(sqlText).simple();
+                    await tx.unsafe(
+                        `insert into supabase_migrations.schema_migrations (
+                            version,
+                            name,
+                            statements
+                        )
+                        values ($1, $2, ARRAY[$3::text])`,
+                        [file.version, file.name, sqlText],
+                    );
+                });
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Migration ${label} failed: ${message}`, {
+                    cause: err,
+                });
+            }
+
+            applied.push(label);
+            log(`ok ${label}`);
+        }
+
+        return {
+            applied,
+            pending: toApply.filter((p) => !applied.includes(p)),
+        };
+    } finally {
+        try {
+            await reserved.unsafe("discard all").simple();
+        } finally {
+            await reserved.release();
+        }
+    }
 }

@@ -60,12 +60,9 @@ export async function run<T>(
             try {
                 await tx`
                 select set_config('statement_timeout', ${String(opts?.timeoutMs ?? 15_000)}, true),
-                       set_config('TimeZone', 'UTC', true),
-                       set_config('search_path', 'public', true)
+                       set_config('TimeZone', 'UTC', true)
             `;
                 // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
-                // search_path public: Bun.sql transactions default to an empty search_path,
-                // so unqualified table names would not resolve (Phase 2 adapters).
                 return await fn(tx);
             } finally {
                 store.open = false;
