@@ -33,8 +33,13 @@ export class AlreadyRegisteredError extends Error {
 // GoTrue: internal/api/token.go — InvalidLoginMessage
 const INVALID_LOGIN_MESSAGE = "Invalid login credentials";
 
+// The household's own minimum for every new password (first-user sign-up
+// and members added in Settings). Stricter than GoTrue's default of 6;
+// existing accounts with shorter passwords still sign in.
+export const MIN_PASSWORD_LENGTH = 12;
+
 // GoTrue: internal/api/password.go — fmt.Sprintf("Password should be at least %d characters.", config.Password.MinLength)
-const WEAK_PASSWORD_MESSAGE = "Password should be at least 6 characters.";
+const WEAK_PASSWORD_MESSAGE = `Password should be at least ${MIN_PASSWORD_LENGTH} characters.`;
 
 // GoTrue: internal/api/signup.go — ErrorCodeUserAlreadyExists
 const USER_ALREADY_REGISTERED_MESSAGE = "User already registered";
@@ -51,8 +56,6 @@ const EMAIL_FORMAT_RE =
 
 // GoTrue: internal/api/signup.go — empty password before MinLength check
 const SIGNUP_PASSWORD_REQUIRED_MESSAGE = "Signup requires a valid password";
-
-const MIN_PASSWORD_LENGTH = 6;
 
 // Fixed bcrypt hash so unknown-email sign-in still runs Bun.password.verify.
 export const DUMMY_PASSWORD_HASH =

@@ -1,4 +1,5 @@
 import { escapeHtml, renderAppShell } from "../shell.js";
+import { MIN_PASSWORD_LENGTH } from "../../domain/auth.js";
 import type { ViewerChrome } from "../shell.js";
 import type { HouseholdMember } from "../../household.js";
 import type { GrocerySection, GroceryStore } from "../../domain/settings.js";
@@ -104,7 +105,7 @@ function addMemberFormBody(error?: string): string {
 ${field({ id: "add_display_name", label: "Name", control: `<input id="add_display_name" name="display_name" required maxlength="80" />` })}
 ${field({ id: "add_login", label: "Email or username", control: `<input id="add_login" name="login" required autocomplete="off" autocapitalize="none" spellcheck="false" />` })}
 <p class="hint">A username has no @: 2–31 letters, digits, dots, dashes or underscores. They sign in with it on the same login page.</p>
-${field({ id: "add_password", label: "Password", control: `<input id="add_password" name="password" type="password" required minlength="8" autocomplete="new-password" />` })}
+${field({ id: "add_password", label: "Password", control: `<input id="add_password" name="password" type="password" required minlength="${MIN_PASSWORD_LENGTH}" autocomplete="new-password" />` })}
 <button type="submit" class="btn-primary">Add member</button>`;
 }
 

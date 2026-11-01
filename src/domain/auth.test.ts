@@ -26,7 +26,7 @@ describe("signUp", () => {
     test("weak password uses GoTrue message", async () => {
         const store = createMemoryAuthStore();
         await expect(signUp(store, "a@example.com", "12345")).rejects.toThrow(
-            "Password should be at least 6 characters.",
+            "Password should be at least 12 characters.",
         );
     });
 
@@ -41,38 +41,38 @@ describe("signUp", () => {
             "Signup requires a valid password",
         );
         expect(await message(signUp(store, "not-an-email", "12345"))).toBe(
-            "Password should be at least 6 characters.",
+            "Password should be at least 12 characters.",
         );
     });
 
     test("invalid email uses GoTrue validateEmail message", async () => {
         const store = createMemoryAuthStore();
-        await expect(signUp(store, "not-an-email", "secret12")).rejects.toThrow(
-            "Unable to validate email address: invalid format",
-        );
+        await expect(
+            signUp(store, "not-an-email", "secret123456"),
+        ).rejects.toThrow("Unable to validate email address: invalid format");
     });
 
     test("email format matches checkmail rules", async () => {
         const store = createMemoryAuthStore();
         await expect(
-            signUp(store, "user@localhost", "secret12"),
+            signUp(store, "user@localhost", "secret123456"),
         ).resolves.toBeTruthy();
         await expect(
-            signUp(store, "space @example.com", "secret12"),
+            signUp(store, "space @example.com", "secret123456"),
         ).rejects.toThrow("Unable to validate email address: invalid format");
         await expect(
-            signUp(store, "a@@example.com", "secret12"),
+            signUp(store, "a@@example.com", "secret123456"),
         ).rejects.toThrow("Unable to validate email address: invalid format");
         await expect(
-            signUp(store, "üser@example.com", "secret12"),
+            signUp(store, "üser@example.com", "secret123456"),
         ).rejects.toThrow("Unable to validate email address: invalid format");
     });
 
     test("duplicate email uses GoTrue user already registered message", async () => {
         const store = createMemoryAuthStore();
-        await signUp(store, "dup@example.com", "secret12");
+        await signUp(store, "dup@example.com", "secret123456");
         await expect(
-            signUp(store, "dup@example.com", "secret12"),
+            signUp(store, "dup@example.com", "secret123456"),
         ).rejects.toThrow("User already registered");
     });
 });
@@ -80,7 +80,7 @@ describe("signUp", () => {
 describe("signIn", () => {
     test("wrong password raises SignInError", async () => {
         const store = createMemoryAuthStore();
-        await signUp(store, "user@example.com", "secret12");
+        await signUp(store, "user@example.com", "secret123456");
         try {
             await signIn(store, "user@example.com", "wrong-pass");
             throw new Error("expected throw");
@@ -99,7 +99,7 @@ describe("signIn", () => {
         let verifyCalls = 0;
         let verifyHash = "";
         await expect(
-            signIn(store, "ghost@example.com", "secret12", {
+            signIn(store, "ghost@example.com", "secret123456", {
                 verify: async (_password, hash) => {
                     verifyCalls += 1;
                     verifyHash = hash;
@@ -158,5 +158,17 @@ describe("memory store", () => {
                 passwordHash: "hash2",
             }),
         ).rejects.toBeInstanceOf(AlreadyRegisteredError);
+    });
+});
+
+describe("password minimum", () => {
+    test("is 12 characters for sign-up", async () => {
+        const store = createMemoryAuthStore();
+        await expect(
+            signUp(store, "a@example.com", "x".repeat(11)),
+        ).rejects.toThrow("Password should be at least 12 characters.");
+        expect(
+            await signUp(store, "a@example.com", "x".repeat(12)),
+        ).toBeString();
     });
 });

@@ -544,7 +544,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
         };
         const first = await resolveApproveUser({
             email: "first@example.com",
-            password: "secret12",
+            password: "secret123456",
             authUserCount,
             signInUser,
             signUpUser,

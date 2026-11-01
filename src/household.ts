@@ -1,4 +1,5 @@
 import type { AuthContext } from "./auth-context.js";
+import { MIN_PASSWORD_LENGTH } from "./domain/auth.js";
 
 /** `admin` is an elevated member: they manage the household (settings,
  * stores, everyone's rules, adding people) alongside the owner. Ownership
@@ -763,8 +764,14 @@ export function parseMemberInput(raw: unknown): ParseResult<MemberDraft> {
     if (hasEmail === hasUsername) {
         return { ok: false, error: "Enter an email or username." };
     }
-    if (typeof record.password !== "string" || record.password.length < 8) {
-        return { ok: false, error: "Password must be at least 8 characters." };
+    if (
+        typeof record.password !== "string" ||
+        record.password.length < MIN_PASSWORD_LENGTH
+    ) {
+        return {
+            ok: false,
+            error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+        };
     }
     const login = hasEmail
         ? parseEmailLogin(email as string)

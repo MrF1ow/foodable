@@ -14,7 +14,7 @@ function emailDraft(over: Partial<MemberDraft> = {}): MemberDraft {
     return {
         displayName: "Sam",
         login: { kind: "email", email: "sam@example.com" },
-        password: "password1",
+        password: "password1234",
         ...over,
     };
 }
@@ -23,7 +23,7 @@ function usernameDraft(over: Partial<MemberDraft> = {}): MemberDraft {
     return {
         displayName: "Sam",
         login: { kind: "username", username: "sam" },
-        password: "password1",
+        password: "password1234",
         ...over,
     };
 }
@@ -84,7 +84,7 @@ test("username login becomes the household.invalid Auth email", () => {
         parseMemberInput({
             display_name: "Sam",
             username: "sam",
-            password: "password1",
+            password: "password1234",
         }),
     ).toEqual({
         ok: true,
@@ -121,7 +121,7 @@ test("email login keeps the real address and rejects a username in the same call
         parseMemberInput({
             display_name: "Sam",
             email: "Sam@Example.com",
-            password: "password1",
+            password: "password1234",
         }),
     ).toEqual({
         ok: true,
@@ -132,7 +132,7 @@ test("email login keeps the real address and rejects a username in the same call
             display_name: "Sam",
             email: "sam@example.com",
             username: "sam",
-            password: "password1",
+            password: "password1234",
         }),
     ).toEqual({
         ok: false,
@@ -145,7 +145,7 @@ test("the Settings form's single login field is an email when it has an @", () =
         parseMemberInput({
             display_name: "Sam",
             login: "sam",
-            password: "password1",
+            password: "password1234",
             email: "",
             username: "",
         }),
@@ -154,14 +154,14 @@ test("the Settings form's single login field is an email when it has an @", () =
         parseMemberInput({
             display_name: "Sam",
             login: " Sam@Example.com ",
-            password: "password1",
+            password: "password1234",
         }),
     ).toEqual({ ok: true, value: emailDraft() });
     expect(
         parseMemberInput({
             display_name: "Sam",
             login: "",
-            password: "password1",
+            password: "password1234",
         }),
     ).toEqual({ ok: false, error: "Enter an email or username." });
 });
@@ -178,7 +178,7 @@ test("addHouseholdMember with a username stores only the display name on the mem
     if (!result.ok) return;
     expect(users.get(result.userId)).toEqual({
         email: "sam@household.invalid",
-        password: "password1",
+        password: "password1234",
     });
     expect(members.get(result.userId)).toEqual({
         householdId: "hh-1",
@@ -201,7 +201,7 @@ test("addHouseholdMember with an email stores that Auth email", async () => {
     if (!result.ok) return;
     expect(users.get(result.userId)).toEqual({
         email: "sam@example.com",
-        password: "password1",
+        password: "password1234",
     });
     expect(members.get(result.userId)).toEqual({
         householdId: "hh-1",
@@ -293,4 +293,15 @@ test("the owner cannot transfer to or remove themselves", () => {
         ok: false,
         error: "You can't remove yourself. Make someone else the owner first.",
     });
+});
+
+test("parseMemberInput requires a 12-character password", () => {
+    const base = { display_name: "Kid", login: "kid" };
+    expect(parseMemberInput({ ...base, password: "x".repeat(11) })).toEqual({
+        ok: false,
+        error: "Password must be at least 12 characters.",
+    });
+    expect(parseMemberInput({ ...base, password: "x".repeat(12) }).ok).toBe(
+        true,
+    );
 });

@@ -2847,7 +2847,7 @@ describe("household PAT has no default user", () => {
                             ? {
                                   display_name: "Sam",
                                   username: "sam",
-                                  password: "password1",
+                                  password: "password1234",
                               }
                             : {},
                     ),
@@ -4144,7 +4144,7 @@ describe("removed membership admin MCP tools", () => {
                 call("add_household_member", {
                     display_name: "Sam",
                     username: "sam",
-                    password: "password1",
+                    password: "password1234",
                 }),
             ).rejects.toThrow(/not found/);
             expect(db.tokenRotations).toHaveLength(0);
@@ -5023,7 +5023,7 @@ describe("authenticated dashboard HTTP", () => {
                 cookie: cookieFor(alice),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "display_name=Kid&password=password1&username=kid",
+            body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/settings/household");
@@ -5046,7 +5046,7 @@ describe("authenticated dashboard HTTP", () => {
                 cookie: cookieFor(bob),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "display_name=Kid&password=password1&username=kid",
+            body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(403);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
@@ -5194,7 +5194,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(400);
         const html = await r.text();
-        expect(html).toContain("Password must be at least 8 characters.");
+        expect(html).toContain("Password must be at least 12 characters.");
         expect(html).toContain('action="/settings/household"');
         expect(html).toMatch(
             /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
@@ -5209,7 +5209,7 @@ describe("authenticated dashboard HTTP", () => {
             headers: {
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "display_name=Kid&password=password1&username=kid",
+            body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(401);
         const html = await r.text();
@@ -5226,7 +5226,7 @@ describe("authenticated dashboard HTTP", () => {
                 cookie: cookieFor(alice),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "display_name=Kid&password=password1&username=kid",
+            body: "display_name=Kid&password=password1234&username=kid",
         });
         const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
@@ -5234,7 +5234,7 @@ describe("authenticated dashboard HTTP", () => {
                 cookie: cookieFor(alice),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "display_name=Kid2&password=password1&username=kid",
+            body: "display_name=Kid2&password=password1234&username=kid",
         });
         expect(r.status).toBe(400);
         const html = await r.text();
