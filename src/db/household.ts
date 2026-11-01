@@ -10,7 +10,8 @@ import {
     type MemberDraft,
     type MemberRole,
 } from "../household.js";
-import { getSupabase } from "./client.js";
+import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
+import { liveAuthStore } from "./users.js";
 import { maybeOne, rows, run } from "./sql.js";
 
 export type HouseholdMembership = {
@@ -168,33 +169,37 @@ function friendlyMemberError(message: string): string {
 }
 
 function liveAuthAdmin(): AuthUserAdmin {
+    const store = liveAuthStore();
     return {
         async createUser({ email, password }) {
-            const created = await getSupabase().auth.admin.createUser({
-                email,
-                password,
-                email_confirm: true,
-            });
-            if (created.error) {
-                return {
-                    ok: false,
-                    alreadyRegistered: alreadyRegistered(created.error.message),
-                    error: created.error.message,
-                };
-            }
-            const userId = created.data.user?.id;
-            if (!userId) {
+            try {
+                const userId = await signUp(store, email, password);
+                return { ok: true, userId };
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                if (
+                    err instanceof AlreadyRegisteredError ||
+                    alreadyRegistered(message)
+                ) {
+                    return {
+                        ok: false,
+                        alreadyRegistered: true,
+                        error: message,
+                    };
+                }
                 return {
                     ok: false,
                     alreadyRegistered: false,
-                    error: "Could not create the login.",
+                    error: message,
                 };
             }
-            return { ok: true, userId };
         },
         async deleteUser(userId) {
-            const { error } = await getSupabase().auth.admin.deleteUser(userId);
-            if (error) throw new Error(error.message);
+            const deleted = await store.deleteUser(userId);
+            if (!deleted) {
+                throw new Error("User not found");
+            }
         },
     };
 }

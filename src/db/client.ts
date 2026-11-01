@@ -1,5 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+export { SignInError } from "../domain/auth.js";
+export { authUserCount, signInUser, signUpUser } from "./users.js";
+
 let supabase: SupabaseClient;
 
 export const SUPABASE_TIMEOUT_MS = 15_000;
@@ -40,60 +43,4 @@ function buildClient(): SupabaseClient {
 export function getSupabase(): SupabaseClient {
     if (!supabase) supabase = buildClient();
     return supabase;
-}
-
-// ---------- Auth ----------
-
-// Carries Supabase's HTTP status and error code so the login page can tell a
-// wrong password (400 / invalid_credentials) from Supabase being unreachable,
-// timed out or rate limited.
-export class SignInError extends Error {
-    constructor(
-        message: string,
-        readonly status: number | undefined,
-        readonly code: string | undefined,
-    ) {
-        super(message);
-        this.name = "SignInError";
-    }
-}
-
-export async function signUpUser(
-    email: string,
-    password: string,
-): Promise<string> {
-    // Use a throw-away client so the session never lands on the shared singleton.
-    const { data, error } = await buildClient().auth.signUp({
-        email,
-        password,
-    });
-
-    if (error) throw new Error(error.message);
-    if (!data.user) throw new Error("Sign-up failed");
-    return data.user.id;
-}
-
-export async function signInUser(
-    email: string,
-    password: string,
-): Promise<string> {
-    const { data, error } = await buildClient().auth.signInWithPassword({
-        email,
-        password,
-    });
-
-    if (error) throw new SignInError(error.message, error.status, error.code);
-    return data.user.id;
-}
-
-export async function authUserCount(): Promise<number> {
-    const { data, error } = await getSupabase().auth.admin.listUsers({
-        page: 1,
-        perPage: 1,
-    });
-    if (error) throw new Error(error.message);
-    if ("total" in data && typeof data.total === "number") {
-        return data.total;
-    }
-    return data.users.length;
 }
