@@ -1,8 +1,8 @@
 # Self-hosting Foodable
 
-Foodable is a single-household deploy. It is not a public hosted service. You run the Bun server yourself and point it at a Supabase project.
+Foodable is a single-household deploy. It is not a public hosted service. You run the Bun server yourself and point it at Postgres through `DATABASE_URL`.
 
-Clone [https://github.com/MrF1ow/foodable](https://github.com/MrF1ow/foodable), copy `.env.example` to `.env`, fill in the values below, push the migrations, and start the server. The old `MrF1ow/nutrition-mcp` URL redirects here.
+Clone [https://github.com/MrF1ow/foodable](https://github.com/MrF1ow/foodable), copy `.env.example` to `.env`, fill in the values below, apply the migrations, and start the server. The old `MrF1ow/nutrition-mcp` URL redirects here.
 
 ```bash
 git clone https://github.com/MrF1ow/foodable.git
@@ -10,32 +10,32 @@ cd foodable
 bun install
 cp .env.example .env
 bun run generate-oauth-creds   # paste into .env
+bun run db:migrate             # needs DATABASE_URL in .env
 bun src/index.ts               # http://localhost:8080
 ```
 
 `GET /health` returns `ok` when the process is up.
 
-## Supabase: cloud first
+## Database
 
-Use [Supabase cloud](https://supabase.com) unless you already run Postgres yourself.
-
-1. Create a project in the Supabase dashboard.
-2. Copy the project URL into `SUPABASE_URL` (`https://<ref>.supabase.co`).
-3. Copy the **service role** secret into `SUPABASE_SECRET_KEY`. The server uses the service role for Auth admin, household RPCs, and the rest of the data plane. The publishable/anon key is not enough.
-4. Link the CLI and push every file in `supabase/migrations/`:
+Foodable talks to Postgres only through `DATABASE_URL`. The schema lives in `supabase/migrations/`; apply it with:
 
 ```bash
-supabase link --project-ref <ref>
-supabase db push
+bun run db:migrate
 ```
 
-Do not skip migrations. Schema lives only in those files. `supabase db push` applies them in order to the linked project.
+On **plain Postgres**, `db/bootstrap.sql` runs automatically first (roles and stubs the migrations expect). On **Supabase cloud**, that bootstrap is a no-op because those objects already exist.
 
-Auth must allow email and password. Foodable has no Google login. Confirm email can stay off for a household deploy so the first sign-up can sign in immediately; if you leave it on, the first user has to confirm before `/approve` succeeds.
+### Supabase as a Postgres host
 
-### Upgrading an existing deploy
+[Supabase cloud](https://supabase.com) is a supported host: create a project, copy the **session pooler** connection string from Project Settings → Database into `DATABASE_URL` (port **6543**), then either:
 
-When a new version brings migrations and the database already holds data:
+- `bun run db:migrate` from this repo, or
+- `supabase link --project-ref <ref>` and `supabase db push` if you already use the Supabase CLI.
+
+Do not skip migrations. Schema changes ship only in those SQL files.
+
+For upgrading an existing deploy when new migrations land:
 
 1. Back up. Take a dashboard backup or `pg_dump`, and run `export_all_data` for each member as a second copy.
 2. Dry-run the pending migrations against a copy of your data, locally:
@@ -45,27 +45,17 @@ When a new version brings migrations and the database already holds data:
     bun run db:dryrun --data prod-data.sql
     ```
 
-    This uses a throwaway local Postgres and never touches the remote database. Set `PG_BIN` if `initdb` is not on your `PATH`. Add `--pending-from <version>` naming the first migration your database has not applied (`supabase migration list` shows which).
+    This uses a throwaway local Postgres and never touches the remote database. Set `PG_BIN` if `initdb` is not on your `PATH`. Add `--pending-from <version>` naming the first migration your database has not applied (`bun run db:migrate --list` or `supabase migration list` shows which).
 
-3. `supabase db push`, then deploy the matching code. The new code expects the new tables, so do not deploy it first.
+3. Apply migrations (`bun run db:migrate` or `supabase db push`), then deploy the matching code. The new code expects the new tables, so do not deploy it first.
 
-## Self-hosted Supabase
-
-Self-hosted Supabase is the other option, not the default. The app speaks the same PostgREST and GoTrue APIs, so the env vars do not change:
-
-- `SUPABASE_URL` is the API origin of _your_ instance (the Kong/API gateway, not the Studio URL).
-- `SUPABASE_SECRET_KEY` is that instance's service role JWT.
-
-Install the Supabase CLI, point it at the self-hosted project, and run the same `supabase db push` against `supabase/migrations/`. You are responsible for Auth (email+password), storage (the `exports` bucket from the migrations), and keeping the instance reachable from the Foodable process.
-
-A self-hosted instance that only exposes the database, without GoTrue and PostgREST, will not work. Sign-up, sign-in, and the household RPCs all go through the Supabase API. Running on plain Postgres with none of those services is planned, and not available yet: [roadmap.md](./roadmap.md).
+Any other Postgres (Railway, Neon, RDS, a local `initdb` cluster) works the same way: set `DATABASE_URL` and run `bun run db:migrate`.
 
 ## Environment variables
 
 | Variable                | Required     | Purpose                                                                                                                     |
 | ----------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `SUPABASE_URL`          | yes          | Supabase API origin (cloud or self-hosted)                                                                                  |
-| `SUPABASE_SECRET_KEY`   | yes          | Service role secret                                                                                                         |
+| `DATABASE_URL`          | yes          | Postgres connection string (plain host or Supabase session pooler)                                                          |
 | `OAUTH_CLIENT_ID`       | yes          | MCP OAuth client id (`bun run generate-oauth-creds`)                                                                        |
 | `OAUTH_CLIENT_SECRET`   | yes          | MCP OAuth client secret                                                                                                     |
 | `SESSION_SECRET`        | production   | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). Setting it on a live deploy logs everyone out of the web app once. |
@@ -121,8 +111,7 @@ Set the same variables as `.env.example` on the service:
 
 | Variable                | Required                | Purpose                                                                                     |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
-| `SUPABASE_URL`          | yes                     | Supabase API origin (cloud or self-hosted)                                                  |
-| `SUPABASE_SECRET_KEY`   | yes                     | Service role secret                                                                         |
+| `DATABASE_URL`          | yes                     | Supabase session pooler URI or other Postgres host                                          |
 | `OAUTH_CLIENT_ID`       | yes                     | MCP OAuth client id (`bun run generate-oauth-creds`)                                        |
 | `OAUTH_CLIENT_SECRET`   | yes                     | MCP OAuth client secret                                                                     |
 | `SESSION_SECRET`        | yes                     | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). New value logs web users out once. |
@@ -148,13 +137,13 @@ Use a single-label name such as `food.example.com`. A deeper name (`app.food.exa
 
 ## First-user flow
 
-One deploy, one Supabase project, one household.
+One deploy, one Postgres database, one household.
 
-1. Open the site at `/` (or complete MCP OAuth at `/authorize`). There is no Google button. The first visit, while Auth is empty, is email and password.
-2. That first successful `/approve` **signs up** the first Auth user. After any Auth user exists, `/approve` only signs in. A second email is refused with "Wrong email, username or password."; a wrong password does not fall through to sign-up. If Supabase cannot answer (timeout, rate limit, outage) the page says to try again in a minute instead of blaming the password.
+1. Open the site at `/` (or complete MCP OAuth at `/authorize`). There is no Google button. The first visit, while no user accounts exist, is email and password.
+2. That first successful `/approve` **signs up** the first user. After any user exists, `/approve` only signs in. A second email is refused with "Wrong email, username or password."; a wrong password does not fall through to sign-up. If the database cannot answer (timeout, rate limit, outage) the page says to try again in a minute instead of blaming the password.
 3. The first user is not in a household yet. `/` shows **Create household** (household name and your name) instead of the app. Submit it. That RPC creates the singleton household and the caller as **owner**. A second create fails.
 4. Later people exist only when the owner adds them. Members and the household bot token are managed only in **Settings → Household** (`/settings/household`) — add people there (email or username plus password). Members sign in with those credentials; a username member types just the username (it is stored as `<username>@household.invalid`). They cannot rotate the household token or add people unless the owner makes them an **admin**. Every member can edit their own allergens, dislikes and rules under **Rules**.
-5. The owner can make a member an admin (or back), hand ownership to another member, or remove a person, from that person's **Manage** dialog in Settings → Household. An admin manages the household beside the owner: name, location, stores, store rules, everyone's rules, and adding people. Roles, removal, transfer and the bot token stay with the owner, who keeps ownership when they promote someone. Removing someone erases their login, tokens and personal nutrition history (the same path as `delete_account`); shared fridge, grocery, recipe and food data stays. If the owner deletes their account without handing over, an admin becomes owner, or else the member with the oldest Auth account (trigger `household_members_promote_on_owner_leave`). An owner who is the last member leaves an empty household behind.
+5. The owner can make a member an admin (or back), hand ownership to another member, or remove a person, from that person's **Manage** dialog in Settings → Household. An admin manages the household beside the owner: name, location, stores, store rules, everyone's rules, and adding people. Roles, removal, transfer and the bot token stay with the owner, who keeps ownership when they promote someone. Removing someone erases their login, tokens and personal nutrition history (the same path as `delete_account`); shared fridge, grocery, recipe and food data stays. If the owner deletes their account without handing over, an admin becomes owner, or else the member with the oldest account (trigger `household_members_promote_on_owner_leave`). An owner who is the last member leaves an empty household behind.
 6. Public registration stays closed. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path.
 
 Connect an agent at `https://your-host/mcp` with the household account.
