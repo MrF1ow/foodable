@@ -52,7 +52,6 @@
     "dependencies": {
         "@hotwired/turbo": "8.0.23",
         "@modelcontextprotocol/server": "^2.0.0",
-        "@supabase/supabase-js": "^2.116.0",
         "hono": "^4.13.7",
         "zod": "^4.5.4"
     }
