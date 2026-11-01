@@ -1646,41 +1646,6 @@ export async function deleteWeight(
 
 // ---------- Delete all user data ----------
 
-/**
- * Storage key the whole-account export archive is written to — one per user,
- * so each export overwrites the last. Lives here rather than in src/export.ts
- * because deletion needs it too and src/export.ts already imports from this
- * module; the other direction would be a cycle.
- */
-export function exportArchivePath(userId: string): string {
-    return `${userId}/foodable-export.zip`;
-}
-
-/**
- * EVERY key an export may have left in the bucket for this user, current and
- * historical. `deleteAllUserData` removes all of them, and that is the whole
- * reason this list exists rather than a single inlined path: the archive holds
- * the user's complete meal, water, weight, goals and profile history, so a key
- * missed here survives the account that asked to be erased — and keeps
- * resolving through the signed URL the user was already handed, for the rest
- * of its hour. Renaming the archive without adding its old name to this list
- * is exactly that bug, and `remove` reports a missing path as success, so
- * nothing would surface it. Add, do not replace.
- */
-export function exportStoragePaths(userId: string): string[] {
-    return [
-        exportArchivePath(userId),
-        // Written by the meals-only export that the archive replaced. Nothing
-        // creates it any more; it stays here to clean up files left behind by
-        // exports taken before that change.
-        `${userId}/meals.csv`,
-        // Written before the archive object was renamed to foodable-export.zip.
-        // Nothing creates it any more; it stays here so account deletion still
-        // removes a leftover from the old key. Add, do not replace.
-        `${userId}/nutrition-mcp-export.zip`,
-    ];
-}
-
 export type DeleteAllUserDataDeps = {
     auth?: { deleteUser: (userId: string) => Promise<void> };
 };

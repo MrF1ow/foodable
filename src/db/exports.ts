@@ -17,11 +17,13 @@ function byteaToUint8Array(value: unknown): Uint8Array {
 export function liveExportArchiveStore(): ExportArchiveStore {
     return {
         async put(userId, archive, ttlSeconds) {
-            const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+            const expiresAt = new Date(
+                Date.now() + ttlSeconds * 1000,
+            ).toISOString();
             await run(async (tx) => {
                 await tx`
                     insert into export_archives (user_id, archive, expires_at)
-                    values (${userId}, ${archive}, ${expiresAt})
+                    values (${userId}, ${archive}, ${expiresAt}::timestamptz)
                     on conflict (user_id) do update
                     set archive = excluded.archive,
                         created_at = now(),

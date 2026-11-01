@@ -2767,28 +2767,59 @@ describe("export_all_data is on the tool surface", () => {
     });
 
     test("returns a signed /exports/ link for the caller", async () => {
+        const exportUser = "11111111-1111-4111-8111-111111111111";
         const prevSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = "mcp-export-test-secret-32chars!!";
-        db.meals = [meal()];
-        db.profile = { ...PROFILE_BASE };
+        db.meals = [meal({ user_id: exportUser })];
+        db.profile = { ...PROFILE_BASE, user_id: exportUser };
         try {
-            await withTools(null, async (call) => {
-                const r = await call("export_all_data");
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            registerTools(
+                server,
+                { kind: "user", userId: exportUser },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+            );
+            const [clientTransport, serverTransport] =
+                InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([
+                server.connect(serverTransport),
+                client.connect(clientTransport),
+            ]);
+            try {
+                const r = (await client.callTool({
+                    name: "export_all_data",
+                    arguments: {},
+                })) as ToolResult;
                 const text = textOf(r);
                 expect(text).toContain(
                     "Download (link valid for 60 minutes): http://localhost/exports/",
                 );
-                const urlLine = text.split("\n").find((l) => l.includes("/exports/"));
+                const urlLine = text
+                    .split("\n")
+                    .find((l) => l.includes("/exports/"));
                 expect(urlLine).toBeDefined();
                 const token = urlLine!.split("/exports/")[1]!;
                 expect(
                     verifyExportToken(
                         token,
-                        Date.now() + 3_600_000,
+                        Date.now(),
                         resolveSessionSigningSecret(),
                     ),
-                ).toBe("u1");
-            });
+                ).toBe(exportUser);
+            } finally {
+                await client.close();
+                await server.close();
+            }
         } finally {
             if (prevSecret === undefined) delete process.env.SESSION_SECRET;
             else process.env.SESSION_SECRET = prevSecret;
@@ -2796,21 +2827,44 @@ describe("export_all_data is on the tool surface", () => {
     });
 
     test("uses baseUrl from tool context (PUBLIC_ORIGIN path)", async () => {
+        const exportUser = "22222222-2222-4222-8222-222222222222";
         const prevSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = "mcp-export-test-secret-32chars!!";
-        db.meals = [meal()];
-        db.profile = { ...PROFILE_BASE };
+        db.meals = [meal({ user_id: exportUser })];
+        db.profile = { ...PROFILE_BASE, user_id: exportUser };
         try {
-            await withTools(
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            registerTools(
+                server,
+                { kind: "user", userId: exportUser },
+                true,
                 null,
-                async (call) => {
-                    const r = await call("export_all_data");
-                    expect(textOf(r)).toContain(
-                        "https://exports.example/exports/",
-                    );
-                },
+                undefined,
                 "https://exports.example",
             );
+            const [clientTransport, serverTransport] =
+                InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([
+                server.connect(serverTransport),
+                client.connect(clientTransport),
+            ]);
+            try {
+                const r = (await client.callTool({
+                    name: "export_all_data",
+                    arguments: {},
+                })) as ToolResult;
+                expect(textOf(r)).toContain("https://exports.example/exports/");
+            } finally {
+                await client.close();
+                await server.close();
+            }
         } finally {
             if (prevSecret === undefined) delete process.env.SESSION_SECRET;
             else process.env.SESSION_SECRET = prevSecret;

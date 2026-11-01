@@ -21,7 +21,7 @@ export function createExportsRouter(
 
     router.get("/exports/:token", rateLimitAuth, async (c) => {
         const userId = verifyExportToken(
-            c.req.param("token"),
+            c.req.param("token") ?? "",
             Date.now(),
             resolveSessionSigningSecret(),
         );
@@ -34,7 +34,7 @@ export function createExportsRouter(
             return c.body(EXPORT_DOWNLOAD_NOT_FOUND, 404, NOT_FOUND_HEADERS);
         }
 
-        return c.body(archive, 200, {
+        return c.body(Buffer.from(archive), 200, {
             "Content-Type": "application/zip",
             "Content-Disposition": 'attachment; filename="foodable-export.zip"',
             "Cache-Control": "no-store",

@@ -78,9 +78,7 @@ describe("categorizeError", () => {
         ["@include cycle: a.html -> b.html -> a.html", "internal_asset_error"],
         ["unknown widget: not-a-real-widget", "internal_asset_error"],
 
-        // src/export.ts / src/supabase.ts
-        ["Failed to upload export: storage quota exceeded", "export_error"],
-        ["Failed to create download link: unknown error", "export_error"],
+        // src/domain/export.ts
         [
             "getAllMeals: fetched 5 meals but countMeals reported 10 — export would be truncated",
             "export_error",

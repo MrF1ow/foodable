@@ -22,7 +22,9 @@ describe("export download tokens", () => {
         const token = signExportToken(USER, exp, SECRET);
         const parts = token.split(".");
         parts[1] = "22222222-2222-4222-8222-222222222222";
-        expect(verifyExportToken(parts.join("."), Date.now(), SECRET)).toBeNull();
+        expect(
+            verifyExportToken(parts.join("."), Date.now(), SECRET),
+        ).toBeNull();
     });
 
     test("tampered expiry is rejected", () => {
@@ -30,7 +32,9 @@ describe("export download tokens", () => {
         const token = signExportToken(USER, exp, SECRET);
         const parts = token.split(".");
         parts[2] = String(exp + 3_600_000);
-        expect(verifyExportToken(parts.join("."), Date.now(), SECRET)).toBeNull();
+        expect(
+            verifyExportToken(parts.join("."), Date.now(), SECRET),
+        ).toBeNull();
     });
 
     test("wrong secret is rejected", () => {
@@ -43,7 +47,11 @@ describe("export download tokens", () => {
         const exp = Date.now() + 60_000;
         const token = signExportToken(USER, exp, SECRET);
         expect(
-            verifyExportToken(token.slice(0, token.length - 4), Date.now(), SECRET),
+            verifyExportToken(
+                token.slice(0, token.length - 4),
+                Date.now(),
+                SECRET,
+            ),
         ).toBeNull();
     });
 

@@ -157,6 +157,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/client-id.ts": "platform",
     "src/dashboard-data.ts": "platform",
     "src/discovery.ts": "platform",
+    "src/exports-route.ts": "platform",
     "src/food-search.ts": "platform",
     "src/html.ts": "platform",
     "src/mcp.ts": "platform",
@@ -174,6 +175,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
 };
 
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
+    { prefix: "src/domain/", area: "domain" },
     { prefix: "src/db/", area: "db" },
     { prefix: "public/app/", area: "web" },
     { prefix: "src/web/components/", area: "web" },

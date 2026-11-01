@@ -80,10 +80,7 @@ describe("GET /exports/:token", () => {
             Date.now() - 1000,
             resolveSessionSigningSecret(),
         );
-        const tampered = validToken.replace(
-            "cccccccc",
-            "dddddddd",
-        );
+        const tampered = validToken.replace("cccccccc", "dddddddd");
 
         const cases = [
             await app.request("http://localhost/exports/not-valid"),
@@ -91,10 +88,11 @@ describe("GET /exports/:token", () => {
             await app.request(`http://localhost/exports/${tampered}`),
             await app.request(`http://localhost/exports/${validToken}`),
         ];
-        expect(cases.every((r) => r.status === 404)).toBe(true);
-        const bodies = await Promise.all(cases.map((r) => r.text()));
-        expect(new Set(bodies)).toEqual(new Set([EXPORT_DOWNLOAD_NOT_FOUND]));
         const fingerprints = await Promise.all(cases.map(notFoundFingerprint));
+        expect(fingerprints.every((fp) => fp.status === 404)).toBe(true);
+        expect(new Set(fingerprints.map((fp) => fp.body))).toEqual(
+            new Set([EXPORT_DOWNLOAD_NOT_FOUND]),
+        );
         const first = fingerprints[0]!;
         for (const fp of fingerprints.slice(1)) {
             expect(fp.status).toBe(first.status);

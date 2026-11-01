@@ -460,8 +460,9 @@ export interface FullExportResult {
 
 /**
  * Build the whole-account archive — every log, the goals and the profile —
- * upload it to the private `exports` bucket under a fixed per-user path (so
- * each export overwrites the previous one), and return a signed download link
+ * upsert it into `export_archives` (one row per user, so each export
+ * overwrites the previous one), and return a signed download link to
+ * `GET /exports/:token`
  * valid for EXPORT_TTL_SECONDS. This is the only export path: a meals-only CSV
  * tool used to sit beside it, and the archive absorbed it, which is why
  * `buildMealsCsv` still emits exactly the columns the importer reads.
@@ -552,11 +553,8 @@ export async function exportAllData(
     }));
     const archive = buildZip(entries, generatedAt);
 
-    // Fixed per-user path: each export overwrites the last, so a user cannot
-    // accumulate archives of their whole history in a bucket the sweep only
-    // visits every ten minutes. Shared with deleteAllUserData rather than
-    // spelled out twice — the two drifting apart is how a deleted account left
-    // its archive behind.
+    // One row per user in export_archives: each export overwrites the last. The
+    // row cascades away when the account is deleted.
     await store.put(userId, archive, EXPORT_TTL_SECONDS);
     const url = baseUrl
         ? `${baseUrl}/exports/${signExportToken(
