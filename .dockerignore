@@ -5,6 +5,8 @@ node_modules
 .gitignore
 .idea
 .DS_Store
-supabase/.temp
+tmp/
+supabase/*
+!supabase/migrations
 *.md
 LICENSE

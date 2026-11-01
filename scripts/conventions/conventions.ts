@@ -62,6 +62,7 @@ type ClassifyResult = Classified;
 const HIGH_EXACT = new Set([
     "package.json",
     "Dockerfile",
+    "docker-compose.yml",
     "railway.toml",
     ".github/CODEOWNERS",
     "src/auth-context.ts",
