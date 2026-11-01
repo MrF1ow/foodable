@@ -246,6 +246,60 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
         });
     });
 
+    test("work that outlives its run opens its own transaction", async () => {
+        const { sql } = ctx();
+        setSqlForTests(sql);
+        await sql`create table public._sql_late (id int primary key)`;
+        try {
+            let late: Promise<void> | undefined;
+            await run(async () => {
+                // Fire-and-forget: inherits the async context but only runs
+                // its query after the outer transaction has committed.
+                late = (async () => {
+                    await Bun.sleep(50);
+                    await run(async (tx) => {
+                        await tx`insert into public._sql_late values (1)`;
+                    });
+                })();
+            });
+            await late;
+            const [row] =
+                await sql`select count(*)::int as n from public._sql_late`;
+            expect(row.n).toBe(1);
+        } finally {
+            await sql`drop table public._sql_late`;
+        }
+    });
+
+    test("rows keeps the query's order", async () => {
+        const { sql } = ctx();
+        setSqlForTests(sql);
+        await sql`
+            create table public._sql_order as
+            select g as id, (g * 7919) % 401 as k
+            from generate_series(1, 400) g
+        `;
+        try {
+            const expected = (
+                (await sql`select id from public._sql_order order by k desc, id`) as {
+                    id: number;
+                }[]
+            ).map((r) => r.id);
+            for (const sortOff of [false, true]) {
+                const got = await run(async (tx) => {
+                    if (sortOff) await tx`set local enable_sort = off`;
+                    return rows<{ id: number }>(
+                        tx,
+                        tx`select id from public._sql_order order by k desc, id`,
+                    );
+                });
+                expect(got.map((r) => r.id)).toEqual(expected);
+            }
+        } finally {
+            await sql`drop table public._sql_order`;
+        }
+    });
+
     test("statement_timeout rejects long work", async () => {
         const { sql } = ctx();
         setSqlForTests(sql);

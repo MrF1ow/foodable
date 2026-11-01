@@ -12,7 +12,11 @@ export type Tx = TransactionSQL;
 let cached: SQL | undefined;
 let testSql: SQL | undefined;
 
-const activeTx = new AsyncLocalStorage<Tx>();
+// `open` flips to false before the transaction commits. Async work started
+// inside a run callback inherits this store and can outlive the transaction
+// (a fire-and-forget write); it must then open its own transaction instead of
+// reusing a connection Bun has already released.
+const activeTx = new AsyncLocalStorage<{ tx: Tx; open: boolean }>();
 
 export function getSql(): SQL {
     if (testSql) return testSql;
@@ -47,21 +51,26 @@ export async function run<T>(
     const outer = activeTx.getStore();
     // Phase 2 multi-step writes call run from inside run; reusing the outer tx
     // keeps one atomic unit and avoids opening another pool connection.
-    if (outer) return fn(outer);
+    if (outer?.open) return fn(outer.tx);
 
     const sql = getSql();
-    return sql.begin(async (tx) =>
-        activeTx.run(tx, async () => {
-            await tx`
+    return sql.begin(async (tx) => {
+        const store = { tx, open: true };
+        return activeTx.run(store, async () => {
+            try {
+                await tx`
                 select set_config('statement_timeout', ${String(opts?.timeoutMs ?? 15_000)}, true),
                        set_config('TimeZone', 'UTC', true)
             `;
-            // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
-            // Supabase sessions are UTC; a plain Postgres host often is not, which would
-            // shift every timestamp string the *FromRow mappers see.
-            return fn(tx);
-        }),
-    );
+                // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
+                // Supabase sessions are UTC; a plain Postgres host often is not, which would
+                // shift every timestamp string the *FromRow mappers see.
+                return await fn(tx);
+            } finally {
+                store.open = false;
+            }
+        });
+    });
 }
 
 function parseRowsPayload(rows: unknown): unknown[] {
