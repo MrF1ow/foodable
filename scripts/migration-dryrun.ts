@@ -39,6 +39,7 @@ const RERUN_BEFORE = "20261031180000_phase8_contract.sql";
 const ROOT = new URL("..", import.meta.url).pathname;
 const MIGRATIONS = `${ROOT}supabase/migrations`;
 const FIXTURES = `${ROOT}scripts/migration-dryrun`;
+const BOOTSTRAP = `${ROOT}db/bootstrap.sql`;
 const PORT = process.env.PG_DRYRUN_PORT
     ? Number(process.env.PG_DRYRUN_PORT)
     : undefined;
@@ -79,8 +80,8 @@ try {
 
     console.log(`postgres: ${await scalar("show server_version")}`);
 
-    const stub = await applyFile(`${FIXTURES}/stub.sql`);
-    if (!stub.ok) fail(`stub.sql failed:\n${stub.out}`);
+    const stub = await applyFile(BOOTSTRAP);
+    if (!stub.ok) fail(`bootstrap.sql failed:\n${stub.out}`);
 
     const files = [...new Bun.Glob("*.sql").scanSync(MIGRATIONS)].sort();
     const baseline = files.filter((f) => f < pendingFrom);
