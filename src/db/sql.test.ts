@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import {
     closeSql,
+    definedColumns,
     getSql,
+    insertReturning,
     maybeOne,
     one,
     pgError,
@@ -22,6 +24,16 @@ if (!pgAvailable) {
     }
     console.warn("database tests skipped: no initdb (set PG_BIN)");
 }
+
+test("definedColumns drops undefined and keeps null", () => {
+    const { row, keys } = definedColumns({
+        a: 1,
+        b: undefined,
+        c: null,
+    });
+    expect(keys).toEqual(["a", "c"]);
+    expect(row).toEqual({ a: 1, c: null });
+});
 
 describe("getSql", () => {
     const prevUrl = process.env.DATABASE_URL;
@@ -154,6 +166,28 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
             await expect(
                 maybeOne(tx, tx`select * from _sql_one`, "widget"),
             ).rejects.toThrow("widget: expected 1 row, got 2");
+        });
+    });
+
+    test("insert with id undefined gets a generated id", async () => {
+        const { sql } = ctx();
+        setSqlForTests(sql);
+
+        await run(async (tx) => {
+            await tx`
+                create temp table _sql_gen (
+                    id uuid primary key default gen_random_uuid(),
+                    label text not null
+                ) on commit drop
+            `;
+            const inserted = await insertReturning<{
+                id: string;
+                label: string;
+            }>(tx, "_sql_gen", { label: "auto" }, "id, label", "insert row");
+            expect(inserted.label).toBe("auto");
+            expect(inserted.id).toMatch(
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+            );
         });
     });
 

@@ -60,11 +60,12 @@ export async function run<T>(
             try {
                 await tx`
                 select set_config('statement_timeout', ${String(opts?.timeoutMs ?? 15_000)}, true),
-                       set_config('TimeZone', 'UTC', true)
+                       set_config('TimeZone', 'UTC', true),
+                       set_config('search_path', 'public', true)
             `;
                 // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
-                // Supabase sessions are UTC; a plain Postgres host often is not, which would
-                // shift every timestamp string the *FromRow mappers see.
+                // search_path public: Bun.sql transactions default to an empty search_path,
+                // so unqualified table names would not resolve (Phase 2 adapters).
                 return await fn(tx);
             } finally {
                 store.open = false;
@@ -120,4 +121,50 @@ export async function maybeOne<T = Record<string, unknown>>(
 export function pgError(context: string, err: unknown): Error {
     const message = err instanceof Error ? err.message : String(err);
     return new Error(`Failed to ${context}: ${message}`, { cause: err });
+}
+
+/** PostgREST / supabase-js omit `undefined` keys on insert and update. */
+export function definedColumns(obj: Record<string, unknown>): {
+    row: Record<string, unknown>;
+    keys: string[];
+} {
+    const keys: string[] = [];
+    const row: Record<string, unknown> = {};
+    for (const key of Object.keys(obj)) {
+        const val = obj[key];
+        if (val !== undefined) {
+            keys.push(key);
+            row[key] = val;
+        }
+    }
+    return { row, keys };
+}
+
+function asColumnTuple(keys: string[]): [string, ...string[]] {
+    if (keys.length === 0) {
+        throw new Error("definedColumns: no columns to write");
+    }
+    return keys as [string, ...string[]];
+}
+
+export async function insertReturning<T>(
+    tx: Tx,
+    table: string,
+    payload: Record<string, unknown>,
+    returningCols: string,
+    what: string,
+): Promise<T> {
+    const { row, keys } = definedColumns(payload);
+    try {
+        return await one<T>(
+            tx,
+            tx`
+                insert into ${tx.unsafe(table)} ${tx(row, ...asColumnTuple(keys))}
+                returning ${tx.unsafe(returningCols)}
+            `,
+            what,
+        );
+    } catch (err) {
+        throw pgError(what, err);
+    }
 }
