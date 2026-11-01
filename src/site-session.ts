@@ -11,7 +11,7 @@ export function resetSessionSecretWarningForTest(): void {
     sessionSecretFallbackWarned = false;
 }
 
-/** Shared HMAC secret for site sessions and export download tokens. */
+/** Session HMAC secret; export download links derive a separate key from this. */
 export function resolveSessionSigningSecret(): string {
     const session = process.env.SESSION_SECRET;
     if (session) {

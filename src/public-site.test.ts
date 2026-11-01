@@ -1,4 +1,5 @@
 import { test, expect, describe } from "bun:test";
+import { signExportToken } from "./domain/export-link.js";
 import { SITE_COOKIE } from "./site-session.js";
 
 // index.ts calls createOAuthRouter() at module scope, which throws without
@@ -90,6 +91,23 @@ describe("marketing HTTP is gone", () => {
     test("GET / with a bad site cookie is still login HTML", async () => {
         const r = await app.request("http://x/", {
             headers: { cookie: `${SITE_COOKIE}=not-a-session` },
+        });
+        expect(r.status).toBe(200);
+        const body = await r.text();
+        expect(body).toContain('action="/approve"');
+        expect(body).not.toContain("widget-frame");
+    });
+
+    test("GET / with an export download token as the site cookie is login HTML", async () => {
+        process.env.SESSION_SECRET ||= "public-site-export-cookie-test!!";
+        const userId = "22222222-2222-4222-8222-222222222222";
+        const exportCookie = signExportToken(
+            userId,
+            Date.now() + 3_600_000,
+            process.env.SESSION_SECRET,
+        );
+        const r = await app.request("http://x/", {
+            headers: { cookie: `${SITE_COOKIE}=${exportCookie}` },
         });
         expect(r.status).toBe(200);
         const body = await r.text();

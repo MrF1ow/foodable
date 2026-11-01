@@ -11,7 +11,7 @@ import {
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
-import { maskIp } from "./net.js";
+import { maskIp, redactPathForAccessLog } from "./net.js";
 import { isNutritionCard } from "./domain/layout.js";
 import {
     appScriptHref,
@@ -45,8 +45,8 @@ const app = new Hono();
 // Requests from IPs banned for repeated auth failures are skipped too — they are
 // announced once by a [ban] line and would otherwise dominate the log.
 app.use("*", async (c, next) => {
-    const path = new URL(c.req.url).pathname;
-    if (path === "/health") return next();
+    const pathRaw = new URL(c.req.url).pathname;
+    if (pathRaw === "/health") return next();
     const start = performance.now();
     await next();
     if (c.get("suppressAccessLog")) return;
@@ -63,6 +63,7 @@ app.use("*", async (c, next) => {
     // question the legacy retirement actually turns on. Absent when the
     // protocol did not carry it — see the note on mcpClient in middleware.ts.
     const client = c.get("mcpClient");
+    const path = redactPathForAccessLog(pathRaw);
     console.log(
         `[req] ${c.req.method} ${path} ${c.res.status} ${ms}ms ip=${ip}${era ? ` era=${era}` : ""}${client ? ` client=${client}` : ""}`,
     );

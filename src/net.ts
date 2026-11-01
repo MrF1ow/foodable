@@ -16,3 +16,14 @@ export function maskIp(forwardedFor: string | undefined): string {
     if (octets.length !== 4 || octets.some((o) => o === "")) return "-";
     return `${octets[0]}.${octets[1]}.${octets[2]}.x`;
 }
+
+/** Strip export download tokens before a path hits the access log. */
+export function redactPathForAccessLog(pathname: string): string {
+    if (
+        pathname.startsWith("/exports/") &&
+        pathname.length > "/exports/".length
+    ) {
+        return "/exports/[redacted]";
+    }
+    return pathname;
+}
