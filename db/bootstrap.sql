@@ -20,12 +20,23 @@ $$;
 
 create schema if not exists auth;
 
-create table if not exists auth.users (
-    id uuid primary key default gen_random_uuid(),
-    email text,
-    encrypted_password text,
-    created_at timestamptz default now()
-);
+do $$
+begin
+    if not exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'auth'
+          and table_name = 'users'
+    ) then
+        create table auth.users (
+            id uuid primary key default gen_random_uuid(),
+            email text,
+            encrypted_password text,
+            created_at timestamptz default now()
+        );
+    end if;
+end
+$$;
 
 do $$
 begin
@@ -49,17 +60,34 @@ $$;
 
 create schema if not exists storage;
 
-create table if not exists storage.buckets (
-    id text primary key,
-    name text,
-    public boolean default false,
-    file_size_limit bigint,
-    allowed_mime_types text[]
-);
-
-create table if not exists storage.objects (
-    id uuid primary key default gen_random_uuid(),
-    bucket_id text,
-    name text,
-    owner uuid
-);
+do $$
+begin
+    if not exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'storage'
+          and table_name = 'buckets'
+    ) then
+        create table storage.buckets (
+            id text primary key,
+            name text,
+            public boolean default false,
+            file_size_limit bigint,
+            allowed_mime_types text[]
+        );
+    end if;
+    if not exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'storage'
+          and table_name = 'objects'
+    ) then
+        create table storage.objects (
+            id uuid primary key default gen_random_uuid(),
+            bucket_id text,
+            name text,
+            owner uuid
+        );
+    end if;
+end
+$$;
