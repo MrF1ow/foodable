@@ -1,6 +1,7 @@
 import { type StockMovement, type StockStore } from "../domain/stock.js";
-import { getSupabase } from "./client.js";
+import { insertReturning, pgError, rows, run, type Tx } from "./sql.js";
 
+const STOCK_MOVEMENTS = "stock_movements";
 const STOCK_COLS =
     "id, household_id, food_id, fridge_item_id, delta, unit, reason, grocery_line_id, recipe_id, meal_id, actor_user_id, created_at";
 
@@ -63,47 +64,70 @@ function movementToRow(row: StockMovement) {
     };
 }
 
+async function listMovementRows(
+    tx: Tx,
+    householdId: string,
+    foodId: string | null | undefined,
+): Promise<StockMovement[]> {
+    const data = foodId
+        ? await rows(
+              tx,
+              tx`
+                  select ${tx.unsafe(STOCK_COLS)}
+                  from ${tx.unsafe(STOCK_MOVEMENTS)}
+                  where household_id = ${householdId}
+                    and food_id = ${foodId}
+                  order by created_at desc
+              `,
+          )
+        : await rows(
+              tx,
+              tx`
+                  select ${tx.unsafe(STOCK_COLS)}
+                  from ${tx.unsafe(STOCK_MOVEMENTS)}
+                  where household_id = ${householdId}
+                  order by created_at desc
+              `,
+          );
+    return data.map((row) => movementFromRow(row as never));
+}
+
 export function liveStockStore(): StockStore {
     return {
         async insertMovement(row) {
-            const { data, error } = await getSupabase()
-                .from("stock_movements")
-                .insert(movementToRow(row))
-                .select(STOCK_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to record stock movement: ${error.message}`,
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    STOCK_MOVEMENTS,
+                    movementToRow(row),
+                    STOCK_COLS,
+                    "record stock movement",
                 );
-            }
-            return movementFromRow(data);
+                return movementFromRow(data as never);
+            });
         },
         async linkMeal(householdId, movementId, mealId) {
-            const { error } = await getSupabase()
-                .from("stock_movements")
-                .update({ meal_id: mealId })
-                .eq("household_id", householdId)
-                .eq("id", movementId);
-            if (error) {
-                throw new Error(
-                    `Failed to link stock movement to meal: ${error.message}`,
-                );
-            }
+            return run(async (tx) => {
+                try {
+                    await tx`
+                        update ${tx.unsafe(STOCK_MOVEMENTS)}
+                        set meal_id = ${mealId}
+                        where household_id = ${householdId}
+                          and id = ${movementId}
+                    `;
+                } catch (err) {
+                    throw pgError("link stock movement to meal", err);
+                }
+            });
         },
         async listMovements(householdId, foodId) {
-            let query = getSupabase()
-                .from("stock_movements")
-                .select(STOCK_COLS)
-                .eq("household_id", householdId)
-                .order("created_at", { ascending: false });
-            if (foodId) query = query.eq("food_id", foodId);
-            const { data, error } = await query;
-            if (error) {
-                throw new Error(
-                    `Failed to list stock movements: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(movementFromRow);
+            return run(async (tx) => {
+                try {
+                    return await listMovementRows(tx, householdId, foodId);
+                } catch (err) {
+                    throw pgError("list stock movements", err);
+                }
+            });
         },
     };
 }
