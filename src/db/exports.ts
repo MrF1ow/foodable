@@ -1,130 +1,99 @@
-import { getSupabase } from "./client.js";
-
-export const EXPORT_BUCKET = "exports";
+import { run } from "./sql.js";
 
 export interface ExportArchiveStore {
-    upload(path: string, archive: Uint8Array): Promise<void>;
-    signedUrl(path: string, ttlSeconds: number): Promise<string>;
-    sweepOlderThan(cutoffMs: number): Promise<void>;
-    remove(paths: string[]): Promise<void>;
+    put(userId: string, archive: Uint8Array, ttlSeconds: number): Promise<void>;
+    read(userId: string): Promise<Uint8Array | null>;
+    sweepExpired(): Promise<void>;
+    remove(userId: string): Promise<void>;
+}
+
+function byteaToUint8Array(value: unknown): Uint8Array {
+    if (value instanceof Uint8Array) return value;
+    if (Buffer.isBuffer(value)) return new Uint8Array(value);
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    throw new Error("unexpected bytea type");
 }
 
 export function liveExportArchiveStore(): ExportArchiveStore {
-    const storage = () => getSupabase().storage.from(EXPORT_BUCKET);
-
     return {
-        async upload(path, archive) {
-            const { error: uploadErr } = await storage().upload(path, archive, {
-                contentType: "application/zip",
-                upsert: true,
+        async put(userId, archive, ttlSeconds) {
+            const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+            await run(async (tx) => {
+                await tx`
+                    insert into export_archives (user_id, archive, expires_at)
+                    values (${userId}, ${archive}, ${expiresAt})
+                    on conflict (user_id) do update
+                    set archive = excluded.archive,
+                        created_at = now(),
+                        expires_at = excluded.expires_at
+                `;
             });
-            if (uploadErr)
-                throw new Error(
-                    `Failed to upload export: ${uploadErr.message}`,
-                );
         },
 
-        async signedUrl(path, ttlSeconds) {
-            const { data, error: signErr } = await storage().createSignedUrl(
-                path,
-                ttlSeconds,
-            );
-            if (signErr || !data)
-                throw new Error(
-                    `Failed to create download link: ${signErr?.message ?? "unknown error"}`,
-                );
-            return data.signedUrl;
-        },
-
-        async sweepOlderThan(cutoffMs) {
-            const { data: folders, error: rootErr } = await storage().list("", {
-                limit: 1000,
+        async read(userId) {
+            return run(async (tx) => {
+                const rows = (await tx`
+                    select archive
+                    from export_archives
+                    where user_id = ${userId}
+                      and expires_at > now()
+                `) as { archive: unknown }[];
+                const row = rows[0];
+                if (!row) return null;
+                return byteaToUint8Array(row.archive);
             });
-            if (rootErr) {
-                console.warn(
-                    "Export sweep: failed to list bucket:",
-                    rootErr.message,
-                );
-                return;
-            }
-            if (!folders) return;
-
-            const stalePaths: string[] = [];
-            for (const folder of folders) {
-                const { data: files, error: listErr } = await storage().list(
-                    folder.name,
-                    { limit: 1000 },
-                );
-                if (listErr) {
-                    console.warn(
-                        `Export sweep: failed to list ${folder.name}:`,
-                        listErr.message,
-                    );
-                    continue;
-                }
-                for (const file of files ?? []) {
-                    const ts = file.updated_at ?? file.created_at;
-                    if (ts && new Date(ts).getTime() < cutoffMs) {
-                        stalePaths.push(`${folder.name}/${file.name}`);
-                    }
-                }
-            }
-
-            if (stalePaths.length === 0) return;
-            const { error: removeErr } = await storage().remove(stalePaths);
-            if (removeErr) {
-                console.warn(
-                    "Export sweep: failed to remove files:",
-                    removeErr.message,
-                );
-                return;
-            }
-            console.log(
-                `Export sweep: removed ${stalePaths.length} stale file(s).`,
-            );
         },
 
-        async remove(paths) {
-            const { error: exportErr } = await storage().remove(paths);
-            if (exportErr)
-                throw new Error(
-                    `Failed to delete exports: ${exportErr.message}`,
-                );
+        async sweepExpired() {
+            await run(async (tx) => {
+                await tx`
+                    delete from export_archives
+                    where expires_at < now()
+                `;
+            });
+        },
+
+        async remove(userId) {
+            await run(async (tx) => {
+                await tx`
+                    delete from export_archives
+                    where user_id = ${userId}
+                `;
+            });
         },
     };
 }
 
 export function createMemoryExportArchiveStore(): ExportArchiveStore & {
-    files: Map<string, { archive: Uint8Array; updatedAt: number }>;
+    rows: Map<string, { archive: Uint8Array; expiresAt: number }>;
 } {
-    const files = new Map<string, { archive: Uint8Array; updatedAt: number }>();
+    const rows = new Map<string, { archive: Uint8Array; expiresAt: number }>();
 
     return {
-        files,
+        rows,
 
-        async upload(path, archive) {
-            files.set(path, { archive, updatedAt: Date.now() });
+        async put(userId, archive, ttlSeconds) {
+            rows.set(userId, {
+                archive,
+                expiresAt: Date.now() + ttlSeconds * 1000,
+            });
         },
 
-        async signedUrl(path, ttlSeconds) {
-            if (!files.has(path)) {
-                throw new Error(
-                    `Failed to create download link: Object not found`,
-                );
-            }
-            return `memory://exports/${path}?ttl=${ttlSeconds}`;
+        async read(userId) {
+            const entry = rows.get(userId);
+            if (!entry || entry.expiresAt <= Date.now()) return null;
+            return entry.archive;
         },
 
-        async sweepOlderThan(cutoffMs) {
-            for (const [path, entry] of files) {
-                if (entry.updatedAt < cutoffMs) files.delete(path);
+        async sweepExpired() {
+            const now = Date.now();
+            for (const [userId, entry] of rows) {
+                if (entry.expiresAt <= now) rows.delete(userId);
             }
         },
 
-        async remove(paths) {
-            for (const path of paths) {
-                files.delete(path);
-            }
+        async remove(userId) {
+            rows.delete(userId);
         },
     };
 }

@@ -11,7 +11,8 @@ export function resetSessionSecretWarningForTest(): void {
     sessionSecretFallbackWarned = false;
 }
 
-function sessionSecret(): string {
+/** Shared HMAC secret for site sessions and export download tokens. */
+export function resolveSessionSigningSecret(): string {
     const session = process.env.SESSION_SECRET;
     if (session) {
         if (session.length < MIN_SESSION_SECRET_LEN) {
@@ -35,7 +36,9 @@ function sessionSecret(): string {
 }
 
 function sign(payload: string): string {
-    return createHmac("sha256", sessionSecret()).update(payload).digest("hex");
+    return createHmac("sha256", resolveSessionSigningSecret())
+        .update(payload)
+        .digest("hex");
 }
 
 export function mintSiteSession(userId: string, now = Date.now()): string {

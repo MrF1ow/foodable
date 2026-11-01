@@ -2,50 +2,39 @@ import { describe, expect, test } from "bun:test";
 import { createMemoryExportArchiveStore } from "./exports.js";
 
 describe("createMemoryExportArchiveStore", () => {
-    test("upload overwrite", async () => {
+    test("put overwrites the same user", async () => {
         const store = createMemoryExportArchiveStore();
-        await store.upload("u1/a.zip", new Uint8Array([1]));
-        await store.upload("u1/a.zip", new Uint8Array([2, 3]));
-        expect(store.files.get("u1/a.zip")?.archive).toEqual(
-            new Uint8Array([2, 3]),
-        );
+        await store.put("u1", new Uint8Array([1]), 3600);
+        await store.put("u1", new Uint8Array([2, 3]), 3600);
+        expect(await store.read("u1")).toEqual(new Uint8Array([2, 3]));
     });
 
-    test("signedUrl for missing path throws", async () => {
+    test("expired row is not returned", async () => {
         const store = createMemoryExportArchiveStore();
-        await expect(store.signedUrl("missing.zip", 60)).rejects.toThrow(
-            "Failed to create download link",
-        );
+        await store.put("u1", new Uint8Array([1]), -1);
+        expect(await store.read("u1")).toBeNull();
     });
 
-    test("signedUrl for uploaded path", async () => {
-        const store = createMemoryExportArchiveStore();
-        await store.upload("u1/a.zip", new Uint8Array([1]));
-        expect(await store.signedUrl("u1/a.zip", 3600)).toBe(
-            "memory://exports/u1/a.zip?ttl=3600",
-        );
-    });
-
-    test("sweep cutoff", async () => {
+    test("sweep removes only expired rows", async () => {
         const store = createMemoryExportArchiveStore();
         const now = Date.now();
-        store.files.set("old.zip", {
+        store.rows.set("old", {
             archive: new Uint8Array([1]),
-            updatedAt: now - 10_000,
+            expiresAt: now - 1000,
         });
-        store.files.set("new.zip", {
+        store.rows.set("new", {
             archive: new Uint8Array([2]),
-            updatedAt: now,
+            expiresAt: now + 60_000,
         });
-        await store.sweepOlderThan(now - 5_000);
-        expect(store.files.has("old.zip")).toBe(false);
-        expect(store.files.has("new.zip")).toBe(true);
+        await store.sweepExpired();
+        expect(store.rows.has("old")).toBe(false);
+        expect(store.rows.has("new")).toBe(true);
     });
 
-    test("remove of missing path is not an error", async () => {
+    test("remove deletes the user row", async () => {
         const store = createMemoryExportArchiveStore();
-        await expect(
-            store.remove(["never-uploaded.zip"]),
-        ).resolves.toBeUndefined();
+        await store.put("u1", new Uint8Array([1]), 3600);
+        await store.remove("u1");
+        expect(await store.read("u1")).toBeNull();
     });
 });

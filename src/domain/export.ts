@@ -2,8 +2,9 @@ import {
     liveExportArchiveStore,
     type ExportArchiveStore,
 } from "../db/exports.js";
+import { signExportToken } from "./export-link.js";
+import { resolveSessionSigningSecret } from "../site-session.js";
 import {
-    exportArchivePath,
     getAllMealItems,
     getAllMeals,
     getAllWater,
@@ -468,6 +469,7 @@ export interface FullExportResult {
 export async function exportAllData(
     userId: string,
     store: ExportArchiveStore = liveExportArchiveStore(),
+    baseUrl?: string,
 ): Promise<FullExportResult> {
     // One round of five independent queries rather than five awaited in turn:
     // an account with years of history pages through meals, water and weight,
@@ -555,9 +557,14 @@ export async function exportAllData(
     // visits every ten minutes. Shared with deleteAllUserData rather than
     // spelled out twice — the two drifting apart is how a deleted account left
     // its archive behind.
-    const path = exportArchivePath(userId);
-    await store.upload(path, archive);
-    const url = await store.signedUrl(path, EXPORT_TTL_SECONDS);
+    await store.put(userId, archive, EXPORT_TTL_SECONDS);
+    const url = baseUrl
+        ? `${baseUrl}/exports/${signExportToken(
+              userId,
+              Date.now() + EXPORT_TTL_SECONDS * 1000,
+              resolveSessionSigningSecret(),
+          )}`
+        : undefined;
 
     return {
         counts,
@@ -575,7 +582,7 @@ export async function exportAllData(
 export async function sweepStaleExports(
     store: ExportArchiveStore = liveExportArchiveStore(),
 ): Promise<void> {
-    await store.sweepOlderThan(Date.now() - EXPORT_TTL_SECONDS * 1000);
+    await store.sweepExpired();
 }
 
 let sweepRunning = false;
