@@ -8,12 +8,6 @@
  *   bun run e2e:agent --keep           # leave the test writes in place
  *   bun run e2e:agent --restore        # reload the last snapshot (after --keep)
  *
- * Needs: the local stack from ~/.local/share/foodable-dev (server on :8080,
- * Supabase on :54322), and Grok signed in to its `foodable` MCP server
- * (`grok` → /mcps → foodable → i). Grok acts as whoever signed in; the
- * scenarios are written for the seeded household (owner Ethan, member
- * Morgan), so the actor must be a member of it.
- *
  * Every agent turn is checked three ways:
  *   - which tools ran, as whom, and that none failed (tool_analytics rows
  *     written by the server during the turn, not the agent's own account);
@@ -21,10 +15,16 @@
  *   - invariants: every food's fridge stock still equals its stock ledger
  *     (the real ledgerMatchesStock), and no fridge amount is negative.
  *
- * Before the run the public schema's data is snapshotted (as supabase_admin,
- * inside the DB container); afterwards it is restored, so the seed data comes
- * back unchanged. OAuth tables and tool_analytics are left out of both:
- * restoring an older refresh token would sign Grok out mid-session.
+ * Before the run the public schema's data is snapshotted with host pg_dump;
+ * afterwards it is restored with psql, so the seed data comes back unchanged.
+ * OAuth tables, tool_analytics, public.users and export_archives are left out
+ * (see src/db/testing/e2e-snapshot.ts): Phase 3 OAuth FKs use NO ACTION on
+ * users, so truncate cannot touch users while tokens exist; restoring OAuth
+ * would sign Grok out mid-session.
+ *
+ * Needs: DATABASE_URL or E2E_DB_URL pointing at Postgres (plain local or
+ * Supabase-as-host), server on E2E_SERVER (default :8080), and Grok signed
+ * into the foodable MCP server for full runs. Snapshot/restore use PG_BIN tools.
  */
 
 import { SQL } from "bun";
@@ -33,12 +33,13 @@ import { foodFromRow } from "../src/domain/foods.js";
 import { fridgeItemFromRow, type FridgeItem } from "../src/domain/fridge.js";
 import { ledgerMatchesStock, type StockMovement } from "../src/domain/stock.js";
 import { movementFromRow } from "../src/db/stock.js";
+import { e2eRestore, e2eSnapshot } from "../src/db/testing/e2e-snapshot.js";
 
 const DB_URL =
     process.env.E2E_DB_URL ??
+    process.env.DATABASE_URL ??
     "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const SERVER = process.env.E2E_SERVER ?? "http://localhost:8080";
-const CONTAINER = process.env.E2E_DB_CONTAINER ?? "supabase_db_foodable-dev";
 const GROK = process.env.GROK_BIN ?? `${process.env.HOME}/.grok/bin/grok`;
 const MCP_NAME = process.env.E2E_MCP_NAME ?? "foodable";
 const TURN_TIMEOUT_MS = 240_000;
@@ -47,15 +48,6 @@ const OUT_DIR = "tmp/e2e-agent";
 // Grok resumes sessions per working directory, and an empty one keeps repo
 // instructions out of the agent's context.
 const WORK_DIR = `${OUT_DIR}/work`;
-const SNAPSHOT_IN_CONTAINER = "/tmp/foodable-e2e-snapshot.sql";
-const NOT_SNAPSHOTTED = [
-    "oauth_tokens",
-    "refresh_tokens",
-    "registered_clients",
-    "auth_codes",
-    "tool_analytics",
-];
-
 const sql = new SQL(DB_URL);
 
 // ---- terminal output ----
@@ -1000,25 +992,11 @@ const SCENARIOS: Scenario[] = [
 // ---- snapshot / restore ----
 
 async function snapshot(): Promise<void> {
-    const excludes = NOT_SNAPSHOTTED.map(
-        (t) => `--exclude-table-data=public.${t}`,
-    );
-    await Bun.$`docker exec ${CONTAINER} pg_dump -U supabase_admin -d postgres --data-only --schema=public --disable-triggers ${excludes} -f ${SNAPSHOT_IN_CONTAINER}`.quiet();
-    await Bun.$`docker cp ${CONTAINER}:${SNAPSHOT_IN_CONTAINER} ${OUT_DIR}/snapshot.sql`.quiet();
+    await e2eSnapshot(DB_URL, `${OUT_DIR}/snapshot.sql`);
 }
 
 async function restore(): Promise<void> {
-    const tables = (
-        await sql`select tablename from pg_tables where schemaname = 'public'`
-    )
-        .map((r: Record<string, unknown>) => String(r.tablename))
-        .filter((t: string) => !NOT_SNAPSHOTTED.includes(t))
-        .map((t: string) => `public.${t}`)
-        .join(", ");
-    // One transaction: truncate every snapshotted table together (no
-    // CASCADE, so an excluded table can never be emptied by accident), then
-    // reload the snapshot.
-    await Bun.$`docker exec ${CONTAINER} psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 --single-transaction -q -c ${"set session_replication_role = replica"} -c ${`truncate ${tables}`} -f ${SNAPSHOT_IN_CONTAINER}`.quiet();
+    await e2eRestore(DB_URL, `${OUT_DIR}/snapshot.sql`);
 }
 
 // ---- main ----
