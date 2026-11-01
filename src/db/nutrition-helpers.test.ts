@@ -5,18 +5,18 @@ import {
     fetchAllPages,
     type Meal,
     type MealInput,
-} from "./db/nutrition.js";
+} from "./nutrition.js";
 import {
     widgetsEnabledFromProfile,
     alcoholTrackingEnabledFromProfile,
     preferredDrinkUnitFromProfile,
     timezoneFromProfile,
     type Profile,
-} from "./db/profiles.js";
-import { rowContentDigest } from "./domain/import.js";
+} from "./profiles.js";
+import { rowContentDigest } from "../domain/import.js";
 
-// Every export exercised here is pure: no test in this file constructs a
-// Supabase client, and none touches the network or the database.
+// Every export exercised here is pure: none of these tests touch the network
+// or the database.
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const LOGGED_AT = "2026-03-14T12:00:00.000Z";

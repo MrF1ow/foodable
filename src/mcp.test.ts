@@ -30,7 +30,6 @@ import {
 } from "@modelcontextprotocol/client";
 import { Hono } from "hono";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
-import * as actualClient from "./db/client.js";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
 import * as actualHousehold from "./db/household.js";
@@ -52,7 +51,6 @@ import { resolveSessionSigningSecret } from "./site-session.js";
 // Snapshot BEFORE mock.module runs: Bun patches a mocked module's namespace
 // in place, so restoring from the live import afterwards would hand the next
 // file the mock again. Restore from these copies.
-const realClient = { ...actualClient };
 const realNutrition = { ...actualNutrition };
 const realProfiles = { ...actualProfiles };
 const realHousehold = { ...actualHousehold };
@@ -288,10 +286,6 @@ const db = {
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
 };
-
-mock.module("./db/client.js", () => ({
-    ...actualClient,
-}));
 
 mock.module("./db/analytics.js", () => ({
     ...realDbAnalytics,
@@ -601,7 +595,6 @@ mock.module("./food-search.js", () => ({
 }));
 
 afterAll(() => {
-    mock.module("./db/client.js", () => realClient);
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
     mock.module("./db/profiles.js", () => realProfiles);

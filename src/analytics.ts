@@ -36,13 +36,15 @@ interface AnalyticsContext {
  * validation/config errors this codebase throws itself (resolveWriteLoggedAt,
  * set_timezone, assertPlausibleWeight, widget assembly, missing env config,
  * …) — checked first so they don't get swallowed by tier 3's looser
- * keyword heuristics. Tier 2 is every src/supabase.ts persistence throw,
- * matched generically by its "Failed to <verb> <noun>: <cause>" prefix —
- * this runs *before* tier 3's auth/rate/date keyword checks specifically so
- * that a message like "Failed to store token" or "Failed to delete auth
- * codes" (which legitimately contain "token"/"auth" as our own noun, not as
- * a signal about the failure) is bucketed as `supabase_error`, not
- * `auth_expired`, before tier 3 ever sees it. Tier 3 is for third-party text
+ * keyword heuristics. Tier 2 is every `src/db/*` persistence throw (via
+ * `pgError`), matched generically by its "Failed to <verb> <noun>: <cause>"
+ * prefix — this runs *before* tier 3's auth/rate/date keyword checks
+ * specifically so that a message like "Failed to store token" or "Failed to
+ * delete auth codes" (which legitimately contain "token"/"auth" as our own
+ * noun, not as a signal about the failure) is bucketed as `supabase_error`
+ * (the stored label predates the Postgres port; renaming would split history),
+ * not `auth_expired`, before tier 3 ever sees it. Tier 3 is for third-party
+ * text
  * we didn't author (Postgres/PostgREST, native fetch/DNS errors) where only
  * a keyword heuristic is possible.
  */
@@ -87,16 +89,15 @@ export function categorizeError(error: unknown): string {
     if (msg.includes("no weight unit given and no preference set"))
         return "missing_required_param";
 
-    // updateMeal / updateWeight (src/supabase.ts) pre-checks — a stale or
+    // updateMeal / updateWeight (src/db/nutrition.ts) pre-checks — a stale or
     // wrong id, not a DB outage, so it shouldn't share supabase_error's bucket.
     if (msg.includes("meal not found") || msg.includes("entry not found"))
         return "record_not_found";
 
-    // Deploy/env config problems, not user- or DB-caused. The only throw site
-    // for the first is the single literal "Missing SUPABASE_URL or
-    // SUPABASE_SECRET_KEY" (src/supabase.ts) — one substring check covers it.
+    // Deploy/env config problems, not user- or DB-caused. `getSql` throws the
+    // single literal "Missing DATABASE_URL" when unset — one substring check.
     if (
-        msg.includes("missing supabase_url or supabase_secret_key") ||
+        msg.includes("missing database_url") ||
         msg.includes("off_user_agent is not configured")
     )
         return "service_misconfigured";
@@ -114,7 +115,7 @@ export function categorizeError(error: unknown): string {
     // export_all_data — archive write and row-count-mismatch failures.
     if (msg.includes("export would be truncated")) return "export_error";
 
-    // ---- Tier 2: every src/supabase.ts persistence throw ----
+    // ---- Tier 2: every src/db/* persistence throw ----
 
     // Every one follows "Failed to <verb> <noun>: <cause>" — match the prefix
     // generically rather than enumerating verbs, or a verb added later (as

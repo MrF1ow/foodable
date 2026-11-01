@@ -8,7 +8,7 @@ import {
     consumeRefreshToken,
     registerClient,
 } from "./db/tokens.js";
-import { signUpUser, signInUser, authUserCount } from "./db/client.js";
+import { signUpUser, signInUser, authUserCount } from "./db/users.js";
 import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
 import { rateLimitAuth } from "./middleware.js";

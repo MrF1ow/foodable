@@ -176,7 +176,8 @@ export interface MealInsertResult {
  * The server-derived idempotency key for a meal write, over the resolved
  * logged_at (so the digest and the persisted row agree). Exported and pure so
  * the frozen field list below is testable directly — see
- * src/supabase.test.ts — exactly as rowContentDigest is in src/import.ts.
+ * src/db/nutrition-helpers.test.ts — exactly as rowContentDigest is in
+ * src/domain/import.ts.
  */
 export function mealIdempotencyKey(
     userId: string,
@@ -795,7 +796,8 @@ export async function getAllMeals(userId: string): Promise<Meal[]> {
 // across, e.g. the same food in two languages); within one alternative every
 // word token must match the column (AND'd via chained .ilike). We deliberately
 // avoid PostgREST's .or() — its logic-tree grammar treats commas/parens inside
-// values as structure and supabase-js does not quote them — and instead run
+// values as structure and the old PostgREST client did not quote them — and
+// instead run
 // one cheap per-user query per (alternative × column) and merge in code.
 async function searchMealsQuery(
     userId: string,

@@ -55,15 +55,12 @@ describe("categorizeError", () => {
             "missing_required_param",
         ],
 
-        // src/supabase.ts updateMeal / updateWeight not-found pre-checks
+        // src/db/nutrition.ts updateMeal / updateWeight not-found pre-checks
         ["Failed to update meal: meal not found", "record_not_found"],
         ["Failed to update weight: entry not found", "record_not_found"],
 
-        // src/supabase.ts / src/foods.ts missing config
-        [
-            "Missing SUPABASE_URL or SUPABASE_SECRET_KEY",
-            "service_misconfigured",
-        ],
+        // src/db/sql.ts / src/foods.ts missing config
+        ["Missing DATABASE_URL", "service_misconfigured"],
         [
             "OFF_USER_AGENT is not configured — Open Food Facts requires a User-Agent like 'Foodable (you@example.com)'",
             "service_misconfigured",
@@ -84,7 +81,7 @@ describe("categorizeError", () => {
             "export_error",
         ],
 
-        // src/supabase.ts generic persistence failures — the regression case:
+        // src/db/* generic persistence failures — the regression case:
         // these contain "token"/"auth" as our own noun, not as a signal, and
         // must NOT be classified auth_expired.
         ["Failed to insert meal: connection reset", "supabase_error"],

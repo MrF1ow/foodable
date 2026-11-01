@@ -129,7 +129,7 @@ export function pgCode(err: unknown): string | undefined {
     return undefined;
 }
 
-/** PostgREST / supabase-js omit `undefined` keys on insert and update. */
+/** PostgREST omitted `undefined` keys on insert and update; keep that shape. */
 export function definedColumns(obj: Record<string, unknown>): {
     row: Record<string, unknown>;
     keys: string[];

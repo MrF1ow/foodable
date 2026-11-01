@@ -156,7 +156,7 @@ const MESSAGES = {
     signInUnavailable: "Couldn't sign in right now. Try again in a minute.",
 };
 
-// Shaped like the SignInError src/db/client.ts throws for a Supabase refusal.
+// Shaped like SignInError from src/domain/auth.ts (legacy GoTrue status/code).
 function supabaseError(status: number | undefined, code?: string): Error {
     return Object.assign(new Error("Invalid login credentials"), {
         status,

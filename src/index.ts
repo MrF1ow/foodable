@@ -393,7 +393,7 @@ const port = parseInt(process.env.PORT || "8080");
 
 // Boot side effects run only when this file IS the entrypoint. src/index.test.ts
 // imports `app` to pin the shutdown gate's position in the middleware chain, and
-// an import must not start the export-sweep interval (which would hit Supabase
+// an import must not start the export-sweep interval (which would hit Postgres
 // on a timer and hold the test process open) or register signal handlers.
 // `bun run src/index.ts` still takes this branch — verified: import.meta.main is
 // true for the entrypoint and false under `bun test`.
