@@ -21,66 +21,73 @@ import { run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
-function createBarrier(parties: number) {
-    let arrived = 0;
-    let release!: () => void;
-    const allArrived = new Promise<void>((resolve) => {
-        release = resolve;
+/**
+ * Runs two real consume calls against each other on separate connections.
+ * A third connection holds the row lock first, so both calls reach the row
+ * before either can finish; releasing it lets them race. A consume that
+ * reads and then deletes in separate steps lets both read the row before the
+ * lock goes, so both would win.
+ */
+async function raceConsume<T>(opts: {
+    url: string;
+    sql: SQL;
+    lockRow: (tx: SQL) => Promise<unknown>;
+    consume: () => Promise<T>;
+}): Promise<T[]> {
+    const holder = new SQL(opts.url, { prepare: false, max: 1 });
+    const left = new SQL(opts.url, { prepare: false, max: 1 });
+    const right = new SQL(opts.url, { prepare: false, max: 1 });
+    // Watches pg_stat_activity on its own connection, so a consume that
+    // queues on the shared test client cannot block the watch.
+    const observer = new SQL(opts.url, { prepare: false, max: 1 });
+    let releaseLock!: () => void;
+    const lockReleased = new Promise<void>((r) => (releaseLock = r));
+    let lockTaken!: () => void;
+    const lockHeld = new Promise<void>((r) => (lockTaken = r));
+    const holding = holder.begin(async (tx) => {
+        await opts.lockRow(tx);
+        lockTaken();
+        await lockReleased;
     });
-    return {
-        async wait() {
-            arrived++;
-            if (arrived >= parties) release();
-            else await allArrived;
-        },
-    };
-}
-
-/** Two connections, transactions held open until both arrive, then the same delete-returning consume uses. */
-async function raceAuthCodeConsume(
-    url: string,
-    code: string,
-    now: string,
-    barrier: ReturnType<typeof createBarrier>,
-): Promise<unknown> {
-    const client = new SQL(url, { prepare: false, max: 1 });
     try {
-        return await client.begin(async (tx) => {
-            await barrier.wait();
-            const [row] = await tx`
-                delete from auth_codes
-                where code = ${code}
-                  and expires_at > ${now}
-                returning code, redirect_uri, user_id, code_challenge
-            `;
-            return row ?? null;
-        });
+        await lockHeld;
+        // run() picks its client synchronously, so each call keeps its own.
+        setSqlForTests(left);
+        const first = opts.consume();
+        setSqlForTests(right);
+        const second = opts.consume();
+        setSqlForTests(opts.sql);
+        await waitForLockWaiters(observer, 2);
+        releaseLock();
+        await holding;
+        return await Promise.all([first, second]);
     } finally {
-        await client.close();
+        releaseLock();
+        await Promise.allSettled([holding]);
+        setSqlForTests(opts.sql);
+        await Promise.all([
+            holder.close(),
+            left.close(),
+            right.close(),
+            observer.close(),
+        ]);
     }
 }
 
-async function raceRefreshTokenConsume(
-    url: string,
-    token: string,
-    now: string,
-    barrier: ReturnType<typeof createBarrier>,
-): Promise<string | null> {
-    const client = new SQL(url, { prepare: false, max: 1 });
-    try {
-        return await client.begin(async (tx) => {
-            await barrier.wait();
-            const [row] = await tx`
-                delete from refresh_tokens
-                where token = ${token}
-                  and expires_at > ${now}
-                returning user_id
-            `;
-            return (row?.user_id as string | undefined) ?? null;
-        });
-    } finally {
-        await client.close();
+async function waitForLockWaiters(sql: SQL, count: number): Promise<void> {
+    // Well inside the 5 s test timeout, so a failure reads as this message.
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+        const [row] = await sql`
+            select count(*)::int as n
+            from pg_stat_activity
+            where datname = current_database()
+              and wait_event_type = 'Lock'
+        `;
+        if (row.n >= count) return;
+        await Bun.sleep(10);
     }
+    throw new Error(`expected ${count} sessions waiting on the row lock`);
 }
 
 describeDb(pgAvailable !== null, "tokens db", (getCtx) => {
@@ -169,26 +176,30 @@ describeDb(pgAvailable !== null, "tokens db", (getCtx) => {
 
     test("concurrent auth code consume allows only one winner", async () => {
         await storeAuthCode("race-code", "http://localhost/cb", userId);
-        const { pg } = getCtx();
-        const now = new Date().toISOString();
-        const barrier = createBarrier(2);
-        const results = await Promise.all([
-            raceAuthCodeConsume(pg.url, "race-code", now, barrier),
-            raceAuthCodeConsume(pg.url, "race-code", now, barrier),
-        ]);
-        expect(results.filter((r) => r != null)).toHaveLength(1);
+        const { pg, sql } = getCtx();
+        const results = await raceConsume({
+            url: pg.url,
+            sql,
+            lockRow: (tx) =>
+                tx`select 1 from auth_codes where code = 'race-code' for update`,
+            consume: () => consumeAuthCode("race-code"),
+        });
+        const winners = results.filter((r) => r != null);
+        expect(winners).toHaveLength(1);
+        expect(winners[0]!.user_id).toBe(userId);
     });
 
     test("concurrent refresh token consume allows only one winner", async () => {
         await storeRefreshToken("race-refresh", userId);
-        const { pg } = getCtx();
-        const now = new Date().toISOString();
-        const barrier = createBarrier(2);
-        const results = await Promise.all([
-            raceRefreshTokenConsume(pg.url, "race-refresh", now, barrier),
-            raceRefreshTokenConsume(pg.url, "race-refresh", now, barrier),
-        ]);
-        expect(results.filter((r) => r != null)).toHaveLength(1);
+        const { pg, sql } = getCtx();
+        const results = await raceConsume({
+            url: pg.url,
+            sql,
+            lockRow: (tx) =>
+                tx`select 1 from refresh_tokens where token = 'race-refresh' for update`,
+            consume: () => consumeRefreshToken("race-refresh"),
+        });
+        expect(results.filter((r) => r != null)).toEqual([userId]);
     });
 
     test("registerClient inserts without throwing", async () => {
