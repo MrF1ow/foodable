@@ -31,6 +31,7 @@ import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
 import { settingsRoutes } from "./web/routes/settings.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
+import { createExportsRouter } from "./exports-route.js";
 
 const app = new Hono();
 
@@ -242,6 +243,8 @@ app.use("*", async (c, next) => {
 // authorization-server documents, served at the root and at the path-folded
 // variants clients derive from the /mcp endpoint. See src/discovery.ts.
 registerDiscoveryRoutes(app);
+
+app.route("/", createExportsRouter());
 
 // OAuth routes
 app.route("/", createOAuthRouter());

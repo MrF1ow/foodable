@@ -5,7 +5,6 @@ import { classifySignInFailure, resolveApproveUser } from "../oauth.js";
 import { SignInError } from "../domain/auth.js";
 import { addHouseholdMemberForHousehold } from "./household.js";
 import { upsertProfile } from "./profiles.js";
-import { createMemoryExportArchiveStore } from "./exports.js";
 import { describeDb } from "./testing/pg.js";
 import { seedFood, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -36,6 +35,7 @@ const EXPECTED_USER_FKS: {
     { table: "foods", column: "created_by", deltype: "n" },
     { table: "household_mcp_tokens", column: "issued_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
+    { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "auth_codes", column: "user_id", deltype: "a" },
     { table: "meals", column: "user_id", deltype: "a" },
     { table: "oauth_tokens", column: "user_id", deltype: "a" },

@@ -3,7 +3,6 @@ import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
-import { liveExportArchiveStore, type ExportArchiveStore } from "./exports.js";
 import { deleteAuthUser } from "./users.js";
 import {
     definedColumns,
@@ -1683,7 +1682,6 @@ export function exportStoragePaths(userId: string): string[] {
 }
 
 export type DeleteAllUserDataDeps = {
-    exportStore?: ExportArchiveStore;
     auth?: { deleteUser: (userId: string) => Promise<void> };
 };
 
@@ -1691,13 +1689,9 @@ export async function deleteAllUserData(
     userId: string,
     deps?: DeleteAllUserDataDeps,
 ): Promise<void> {
-    // Export removal is idempotent and lives outside Postgres; run it first so
-    // a later DB failure does not leave a downloadable archive for an account
-    // we failed to erase. public.users is deleted last inside the same
-    // transaction, after the four no-action tables, so FK checks still pass.
-    await (deps?.exportStore ?? liveExportArchiveStore()).remove(
-        exportStoragePaths(userId),
-    );
+    // export_archives rows cascade from public.users on delete, so they need no
+    // separate step. public.users is deleted last inside the transaction, after
+    // the four no-action tables, so FK checks still pass.
 
     await run(async (tx) => {
         const deleteUserRows = async (

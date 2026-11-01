@@ -44,6 +44,10 @@ import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
+import * as actualExports from "./db/exports.js";
+import { createMemoryExportArchiveStore } from "./db/exports.js";
+import { verifyExportToken } from "./domain/export-link.js";
+import { resolveSessionSigningSecret } from "./site-session.js";
 
 // Snapshot BEFORE mock.module runs: Bun patches a mocked module's namespace
 // in place, so restoring from the live import afterwards would hand the next
@@ -62,6 +66,8 @@ const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
+const realExports = { ...actualExports };
+const exportMemoryStore = createMemoryExportArchiveStore();
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
 import {
     HOUSEHOLD_CANNOT_DELETE_ACCOUNT,
@@ -400,6 +406,15 @@ mock.module("./db/nutrition.js", () => ({
     },
     getLatestWeight: async () => null,
     getWeightInRange: async () => [],
+    getAllMeals: async () => db.meals,
+    getAllMealItems: async () => [],
+    getAllWater: async () => db.water,
+    getAllWeight: async () => [],
+}));
+
+mock.module("./db/exports.js", () => ({
+    ...realExports,
+    liveExportArchiveStore: () => exportMemoryStore,
 }));
 
 mock.module("./db/profiles.js", () => ({
@@ -600,6 +615,7 @@ afterAll(() => {
     mock.module("./db/foods.js", () => realDbFoods);
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
+    mock.module("./db/exports.js", () => realExports);
 });
 
 beforeEach(() => {
@@ -664,12 +680,20 @@ type CallTool = (
 async function withTools(
     alcohol: "us" | "uk" | null,
     run: (call: CallTool) => Promise<void>,
+    baseUrl = "http://localhost",
 ): Promise<void> {
     const server = new McpServer(
         { name: "foodable-test", version: "0.0.0" },
         { capabilities: { tools: {}, resources: {} } },
     );
-    registerTools(server, { kind: "user", userId: "u1" }, true, alcohol);
+    registerTools(
+        server,
+        { kind: "user", userId: "u1" },
+        true,
+        alcohol,
+        undefined,
+        baseUrl,
+    );
     const [clientTransport, serverTransport] =
         InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -2742,9 +2766,60 @@ describe("export_all_data is on the tool surface", () => {
         expect(desc).toContain("meals.csv inside the archive");
     });
 
-    // The archive is a write — it uploads to the exports bucket — and the
-    // signed link differs on every call, so despite reading like a query none
-    // of this is read-only or idempotent.
+    test("returns a signed /exports/ link for the caller", async () => {
+        const prevSecret = process.env.SESSION_SECRET;
+        process.env.SESSION_SECRET = "mcp-export-test-secret-32chars!!";
+        db.meals = [meal()];
+        db.profile = { ...PROFILE_BASE };
+        try {
+            await withTools(null, async (call) => {
+                const r = await call("export_all_data");
+                const text = textOf(r);
+                expect(text).toContain(
+                    "Download (link valid for 60 minutes): http://localhost/exports/",
+                );
+                const urlLine = text.split("\n").find((l) => l.includes("/exports/"));
+                expect(urlLine).toBeDefined();
+                const token = urlLine!.split("/exports/")[1]!;
+                expect(
+                    verifyExportToken(
+                        token,
+                        Date.now() + 3_600_000,
+                        resolveSessionSigningSecret(),
+                    ),
+                ).toBe("u1");
+            });
+        } finally {
+            if (prevSecret === undefined) delete process.env.SESSION_SECRET;
+            else process.env.SESSION_SECRET = prevSecret;
+        }
+    });
+
+    test("uses baseUrl from tool context (PUBLIC_ORIGIN path)", async () => {
+        const prevSecret = process.env.SESSION_SECRET;
+        process.env.SESSION_SECRET = "mcp-export-test-secret-32chars!!";
+        db.meals = [meal()];
+        db.profile = { ...PROFILE_BASE };
+        try {
+            await withTools(
+                null,
+                async (call) => {
+                    const r = await call("export_all_data");
+                    expect(textOf(r)).toContain(
+                        "https://exports.example/exports/",
+                    );
+                },
+                "https://exports.example",
+            );
+        } finally {
+            if (prevSecret === undefined) delete process.env.SESSION_SECRET;
+            else process.env.SESSION_SECRET = prevSecret;
+        }
+    });
+
+    // The archive is a write — it upserts Postgres and the signed link differs
+    // on every call — so despite reading like a query none of this is read-only
+    // or idempotent.
     test("it is annotated as the write it is", async () => {
         const all = (await toolsOf()).find((t) => t.name === "export_all_data");
         expect(all?.annotations).toEqual({

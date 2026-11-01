@@ -1136,6 +1136,7 @@ export async function groceryLineExtras(
 
 export type ToolContext = {
     auth: AuthContext;
+    baseUrl: string;
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
     protocolEra?: "legacy" | "modern";
@@ -1176,6 +1177,7 @@ export function createToolContext(
     widgetsEnabled: boolean,
     alcohol: AlcoholDisplay,
     protocolEra?: "legacy" | "modern",
+    baseUrl = "http://localhost",
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1355,6 +1357,7 @@ export function createToolContext(
             : {};
     return {
         auth,
+        baseUrl,
         widgetsEnabled,
         alcohol,
         protocolEra,
