@@ -58,11 +58,15 @@ export class FridgeInputError extends Error {
     }
 }
 
+type MemoryFridgeItem = FridgeItem & { createdAt: string };
+
 export function createMemoryFridgeStore(): FridgeStore {
     const locations: FridgeLocation[] = [];
-    const items: FridgeItem[] = [];
+    const items: MemoryFridgeItem[] = [];
 
-    return {
+    const store: FridgeStore & {
+        __paritySetItemCreatedAt(id: string, createdAt: string): void;
+    } = {
         async listLocations(householdId) {
             return locations
                 .filter((row) => row.householdId === householdId)
@@ -107,15 +111,18 @@ export function createMemoryFridgeStore(): FridgeStore {
         async listItems(householdId) {
             return items
                 .filter((row) => row.householdId === householdId)
+                .slice()
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
                 .map((row) => ({ ...row, quantity: { ...row.quantity } }));
         },
         async insertItem(row) {
-            const saved = {
+            const saved: MemoryFridgeItem = {
                 ...row,
                 quantity: { ...row.quantity },
                 purchasedOn: row.purchasedOn ?? null,
                 openedOn: row.openedOn ?? null,
                 expiresOn: row.expiresOn ?? null,
+                createdAt: new Date().toISOString(),
             };
             items.push(saved);
             return {
@@ -135,6 +142,7 @@ export function createMemoryFridgeStore(): FridgeStore {
                 purchasedOn: row.purchasedOn ?? null,
                 openedOn: row.openedOn ?? null,
                 expiresOn: row.expiresOn ?? null,
+                createdAt: items[idx]!.createdAt,
             };
             return {
                 ...row,
@@ -154,7 +162,12 @@ export function createMemoryFridgeStore(): FridgeStore {
             items.push(...next);
             return removed;
         },
+        __paritySetItemCreatedAt(id, createdAt) {
+            const row = items.find((item) => item.id === id);
+            if (row) row.createdAt = createdAt;
+        },
     };
+    return store;
 }
 
 export async function listFridge(

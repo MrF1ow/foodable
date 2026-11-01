@@ -420,12 +420,20 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                         row.householdId === householdId &&
                         row.foodId === foodId,
                 )
-                .map((row) => row.alias);
+                .map((row) => row.alias)
+                .sort((a, b) => a.localeCompare(b));
         },
         async listAllAliases(householdId) {
             const grouped = new Map<string, string[]>();
-            for (const row of aliases) {
-                if (row.householdId !== householdId) continue;
+            const rows = aliases
+                .filter((row) => row.householdId === householdId)
+                .slice()
+                .sort(
+                    (a, b) =>
+                        a.foodId.localeCompare(b.foodId) ||
+                        a.alias.localeCompare(b.alias),
+                );
+            for (const row of rows) {
                 const list = grouped.get(row.foodId);
                 if (list) list.push(row.alias);
                 else grouped.set(row.foodId, [row.alias]);

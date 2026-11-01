@@ -29,10 +29,6 @@ export async function seedHousehold(sql: SQL): Promise<SeededHousehold> {
     return { userId, householdId };
 }
 
-export async function seedSecondHousehold(sql: SQL): Promise<SeededHousehold> {
-    return seedHousehold(sql);
-}
-
 export async function seedGroceryStore(
     sql: SQL,
     householdId: string,

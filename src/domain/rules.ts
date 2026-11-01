@@ -99,13 +99,19 @@ export function isAllergenCode(value: string): value is AllergenCode {
     return isNamedAllergen(value) || value === ALLERGEN_OTHER;
 }
 
+type StoredAllergen = MemberAllergen & { createdAt: string };
+type StoredDislike = MemberDislike & { createdAt: string };
+
 export function createMemoryRulesStore(): RulesStore {
     const storeRules: StoreRule[] = [];
     const personRules: PersonRule[] = [];
-    const allergens: MemberAllergen[] = [];
-    const dislikes: MemberDislike[] = [];
+    const allergens: StoredAllergen[] = [];
+    const dislikes: StoredDislike[] = [];
 
-    return {
+    const store: RulesStore & {
+        __paritySetAllergenCreatedAt(id: string, createdAt: string): void;
+        __paritySetDislikeCreatedAt(id: string, createdAt: string): void;
+    } = {
         async listStoreRules(storeId) {
             return storeRules
                 .filter((row) => row.storeId === storeId)
@@ -139,10 +145,16 @@ export function createMemoryRulesStore(): RulesStore {
                         row.householdId === householdId &&
                         row.userId === userId,
                 )
-                .map((row) => ({ ...row }));
+                .slice()
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+                .map(({ createdAt: _, ...row }) => ({ ...row }));
         },
         async insertAllergen(row) {
-            allergens.push({ ...row });
+            const saved: StoredAllergen = {
+                ...row,
+                createdAt: new Date().toISOString(),
+            };
+            allergens.push(saved);
             return { ...row };
         },
         async listDislikes(householdId, userId) {
@@ -152,10 +164,16 @@ export function createMemoryRulesStore(): RulesStore {
                         row.householdId === householdId &&
                         row.userId === userId,
                 )
-                .map((row) => ({ ...row }));
+                .slice()
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+                .map(({ createdAt: _, ...row }) => ({ ...row }));
         },
         async insertDislike(row) {
-            dislikes.push({ ...row });
+            const saved: StoredDislike = {
+                ...row,
+                createdAt: new Date().toISOString(),
+            };
+            dislikes.push(saved);
             return { ...row };
         },
         async deletePersonRule(ref) {
@@ -167,7 +185,16 @@ export function createMemoryRulesStore(): RulesStore {
         async deleteDislike(ref) {
             return spliceRef(dislikes, ref);
         },
+        __paritySetAllergenCreatedAt(id, createdAt) {
+            const row = allergens.find((a) => a.id === id);
+            if (row) row.createdAt = createdAt;
+        },
+        __paritySetDislikeCreatedAt(id, createdAt) {
+            const row = dislikes.find((d) => d.id === id);
+            if (row) row.createdAt = createdAt;
+        },
     };
+    return store;
 }
 
 function spliceRef(

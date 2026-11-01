@@ -1,13 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { GroceryLine, GroceryListStore } from "../../domain/grocery.js";
-
-export type StoreContractCtx = {
-    householdId: string;
-    otherHouseholdId: string;
-    storeId: string;
-    sectionId: string;
-    foodId: string;
-};
+import type { GroceryListStore } from "../../domain/grocery.js";
+import { sampleGroceryLine, type StoreContractCtx } from "./helpers.js";
 
 export function runGroceryListStoreContract(
     label: string,
@@ -16,48 +9,42 @@ export function runGroceryListStoreContract(
     ctx: () => StoreContractCtx,
 ): void {
     describe(`${label} grocery store`, () => {
-        test("list, update, delete, and household scoping", async () => {
+        test("listLines order by created_at, update, delete, scoping", async () => {
             await reset();
             const c = ctx();
             const store = createStore();
-            const lineA: GroceryLine = {
+            const milk = sampleGroceryLine(c, {
                 id: crypto.randomUUID(),
-                householdId: c.householdId,
-                storeId: c.storeId,
-                sectionId: c.sectionId,
-                kind: "food",
                 displayName: "Milk",
-                quantity: { amount: 1, unit: "L" },
-                foodId: c.foodId,
-                checked: false,
-            };
-            const lineB: GroceryLine = {
-                ...lineA,
+            });
+            const bread = sampleGroceryLine(c, {
                 id: crypto.randomUUID(),
                 displayName: "Bread",
-            };
-            await store.insertLine(lineB);
-            await Bun.sleep(5);
-            await store.insertLine(lineA);
+            });
+            await store.insertLine(milk);
+            await store.insertLine(bread);
+            if (c.setLineCreatedAt) {
+                await c.setLineCreatedAt(milk.id, "2026-02-02T00:00:00+00:00");
+                await c.setLineCreatedAt(bread.id, "2026-02-01T00:00:00+00:00");
+            }
             const listed = await store.listLines(c.householdId);
             expect(listed.map((l) => l.displayName)).toEqual(["Bread", "Milk"]);
 
             expect(await store.listLines(c.otherHouseholdId)).toEqual([]);
-            expect(await store.listLines(c.householdId)).toHaveLength(2);
 
             const updated = await store.updateLine({
-                ...lineA,
+                ...milk,
                 checked: true,
             });
             expect(updated?.checked).toBe(true);
             expect(
                 await store.updateLine({
-                    ...lineA,
+                    ...milk,
                     id: crypto.randomUUID(),
                 }),
             ).toBeNull();
 
-            expect(await store.deleteLine(c.householdId, lineB.id)).toBe(true);
+            expect(await store.deleteLine(c.householdId, bread.id)).toBe(true);
             expect(
                 await store.deleteLine(c.householdId, crypto.randomUUID()),
             ).toBe(false);
