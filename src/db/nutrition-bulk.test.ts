@@ -26,6 +26,9 @@ const DELETE_ALL_TABLES = [
     "profiles",
     "recipe_portions",
     "meals",
+    // Not deleted by name: it goes with meals through on delete cascade.
+    // Counted so a migration that breaks that cascade fails this test.
+    "meal_items",
     "oauth_tokens",
     "refresh_tokens",
     "auth_codes",
@@ -84,6 +87,12 @@ async function seedDeleteAllUserRows(
             ${"2024-05-01T13:00:00.000Z"},
             ${`meal-${userId}`}
         )
+    `;
+    await sql`
+        insert into meal_items (meal_id, user_id, label)
+        select id, user_id, ${"Erase item"}
+        from meals
+        where idempotency_key = ${`meal-${userId}`}
     `;
     await sql`
         insert into tool_analytics (
