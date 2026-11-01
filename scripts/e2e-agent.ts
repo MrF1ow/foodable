@@ -681,12 +681,97 @@ const SCENARIOS: Scenario[] = [
     {
         id: "eat",
         title: "Eat something from the fridge",
-        covers: "eat_fridge_item → fridge decrement + food-backed meal with computed totals",
+        covers: "eat_fridge_item when it is in stock; otherwise log_meal and the fridge left alone",
         async run(ctx) {
             const yogurt = await foodId("Greek yogurt");
             const before = await stockOf(yogurt);
             const [food] =
                 await sql`select calories::float8 from foods where id = ${yogurt}`;
+            // The checks follow the fridge as it is: eating something the
+            // fridge does not hold must log the meal and leave stock alone.
+            const inStock = (before.g ?? 0) >= 150;
+            const expectedKcal = Math.round(
+                (Number(food.calories) * 150) / 100,
+            );
+            if (!inStock) {
+                // Nothing to deduct. The meal still happened, so it must be
+                // logged, with the fridge left alone. Asking which meal it
+                // was before logging is fine: answer and check then.
+                let logged = false;
+                const t1 = await ctx.turn(
+                    "Eat yogurt (none in the fridge)",
+                    "I just ate 150 g of the Greek yogurt from the fridge.",
+                    undefined,
+                    async (t, c) => {
+                        c.check(
+                            !called(t, "eat_fridge_item"),
+                            "no yogurt in the fridge, so eat_fridge_item was not used",
+                            toolList(t),
+                        );
+                        const moves = await movementsSince(t.since);
+                        c.check(
+                            moves.length === 0,
+                            "no stock movement at all",
+                            moves,
+                        );
+                        c.near(
+                            (await stockOf(yogurt)).g ?? 0,
+                            before.g ?? 0,
+                            "yogurt stock unchanged",
+                        );
+                        const fresh = await mealsSince(t);
+                        c.check(
+                            fresh.length <= 1 &&
+                                fresh.every((m) => m.user_id === ctx.me.userId),
+                            "at most one meal, logged for me",
+                            fresh,
+                        );
+                        logged = fresh.length === 1;
+                        if (logged) {
+                            c.near(
+                                fresh[0]!.calories,
+                                expectedKcal,
+                                "meal calories match 150 g of the food",
+                                1,
+                            );
+                        }
+                    },
+                );
+                if (logged) return;
+                await ctx.turn(
+                    "Answer: it was a snack",
+                    "It was a snack.",
+                    { resume: t1 },
+                    async (t, c) => {
+                        const fresh = (await mealsSince(t1)).filter(
+                            (m) => m.user_id === ctx.me.userId,
+                        );
+                        c.check(
+                            fresh.length === 1,
+                            "one meal logged for me",
+                            fresh,
+                        );
+                        c.near(
+                            fresh[0]?.calories ?? null,
+                            expectedKcal,
+                            "meal calories match 150 g of the food",
+                            1,
+                        );
+                        c.check(
+                            !called(t, "eat_fridge_item"),
+                            "still nothing taken from the fridge",
+                            toolList(t),
+                        );
+                        const moves = await movementsSince(t1.since);
+                        c.check(
+                            moves.length === 0,
+                            "no stock movement at all",
+                            moves,
+                        );
+                    },
+                );
+                return;
+            }
             await ctx.turn(
                 "Eat yogurt",
                 "I just ate 150 g of the Greek yogurt from the fridge.",
@@ -738,9 +823,49 @@ const SCENARIOS: Scenario[] = [
                     );
                     c.near(
                         meal?.calories ?? null,
-                        Math.round((Number(food.calories) * 150) / 100),
+                        expectedKcal,
                         "meal calories computed from the food (per 100 g × 150 g)",
                         1,
+                    );
+                },
+            );
+        },
+    },
+    {
+        id: "ate-out",
+        title: "Eat out: log the meal, leave the fridge alone",
+        covers: "log_meal for food not from the fridge → a meal and no stock change",
+        async run(ctx) {
+            await ctx.turn(
+                "Burger at a restaurant",
+                "I had a cheeseburger and fries at a restaurant for lunch, about 1100 calories.",
+                undefined,
+                async (t, c) => {
+                    c.check(called(t, "log_meal"), "log_meal was called");
+                    c.check(
+                        !called(t, "eat_fridge_item") &&
+                            !called(t, "cook_recipe"),
+                        "nothing taken from the fridge",
+                        toolList(t),
+                    );
+                    const fresh = await mealsSince(t);
+                    c.check(
+                        fresh.length === 1 &&
+                            fresh[0]!.user_id === ctx.me.userId,
+                        "one meal, logged for me",
+                        fresh,
+                    );
+                    c.near(
+                        fresh[0]?.calories ?? null,
+                        1100,
+                        "about 1100 kcal stored",
+                        50,
+                    );
+                    const moves = await movementsSince(t.since);
+                    c.check(
+                        moves.length === 0,
+                        "no stock movement at all",
+                        moves,
                     );
                 },
             );
@@ -759,13 +884,27 @@ const SCENARIOS: Scenario[] = [
                 undefined,
                 async (t, c) => {
                     c.check(
+                        !called(t, "eat_fridge_item") && !called(t, "log_meal"),
+                        "nothing logged as eaten",
+                    );
+                    c.check(
+                        (await mealsSince(t)).length === 0,
+                        "no meal was created",
+                    );
+                    if ((before.g ?? 0) === 0) {
+                        // Nothing to throw out: the fridge must stay as it was.
+                        const moves = await movementsSince(t.since);
+                        c.check(
+                            moves.length === 0,
+                            "no spinach in the fridge, so no stock movement",
+                            moves,
+                        );
+                        return;
+                    }
+                    c.check(
                         called(t, "discard_fridge_item"),
                         "discard_fridge_item was called",
                         toolList(t),
-                    );
-                    c.check(
-                        !called(t, "eat_fridge_item") && !called(t, "log_meal"),
-                        "nothing logged as eaten",
                     );
                     c.near(
                         (await stockOf(spinach)).g ?? 0,
@@ -779,10 +918,6 @@ const SCENARIOS: Scenario[] = [
                         discard.reduce((s, m) => s + m.delta, 0),
                         -(before.g ?? 0),
                         `discard movements total -${before.g ?? 0} g`,
-                    );
-                    c.check(
-                        (await mealsSince(t)).length === 0,
-                        "no meal was created",
                     );
                 },
             );
@@ -818,17 +953,27 @@ const SCENARIOS: Scenario[] = [
                         "cook movements, all tied to the recipe",
                         cook,
                     );
-                    // Recipe yields 4; 2 portions use half: 250 g chicken, 150 g broccoli.
+                    // Recipe yields 4; 2 portions use half: 250 g chicken,
+                    // 150 g broccoli. Cooking takes what the fridge holds and
+                    // never goes below zero; anything missing is a shortfall.
+                    const used = (have: number | null, need: number) =>
+                        Math.min(have ?? 0, need);
                     c.near(
                         (await stockOf(chicken)).g ?? 0,
-                        (chickenBefore.g ?? 0) - 250,
-                        "250 g chicken used",
+                        (chickenBefore.g ?? 0) - used(chickenBefore.g, 250),
+                        `${used(chickenBefore.g, 250)} g chicken used (of 250 g needed)`,
                     );
                     c.near(
                         (await stockOf(broccoli)).g ?? 0,
-                        (broccoliBefore.g ?? 0) - 150,
-                        "150 g broccoli used",
+                        (broccoliBefore.g ?? 0) - used(broccoliBefore.g, 150),
+                        `${used(broccoliBefore.g, 150)} g broccoli used (of 150 g needed)`,
                     );
+                    if ((chickenBefore.g ?? 0) < 250) {
+                        c.check(
+                            /chicken/i.test(t.text),
+                            "the reply says the chicken was short",
+                        );
+                    }
                     const fresh = await mealsSince(t);
                     c.check(
                         fresh.filter((m) => m.user_id === ctx.me.userId)
