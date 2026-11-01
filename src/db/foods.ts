@@ -323,6 +323,12 @@ export function liveFoodsStore(): FoodsStore {
                 try {
                     return await listAllAliasesInTx(tx, householdId);
                 } catch (err) {
+                    if (
+                        err instanceof Error &&
+                        err.message.startsWith("listAllAliases:")
+                    ) {
+                        throw err;
+                    }
                     throw pgError("list aliases", err);
                 }
             });
