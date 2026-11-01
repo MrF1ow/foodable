@@ -84,6 +84,7 @@ const HIGH_EXACT = new Set([
 ]);
 
 const HIGH_PREFIXES = [
+    "db/",
     "supabase/migrations/",
     ".github/workflows/",
     ".github/rulesets/",
