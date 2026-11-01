@@ -18,10 +18,16 @@ let testSql: SQL | undefined;
 // reusing a connection Bun has already released.
 const activeTx = new AsyncLocalStorage<{ tx: Tx; open: boolean }>();
 
+/** Fail fast at server boot when DATABASE_URL is unset (not at import time). */
+export function requireDatabaseUrl(): void {
+    const url = process.env.DATABASE_URL;
+    if (!url?.trim()) throw new Error("Missing DATABASE_URL");
+}
+
 export function getSql(): SQL {
     if (testSql) return testSql;
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("Missing DATABASE_URL");
+    requireDatabaseUrl();
+    const url = process.env.DATABASE_URL!;
     if (!cached) {
         cached = new SQL(url, {
             prepare: false,

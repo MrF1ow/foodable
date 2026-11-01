@@ -9,6 +9,7 @@ import {
     one,
     pgCode,
     pgError,
+    requireDatabaseUrl,
     rows,
     run,
     setSqlForTests,
@@ -34,6 +35,25 @@ test("definedColumns drops undefined and keeps null", () => {
     });
     expect(keys).toEqual(["a", "c"]);
     expect(row).toEqual({ a: 1, c: null });
+});
+
+describe("requireDatabaseUrl", () => {
+    const prevUrl = process.env.DATABASE_URL;
+
+    afterEach(() => {
+        if (prevUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = prevUrl;
+    });
+
+    test("throws Missing DATABASE_URL when unset", () => {
+        delete process.env.DATABASE_URL;
+        expect(() => requireDatabaseUrl()).toThrow("Missing DATABASE_URL");
+    });
+
+    test("throws Missing DATABASE_URL when blank", () => {
+        process.env.DATABASE_URL = "   ";
+        expect(() => requireDatabaseUrl()).toThrow("Missing DATABASE_URL");
+    });
 });
 
 describe("getSql", () => {
