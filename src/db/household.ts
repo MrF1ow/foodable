@@ -140,7 +140,7 @@ export async function listHouseholdMembers(
                     order by display_name asc
                 `,
             );
-            return data.map((row) => membershipFromRow(row));
+            return data.map((row) => membershipFromRow(row as never));
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             throw new Error(`Failed to list household members: ${message}`);
@@ -268,7 +268,7 @@ export async function getHouseholdConfig(
         if (!data) {
             throw new Error("Failed to load household config");
         }
-        const parsed = householdConfigFromRow(data);
+        const parsed = householdConfigFromRow(data as never);
         if (!parsed.ok) throw new Error(parsed.error);
         return parsed.value;
     });
@@ -306,7 +306,7 @@ export async function updateHouseholdConfig(
         if (!data) {
             throw new Error("Failed to update household config");
         }
-        const parsed = householdConfigFromRow(data);
+        const parsed = householdConfigFromRow(data as never);
         if (!parsed.ok) throw new Error(parsed.error);
         return parsed.value;
     });

@@ -105,11 +105,13 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
 
     test("getProfile full row shape for present user", async () => {
         await upsertProfile(userId, {
-            timezone: null,
             preferred_drink_unit: null,
             preferred_weight_unit: null,
             theme: "dark",
         });
+        await getCtx().sql`
+            update profiles set timezone = null where user_id = ${userId}
+        `;
         const row = await getProfile(userId);
         expect(row).toEqual({
             user_id: userId,

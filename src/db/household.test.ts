@@ -153,7 +153,7 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
             },
             householdId,
             {
-                login: "new.person",
+                login: { kind: "username", username: "newperson" },
                 password: "long-enough-password",
                 displayName: "New Person",
             },

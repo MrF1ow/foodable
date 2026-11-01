@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { insertToolAnalytics } from "./analytics.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
@@ -27,7 +27,6 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
             tool_name: "log_meal",
             success: true,
             duration_ms: 42,
-            error_category: null as string | null,
             date_range_days: 7,
             mcp_session_id: "sess-1",
             invoked_at: "2026-03-01T12:00:00.000Z",
@@ -61,9 +60,11 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
 
     test("failure logs warning and does not reject", async () => {
         setSqlForTests(null);
-        const warn = mock(() => {});
+        const calls: unknown[][] = [];
         const prev = console.warn;
-        console.warn = warn;
+        console.warn = (...args: unknown[]) => {
+            calls.push(args);
+        };
         try {
             insertToolAnalytics({
                 user_id: "u",
@@ -73,8 +74,8 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
                 invoked_at: new Date().toISOString(),
             });
             await new Promise((r) => setTimeout(r, 20));
-            expect(warn.mock.calls.length).toBeGreaterThan(0);
-            expect(String(warn.mock.calls[0]![0])).toContain(
+            expect(calls.length).toBeGreaterThan(0);
+            expect(String(calls[0]?.[0])).toContain(
                 "Failed to persist analytics for x:",
             );
         } finally {
