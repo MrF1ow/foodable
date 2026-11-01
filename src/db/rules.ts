@@ -10,8 +10,12 @@ import {
     type PersonRowRef,
     type RulesStore,
 } from "../domain/rules.js";
-import { getSupabase } from "./client.js";
+import { insertReturning, pgError, rows, run } from "./sql.js";
 
+const STORE_RULES = "store_rules";
+const PERSON_RULES = "person_rules";
+const MEMBER_ALLERGENS = "member_allergens";
+const MEMBER_DISLIKES = "member_dislikes";
 const STORE_RULE_COLS = "id, household_id, store_id, body, sort_order";
 const PERSON_RULE_COLS = "id, household_id, user_id, body, sort_order";
 const ALLERGEN_COLS = "id, household_id, user_id, allergen, other_label";
@@ -20,106 +24,140 @@ const DISLIKE_COLS = "id, household_id, user_id, display_name";
 export function liveRulesStore(): RulesStore {
     return {
         async listStoreRules(storeId) {
-            const { data, error } = await getSupabase()
-                .from("store_rules")
-                .select(STORE_RULE_COLS)
-                .eq("store_id", storeId)
-                .order("sort_order", { ascending: true });
-            if (error) {
-                throw new Error(`Failed to list store rules: ${error.message}`);
-            }
-            return (data ?? []).map(storeRuleFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(STORE_RULE_COLS)}
+                            from ${tx.unsafe(STORE_RULES)}
+                            where store_id = ${storeId}
+                            order by sort_order asc
+                        `,
+                    );
+                    return data.map((row) => storeRuleFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list store rules", err);
+                }
+            });
         },
         async insertStoreRule(row) {
-            const { data, error } = await getSupabase()
-                .from("store_rules")
-                .insert(storeRuleToRow(row))
-                .select(STORE_RULE_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add store rule: ${error.message}`);
-            }
-            return storeRuleFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    STORE_RULES,
+                    storeRuleToRow(row),
+                    STORE_RULE_COLS,
+                    "add store rule",
+                );
+                return storeRuleFromRow(data as never);
+            });
         },
         async listPersonRules(householdId, userId) {
-            const { data, error } = await getSupabase()
-                .from("person_rules")
-                .select(PERSON_RULE_COLS)
-                .eq("household_id", householdId)
-                .eq("user_id", userId)
-                .order("sort_order", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list person rules: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(personRuleFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(PERSON_RULE_COLS)}
+                            from ${tx.unsafe(PERSON_RULES)}
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                            order by sort_order asc
+                        `,
+                    );
+                    return data.map((row) => personRuleFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list person rules", err);
+                }
+            });
         },
         async insertPersonRule(row) {
-            const { data, error } = await getSupabase()
-                .from("person_rules")
-                .insert(personRuleToRow(row))
-                .select(PERSON_RULE_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add person rule: ${error.message}`);
-            }
-            return personRuleFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    PERSON_RULES,
+                    personRuleToRow(row),
+                    PERSON_RULE_COLS,
+                    "add person rule",
+                );
+                return personRuleFromRow(data as never);
+            });
         },
         async listAllergens(householdId, userId) {
-            const { data, error } = await getSupabase()
-                .from("member_allergens")
-                .select(ALLERGEN_COLS)
-                .eq("household_id", householdId)
-                .eq("user_id", userId)
-                .order("created_at", { ascending: true });
-            if (error) {
-                throw new Error(`Failed to list allergens: ${error.message}`);
-            }
-            return (data ?? []).map(memberAllergenFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(ALLERGEN_COLS)}
+                            from ${tx.unsafe(MEMBER_ALLERGENS)}
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                            order by created_at asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        memberAllergenFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list allergens", err);
+                }
+            });
         },
         async insertAllergen(row) {
-            const { data, error } = await getSupabase()
-                .from("member_allergens")
-                .insert(memberAllergenToRow(row))
-                .select(ALLERGEN_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add allergen: ${error.message}`);
-            }
-            return memberAllergenFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    MEMBER_ALLERGENS,
+                    memberAllergenToRow(row),
+                    ALLERGEN_COLS,
+                    "add allergen",
+                );
+                return memberAllergenFromRow(data as never);
+            });
         },
         async listDislikes(householdId, userId) {
-            const { data, error } = await getSupabase()
-                .from("member_dislikes")
-                .select(DISLIKE_COLS)
-                .eq("household_id", householdId)
-                .eq("user_id", userId)
-                .order("created_at", { ascending: true });
-            if (error) {
-                throw new Error(`Failed to list dislikes: ${error.message}`);
-            }
-            return (data ?? []).map(memberDislikeFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(DISLIKE_COLS)}
+                            from ${tx.unsafe(MEMBER_DISLIKES)}
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                            order by created_at asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        memberDislikeFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list dislikes", err);
+                }
+            });
         },
         async insertDislike(row) {
-            const { data, error } = await getSupabase()
-                .from("member_dislikes")
-                .insert(memberDislikeToRow(row))
-                .select(DISLIKE_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add dislike: ${error.message}`);
-            }
-            return memberDislikeFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    MEMBER_DISLIKES,
+                    memberDislikeToRow(row),
+                    DISLIKE_COLS,
+                    "add dislike",
+                );
+                return memberDislikeFromRow(data as never);
+            });
         },
         async deletePersonRule(ref) {
-            return deleteRef("person_rules", "person rule", ref);
+            return deleteRef(PERSON_RULES, "person rule", ref);
         },
         async deleteAllergen(ref) {
-            return deleteRef("member_allergens", "allergen", ref);
+            return deleteRef(MEMBER_ALLERGENS, "allergen", ref);
         },
         async deleteDislike(ref) {
-            return deleteRef("member_dislikes", "dislike", ref);
+            return deleteRef(MEMBER_DISLIKES, "dislike", ref);
         },
     };
 }
@@ -127,19 +165,25 @@ export function liveRulesStore(): RulesStore {
 export type { RulesStore };
 
 async function deleteRef(
-    table: "person_rules" | "member_allergens" | "member_dislikes",
+    table: string,
     label: string,
     ref: PersonRowRef,
 ): Promise<boolean> {
-    const { data, error } = await getSupabase()
-        .from(table)
-        .delete()
-        .eq("id", ref.id)
-        .eq("household_id", ref.householdId)
-        .eq("user_id", ref.userId)
-        .select("id");
-    if (error) {
-        throw new Error(`Failed to remove ${label}: ${error.message}`);
-    }
-    return (data ?? []).length > 0;
+    return run(async (tx) => {
+        try {
+            const data = await rows<{ id: string }>(
+                tx,
+                tx`
+                    delete from ${tx.unsafe(table)}
+                    where id = ${ref.id}
+                      and household_id = ${ref.householdId}
+                      and user_id = ${ref.userId}
+                    returning id
+                `,
+            );
+            return data.length > 0;
+        } catch (err) {
+            throw pgError(`remove ${label}`, err);
+        }
+    });
 }
