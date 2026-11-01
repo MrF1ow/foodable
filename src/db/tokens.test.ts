@@ -1,3 +1,4 @@
+import { SQL } from "bun";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
     consumeAuthCode,
@@ -19,6 +20,68 @@ import { findPgBin } from "./testing/pg-temp.js";
 import { run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
+
+function createBarrier(parties: number) {
+    let arrived = 0;
+    let release!: () => void;
+    const allArrived = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    return {
+        async wait() {
+            arrived++;
+            if (arrived >= parties) release();
+            else await allArrived;
+        },
+    };
+}
+
+/** Two connections, transactions held open until both arrive, then the same delete-returning consume uses. */
+async function raceAuthCodeConsume(
+    url: string,
+    code: string,
+    now: string,
+    barrier: ReturnType<typeof createBarrier>,
+): Promise<unknown> {
+    const client = new SQL(url, { prepare: false, max: 1 });
+    try {
+        return await client.begin(async (tx) => {
+            await barrier.wait();
+            const [row] = await tx`
+                delete from auth_codes
+                where code = ${code}
+                  and expires_at > ${now}
+                returning code, redirect_uri, user_id, code_challenge
+            `;
+            return row ?? null;
+        });
+    } finally {
+        await client.close();
+    }
+}
+
+async function raceRefreshTokenConsume(
+    url: string,
+    token: string,
+    now: string,
+    barrier: ReturnType<typeof createBarrier>,
+): Promise<string | null> {
+    const client = new SQL(url, { prepare: false, max: 1 });
+    try {
+        return await client.begin(async (tx) => {
+            await barrier.wait();
+            const [row] = await tx`
+                delete from refresh_tokens
+                where token = ${token}
+                  and expires_at > ${now}
+                returning user_id
+            `;
+            return (row?.user_id as string | undefined) ?? null;
+        });
+    } finally {
+        await client.close();
+    }
+}
 
 describeDb(pgAvailable !== null, "tokens db", (getCtx) => {
     let userId: string;
@@ -106,9 +169,24 @@ describeDb(pgAvailable !== null, "tokens db", (getCtx) => {
 
     test("concurrent auth code consume allows only one winner", async () => {
         await storeAuthCode("race-code", "http://localhost/cb", userId);
+        const { pg } = getCtx();
+        const now = new Date().toISOString();
+        const barrier = createBarrier(2);
         const results = await Promise.all([
-            consumeAuthCode("race-code"),
-            consumeAuthCode("race-code"),
+            raceAuthCodeConsume(pg.url, "race-code", now, barrier),
+            raceAuthCodeConsume(pg.url, "race-code", now, barrier),
+        ]);
+        expect(results.filter((r) => r != null)).toHaveLength(1);
+    });
+
+    test("concurrent refresh token consume allows only one winner", async () => {
+        await storeRefreshToken("race-refresh", userId);
+        const { pg } = getCtx();
+        const now = new Date().toISOString();
+        const barrier = createBarrier(2);
+        const results = await Promise.all([
+            raceRefreshTokenConsume(pg.url, "race-refresh", now, barrier),
+            raceRefreshTokenConsume(pg.url, "race-refresh", now, barrier),
         ]);
         expect(results.filter((r) => r != null)).toHaveLength(1);
     });

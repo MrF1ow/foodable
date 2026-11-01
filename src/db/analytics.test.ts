@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { AnalyticsRecord } from "../analytics.js";
 import { insertToolAnalytics } from "./analytics.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { rows, run, setSqlForTests } from "./sql.js";
+import { closeSql, rows, run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -28,9 +29,10 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
             success: true,
             duration_ms: 42,
             date_range_days: 7,
+            error_category: null,
             mcp_session_id: "sess-1",
             invoked_at: "2026-03-01T12:00:00.000Z",
-        };
+        } as unknown as AnalyticsRecord;
         insertToolAnalytics(record);
         await new Promise((r) => setTimeout(r, 50));
         const { sql } = getCtx();
@@ -54,12 +56,16 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
             duration_ms: 42,
             date_range_days: 7,
             mcp_session_id: "sess-1",
+            error_category: null,
         });
         expect(String(stored[0]!.invoked_at)).toMatch(/2026-03-01/);
     });
 
     test("failure logs warning and does not reject", async () => {
+        const prevUrl = process.env.DATABASE_URL;
+        delete process.env.DATABASE_URL;
         setSqlForTests(null);
+        await closeSql();
         const calls: unknown[][] = [];
         const prev = console.warn;
         console.warn = (...args: unknown[]) => {
@@ -74,12 +80,15 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
                 invoked_at: new Date().toISOString(),
             });
             await new Promise((r) => setTimeout(r, 20));
-            expect(calls.length).toBeGreaterThan(0);
-            expect(String(calls[0]?.[0])).toContain(
-                "Failed to persist analytics for x:",
-            );
+            expect(calls).toEqual([
+                ["Failed to persist analytics for x:", "Missing DATABASE_URL"],
+            ]);
         } finally {
             console.warn = prev;
+            if (prevUrl === undefined) delete process.env.DATABASE_URL;
+            else process.env.DATABASE_URL = prevUrl;
+            const { sql } = getCtx();
+            setSqlForTests(sql);
         }
     });
 });

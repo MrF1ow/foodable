@@ -360,17 +360,18 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
         const { sql } = ctx();
         setSqlForTests(sql);
 
-        await run(async (tx) => {
-            try {
-                await tx`
-                    create temp table _sql_unique (id int primary key) on commit drop
-                `;
-                await tx`insert into _sql_unique values (1)`;
-                await tx`insert into _sql_unique values (1)`;
-            } catch (err) {
-                expect(pgCode(err)).toBe("23505");
-            }
-        });
+        const err = await run(async (tx) => {
+            await tx`
+                create temp table _sql_unique (id int primary key) on commit drop
+            `;
+            await tx`insert into _sql_unique values (1)`;
+            return tx`insert into _sql_unique values (1)`;
+        }).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(err).not.toBeNull();
+        expect(pgCode(err)).toBe("23505");
     });
 
     test("pgError wraps postgres failures", async () => {

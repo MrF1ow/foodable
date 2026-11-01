@@ -91,9 +91,9 @@ export async function createHouseholdForCaller(
                 tx,
                 tx`
                     select public.create_household(
-                        ${userId}::uuid,
-                        ${name},
-                        ${displayName}
+                        p_user_id => ${userId}::uuid,
+                        p_name => ${name},
+                        p_display_name => ${displayName}
                     ) as id
                 `,
                 "create household",
@@ -208,9 +208,9 @@ function liveAddMemberRpc(): AddMemberRpc {
                         tx,
                         tx`
                             select public.add_household_member(
-                                ${householdId}::uuid,
-                                ${userId}::uuid,
-                                ${displayName}
+                                p_household_id => ${householdId}::uuid,
+                                p_auth_user_id => ${userId}::uuid,
+                                p_display_name => ${displayName}
                             ) as id
                         `,
                         "add household member",
@@ -238,9 +238,13 @@ function liveAddMemberRpc(): AddMemberRpc {
 export async function addHouseholdMemberForHousehold(
     householdId: string,
     draft: MemberDraft,
+    deps?: { auth: AuthUserAdmin; rpc?: AddMemberRpc },
 ): Promise<AddMemberResult> {
     return addHouseholdMember(
-        { auth: liveAuthAdmin(), rpc: liveAddMemberRpc() },
+        {
+            auth: deps?.auth ?? liveAuthAdmin(),
+            rpc: deps?.rpc ?? liveAddMemberRpc(),
+        },
         householdId,
         draft,
     );
@@ -323,9 +327,9 @@ export async function rotateHouseholdMcpToken(args: {
                 tx,
                 tx`
                     select public.rotate_household_mcp_token(
-                        ${args.householdId}::uuid,
-                        ${args.tokenHashHex},
-                        ${args.issuedBy}::uuid
+                        p_household_id => ${args.householdId}::uuid,
+                        p_token_hash_hex => ${args.tokenHashHex},
+                        p_issued_by => ${args.issuedBy}::uuid
                     ) as issued_at
                 `,
                 "rotate household mcp token",
@@ -383,9 +387,9 @@ export async function transferHouseholdOwnership(
         try {
             await tx`
                 select public.transfer_household_ownership(
-                    ${householdId}::uuid,
-                    ${fromUserId}::uuid,
-                    ${toUserId}::uuid
+                    p_household_id => ${householdId}::uuid,
+                    p_from_user_id => ${fromUserId}::uuid,
+                    p_to_user_id => ${toUserId}::uuid
                 )
             `;
         } catch (err) {

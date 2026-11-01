@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-    addHouseholdMember,
     EMPTY_HOUSEHOLD_PREFERENCES,
     HouseholdAlreadyExistsError,
 } from "../household.js";
 import {
+    addHouseholdMemberForHousehold,
     createHouseholdForCaller,
     getHouseholdConfig,
     getHouseholdMembership,
@@ -19,7 +19,7 @@ import {
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { maybeOne, run, setSqlForTests } from "./sql.js";
+import { run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -30,6 +30,18 @@ async function seedUser(sql: import("bun").SQL): Promise<string> {
         values (${id}, ${`u-${id}@foodable.test`})
     `;
     return id;
+}
+
+async function expectRejectsWithMessage(
+    promise: Promise<unknown>,
+    message: string,
+): Promise<void> {
+    const err = await promise.then(
+        () => null,
+        (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(message);
 }
 
 describeDb(pgAvailable !== null, "household db", (getCtx) => {
@@ -106,14 +118,20 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         ]);
     });
 
-    test("addHouseholdMember RPC with stubbed auth admin", async () => {
+    test("addHouseholdMemberForHousehold success", async () => {
         const newUserId = crypto.randomUUID();
         const { sql } = getCtx();
         await sql`
             insert into auth.users (id, email)
             values (${newUserId}, ${`new-${newUserId}@foodable.test`})
         `;
-        const result = await addHouseholdMember(
+        const result = await addHouseholdMemberForHousehold(
+            householdId,
+            {
+                login: { kind: "username", username: "newperson" },
+                password: "long-enough-password",
+                displayName: "New Person",
+            },
             {
                 auth: {
                     createUser: async () => ({
@@ -122,43 +140,63 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
                     }),
                     deleteUser: async () => {},
                 },
-                rpc: {
-                    insertMember: async ({
-                        householdId,
-                        userId,
-                        displayName,
-                    }) => {
-                        const data = await run(async (tx) =>
-                            maybeOne<{ id: string }>(
-                                tx,
-                                tx`
-                                    select public.add_household_member(
-                                        ${householdId}::uuid,
-                                        ${userId}::uuid,
-                                        ${displayName}
-                                    ) as id
-                                `,
-                                "add household member",
-                            ),
-                        );
-                        if (!data?.id) {
-                            return {
-                                ok: false,
-                                error: "Could not add the household member.",
-                            };
-                        }
-                        return { ok: true, userId: data.id };
-                    },
-                },
-            },
-            householdId,
-            {
-                login: { kind: "username", username: "newperson" },
-                password: "long-enough-password",
-                displayName: "New Person",
             },
         );
         expect(result).toEqual({ ok: true, userId: newUserId });
+        expect(await getHouseholdMembership(newUserId)).toMatchObject({
+            displayName: "New Person",
+            role: "member",
+        });
+    });
+
+    test("addHouseholdMemberForHousehold auth already registered", async () => {
+        const result = await addHouseholdMemberForHousehold(
+            householdId,
+            {
+                login: { kind: "username", username: "taken" },
+                password: "long-enough-password",
+                displayName: "Taken",
+            },
+            {
+                auth: {
+                    createUser: async () => ({
+                        ok: false as const,
+                        alreadyRegistered: true,
+                        error: "User already registered",
+                    }),
+                    deleteUser: async () => {},
+                },
+            },
+        );
+        expect(result).toEqual({
+            ok: false,
+            error: "That login is already in use.",
+        });
+    });
+
+    test("addHouseholdMemberForHousehold not a household member RPC error", async () => {
+        const newUserId = crypto.randomUUID();
+        const result = await addHouseholdMemberForHousehold(
+            crypto.randomUUID(),
+            {
+                login: { kind: "username", username: "ghost" },
+                password: "long-enough-password",
+                displayName: "Ghost",
+            },
+            {
+                auth: {
+                    createUser: async () => ({
+                        ok: true as const,
+                        userId: newUserId,
+                    }),
+                    deleteUser: async () => {},
+                },
+            },
+        );
+        expect(result).toEqual({
+            ok: false,
+            error: "You must be a household member to add people.",
+        });
     });
 
     test("getHouseholdConfig and updateHouseholdConfig", async () => {
@@ -225,23 +263,20 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
                 values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
             `;
         });
-        await expect(
+        await expectRejectsWithMessage(
             transferHouseholdOwnership(householdId, memberId, ownerId),
-        ).rejects.toThrow(
             "Failed to transfer ownership: only the household owner may transfer ownership",
         );
-        await expect(
+        await expectRejectsWithMessage(
             transferHouseholdOwnership(householdId, ownerId, ownerId),
-        ).rejects.toThrow(
             "Failed to transfer ownership: that person is already the owner",
         );
-        await expect(
+        await expectRejectsWithMessage(
             transferHouseholdOwnership(
                 householdId,
                 ownerId,
                 crypto.randomUUID(),
             ),
-        ).rejects.toThrow(
             "Failed to transfer ownership: not a household member",
         );
     });
@@ -264,8 +299,9 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         expect(await getHouseholdMembership(memberId)).toMatchObject({
             role: "admin",
         });
-        await expect(
+        await expectRejectsWithMessage(
             setHouseholdMemberRole(householdId, ownerId, "admin"),
-        ).rejects.toThrow("That person is not a member you can change.");
+            "That person is not a member you can change.",
+        );
     });
 });

@@ -101,6 +101,10 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
         expect(alcoholTrackingEnabledFromProfile(profile)).toBe(true);
         expect(preferredDrinkUnitFromProfile(profile)).toBe("uk");
         expect(await getUserTimezone(userId)).toBe("Pacific/Honolulu");
+        expect(await getPreferredWeightUnit(userId)).toBe("kg");
+        expect(await getWidgetsEnabled(userId)).toBe(false);
+        expect(await getAlcoholTrackingEnabled(userId)).toBe(true);
+        expect(await getPreferredDrinkUnit(userId)).toBe("uk");
     });
 
     test("getProfile full row shape for present user", async () => {

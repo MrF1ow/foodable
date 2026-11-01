@@ -85,7 +85,9 @@ async function lookupHouseholdToken(token: string): Promise<TableLookup> {
             return await maybeOne<{ household_id: string | null }>(
                 tx,
                 tx`
-                    select public.resolve_household_mcp_token(${hex}) as household_id
+                    select public.resolve_household_mcp_token(
+                        p_token_hash_hex => ${hex}
+                    ) as household_id
                 `,
                 "resolve household mcp token",
             );
