@@ -7,163 +7,247 @@ import {
     recipeToRow,
     type RecipesStore,
 } from "../domain/recipes.js";
-import { getSupabase } from "./client.js";
+import {
+    definedColumns,
+    insertReturning,
+    maybeOne,
+    one,
+    pgError,
+    rows,
+    run,
+    type Tx,
+} from "./sql.js";
 
+const RECIPES = "recipes";
+const RECIPE_INGREDIENTS = "recipe_ingredients";
+const RECIPE_PORTIONS = "recipe_portions";
 const RECIPE_COLS =
     "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes";
 const RECIPE_INGREDIENT_COLS =
     "id, household_id, recipe_id, kind, display_name, amount, unit, food_id, sort_order, note";
 const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
 
+function patchKeys(keys: string[]): [string, ...string[]] {
+    return keys as [string, ...string[]];
+}
+
+function recipeRowForWrite(
+    tx: Tx,
+    row: ReturnType<typeof recipeToRow>,
+): Record<string, unknown> {
+    return {
+        ...row,
+        tags: tx.array(Array.isArray(row.tags) ? row.tags : [], "text"),
+    };
+}
+
 export function liveRecipesStore(): RecipesStore {
     return {
         async listRecipes(householdId) {
-            const { data, error } = await getSupabase()
-                .from("recipes")
-                .select(RECIPE_COLS)
-                .eq("household_id", householdId)
-                .order("name", { ascending: true });
-            if (error) {
-                throw new Error(`Failed to list recipes: ${error.message}`);
-            }
-            return (data ?? []).map(recipeFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_COLS)}
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                            order by name asc
+                        `,
+                    );
+                    return data.map((row) => recipeFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list recipes", err);
+                }
+            });
         },
         async getRecipe(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("recipes")
-                .select(RECIPE_COLS)
-                .eq("household_id", householdId)
-                .eq("id", id)
-                .maybeSingle();
-            if (error) {
-                throw new Error(`Failed to load recipe: ${error.message}`);
-            }
-            return data ? recipeFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_COLS)}
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                              and id = ${id}
+                        `,
+                        "load recipe",
+                    );
+                    return data ? recipeFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("load recipe", err);
+                }
+            });
         },
         async insertRecipe(row) {
-            const { data, error } = await getSupabase()
-                .from("recipes")
-                .insert(recipeToRow(row))
-                .select(RECIPE_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add recipe: ${error.message}`);
-            }
-            return recipeFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    RECIPES,
+                    recipeRowForWrite(tx, recipeToRow(row)),
+                    RECIPE_COLS,
+                    "add recipe",
+                );
+                return recipeFromRow(data as never);
+            });
         },
         async updateRecipe(row) {
-            const { data, error } = await getSupabase()
-                .from("recipes")
-                .update({
-                    ...recipeToRow(row),
-                    updated_at: new Date().toISOString(),
-                })
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(RECIPE_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(`Failed to update recipe: ${error.message}`);
-            }
-            return data ? recipeFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const payload = {
+                        ...recipeRowForWrite(tx, recipeToRow(row)),
+                        updated_at: new Date().toISOString(),
+                    };
+                    const { row: patch, keys } = definedColumns(payload);
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPES)} set ${tx(patch, ...patchKeys(keys))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(RECIPE_COLS)}
+                        `,
+                        "update recipe",
+                    );
+                    return data ? recipeFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update recipe", err);
+                }
+            });
         },
         async deleteRecipe(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("recipes")
-                .delete()
-                .eq("id", id)
-                .eq("household_id", householdId)
-                .select("id");
-            if (error) {
-                throw new Error(`Failed to delete recipe: ${error.message}`);
-            }
-            return (data ?? []).length > 0;
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPES)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete recipe", err);
+                }
+            });
         },
         async listIngredients(householdId, recipeId) {
-            const { data, error } = await getSupabase()
-                .from("recipe_ingredients")
-                .select(RECIPE_INGREDIENT_COLS)
-                .eq("household_id", householdId)
-                .eq("recipe_id", recipeId)
-                .order("sort_order", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list recipe ingredients: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(recipeIngredientFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_INGREDIENT_COLS)}
+                            from ${tx.unsafe(RECIPE_INGREDIENTS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                            order by sort_order asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        recipeIngredientFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list recipe ingredients", err);
+                }
+            });
         },
         async insertIngredient(row) {
-            const { data, error } = await getSupabase()
-                .from("recipe_ingredients")
-                .insert(recipeIngredientToRow(row))
-                .select(RECIPE_INGREDIENT_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to add recipe ingredient: ${error.message}`,
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    RECIPE_INGREDIENTS,
+                    recipeIngredientToRow(row),
+                    RECIPE_INGREDIENT_COLS,
+                    "add recipe ingredient",
                 );
-            }
-            return recipeIngredientFromRow(data);
+                return recipeIngredientFromRow(data as never);
+            });
         },
         async updateIngredient(row) {
-            const { data, error } = await getSupabase()
-                .from("recipe_ingredients")
-                .update(recipeIngredientToRow(row))
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(RECIPE_INGREDIENT_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to update recipe ingredient: ${error.message}`,
-                );
-            }
-            return data ? recipeIngredientFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const { row: patch, keys } = definedColumns(
+                        recipeIngredientToRow(row),
+                    );
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPE_INGREDIENTS)} set ${tx(patch, ...patchKeys(keys))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(RECIPE_INGREDIENT_COLS)}
+                        `,
+                        "update recipe ingredient",
+                    );
+                    return data ? recipeIngredientFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update recipe ingredient", err);
+                }
+            });
         },
         async deleteIngredient(householdId, ingredientId) {
-            const { data, error } = await getSupabase()
-                .from("recipe_ingredients")
-                .delete()
-                .eq("id", ingredientId)
-                .eq("household_id", householdId)
-                .select("id");
-            if (error) {
-                throw new Error(
-                    `Failed to delete recipe ingredient: ${error.message}`,
-                );
-            }
-            return (data ?? []).length > 0;
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPE_INGREDIENTS)}
+                            where id = ${ingredientId}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete recipe ingredient", err);
+                }
+            });
         },
         async getPortion(householdId, recipeId, userId) {
-            const { data, error } = await getSupabase()
-                .from("recipe_portions")
-                .select(RECIPE_PORTION_COLS)
-                .eq("household_id", householdId)
-                .eq("recipe_id", recipeId)
-                .eq("user_id", userId)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to load recipe portion: ${error.message}`,
-                );
-            }
-            return data ? recipePortionFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_PORTION_COLS)}
+                            from ${tx.unsafe(RECIPE_PORTIONS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                              and user_id = ${userId}
+                        `,
+                        "load recipe portion",
+                    );
+                    return data ? recipePortionFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("load recipe portion", err);
+                }
+            });
         },
         async upsertPortion(row) {
-            const { data, error } = await getSupabase()
-                .from("recipe_portions")
-                .upsert(recipePortionToRow(row), {
-                    onConflict: "recipe_id,user_id",
-                })
-                .select(RECIPE_PORTION_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to save recipe portion: ${error.message}`,
-                );
-            }
-            return recipePortionFromRow(data);
+            return run(async (tx) => {
+                try {
+                    const payload = recipePortionToRow(row);
+                    const { row: patch, keys } = definedColumns(payload);
+                    const data = await one<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            insert into ${tx.unsafe(RECIPE_PORTIONS)} ${tx(patch, ...patchKeys(keys))}
+                            on conflict (recipe_id, user_id) do update set
+                                household_id = excluded.household_id,
+                                portion_count = excluded.portion_count
+                            returning ${tx.unsafe(RECIPE_PORTION_COLS)}
+                        `,
+                        "save recipe portion",
+                    );
+                    return recipePortionFromRow(data as never);
+                } catch (err) {
+                    throw pgError("save recipe portion", err);
+                }
+            });
         },
     };
 }

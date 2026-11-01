@@ -468,7 +468,8 @@ export function createMemoryRecipesStore(): RecipesStore {
         async listRecipes(householdId) {
             return recipes
                 .filter((row) => row.householdId === householdId)
-                .map(cloneRecipe);
+                .map(cloneRecipe)
+                .sort((a, b) => a.name.localeCompare(b.name));
         },
         async getRecipe(householdId, id) {
             const row = recipes.find(
