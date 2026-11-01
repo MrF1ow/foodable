@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { SQL } from "bun";
+import { SQL } from "bun";
+import type { SQL as SQLType } from "bun";
 import { classifySignInFailure, resolveApproveUser } from "../oauth.js";
 import { SignInError } from "../domain/auth.js";
 import { addHouseholdMemberForHousehold } from "./household.js";
-import { deleteAllUserData } from "./nutrition.js";
+import { upsertProfile } from "./profiles.js";
 import { createMemoryExportArchiveStore } from "./exports.js";
 import { describeDb } from "./testing/pg.js";
-import { seedHousehold } from "./testing/fixtures.js";
+import { seedFood, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import {
     authUserCount,
@@ -67,6 +68,132 @@ async function loadUserForeignKeys(sql: SQL) {
         deltype: r.deltype as "c" | "n" | "a",
         ref_table: r.ref_table,
     }));
+}
+
+const CASCADE_TABLES = [
+    "household_members",
+    "meal_items",
+    "member_allergens",
+    "member_dislikes",
+    "nutrition_goals",
+    "person_rules",
+    "profiles",
+    "water_log",
+    "weight_log",
+] as const;
+
+async function countUserRows(
+    sql: SQLType,
+    table: string,
+    userId: string,
+): Promise<number> {
+    const [row] = await sql`
+        select count(*)::int as n
+        from ${sql.unsafe(table)}
+        where user_id = ${userId}
+    `;
+    return row.n;
+}
+
+async function seedCascadeAndSetNullRows(
+    sql: SQLType,
+    userId: string,
+    householdId: string,
+): Promise<{ foodId: string }> {
+    const otherUserId = crypto.randomUUID();
+    await sql`
+        insert into auth.users (id, email)
+        values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
+    `;
+    await upsertProfile(userId, { timezone: "UTC" });
+    await sql`
+        insert into member_allergens (household_id, user_id, allergen)
+        values (${householdId}, ${userId}, ${"peanut"})
+    `;
+    await sql`
+        insert into member_dislikes (household_id, user_id, display_name)
+        values (${householdId}, ${userId}, ${"Kale"})
+    `;
+    await sql`
+        insert into nutrition_goals (user_id, daily_calories)
+        values (${userId}, ${1800})
+    `;
+    await sql`
+        insert into person_rules (household_id, user_id, body)
+        values (${householdId}, ${userId}, ${"No shop on Mondays"})
+    `;
+    await sql`
+        insert into water_log (user_id, amount_ml, logged_at, idempotency_key)
+        values (
+            ${userId},
+            ${250},
+            ${"2024-06-01T12:00:00.000Z"},
+            ${`cascade-w-${userId}`}
+        )
+    `;
+    await sql`
+        insert into weight_log (user_id, weight_g, logged_at, idempotency_key)
+        values (
+            ${userId},
+            ${70000},
+            ${"2024-06-01T12:00:00.000Z"},
+            ${`cascade-wt-${userId}`}
+        )
+    `;
+    const [meal] = await sql`
+        insert into meals (
+            user_id,
+            description,
+            meal_type,
+            logged_at,
+            idempotency_key
+        )
+        values (
+            ${otherUserId},
+            ${"Other meal"},
+            ${"lunch"},
+            ${"2024-06-01T13:00:00.000Z"},
+            ${`other-meal-${otherUserId}`}
+        )
+        returning id
+    `;
+    await sql`
+        insert into meal_items (meal_id, user_id, label)
+        values (${meal.id}, ${userId}, ${"Shared item"})
+    `;
+    const foodId = await seedFood(sql, householdId, { name: "Cascade apple" });
+    await sql`
+        update public.foods set created_by = ${userId} where id = ${foodId}
+    `;
+    await sql`
+        insert into household_mcp_tokens (household_id, token_hash, issued_by)
+        values (
+            ${householdId},
+            decode(repeat('00', 32), 'hex'),
+            ${userId}
+        )
+        on conflict (household_id) do update
+        set issued_by = excluded.issued_by
+    `;
+    await sql`
+        insert into stock_movements (
+            household_id,
+            food_id,
+            delta,
+            unit,
+            reason,
+            actor_user_id
+        )
+        values (
+            ${householdId},
+            ${foodId},
+            ${1},
+            ${"g"},
+            ${"adjust"},
+            ${userId}
+        )
+    `;
+    return { foodId };
 }
 
 describeDb(pgAvailable !== null, "users db", (getCtx) => {
@@ -140,70 +267,116 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
     test("cascade and set-null on public.users delete", async () => {
         const { sql } = getCtx();
         const { userId, householdId } = await seedHousehold(sql);
-        await sql`
-            insert into member_dislikes (household_id, user_id, display_name)
-            values (${householdId}, ${userId}, ${"Kale"})
-        `;
-        const foodId = crypto.randomUUID();
-        await sql`
-            insert into foods (
-                id,
-                household_id,
-                kind,
-                name,
-                normalized_name,
-                default_unit,
-                allergens,
-                created_by
-            )
-            values (
-                ${foodId},
-                ${householdId},
-                ${"food"},
-                ${"Apple"},
-                ${"apple"},
-                ${"g"},
-                ${sql.array([], "text")},
-                ${userId}
-            )
-        `;
+        const { foodId } = await seedCascadeAndSetNullRows(
+            sql,
+            userId,
+            householdId,
+        );
+        for (const table of CASCADE_TABLES) {
+            expect(await countUserRows(sql, table, userId)).toBeGreaterThan(0);
+        }
         await deleteAuthUser(userId);
-        const dislikes = await sql`
-            select count(*)::int as n
-            from member_dislikes
-            where user_id = ${userId}
-        `;
-        expect(dislikes[0].n).toBe(0);
+        for (const table of CASCADE_TABLES) {
+            expect(await countUserRows(sql, table, userId)).toBe(0);
+        }
         const [food] = await sql`
             select created_by from foods where id = ${foodId}
         `;
         expect(food.created_by).toBeNull();
+        const [token] = await sql`
+            select issued_by from household_mcp_tokens
+            where household_id = ${householdId}
+        `;
+        expect(token.issued_by).toBeNull();
+        const [movement] = await sql`
+            select actor_user_id from stock_movements
+            where food_id = ${foodId}
+        `;
+        expect(movement.actor_user_id).toBeNull();
     });
 
     test("no-action tables block delete until cleared", async () => {
         const { sql } = getCtx();
         const { userId } = await seedHousehold(sql);
-        await sql`
-            insert into meals (
-                user_id,
-                description,
-                meal_type,
-                logged_at,
-                idempotency_key
-            )
-            values (
-                ${userId},
-                ${"Block"},
-                ${"lunch"},
-                ${"2024-01-01T12:00:00.000Z"},
-                ${"block-meal"}
-            )
-        `;
-        const err = await deleteAuthUser(userId).then(
-            () => null,
-            (e: unknown) => e,
-        );
-        expect(err).toBeTruthy();
+        const blockers: { table: string; seed: () => Promise<void> }[] = [
+            {
+                table: "meals",
+                seed: async () => {
+                    await sql`
+                        insert into meals (
+                            user_id,
+                            description,
+                            meal_type,
+                            logged_at,
+                            idempotency_key
+                        )
+                        values (
+                            ${userId},
+                            ${"Block"},
+                            ${"lunch"},
+                            ${"2024-01-01T12:00:00.000Z"},
+                            ${"block-meal"}
+                        )
+                    `;
+                },
+            },
+            {
+                table: "oauth_tokens",
+                seed: async () => {
+                    await sql`
+                        insert into oauth_tokens (token, user_id, expires_at)
+                        values (
+                            ${"block-oauth"},
+                            ${userId},
+                            ${"2030-01-01T00:00:00.000Z"}
+                        )
+                    `;
+                },
+            },
+            {
+                table: "refresh_tokens",
+                seed: async () => {
+                    await sql`
+                        insert into refresh_tokens (token, user_id, expires_at)
+                        values (
+                            ${"block-refresh"},
+                            ${userId},
+                            ${"2030-01-01T00:00:00.000Z"}
+                        )
+                    `;
+                },
+            },
+            {
+                table: "auth_codes",
+                seed: async () => {
+                    await sql`
+                        insert into auth_codes (
+                            code,
+                            redirect_uri,
+                            user_id,
+                            code_challenge,
+                            expires_at
+                        )
+                        values (
+                            ${"block-code"},
+                            ${"http://localhost/cb"},
+                            ${userId},
+                            ${"challenge"},
+                            ${"2030-01-01T00:00:00.000Z"}
+                        )
+                    `;
+                },
+            },
+        ];
+        for (const { table, seed } of blockers) {
+            await seed();
+            const err = await deleteAuthUser(userId).then(
+                () => null,
+                (e: unknown) => e,
+            );
+            expect(err).toBeTruthy();
+            await sql`delete from ${sql.unsafe(table)} where user_id = ${userId}`;
+        }
     });
 
     test("ownership promotion prefers admin then oldest account", async () => {
@@ -263,6 +436,63 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
         expect(nextOwner.display_name).toBe("Admin");
     });
 
+    test("ownership promotion picks oldest account when no admin", async () => {
+        const { sql } = getCtx();
+        const householdId = crypto.randomUUID();
+        const ownerId = crypto.randomUUID();
+        const olderMemberId = crypto.randomUUID();
+        const newerMemberId = crypto.randomUUID();
+        const now = new Date();
+        for (const row of [
+            {
+                id: ownerId,
+                email: "owner2@example.com",
+                created_at: now.toISOString(),
+            },
+            {
+                id: newerMemberId,
+                email: "newer@example.com",
+                created_at: new Date(now.getTime() - 86400000).toISOString(),
+            },
+            {
+                id: olderMemberId,
+                email: "older@example.com",
+                created_at: new Date(
+                    now.getTime() - 86400000 * 365,
+                ).toISOString(),
+            },
+        ]) {
+            await sql`
+                insert into auth.users (id, email, created_at)
+                values (${row.id}, ${row.email}, ${row.created_at})
+            `;
+        }
+        await sql`
+            insert into public.households (id, name)
+            values (${householdId}, ${"Promo no admin"})
+        `;
+        await sql`
+            insert into public.household_members (
+                household_id,
+                user_id,
+                role,
+                display_name
+            )
+            values
+                (${householdId}, ${ownerId}, ${"owner"}, ${"Owner"}),
+                (${householdId}, ${olderMemberId}, ${"member"}, ${"Older"}),
+                (${householdId}, ${newerMemberId}, ${"member"}, ${"Newer"})
+        `;
+        await deleteAuthUser(ownerId);
+        const [nextOwner] = await sql`
+            select display_name, role
+            from household_members
+            where household_id = ${householdId}
+              and role = 'owner'
+        `;
+        expect(nextOwner.display_name).toBe("Older");
+    });
+
     test("live sign-in rehashes bcrypt and classifies failures", async () => {
         const bcryptHash = (
             await Bun.password.hash("live-pass", { algorithm: "bcrypt" })
@@ -279,17 +509,32 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
         `;
         expect(row.password_hash.startsWith("$argon2id$")).toBe(true);
         await signInUser("live@example.com", "live-pass");
-        try {
-            await signInUser("live@example.com", "wrong");
-        } catch (err) {
-            expect(classifySignInFailure(err)).toBe("credentials");
-            expect((err as SignInError).message).toBe(
-                "Invalid login credentials",
-            );
-        }
-        expect(
-            classifySignInFailure(new Error("timeout", { cause: "network" })),
-        ).toBe("unavailable");
+        const wrongPassErr = await signInUser(
+            "live@example.com",
+            "wrong",
+        ).catch((e: unknown) => e);
+        expect(wrongPassErr).toBeInstanceOf(SignInError);
+        expect(wrongPassErr).toMatchObject({
+            message: "Invalid login credentials",
+            status: 400,
+            code: "invalid_credentials",
+        });
+        expect(classifySignInFailure(wrongPassErr)).toBe("credentials");
+
+        const savedSql = sql;
+        setSqlForTests(
+            new SQL("postgres://nobody:nothing@127.0.0.1:1/none", {
+                prepare: false,
+                max: 1,
+                connectionTimeout: 500,
+            }),
+        );
+        const storeErr = await signInUser(
+            "live@example.com",
+            "live-pass",
+        ).catch((e: unknown) => e);
+        setSqlForTests(savedSql);
+        expect(classifySignInFailure(storeErr)).toBe("unavailable");
     });
 
     test("resolveApproveUser first user and closed household", async () => {

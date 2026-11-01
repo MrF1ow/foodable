@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
     AlreadyRegisteredError,
     createMemoryAuthStore,
+    DUMMY_PASSWORD_HASH,
     normalizeEmail,
     SignInError,
     signIn,
@@ -15,6 +16,13 @@ describe("normalizeEmail", () => {
 });
 
 describe("signUp", () => {
+    test("empty password uses GoTrue signup message", async () => {
+        const store = createMemoryAuthStore();
+        await expect(signUp(store, "a@example.com", "")).rejects.toThrow(
+            "Signup requires a valid password",
+        );
+    });
+
     test("weak password uses GoTrue message", async () => {
         const store = createMemoryAuthStore();
         await expect(signUp(store, "a@example.com", "12345")).rejects.toThrow(
@@ -25,8 +33,24 @@ describe("signUp", () => {
     test("invalid email uses GoTrue validateEmail message", async () => {
         const store = createMemoryAuthStore();
         await expect(signUp(store, "not-an-email", "secret12")).rejects.toThrow(
-            "Unable to validate email address: missing '@' or angle-addr",
+            "Unable to validate email address: invalid format",
         );
+    });
+
+    test("email format matches checkmail rules", async () => {
+        const store = createMemoryAuthStore();
+        await expect(
+            signUp(store, "user@localhost", "secret12"),
+        ).resolves.toBeTruthy();
+        await expect(
+            signUp(store, "space @example.com", "secret12"),
+        ).rejects.toThrow("Unable to validate email address: invalid format");
+        await expect(
+            signUp(store, "a@@example.com", "secret12"),
+        ).rejects.toThrow("Unable to validate email address: invalid format");
+        await expect(
+            signUp(store, "üser@example.com", "secret12"),
+        ).rejects.toThrow("Unable to validate email address: invalid format");
     });
 
     test("duplicate email uses GoTrue user already registered message", async () => {
@@ -58,15 +82,18 @@ describe("signIn", () => {
     test("unknown email still verifies dummy hash", async () => {
         const store = createMemoryAuthStore();
         let verifyCalls = 0;
+        let verifyHash = "";
         await expect(
             signIn(store, "ghost@example.com", "secret12", {
-                verify: async () => {
+                verify: async (_password, hash) => {
                     verifyCalls += 1;
+                    verifyHash = hash;
                     return false;
                 },
             }),
         ).rejects.toBeInstanceOf(SignInError);
         expect(verifyCalls).toBe(1);
+        expect(verifyHash).toBe(DUMMY_PASSWORD_HASH);
     });
 
     test("bcrypt hash rehashes to argon2id on success", async () => {

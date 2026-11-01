@@ -42,11 +42,20 @@ const USER_ALREADY_REGISTERED_MESSAGE = "User already registered";
 // GoTrue: internal/api/mail.go — validateEmail / checkmail.ValidateFormat
 const EMAIL_REQUIRED_MESSAGE = "An email address is required";
 const EMAIL_TOO_LONG_MESSAGE = "An email address is too long";
+const EMAIL_INVALID_FORMAT_MESSAGE =
+    "Unable to validate email address: invalid format";
+
+// checkmail.ValidateFormat (GoTrue v2.197.0), applied after trim in normalizeEmail.
+const EMAIL_FORMAT_RE =
+    /^[a-zA-Z0-9.!#$%&'*+/=?^_\`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+// GoTrue: internal/api/signup.go — empty password before MinLength check
+const SIGNUP_PASSWORD_REQUIRED_MESSAGE = "Signup requires a valid password";
 
 const MIN_PASSWORD_LENGTH = 6;
 
 // Fixed bcrypt hash so unknown-email sign-in still runs Bun.password.verify.
-const DUMMY_PASSWORD_HASH =
+export const DUMMY_PASSWORD_HASH =
     "$2b$10$5pc/WMgCYJtPxZ3BH1Ccz.jWAQFEavBIGuDkytwIuSpPn9WqjSJSK";
 
 export type PasswordVerifier = (
@@ -65,20 +74,6 @@ export function normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
 }
 
-function emailFormatError(email: string): string | null {
-    if (!email.includes("@")) {
-        // checkmail: missing '@' or angle-addr
-        return "missing '@' or angle-addr";
-    }
-    const at = email.indexOf("@");
-    const local = email.slice(0, at);
-    const domain = email.slice(at + 1);
-    if (local.length === 0 || domain.length === 0 || !domain.includes(".")) {
-        return "missing '@' or angle-addr";
-    }
-    return null;
-}
-
 function validateEmailForSignUp(emailLower: string): void {
     if (emailLower === "") {
         throw new Error(EMAIL_REQUIRED_MESSAGE);
@@ -86,9 +81,8 @@ function validateEmailForSignUp(emailLower: string): void {
     if (emailLower.length > 255) {
         throw new Error(EMAIL_TOO_LONG_MESSAGE);
     }
-    const formatErr = emailFormatError(emailLower);
-    if (formatErr) {
-        throw new Error(`Unable to validate email address: ${formatErr}`);
+    if (!EMAIL_FORMAT_RE.test(emailLower)) {
+        throw new Error(EMAIL_INVALID_FORMAT_MESSAGE);
     }
 }
 
@@ -108,6 +102,9 @@ export async function signUp(
 ): Promise<string> {
     const emailLower = normalizeEmail(email);
     validateEmailForSignUp(emailLower);
+    if (password === "") {
+        throw new Error(SIGNUP_PASSWORD_REQUIRED_MESSAGE);
+    }
     if (password.length < MIN_PASSWORD_LENGTH) {
         throw new Error(WEAK_PASSWORD_MESSAGE);
     }

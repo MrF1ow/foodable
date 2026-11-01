@@ -125,6 +125,7 @@ begin
         where u.id is null
            or u.email is distinct from a.email
            or u.created_at is distinct from a.created_at
+           or u.password_hash is distinct from a.encrypted_password
     ) then
         raise exception 'public.users does not mirror auth.users';
     end if;
