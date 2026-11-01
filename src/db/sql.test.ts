@@ -272,76 +272,38 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
     });
 
     test("rows keeps the query's order", async () => {
-        const { sql, pg } = ctx();
+        const { sql } = ctx();
         setSqlForTests(sql);
-        // This test has hung on CI a few times (never locally). Each await
-        // is bounded so a hang names its step and shows what the server
-        // was doing, instead of a bare 5 s timeout.
-        const step = async <T>(name: string, work: Promise<T>): Promise<T> => {
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            const hung = new Promise<never>((_, reject) => {
-                timer = setTimeout(async () => {
-                    const probe = new SQL(pg.url, { prepare: false, max: 1 });
-                    try {
-                        const activity = await probe`
-                            select pid, state, wait_event_type, wait_event,
-                                   left(query, 120) as query
-                            from pg_stat_activity
-                            where datname = current_database()
-                              and pid <> pg_backend_pid()
-                        `;
-                        reject(
-                            new Error(
-                                `hung at "${name}"; server sessions: ${JSON.stringify(activity)}`,
-                            ),
-                        );
-                    } catch (err) {
-                        reject(
-                            new Error(
-                                `hung at "${name}"; probe failed: ${err}`,
-                            ),
-                        );
-                    } finally {
-                        await probe.close();
-                    }
-                }, 1_500);
-            });
-            try {
-                return await Promise.race([work, hung]);
-            } finally {
-                clearTimeout(timer);
-            }
-        };
-        await step(
-            "create table",
-            sql`
-                create table public._sql_order as
-                select g as id, (g * 7919) % 401 as k
-                from generate_series(1, 400) g
-            `,
-        );
+        await sql`
+            create table public._sql_order as
+            select g as id, (g * 7919) % 401 as k
+            from generate_series(1, 400) g
+        `;
         try {
             const expected = (
-                (await step(
-                    "expected select",
-                    sql`select id from public._sql_order order by k desc, id`,
-                )) as { id: number }[]
+                (await sql`select id from public._sql_order order by k desc, id`) as {
+                    id: number;
+                }[]
             ).map((r) => r.id);
             for (const sortOff of [false, true]) {
-                const got = await step(
-                    `run sortOff=${sortOff}`,
-                    run(async (tx) => {
-                        if (sortOff) await tx`set local enable_sort = off`;
-                        return rows<{ id: number }>(
-                            tx,
-                            tx`select id from public._sql_order order by k desc, id`,
-                        );
-                    }),
-                );
+                const got = await run(async (tx) => {
+                    if (sortOff) {
+                        await tx`set local enable_sort = off`;
+                        // Up to Postgres 17, enable_sort = off adds a ~1e10
+                        // cost penalty, which crosses the JIT thresholds; on
+                        // a JIT-enabled build (CI's Ubuntu Postgres) the
+                        // 400-row query then spent seconds compiling.
+                        await tx`set local jit = off`;
+                    }
+                    return rows<{ id: number }>(
+                        tx,
+                        tx`select id from public._sql_order order by k desc, id`,
+                    );
+                });
                 expect(got.map((r) => r.id)).toEqual(expected);
             }
         } finally {
-            await step("drop table", sql`drop table public._sql_order`);
+            await sql`drop table public._sql_order`;
         }
     });
 
