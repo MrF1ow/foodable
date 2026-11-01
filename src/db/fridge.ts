@@ -5,125 +5,174 @@ import {
     fridgeLocationToRow,
     type FridgeStore,
 } from "../domain/fridge.js";
-import { getSupabase } from "./client.js";
+import {
+    definedColumns,
+    insertReturning,
+    maybeOne,
+    pgError,
+    rows,
+    run,
+    type Tx,
+} from "./sql.js";
 
+const FRIDGE_LOCATIONS = "fridge_locations";
+const FRIDGE_ITEMS = "fridge_items";
 const FRIDGE_LOCATION_COLS = "id, household_id, name, sort_order";
 const FRIDGE_ITEM_COLS =
     "id, household_id, location_id, kind, display_name, amount, unit, food_id, purchased_on, opened_on, expires_on";
 
+function patchKeys(
+    patch: Record<string, unknown>,
+    keys: string[],
+): [string, ...string[]] {
+    return keys as [string, ...string[]];
+}
+
 export function liveFridgeStore(): FridgeStore {
     return {
         async listLocations(householdId) {
-            const { data, error } = await getSupabase()
-                .from("fridge_locations")
-                .select(FRIDGE_LOCATION_COLS)
-                .eq("household_id", householdId)
-                .order("sort_order", { ascending: true })
-                .order("name", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list fridge locations: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(fridgeLocationFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(FRIDGE_LOCATION_COLS)}
+                            from ${tx.unsafe(FRIDGE_LOCATIONS)}
+                            where household_id = ${householdId}
+                            order by sort_order asc, name asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        fridgeLocationFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list fridge locations", err);
+                }
+            });
         },
         async insertLocation(row) {
-            const { data, error } = await getSupabase()
-                .from("fridge_locations")
-                .insert(fridgeLocationToRow(row))
-                .select(FRIDGE_LOCATION_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to add fridge location: ${error.message}`,
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    FRIDGE_LOCATIONS,
+                    fridgeLocationToRow(row),
+                    FRIDGE_LOCATION_COLS,
+                    "add fridge location",
                 );
-            }
-            return fridgeLocationFromRow(data);
+                return fridgeLocationFromRow(data as never);
+            });
         },
         async updateLocation(row) {
-            const { data, error } = await getSupabase()
-                .from("fridge_locations")
-                .update(fridgeLocationToRow(row))
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(FRIDGE_LOCATION_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to update fridge location: ${error.message}`,
-                );
-            }
-            return data ? fridgeLocationFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const { row: patch, keys } = definedColumns(
+                        fridgeLocationToRow(row),
+                    );
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FRIDGE_LOCATIONS)} set ${tx(patch, ...patchKeys(patch, keys))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(FRIDGE_LOCATION_COLS)}
+                        `,
+                        "update fridge location",
+                    );
+                    return data ? fridgeLocationFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update fridge location", err);
+                }
+            });
         },
         async deleteLocation(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("fridge_locations")
-                .delete()
-                .eq("id", id)
-                .eq("household_id", householdId)
-                .select("id");
-            if (error) {
-                throw new Error(
-                    `Failed to delete fridge location: ${error.message}`,
-                );
-            }
-            return (data ?? []).length > 0;
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(FRIDGE_LOCATIONS)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete fridge location", err);
+                }
+            });
         },
         async listItems(householdId) {
-            const { data, error } = await getSupabase()
-                .from("fridge_items")
-                .select(FRIDGE_ITEM_COLS)
-                .eq("household_id", householdId)
-                .order("created_at", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list fridge items: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(fridgeItemFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(FRIDGE_ITEM_COLS)}
+                            from ${tx.unsafe(FRIDGE_ITEMS)}
+                            where household_id = ${householdId}
+                            order by created_at asc
+                        `,
+                    );
+                    return data.map((row) => fridgeItemFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list fridge items", err);
+                }
+            });
         },
         async insertItem(row) {
-            const { data, error } = await getSupabase()
-                .from("fridge_items")
-                .insert(fridgeItemToRow(row))
-                .select(FRIDGE_ITEM_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add fridge item: ${error.message}`);
-            }
-            return fridgeItemFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    FRIDGE_ITEMS,
+                    fridgeItemToRow(row),
+                    FRIDGE_ITEM_COLS,
+                    "add fridge item",
+                );
+                return fridgeItemFromRow(data as never);
+            });
         },
         async updateItem(row) {
-            const { data, error } = await getSupabase()
-                .from("fridge_items")
-                .update({
-                    ...fridgeItemToRow(row),
-                    updated_at: new Date().toISOString(),
-                })
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(FRIDGE_ITEM_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to update fridge item: ${error.message}`,
-                );
-            }
-            return data ? fridgeItemFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const payload = {
+                        ...fridgeItemToRow(row),
+                        updated_at: new Date().toISOString(),
+                    };
+                    const { row: patch, keys } = definedColumns(payload);
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FRIDGE_ITEMS)} set ${tx(patch, ...patchKeys(patch, keys))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(FRIDGE_ITEM_COLS)}
+                        `,
+                        "update fridge item",
+                    );
+                    return data ? fridgeItemFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update fridge item", err);
+                }
+            });
         },
         async deleteItem(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("fridge_items")
-                .delete()
-                .eq("id", id)
-                .eq("household_id", householdId)
-                .select("id");
-            if (error) {
-                throw new Error(
-                    `Failed to delete fridge item: ${error.message}`,
-                );
-            }
-            return (data ?? []).length > 0;
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(FRIDGE_ITEMS)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete fridge item", err);
+                }
+            });
         },
     };
 }
