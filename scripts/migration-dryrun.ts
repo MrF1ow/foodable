@@ -30,6 +30,7 @@ const DEFAULT_PENDING_FROM = "20261004230000";
 const RERUNNABLE = [
     "20261005010100_food_catalog_backfill.sql",
     "20261005010200_fridge_locations_from_household.sql",
+    "20261101120100_users_backfill.sql",
 ];
 
 // The backfills above read columns the Phase 8 contract drops, so the re-run
