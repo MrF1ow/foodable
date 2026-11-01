@@ -47,28 +47,10 @@ Two kinds of sharing. Neither opens sign-up or adds people to the household. The
 - Imported recipes are copies. Later edits on either side do not sync.
 - The importer fetches only `https` URLs whose path matches `/s/<token>.json`, with a timeout and a size cap, so the import endpoint cannot be used to make the server request arbitrary URLs (SSRF).
 
-### Local Postgres instead of Supabase
+### Own Postgres and auth
 
-Run Foodable against plain Postgres (a container next to the app, or a managed Postgres) with no Supabase services. Supabase cloud stays the default and stays supported.
-
-What the app uses Supabase for today, and what replaces it:
-
-| Supabase piece | Used for                                                                                                                | Replacement                                                                                                                                                              |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| PostgREST      | about 125 `.from(…)` queries in the `src/db/` adapters and the `create_household` / `transfer_household_ownership` RPCs | A second adapter per domain on `Bun.sql`. The domain modules already sit behind store interfaces, so only `src/db/` changes.                                             |
-| GoTrue (Auth)  | sign-up, sign-in, admin create, delete and list users                                                                   | A local `users` table with `Bun.password` (argon2id) hashes, behind one `AuthStore` interface with a Supabase and a Postgres implementation.                             |
-| Storage        | the `exports` bucket and its signed download link                                                                       | Write the ZIP to a volume and serve it from a signed, expiring `/exports/:token` route, or skip storage and stream the ZIP in that response.                             |
-| `auth` schema  | 17 migrations reference `auth.users` or `auth.uid()`                                                                    | A small `auth` shim schema (`auth.users`, `auth.uid()`) created before the migrations. `scripts/migration-dryrun.ts` already stubs exactly these pieces, so start there. |
-
-Plan:
-
-1. Add the store interfaces at the seams that are still Supabase-shaped (auth and export storage), with Supabase as the only implementation. No behavior change.
-2. Add the Postgres implementations behind `DATABASE_URL`: if it is set, Bun.sql; otherwise `SUPABASE_URL`. Run the existing tests against both.
-3. Ship a `docker-compose.yml` with Postgres and the app, plus a `docs/self-hosting.md` section. Migrations run from `supabase/migrations/` with the auth shim, so there is one schema history for both backends.
-4. Document moving from Supabase to Postgres: `export_all_data` per member, or `pg_dump` of `public` plus a script that copies `auth.users` ids and emails. Password hashes do not carry over, so members set new passwords.
-
-Rules it keeps: one schema history, row level security stays on (Postgres enforces it the same way), and no migration is edited after it is on `main`.
+Run on plain Postgres through one `DATABASE_URL`, with our own user accounts instead of Supabase Auth. Supabase cloud stays usable as a Postgres host. v1 is parity (no user-visible change); v2 makes row level security the real tenant boundary so a multi-household option stays possible. Phases, decisions and risks are in [postgres-plan.md](./postgres-plan.md).
 
 ## Not planned
 
-Multi-tenant hosting, public sign-up, a marketing site, translations, and per-user theming beyond the one accent (see `CONTRIBUTING.md`, "Out of scope").
+Public sign-up, billing, a marketing site, translations, and per-user theming beyond the one accent (see `CONTRIBUTING.md`, "Out of scope"). Multi-household hosting is not planned either, but [postgres-plan.md](./postgres-plan.md) v2 keeps it possible.
