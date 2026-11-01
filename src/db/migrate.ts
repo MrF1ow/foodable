@@ -5,7 +5,74 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
 export type MigrationFile = { version: string; name: string; path: string };
 
-const NESTED_TX = /^\s*(begin|commit)\s*;/im;
+/** Matches a full-line SQL transaction control statement (after comment/dollar-quote strip). */
+const TX_CONTROL_LINE =
+    /^\s*(?:(?:begin(?:\s+(?:work|transaction))?|start\s+transaction)(?:\s+(?:isolation\s+level\s+\S+(?:\s+\S+)?|read\s+(?:only|write)|(?:not\s+)?deferrable|[\w,]+))*\s*;|(?:commit|end|rollback)(?:\s+(?:work|transaction))?\s*;|abort\s*;)\s*$/i;
+
+function stripDollarQuotedBodies(sql: string): string {
+    let out = "";
+    let i = 0;
+    while (i < sql.length) {
+        if (sql[i] === "$") {
+            const head = sql.slice(i).match(/^\$([A-Za-z0-9_]*)\$/);
+            if (head) {
+                const tag = head[1];
+                const open = head[0];
+                const bodyStart = i + open.length;
+                const close = `$${tag}$`;
+                const closeAt = sql.indexOf(close, bodyStart);
+                if (closeAt === -1) {
+                    out += sql[i];
+                    i++;
+                    continue;
+                }
+                const body = sql.slice(bodyStart, closeAt);
+                out +=
+                    " ".repeat(open.length) +
+                    body.replace(/[^\n]/g, " ") +
+                    " ".repeat(close.length);
+                i = closeAt + close.length;
+                continue;
+            }
+        }
+        out += sql[i];
+        i++;
+    }
+    return out;
+}
+
+function stripSqlComments(sql: string): string {
+    let out = "";
+    let i = 0;
+    while (i < sql.length) {
+        if (sql[i] === "-" && sql[i + 1] === "-") {
+            while (i < sql.length && sql[i] !== "\n") i++;
+            continue;
+        }
+        if (sql[i] === "/" && sql[i + 1] === "*") {
+            i += 2;
+            while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) {
+                i++;
+            }
+            i += 2;
+            continue;
+        }
+        out += sql[i];
+        i++;
+    }
+    return out;
+}
+
+function sqlTextForTxScan(sqlText: string): string {
+    return stripSqlComments(stripDollarQuotedBodies(sqlText));
+}
+
+function findTransactionControlLine(scannable: string): string | null {
+    for (const line of scannable.split("\n")) {
+        if (TX_CONTROL_LINE.test(line)) return line.trim();
+    }
+    return null;
+}
 
 export function listMigrationFiles(dir?: string): MigrationFile[] {
     const migrationsDir = dir ?? join(REPO_ROOT, "supabase/migrations");
@@ -90,7 +157,8 @@ function splitAppliedPending(
 }
 
 function assertNoNestedTransaction(sqlText: string, file: MigrationFile): void {
-    if (NESTED_TX.test(sqlText)) {
+    const hit = findTransactionControlLine(sqlTextForTxScan(sqlText));
+    if (hit) {
         throw new Error(
             `Migration ${migrationLabel(file)} contains begin/commit; nested transactions are not supported`,
         );

@@ -14,20 +14,30 @@ let shared: DbCtx | undefined;
 export async function setupTestDatabase(): Promise<DbCtx> {
     const pg = await startTempPostgres();
     const sql = new SQL(pg.url, { prepare: false, max: 1 });
-    await migrate(sql);
+    try {
+        await migrate(sql);
 
-    async function truncateAll(): Promise<void> {
-        const rows = (await sql`
-            select tablename
-            from pg_tables
-            where schemaname = 'public'
-        `) as { tablename: string }[];
-        if (rows.length === 0) return;
-        const names = rows.map((r) => `"public"."${r.tablename}"`).join(", ");
-        await sql.unsafe(`truncate ${names} restart identity cascade`).simple();
+        async function truncateAll(): Promise<void> {
+            const rows = (await sql`
+                select tablename
+                from pg_tables
+                where schemaname = 'public'
+            `) as { tablename: string }[];
+            if (rows.length === 0) return;
+            const names = rows
+                .map((r) => `"public"."${r.tablename}"`)
+                .join(", ");
+            await sql
+                .unsafe(`truncate ${names} restart identity cascade`)
+                .simple();
+        }
+
+        return { sql, pg, truncateAll };
+    } catch (err) {
+        await sql.close();
+        await pg.stop();
+        throw err;
     }
-
-    return { sql, pg, truncateAll };
 }
 
 export function describeDb(
