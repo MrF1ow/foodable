@@ -5,6 +5,7 @@ import { SQL } from "bun";
 import { findPgBin } from "./pg-shared.js";
 import { startTempPostgres } from "./pg-temp.js";
 import {
+    e2eRehearseRestore,
     e2eRestore,
     e2eSnapshot,
     publicRowFingerprint,
@@ -34,6 +35,10 @@ test.skipIf(!pgAvailable)(
 
             const mid = await publicRowFingerprint(pg.url);
             expect(mid).not.toBe(before);
+
+            // The rehearsal runs the same restore and rolls it back.
+            await e2eRehearseRestore(pg.url, snap);
+            expect(await publicRowFingerprint(pg.url)).toBe(mid);
 
             await e2eRestore(pg.url, snap);
             const after = await publicRowFingerprint(pg.url);

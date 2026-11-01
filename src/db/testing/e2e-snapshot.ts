@@ -38,7 +38,7 @@ export async function e2eSnapshot(
         (t) => `--exclude-table-data=public.${t}`,
     );
     const dump =
-        await $`${bin}pg_dump ${dbUrl} --data-only --schema=public --disable-triggers --no-owner --no-privileges ${excludes} -f ${outFile}`
+        await $`${bin}pg_dump ${dbUrl} --data-only --schema=public --no-owner --no-privileges ${excludes} -f ${outFile}`
             .quiet()
             .nothrow();
     if (dump.exitCode !== 0) {
@@ -46,13 +46,15 @@ export async function e2eSnapshot(
     }
 }
 
-export async function e2eRestore(
+// No --disable-triggers in the dump: its ALTER TABLE … DISABLE TRIGGER ALL
+// needs a superuser, which `postgres` is not on Supabase. Restoring with
+// session_replication_role = replica already keeps foreign-key triggers from
+// firing, and that setting is allowed there.
+async function restoreArgs(
     dbUrl: string,
-    snapshotFile: string,
-): Promise<void> {
+): Promise<{ bin: string; tables: string }> {
     const pgBin = await findPgBin();
     if (!pgBin) throw new Error(PG_BIN_HINT);
-    const bin = binPrefix(pgBin);
     const sql = new SQL(dbUrl, { prepare: false, max: 1 });
     try {
         const tableRows = (await sql`
@@ -68,17 +70,44 @@ export async function e2eRestore(
             )
             .map((t: string) => `public.${t}`)
             .join(", ");
-        const restore =
-            await $`${bin}psql ${dbUrl} -v ON_ERROR_STOP=1 --single-transaction -q -c ${"set session_replication_role = replica"} -c ${`truncate ${tables}`} -f ${snapshotFile}`
-                .quiet()
-                .nothrow();
-        if (restore.exitCode !== 0) {
-            throw new Error(
-                restore.stderr.toString() || restore.stdout.toString(),
-            );
-        }
+        return { bin: binPrefix(pgBin), tables };
     } finally {
         await sql.close();
+    }
+}
+
+export async function e2eRestore(
+    dbUrl: string,
+    snapshotFile: string,
+): Promise<void> {
+    const { bin, tables } = await restoreArgs(dbUrl);
+    const restore =
+        await $`${bin}psql ${dbUrl} -v ON_ERROR_STOP=1 --single-transaction -q -c ${"set session_replication_role = replica"} -c ${`truncate ${tables}`} -f ${snapshotFile}`
+            .quiet()
+            .nothrow();
+    if (restore.exitCode !== 0) {
+        throw new Error(restore.stderr.toString() || restore.stdout.toString());
+    }
+}
+
+/**
+ * Runs the exact restore inside a transaction that is rolled back, so a
+ * restore this connection is not allowed to do fails before any scenario
+ * writes to the database, not after.
+ */
+export async function e2eRehearseRestore(
+    dbUrl: string,
+    snapshotFile: string,
+): Promise<void> {
+    const { bin, tables } = await restoreArgs(dbUrl);
+    const rehearsal =
+        await $`${bin}psql ${dbUrl} -v ON_ERROR_STOP=1 -q -c ${"begin"} -c ${"set local session_replication_role = replica"} -c ${`truncate ${tables}`} -f ${snapshotFile} -c ${"rollback"}`
+            .quiet()
+            .nothrow();
+    if (rehearsal.exitCode !== 0) {
+        throw new Error(
+            `restore rehearsal failed, so the run would not be able to undo its writes: ${rehearsal.stderr.toString() || rehearsal.stdout.toString()}`,
+        );
     }
 }
 

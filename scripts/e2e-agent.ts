@@ -33,7 +33,11 @@ import { foodFromRow } from "../src/domain/foods.js";
 import { fridgeItemFromRow, type FridgeItem } from "../src/domain/fridge.js";
 import { ledgerMatchesStock, type StockMovement } from "../src/domain/stock.js";
 import { movementFromRow } from "../src/db/stock.js";
-import { e2eRestore, e2eSnapshot } from "../src/db/testing/e2e-snapshot.js";
+import {
+    e2eRehearseRestore,
+    e2eRestore,
+    e2eSnapshot,
+} from "../src/db/testing/e2e-snapshot.js";
 
 const DB_URL =
     process.env.E2E_DB_URL ??
@@ -1073,7 +1077,10 @@ async function main() {
         );
 
     await snapshot();
-    console.log(dim(`Snapshot saved to ${OUT_DIR}/snapshot.sql`));
+    await e2eRehearseRestore(DB_URL, `${OUT_DIR}/snapshot.sql`);
+    console.log(
+        dim(`Snapshot saved to ${OUT_DIR}/snapshot.sql (restore rehearsed)`),
+    );
 
     const results: Array<{
         scenario: string;
