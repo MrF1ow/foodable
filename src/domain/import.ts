@@ -2,8 +2,8 @@
 // keys, batch integrity checks, and the insert orchestration.
 //
 // All of this is deliberately free of Supabase access so it can be unit-tested
-// with plain fixtures (the export.ts / search.ts convention) — getSupabase()
-// has no injection seam. src/mcp.ts is a thin adapter that supplies `insert`
+// with plain fixtures (the export.ts / search.ts convention) — the Supabase
+// client has no injection seam. src/mcp.ts is a thin adapter that supplies `insert`
 // and `existingKeys`.
 //
 // Two non-obvious invariants live here:

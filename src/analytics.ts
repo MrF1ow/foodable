@@ -1,6 +1,6 @@
-import { getSupabase } from "./db/client.js";
+import { insertToolAnalytics } from "./db/analytics.js";
 
-interface AnalyticsRecord {
+export interface AnalyticsRecord {
     user_id: string;
     tool_name: string;
     success: boolean;
@@ -181,17 +181,7 @@ function calculateDateRangeDays(
 }
 
 function persistAnalytics(record: AnalyticsRecord): void {
-    getSupabase()
-        .from("tool_analytics")
-        .insert(record)
-        .then(({ error }) => {
-            if (error) {
-                console.warn(
-                    `Failed to persist analytics for ${record.tool_name}:`,
-                    error.message,
-                );
-            }
-        });
+    insertToolAnalytics(record);
 }
 
 /**

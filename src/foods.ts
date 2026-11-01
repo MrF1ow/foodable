@@ -7,7 +7,11 @@
 // back to LLM estimation, so the lookup is always additive, never a hard
 // dependency for logging a meal.
 
-import { getSupabase } from "./db/client.js";
+import {
+    selectFoodCacheRow,
+    selectFoodCacheRowsBySource,
+    upsertFoodCacheRow,
+} from "./db/food-cache.js";
 import { gramsFromDrink, formatAlcohol, type DrinkUnit } from "./alcohol.js";
 
 const OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
@@ -350,13 +354,8 @@ export async function getCachedFood(
     ttlMs: number,
 ): Promise<FoodResult | null> {
     try {
-        const { data, error } = await getSupabase()
-            .from("food_cache")
-            .select("payload, fetched_at")
-            .eq("source", source)
-            .eq("source_id", sourceId)
-            .maybeSingle();
-        if (error || !data) return null;
+        const data = await selectFoodCacheRow(source, sourceId);
+        if (!data) return null;
         const ageMs = Date.now() - new Date(data.fetched_at).getTime();
         if (ageMs > ttlMs) return null;
         return hydrateCachedPayload(data.payload as FoodResult);
@@ -371,15 +370,12 @@ export async function putCachedFood(
     payload: FoodResult,
 ): Promise<void> {
     try {
-        await getSupabase().from("food_cache").upsert(
-            {
-                source,
-                source_id: sourceId,
-                payload,
-                fetched_at: new Date().toISOString(),
-            },
-            { onConflict: "source,source_id" },
-        );
+        await upsertFoodCacheRow({
+            source,
+            source_id: sourceId,
+            payload,
+            fetched_at: new Date().toISOString(),
+        });
     } catch {
         // best-effort; ignore
     }
@@ -391,11 +387,8 @@ export async function searchCachedFoodsByName(
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
     try {
-        const { data, error } = await getSupabase()
-            .from("food_cache")
-            .select("payload, fetched_at")
-            .eq("source", SOURCE_OFF);
-        if (error || !data) return [];
+        const data = await selectFoodCacheRowsBySource(SOURCE_OFF);
+        if (!data.length) return [];
         const now = Date.now();
         const hits: FoodResult[] = [];
         for (const row of data) {
