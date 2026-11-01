@@ -13,6 +13,59 @@ export type ImportResult = {
     error?: string;
 };
 
+export type PgDatabaseIdentity = {
+    host: string;
+    port: number;
+    database: string;
+};
+
+function normalizePgHost(hostname: string): string {
+    const h = hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") {
+        return "loopback";
+    }
+    return h;
+}
+
+/** Normalised host, port, and database name for same-DB checks. */
+export function pgDatabaseIdentity(urlString: string): PgDatabaseIdentity {
+    let parsed: URL;
+    try {
+        parsed = new URL(urlString);
+    } catch {
+        throw new Error(`Invalid database URL: ${urlString}`);
+    }
+    if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+        throw new Error(`Not a postgres URL: ${urlString}`);
+    }
+    const database = decodeURIComponent(
+        parsed.pathname.replace(/^\//, "") || "postgres",
+    );
+    const port = parsed.port ? Number(parsed.port) : 5432;
+    return {
+        host: normalizePgHost(parsed.hostname),
+        port,
+        database,
+    };
+}
+
+export function assertDistinctDatabaseUrls(
+    fromUrl: string,
+    toUrl: string,
+): void {
+    const from = pgDatabaseIdentity(fromUrl);
+    const to = pgDatabaseIdentity(toUrl);
+    if (
+        from.host === to.host &&
+        from.port === to.port &&
+        from.database === to.database
+    ) {
+        throw new Error(
+            "Source and target resolve to the same database; refusing import.",
+        );
+    }
+}
+
 async function migrationVersions(url: string): Promise<Set<string>> {
     const sql = new SQL(url, { prepare: false, max: 1 });
     try {
@@ -101,7 +154,7 @@ async function publicTableCounts(url: string): Promise<Map<string, number>> {
     }
 }
 
-async function passwordHashParity(
+export async function passwordHashParity(
     fromUrl: string,
     toUrl: string,
 ): Promise<boolean> {
@@ -113,13 +166,13 @@ async function passwordHashParity(
             from public.users
         `) as { id: string; password_hash: string | null }[];
         for (const row of fromRows) {
-            if (row.password_hash == null) continue;
             const [target] = (await toSql`
                 select password_hash
                 from public.users
                 where id = ${row.id}
             `) as { password_hash: string | null }[];
-            if (!target || target.password_hash == null) return false;
+            if (!target) return false;
+            if (row.password_hash !== target.password_hash) return false;
         }
         return true;
     } finally {
@@ -137,6 +190,7 @@ export async function importSupabasePublicData(
     fromUrl: string,
     toUrl: string,
 ): Promise<ImportResult> {
+    assertDistinctDatabaseUrls(fromUrl, toUrl);
     await assertMigrationParity(fromUrl, toUrl);
     await assertTargetPublicEmpty(toUrl);
 

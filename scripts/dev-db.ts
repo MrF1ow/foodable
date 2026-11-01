@@ -4,7 +4,7 @@
  *   bun run db:dev init | start | stop | status | url | migrate
  *
  * Data: FOODABLE_PG_DIR (default ~/.local/share/foodable/pg)
- * Port: FOODABLE_PG_PORT (default 54330; avoids Supabase 54321–54324 and dry-run 54329)
+ * Port: FOODABLE_PG_PORT (default 54330; avoids Supabase 54321–54324; dry-run uses a free port unless PG_DRYRUN_PORT is set)
  */
 
 import { SQL } from "bun";

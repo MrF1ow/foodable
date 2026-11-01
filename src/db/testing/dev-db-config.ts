@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Avoid Supabase (54321–54324) and the dry-run default PG_DRYRUN_PORT (54329). */
+/** Avoid Supabase (54321–54324); dry-run uses a free port unless PG_DRYRUN_PORT is set. */
 export const DEFAULT_DEV_PG_PORT = 54330;
 
 export const DEV_DATABASE_NAME = "foodable";

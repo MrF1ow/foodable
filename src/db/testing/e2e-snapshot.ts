@@ -11,8 +11,9 @@ import { binPrefix, findPgBin, PG_BIN_HINT } from "./pg-shared.js";
  *   rows still reference them; restoring stale OAuth tokens would sign Grok out.
  * - public.users: kept live so OAuth references stay valid across restore.
  * - tool_analytics: ephemeral per-run telemetry, not part of seed data.
- * - export_archives: large bytea blobs tied to users; scenarios may create
- *   exports and we already exclude users, so skip archives too.
+ * - export_archives: no FK issues if omitted (nothing references it), but
+ *   exports created mid-run would survive restore; excluding them keeps runs
+ *   from leaving stale download blobs behind.
  */
 export const E2E_NOT_SNAPSHOTTED = [
     "oauth_tokens",

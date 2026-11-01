@@ -8,6 +8,7 @@
  */
 
 import {
+    assertDistinctDatabaseUrls,
     assertMigrationParity,
     assertTargetPublicEmpty,
     defaultImportTargetUrl,
@@ -27,6 +28,13 @@ if (!fromUrl) {
     console.error(
         "Usage: bun run db:import-supabase --from <postgres-url> [--to <url>]",
     );
+    process.exit(1);
+}
+
+try {
+    assertDistinctDatabaseUrls(fromUrl, toUrl);
+} catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
 }
 

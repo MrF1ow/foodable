@@ -4,10 +4,12 @@ import { migrate } from "../migrate.js";
 import { findPgBin } from "./pg-shared.js";
 import { startTempPostgres } from "./pg-temp.js";
 import {
+    assertDistinctDatabaseUrls,
     assertMigrationParity,
-    assertTargetPublicEmpty,
     importSupabasePublicData,
     migrationDiff,
+    passwordHashParity,
+    pgDatabaseIdentity,
 } from "./import-supabase-data.js";
 
 const pgAvailable = !!(await findPgBin());
@@ -157,6 +159,67 @@ test("migrationDiff", () => {
     expect(diff.onlySource).toEqual(["a"]);
     expect(diff.onlyTarget).toEqual(["c"]);
 });
+
+test("pgDatabaseIdentity treats loopback hosts as equal", () => {
+    const a = pgDatabaseIdentity("postgres://u@127.0.0.1:5432/foodable");
+    const b = pgDatabaseIdentity("postgres://u@localhost:5432/foodable");
+    const c = pgDatabaseIdentity("postgres://u@[::1]:5432/foodable");
+    expect(a).toEqual(b);
+    expect(a).toEqual(c);
+});
+
+test("assertDistinctDatabaseUrls rejects same database", () => {
+    const url = "postgres://postgres@127.0.0.1:54399/foodable";
+    expect(() =>
+        assertDistinctDatabaseUrls(
+            url,
+            "postgres://postgres@localhost:54399/foodable",
+        ),
+    ).toThrow(/same database/);
+});
+
+test.skipIf(!pgAvailable)(
+    "refuses when source and target are the same migrated database",
+    async () => {
+        const pg = await startTempPostgres();
+        try {
+            const url = await migratedUrl(pg);
+            await expect(importSupabasePublicData(url, url)).rejects.toThrow(
+                /same database/,
+            );
+        } finally {
+            await pg.stop();
+        }
+    },
+);
+
+test.skipIf(!pgAvailable)(
+    "passwordHashParity detects altered hash",
+    async () => {
+        const sourcePg = await startTempPostgres();
+        const targetPg = await startTempPostgres();
+        try {
+            const fromUrl = await migratedUrl(sourcePg);
+            const toUrl = await migratedUrl(targetPg);
+            const { userId } = await seedSource(fromUrl);
+            const result = await importSupabasePublicData(fromUrl, toUrl);
+            expect(result.ok).toBe(true);
+            expect(await passwordHashParity(fromUrl, toUrl)).toBe(true);
+
+            const sql = new SQL(toUrl, { prepare: false, max: 1 });
+            await sql`
+            update public.users
+            set password_hash = ${"tampered"}
+            where id = ${userId}
+        `;
+            await sql.close();
+            expect(await passwordHashParity(fromUrl, toUrl)).toBe(false);
+        } finally {
+            await sourcePg.stop();
+            await targetPg.stop();
+        }
+    },
+);
 
 test.skipIf(!pgAvailable)(
     "assertMigrationParity on matching migrated DBs",

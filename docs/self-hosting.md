@@ -61,7 +61,7 @@ bun run db:dev init          # creates ~/.local/share/foodable/pg, migrates, pri
 bun --watch src/index.ts
 ```
 
-Override paths with `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` (default **54330**, chosen to avoid Supabase **54321–54324** and the dry-run default **54329**). Logs live in `postgres.log` inside the data directory. Other commands: `start`, `stop`, `status`, `url`, `migrate`. Set `PG_BIN` when `initdb` is not on your `PATH`.
+Override paths with `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` (default **54330**, chosen to avoid Supabase **54321–54324**; migration dry-run picks a free port unless you set `PG_DRYRUN_PORT`). Logs live in `postgres.log` inside the data directory. Other commands: `start`, `stop`, `status`, `url`, `migrate`. Set `PG_BIN` when `initdb` is not on your `PATH`.
 
 **Docker Compose** alternative (Postgres 17 + app):
 
