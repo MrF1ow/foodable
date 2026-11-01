@@ -5,122 +5,164 @@ import {
     groceryStoreToRow,
     type SettingsStore,
 } from "../domain/settings.js";
-import { getSupabase } from "./client.js";
+import {
+    definedColumns,
+    insertReturning,
+    maybeOne,
+    pgError,
+    rows,
+    run,
+} from "./sql.js";
 
+const HOUSEHOLDS = "households";
+const GROCERY_STORES = "grocery_stores";
+const GROCERY_SECTIONS = "grocery_sections";
 const GROCERY_STORE_COLS = "id, household_id, name, sort_order";
 const GROCERY_SECTION_COLS =
     "id, household_id, store_id, name, sort_order, hidden, is_other";
 
+function patchKeys(keys: string[]): [string, ...string[]] {
+    return keys as [string, ...string[]];
+}
+
 export function liveSettingsStore(): SettingsStore {
     return {
         async getLocation(householdId) {
-            const { data, error } = await getSupabase()
-                .from("households")
-                .select("location")
-                .eq("id", householdId)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to load household location: ${error.message}`,
-                );
-            }
-            return typeof data?.location === "string" && data.location.trim()
-                ? data.location
-                : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ location: unknown }>(
+                        tx,
+                        tx`
+                            select location
+                            from ${tx.unsafe(HOUSEHOLDS)}
+                            where id = ${householdId}
+                        `,
+                        "load household location",
+                    );
+                    return typeof data?.location === "string" &&
+                        data.location.trim()
+                        ? data.location
+                        : null;
+                } catch (err) {
+                    throw pgError("load household location", err);
+                }
+            });
         },
         async setLocation(householdId, location) {
-            const { error } = await getSupabase()
-                .from("households")
-                .update({ location })
-                .eq("id", householdId);
-            if (error) {
-                throw new Error(
-                    `Failed to save household location: ${error.message}`,
-                );
-            }
+            return run(async (tx) => {
+                try {
+                    await tx`
+                        update ${tx.unsafe(HOUSEHOLDS)}
+                        set location = ${location}
+                        where id = ${householdId}
+                    `;
+                } catch (err) {
+                    throw pgError("save household location", err);
+                }
+            });
         },
         async listStores(householdId) {
-            const { data, error } = await getSupabase()
-                .from("grocery_stores")
-                .select(GROCERY_STORE_COLS)
-                .eq("household_id", householdId)
-                .order("sort_order", { ascending: true })
-                .order("name", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list grocery stores: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(groceryStoreFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(GROCERY_STORE_COLS)}
+                            from ${tx.unsafe(GROCERY_STORES)}
+                            where household_id = ${householdId}
+                            order by sort_order asc, name asc
+                        `,
+                    );
+                    return data.map((row) => groceryStoreFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list grocery stores", err);
+                }
+            });
         },
         async insertStore(row) {
-            const { data, error } = await getSupabase()
-                .from("grocery_stores")
-                .insert(groceryStoreToRow(row))
-                .select(GROCERY_STORE_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to add grocery store: ${error.message}`,
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    GROCERY_STORES,
+                    groceryStoreToRow(row),
+                    GROCERY_STORE_COLS,
+                    "add grocery store",
                 );
-            }
-            return groceryStoreFromRow(data);
+                return groceryStoreFromRow(data as never);
+            });
         },
         async listSections(storeId) {
-            const { data, error } = await getSupabase()
-                .from("grocery_sections")
-                .select(GROCERY_SECTION_COLS)
-                .eq("store_id", storeId)
-                .order("sort_order", { ascending: true })
-                .order("name", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list grocery sections: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(grocerySectionFromRow);
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(GROCERY_SECTION_COLS)}
+                            from ${tx.unsafe(GROCERY_SECTIONS)}
+                            where store_id = ${storeId}
+                            order by sort_order asc, name asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        grocerySectionFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list grocery sections", err);
+                }
+            });
         },
         async getSection(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("grocery_sections")
-                .select(GROCERY_SECTION_COLS)
-                .eq("id", id)
-                .eq("household_id", householdId)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to load grocery section: ${error.message}`,
-                );
-            }
-            return data ? grocerySectionFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(GROCERY_SECTION_COLS)}
+                            from ${tx.unsafe(GROCERY_SECTIONS)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                        `,
+                        "load grocery section",
+                    );
+                    return data ? grocerySectionFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("load grocery section", err);
+                }
+            });
         },
         async insertSection(row) {
-            const { data, error } = await getSupabase()
-                .from("grocery_sections")
-                .insert(grocerySectionToRow(row))
-                .select(GROCERY_SECTION_COLS)
-                .single();
-            if (error) {
-                throw new Error(
-                    `Failed to add grocery section: ${error.message}`,
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    GROCERY_SECTIONS,
+                    grocerySectionToRow(row),
+                    GROCERY_SECTION_COLS,
+                    "add grocery section",
                 );
-            }
-            return grocerySectionFromRow(data);
+                return grocerySectionFromRow(data as never);
+            });
         },
         async updateSection(row) {
-            const { data, error } = await getSupabase()
-                .from("grocery_sections")
-                .update(grocerySectionToRow(row))
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(GROCERY_SECTION_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to update grocery section: ${error.message}`,
-                );
-            }
-            return data ? grocerySectionFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const { row: patch, keys } = definedColumns(
+                        grocerySectionToRow(row),
+                    );
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(GROCERY_SECTIONS)} set ${tx(patch, ...patchKeys(keys))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(GROCERY_SECTION_COLS)}
+                        `,
+                        "update grocery section",
+                    );
+                    return data ? grocerySectionFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update grocery section", err);
+                }
+            });
         },
     };
 }
