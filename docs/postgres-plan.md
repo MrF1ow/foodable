@@ -30,14 +30,14 @@ Facts checked against the local Supabase project (Postgres 17.11): `supabase_mig
 
 What touches Supabase today:
 
-| Area              | Where                                                                                                                                                                                                                                                                    | Size                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| PostgREST queries | `src/db/*.ts`, plus `src/foods.ts` (`food_cache`), `src/analytics.ts` (`tool_analytics`)                                                                                                                                                                                 | about 125 `.from(…)` calls; `nutrition.ts` alone has 49       |
-| RPCs              | `create_household`, `add_household_member`, `transfer_household_ownership` (`src/db/household.ts`), `resolve_household_mcp_token` (`src/db/tokens.ts`)                                                                                                                   | 5 calls. They are plain Postgres functions and stay unchanged |
-| GoTrue            | `signUpUser`, `signInUser`, `authUserCount` (`src/db/client.ts`, used by `src/oauth.ts`); `auth.admin.createUser` / `deleteUser` (`src/db/household.ts`); `auth.admin.deleteUser` (`deleteAllUserData`, `src/db/nutrition.ts`)                                           | 6 call sites                                                  |
-| Storage           | `exports` bucket: upload, signed URL, sweep (`src/domain/export.ts`)                                                                                                                                                                                                     | 1 module                                                      |
-| Schema            | 12 foreign keys to `auth.users` (9 `on delete cascade`, 3 `on delete set null`); 2 versions of `promote_household_owner_on_leave` join `auth.users.created_at`; 15 migrations use `auth.uid()` in policies; `20260620120000_exports_bucket.sql` writes `storage.buckets` |                                                               |
-| Config            | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`; deploy docs use `supabase db push`                                                                                                                                                                                                |                                                               |
+| Area              | Where                                                                                                                                                                                                                                                                                                                                                                                         | Size                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| PostgREST queries | `src/db/*.ts`, plus `src/foods.ts` (`food_cache`), `src/analytics.ts` (`tool_analytics`)                                                                                                                                                                                                                                                                                                      | about 125 `.from(…)` calls; `nutrition.ts` alone has 49       |
+| RPCs              | `create_household`, `add_household_member`, `transfer_household_ownership` (`src/db/household.ts`), `resolve_household_mcp_token` (`src/db/tokens.ts`)                                                                                                                                                                                                                                        | 5 calls. They are plain Postgres functions and stay unchanged |
+| GoTrue            | `signUpUser`, `signInUser`, `authUserCount` (`src/db/client.ts`, used by `src/oauth.ts`); `auth.admin.createUser` / `deleteUser` (`src/db/household.ts`); `auth.admin.deleteUser` (`deleteAllUserData`, `src/db/nutrition.ts`)                                                                                                                                                                | 6 call sites                                                  |
+| Storage           | `exports` bucket: upload, signed URL, sweep (`src/domain/export.ts`)                                                                                                                                                                                                                                                                                                                          | 1 module                                                      |
+| Schema            | 16 foreign keys to `auth.users` (9 `on delete cascade`, 3 `on delete set null`, 4 with no action; 4 of them are in the pg_dump file `20260417044712_remote_schema.sql`, written as `"auth"."users"`); 2 versions of `promote_household_owner_on_leave` join `auth.users.created_at`; 15 migrations use `auth.uid()` in policies; `20260620120000_exports_bucket.sql` writes `storage.buckets` |                                                               |
+| Config            | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`; deploy docs use `supabase db push`                                                                                                                                                                                                                                                                                                                     |                                                               |
 
 Already ours, unaffected: OAuth clients, codes, tokens and site sessions are tables in `public`; password rate limiting is `src/rate-limit.ts`.
 
@@ -45,9 +45,47 @@ Already ours, unaffected: OAuth clients, codes, tokens and site sessions are tab
 
 - Migrations follow expand, backfill, switch, contract. No migration on `main` is edited, renamed or deleted.
 - New tables enable RLS and grant DML to `service_role` in the same file (CLAUDE.md, "Migrations").
-- One PR per step, with a conventional title (see the `foodable-pr` skill). Moves land before changes.
+- One stacked PR per layer (see [Delivery](#delivery-one-stack)), with a conventional title (see the `foodable-pr` skill). Moves land before changes.
 - `bun test`, `bun run typecheck`, `bun run format:check` and `bun run db:dryrun` pass on every PR.
-- During the port, Supabase clients and `Bun.sql` both talk to the same database, so a half-ported tree is consistent and deployable.
+- During the port, Supabase clients and `Bun.sql` both talk to the same database, so every layer of the stack is consistent on its own.
+
+## Delivery: one stack
+
+v1 (Phases 0–6) ships as one [`gh stack`](https://github.com/github/gh-stack). Nothing merges until the whole stack passes the end-to-end test below, so production sees v1 in one deploy.
+
+| Layer | Branch content                                                    |
+| ----- | ----------------------------------------------------------------- |
+| 1     | This plan's stack section (docs only)                             |
+| 2     | Phase 0: groundwork (#129)                                        |
+| 3     | Phase 1: SQL foundation                                           |
+| 4     | Phase 2a: grocery, stock, fridge, settings, rules, recipes, foods |
+| 5     | Phase 2b: profiles, food cache, analytics, tokens, household      |
+| 6     | Phase 2c: nutrition                                               |
+| 7     | Phase 3: own auth (3.1–3.4)                                       |
+| 8     | Phase 4: exports without Storage                                  |
+| 9     | Phase 5: remove `@supabase/supabase-js`                           |
+| 10    | Phase 6: local development on plain Postgres                      |
+
+Per layer: Claude writes a brief, Composer implements, Grok QAs (at most two fix rounds, then Claude audits). A fix in a lower layer is made on that branch and `gh stack rebase` carries it up.
+
+Not in the stack: the Phase 3.5 contract (drop the sync trigger) has to run after the new code is live, so it is a follow-up PR. Phase 7 stays optional and separate.
+
+### End-to-end test (top of the stack, before any merge)
+
+On bumblebee, with the top layer checked out:
+
+1. **Plain Postgres with production data.** `pg_dump "$PROD_URL" --data-only --schema=public` plus the `auth.users` id, email, password hash and created_at, loaded into a fresh database after `bun run db:migrate`. Point `DATABASE_URL` at it.
+2. **Supabase as a plain host.** The same build against the local Supabase project's Postgres through `DATABASE_URL`, after `supabase db push` of the stack's migrations.
+3. On both: `bun test`, `bun run db:dryrun`, `bun run e2e:agent`, a Grok MCP session, and the web app on a phone through a transient preview on `:8081`. By hand: sign in with an existing password (and see it rehashed to argon2id), log, edit and delete a meal, fridge put-away and cook, a grocery list, a recipe, `export_all_data` and its download, add and delete a member (cascade), rotate the household token.
+
+### Production deploy order
+
+1. Set `DATABASE_URL` on Railway to the Supabase session pooler. Current code ignores it.
+2. `supabase db push` the stack's migrations (3.1 expand, 3.2 backfill, 3.3 repoint, Phase 4 table). The old code keeps working on that schema: the sync trigger keeps `public.users` current while GoTrue still writes `auth.users`, and the repointed foreign keys are satisfied through it.
+3. `gh stack merge` the top layer, which merges the whole stack; Railway deploys it once. Check sign-in, an MCP call and an export.
+4. Merge the 3.5 contract PR and push its migration.
+
+Rollback before step 4: redeploy the previous Railway build. Every migration from step 2 is compatible with the old code.
 
 ---
 
@@ -91,33 +129,33 @@ Production keeps `supabase db push` until Phase 7. The runner gets its first rea
 - `run(fn)`: `sql.begin(async tx => …)`. The first statement is `select set_config('statement_timeout', '15000', true)`, which replaces the 15 s fetch timeout the Supabase client has (`SUPABASE_TIMEOUT_MS`). `true` keeps it transaction-local, so it is safe with poolers.
 - Read helpers that keep the PostgREST row shape: `rows(tx, q)` wraps `q` as `select coalesce(json_agg(r), '[]'::json) from (q) r`. `one` throws when the row count is not exactly 1, like `.single()`. `maybeOne` throws on more than 1 and returns null on 0, like `.maybeSingle()`.
 - `pgError(context, err)` builds the same `Failed to …: <message>` errors the adapters throw today. Postgres error text from RPCs (`not a household member` and the rest) is identical through both clients, so message matching in `src/db/household.ts` keeps working.
-- Config: `DATABASE_URL` is required alongside the Supabase variables until Phase 5. In production it is the Supabase session pooler connection string, which also works over IPv4. Confirm the Railway service reaches it before the first ported domain ships.
+- Config: `DATABASE_URL` is required alongside the Supabase variables until Phase 5. In production it is the Supabase session pooler connection string, which also works over IPv4. Confirm the Railway service reaches it before the stack merges.
 
 Spike before the PR, recorded in it: nested `sql` fragments compose inside `rows`; `json` columns come back parsed; timestamps inside `json_agg` match what PostgREST returned for the same row (compare one meal row from both clients in a test).
 
 ## Phase 2: Port the adapters
 
-One PR per domain, smallest first, so the patterns settle before the big file:
+Three stack layers (2a: rows 1–7, 2b: rows 8–10, 2c: rows 11–13), smallest first, so the patterns settle before the big file. Within a layer, one commit per row:
 
-| Order | Adapter                                        | `.from` / `.rpc` | Notes                                                                                                                 |
-| ----- | ---------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 1     | `grocery.ts`                                   | 4 / 0            | First real use of `rows` / `one`                                                                                      |
-| 2     | `stock.ts`                                     | 3 / 0            | Ledger; `ledgerMatchesStock` must hold in tests                                                                       |
-| 3     | `fridge.ts`                                    | 8 / 0            |                                                                                                                       |
-| 4     | `settings.ts`                                  | 8 / 0            |                                                                                                                       |
-| 5     | `rules.ts`                                     | 9 / 0            |                                                                                                                       |
-| 6     | `recipes.ts`                                   | 11 / 0           |                                                                                                                       |
-| 7     | `foods.ts`                                     | 18 / 0           | Aliases, barcodes, `mergeFoods`                                                                                       |
-| 8     | `profiles.ts`, `food-cache.ts`, `analytics.ts` | 4 / 0            | Analytics stays fire-and-forget                                                                                       |
-| 9     | `tokens.ts`                                    | 7 / 1            | OAuth and the household token                                                                                         |
-| 10    | `household.ts`                                 | 7 / 4            | Queries and RPCs only; `liveAuthAdmin` waits for Phase 3                                                              |
-| 11–13 | `nutrition.ts`                                 | 49 / 0           | Three PRs: meals and `meal_items`; water, weight and goals; bulk readers and `deleteAllUserData` (minus `auth.admin`) |
+| Order | Adapter                                        | `.from` / `.rpc` | Notes                                                                                                                     |
+| ----- | ---------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `grocery.ts`                                   | 4 / 0            | First real use of `rows` / `one`                                                                                          |
+| 2     | `stock.ts`                                     | 3 / 0            | Ledger; `ledgerMatchesStock` must hold in tests                                                                           |
+| 3     | `fridge.ts`                                    | 8 / 0            |                                                                                                                           |
+| 4     | `settings.ts`                                  | 8 / 0            |                                                                                                                           |
+| 5     | `rules.ts`                                     | 9 / 0            |                                                                                                                           |
+| 6     | `recipes.ts`                                   | 11 / 0           |                                                                                                                           |
+| 7     | `foods.ts`                                     | 18 / 0           | Aliases, barcodes, `mergeFoods`                                                                                           |
+| 8     | `profiles.ts`, `food-cache.ts`, `analytics.ts` | 4 / 0            | Analytics stays fire-and-forget                                                                                           |
+| 9     | `tokens.ts`                                    | 7 / 1            | OAuth and the household token                                                                                             |
+| 10    | `household.ts`                                 | 7 / 4            | Queries and RPCs only; `liveAuthAdmin` waits for Phase 3                                                                  |
+| 11–13 | `nutrition.ts`                                 | 49 / 0           | Three commits: meals and `meal_items`; water, weight and goals; bulk readers and `deleteAllUserData` (minus `auth.admin`) |
 
-Each PR:
+Each layer:
 
 - Keeps every exported signature, so callers and the `mock.module` tests in `mcp.test.ts`, `middleware.test.ts` and `oauth.test.ts` do not change.
 - Adds a contract suite for store-shaped adapters (`FridgeStore`, `FoodsStore`, and so on) that runs against both `createMemoryXStore()` and the live store on test Postgres. That suite is the parity check. Function-shaped adapters (`nutrition`, `profiles`, `tokens`, `household`) get integration tests on test Postgres.
-- Wraps multi-step operations in one `run` transaction where today they are several PostgREST round trips. This is the only intended behaviour difference, it only removes partial writes, and each PR names the operations it affects.
+- Wraps multi-step operations in one `run` transaction where today they are several PostgREST round trips. This is the only intended behaviour difference, it only removes partial writes, and each layer's PR names the operations it affects.
 - `getAllMeals` / `getAllWater` / `getAllWeight`: one query replaces `fetchAllPages`, because there is no 1000-row cap. Keep the exact-count check so the #66 guard survives.
 
 Exit: no `.from(` or `.rpc(` left in `src/`. `getSupabase` is used only by GoTrue and Storage.
@@ -136,7 +174,7 @@ Expand, backfill, switch, contract, with the code switch between the third and f
 
 **3.3 Repoint.** One migration:
 
-- For each of the 12 foreign keys: add the new one to `public.users (id)` with the same `on delete` action, then drop the old one. Mark the file `-- foodable:contract <reason>` if the migration lint asks.
+- For each of the 16 foreign keys (enumerate them from `pg_constraint`, not by grep): add the new one to `public.users (id)` with the same `on delete` action, then drop the old one. Mark the file `-- foodable:contract <reason>` if the migration lint asks.
 - `create or replace` `promote_household_owner_on_leave` to join `public.users` for `created_at`.
 - After this, deleting through GoTrue still cascades: the trigger deletes the `public.users` row, and the new foreign keys cascade from there.
 
@@ -216,11 +254,11 @@ Not planned, only kept possible: billing (a plan on `households` plus Stripe web
 
 ## Risks
 
-| Risk                                                 | Mitigation                                                                                           |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Row shape drift (numbers as strings, `Date` objects) | `json_agg` reads; Phase 1 spike compares both clients on the same row                                |
-| Partial port in production                           | Both clients use one database; each domain PR is independently deployable and revertable             |
-| Auth switch locks someone out                        | Hashes copied, `$2a$` verify tested, sync trigger covers the window, dry run checks counts           |
-| Cascade delete breaks after repoint                  | Trigger delete plus new FKs; a test deletes a member and checks every table                          |
-| Railway cannot reach Supabase Postgres               | Use the session pooler (IPv4); confirmed before Phase 2's first deploy                               |
-| Migration history diverges between tools             | Runner writes the Supabase CLI table; `--list` compared with `supabase migration list --linked` once |
+| Risk                                                 | Mitigation                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Row shape drift (numbers as strings, `Date` objects) | `json_agg` reads; Phase 1 spike compares both clients on the same row                                                                      |
+| Big-bang deploy of the whole stack                   | End-to-end test on production data first; migrations pushed ahead are compatible with the old code; rollback is the previous Railway build |
+| Auth switch locks someone out                        | Hashes copied, `$2a$` verify tested, sync trigger covers the window, dry run checks counts                                                 |
+| Cascade delete breaks after repoint                  | Trigger delete plus new FKs; a test deletes a member and checks every table                                                                |
+| Railway cannot reach Supabase Postgres               | Use the session pooler (IPv4); confirmed before the stack merges                                                                           |
+| Migration history diverges between tools             | Runner writes the Supabase CLI table; `--list` compared with `supabase migration list --linked` once                                       |
