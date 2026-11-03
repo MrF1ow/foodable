@@ -10,7 +10,6 @@ import {
     insertMeal,
 } from "./nutrition.js";
 import { upsertProfile } from "./profiles.js";
-import { createMemoryExportArchiveStore } from "./exports.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -32,6 +31,7 @@ const DELETE_ALL_TABLES = [
     "oauth_tokens",
     "refresh_tokens",
     "auth_codes",
+    "export_archives",
 ] as const;
 
 async function countDeleteAllTables(
@@ -145,11 +145,15 @@ async function seedDeleteAllUserRows(
             ${"2030-01-01T00:00:00.000Z"}
         )
     `;
+    await sql`
+        insert into export_archives (user_id, archive, expires_at)
+        values (
+            ${userId},
+            ${new Uint8Array([0x50, 0x4b, 0x03, 0x04])},
+            ${"2030-01-01T00:00:00.000Z"}
+        )
+    `;
 }
-
-const deleteAllDeps = {
-    exportStore: createMemoryExportArchiveStore(),
-};
 
 describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
     let userId: string;
@@ -333,7 +337,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
             expect(n).toBeGreaterThan(0);
         }
 
-        await deleteAllUserData(userId, deleteAllDeps);
+        await deleteAllUserData(userId);
 
         const afterTarget = await countDeleteAllTables(sql, userId);
         for (const n of Object.values(afterTarget)) {
@@ -367,7 +371,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
                 execute function public._foodable_break_meals_delete()
             `;
         });
-        const err = await deleteAllUserData(userId, deleteAllDeps).then(
+        const err = await deleteAllUserData(userId).then(
             () => null,
             (e: unknown) => e,
         );

@@ -1,4 +1,5 @@
-import { test, expect, describe, afterEach } from "bun:test";
+import { test, expect, describe, afterEach, spyOn, beforeEach } from "bun:test";
+import { signExportToken } from "./domain/export-link.js";
 
 // index.ts calls createOAuthRouter() at module scope, and that throws when the
 // OAuth env is unset (src/oauth.ts). Bun auto-loads .env, so a static import
@@ -248,5 +249,47 @@ describe("response compression", () => {
         expect(r.headers.get("Content-Security-Policy")).toContain(
             "default-src",
         );
+    });
+});
+
+describe("export download access log", () => {
+    let logSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+        logSpy = spyOn(console, "log").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        logSpy.mockRestore();
+    });
+
+    test("redacts the token from [req] lines", async () => {
+        // Set and restore (32+ characters, the site-session minimum): a
+        // leaked value changes the secret every later test file signs with.
+        const prevSecret = process.env.SESSION_SECRET;
+        process.env.SESSION_SECRET = "index-export-access-log-test-secret!!";
+        try {
+            const token = signExportToken(
+                "33333333-3333-4333-8333-333333333333",
+                Date.now() + 60_000,
+                process.env.SESSION_SECRET,
+            );
+            await app.request(`http://x/exports/${token}`);
+            const reqLines = logSpy.mock.calls
+                .map((args: unknown[]) => String(args[0]))
+                .filter((line: string) => line.startsWith("[req]"));
+            expect(reqLines.length).toBeGreaterThan(0);
+            expect(reqLines.some((line: string) => line.includes(token))).toBe(
+                false,
+            );
+            expect(
+                reqLines.some((line: string) =>
+                    line.includes("/exports/[redacted]"),
+                ),
+            ).toBe(true);
+        } finally {
+            if (prevSecret === undefined) delete process.env.SESSION_SECRET;
+            else process.env.SESSION_SECRET = prevSecret;
+        }
     });
 });

@@ -157,6 +157,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/client-id.ts": "platform",
     "src/dashboard-data.ts": "platform",
     "src/discovery.ts": "platform",
+    "src/domain/export-link.ts": "platform",
+    "src/exports-route.ts": "platform",
     "src/food-search.ts": "platform",
     "src/html.ts": "platform",
     "src/mcp.ts": "platform",

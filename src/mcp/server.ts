@@ -111,8 +111,15 @@ export function registerTools(
     // exercise tool behaviour, not analytics attribution, and a row with no era
     // is exactly what a non-HTTP embedding should record.
     protocolEra?: "legacy" | "modern",
+    baseUrl = "http://localhost",
 ) {
-    const ctx = createToolContext(auth, widgetsEnabled, alcohol, protocolEra);
+    const ctx = createToolContext(
+        auth,
+        widgetsEnabled,
+        alcohol,
+        protocolEra,
+        baseUrl,
+    );
     // Original registerTool order is not grouped by domain. Call consecutive
     // runs so tools/list stays byte-identical, including order.
     registerNutritionWriteTools(server, ctx);
@@ -206,6 +213,7 @@ async function buildMcpServer(
         widgetsEnabledFromProfile(profile),
         alcoholTrackingEnabledFromProfile(profile) ? (drinkUnit ?? "us") : null,
         protocolEra,
+        baseUrl,
     );
     return server;
 }

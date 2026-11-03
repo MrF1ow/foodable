@@ -111,14 +111,8 @@ export function categorizeError(error: unknown): string {
     )
         return "internal_asset_error";
 
-    // export_all_data (src/export.ts / src/supabase.ts) — upload, signed-URL,
-    // and row-count-mismatch failures.
-    if (
-        msg.includes("failed to upload export") ||
-        msg.includes("failed to create download link") ||
-        msg.includes("export would be truncated")
-    )
-        return "export_error";
+    // export_all_data — archive write and row-count-mismatch failures.
+    if (msg.includes("export would be truncated")) return "export_error";
 
     // ---- Tier 2: every src/supabase.ts persistence throw ----
 

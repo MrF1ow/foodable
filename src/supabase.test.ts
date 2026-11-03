@@ -3,8 +3,6 @@ import {
     mealIdempotencyKey,
     updatedMealIdempotencyKey,
     fetchAllPages,
-    exportArchivePath,
-    exportStoragePaths,
     type Meal,
     type MealInput,
 } from "./db/nutrition.js";
@@ -425,48 +423,6 @@ describe("timezoneFromProfile", () => {
         expect(timezoneFromProfile(profile({ timezone: "Asia/Tokyo" }))).toBe(
             "Asia/Tokyo",
         );
-    });
-});
-
-// ---------- export storage keys ----------
-
-// Deleting an account must not leave the export archive behind: it holds the
-// user's entire history, `storage.remove` reports a missing path as success,
-// and the signed URL they were handed keeps resolving for the rest of its
-// hour. So the deletion list is asserted against the path the writer actually
-// uses — the two were spelled out separately once, and renaming the archive
-// from meals.csv to the .zip silently orphaned a full copy of everyone's data.
-describe("exportStoragePaths", () => {
-    test("covers the archive the exporter writes", () => {
-        expect(exportArchivePath("u1")).toBe("u1/foodable-export.zip");
-        expect(exportStoragePaths("u1")).toContain(exportArchivePath("u1"));
-    });
-
-    test("keeps the pre-ZIP meals.csv so old exports are still cleaned up", () => {
-        expect(exportStoragePaths("u1")).toContain("u1/meals.csv");
-    });
-
-    test("keeps the pre-rename archive so old exports are still cleaned up", () => {
-        expect(exportStoragePaths("u1")).toContain(
-            "u1/nutrition-mcp-export.zip",
-        );
-        expect(exportArchivePath("u1")).not.toBe("u1/nutrition-mcp-export.zip");
-    });
-
-    test("scopes every key to the user's own folder", () => {
-        for (const path of exportStoragePaths("u1")) {
-            expect(path.startsWith("u1/")).toBe(true);
-        }
-    });
-
-    // The guard above is only worth anything if deletion actually routes
-    // through it; inlining a path there again is the regression.
-    test("deleteAllUserData removes exactly this list", async () => {
-        const src = await Bun.file("./src/db/nutrition.ts").text();
-        const body = src.slice(
-            src.indexOf("export async function deleteAllUserData"),
-        );
-        expect(body).toContain("exportStoragePaths(userId)");
     });
 });
 

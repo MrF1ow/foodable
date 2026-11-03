@@ -2,8 +2,9 @@ import {
     liveExportArchiveStore,
     type ExportArchiveStore,
 } from "../db/exports.js";
+import { signExportToken } from "./export-link.js";
+import { resolveSessionSigningSecret } from "../site-session.js";
 import {
-    exportArchivePath,
     getAllMealItems,
     getAllMeals,
     getAllWater,
@@ -459,8 +460,9 @@ export interface FullExportResult {
 
 /**
  * Build the whole-account archive — every log, the goals and the profile —
- * upload it to the private `exports` bucket under a fixed per-user path (so
- * each export overwrites the previous one), and return a signed download link
+ * upsert it into `export_archives` (one row per user, so each export
+ * overwrites the previous one), and return a signed download link to
+ * `GET /exports/:token`
  * valid for EXPORT_TTL_SECONDS. This is the only export path: a meals-only CSV
  * tool used to sit beside it, and the archive absorbed it, which is why
  * `buildMealsCsv` still emits exactly the columns the importer reads.
@@ -468,6 +470,7 @@ export interface FullExportResult {
 export async function exportAllData(
     userId: string,
     store: ExportArchiveStore = liveExportArchiveStore(),
+    baseUrl?: string,
 ): Promise<FullExportResult> {
     // One round of five independent queries rather than five awaited in turn:
     // an account with years of history pages through meals, water and weight,
@@ -550,14 +553,16 @@ export async function exportAllData(
     }));
     const archive = buildZip(entries, generatedAt);
 
-    // Fixed per-user path: each export overwrites the last, so a user cannot
-    // accumulate archives of their whole history in a bucket the sweep only
-    // visits every ten minutes. Shared with deleteAllUserData rather than
-    // spelled out twice — the two drifting apart is how a deleted account left
-    // its archive behind.
-    const path = exportArchivePath(userId);
-    await store.upload(path, archive);
-    const url = await store.signedUrl(path, EXPORT_TTL_SECONDS);
+    // One row per user in export_archives: each export overwrites the last. The
+    // row cascades away when the account is deleted.
+    await store.put(userId, archive, EXPORT_TTL_SECONDS);
+    const url = baseUrl
+        ? `${baseUrl}/exports/${signExportToken(
+              userId,
+              Date.now() + EXPORT_TTL_SECONDS * 1000,
+              resolveSessionSigningSecret(),
+          )}`
+        : undefined;
 
     return {
         counts,
@@ -575,7 +580,7 @@ export async function exportAllData(
 export async function sweepStaleExports(
     store: ExportArchiveStore = liveExportArchiveStore(),
 ): Promise<void> {
-    await store.sweepOlderThan(Date.now() - EXPORT_TTL_SECONDS * 1000);
+    await store.sweepExpired();
 }
 
 let sweepRunning = false;

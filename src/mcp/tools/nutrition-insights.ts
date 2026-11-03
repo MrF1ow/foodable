@@ -837,8 +837,11 @@ export function registerNutritionInsightTools(
                 "export_all_data",
                 async () => {
                     const userId = await actorUserId(args.user_id);
-                    const { counts, goals, profile, url } =
-                        await exportAllData(userId);
+                    const { counts, goals, profile, url } = await exportAllData(
+                        userId,
+                        undefined,
+                        ctx.baseUrl,
+                    );
                     // No link means the account had nothing at all — not even a
                     // profile row — so there is no archive to hand over.
                     if (!url) {
