@@ -320,7 +320,7 @@ export function loggedDayAverageNote(
     return `\n\n(Daily averages are per logged day — ${loggedDays} of the ${daysInRange} days in range. get_trends averages over all ${daysInRange} calendar days instead, so its daily figures will be lower.)`;
 }
 
-// insights.ts is deliberately free of Supabase, so it cannot know about the
+// insights.ts is deliberately free of the database, so it cannot know about the
 // per-user opt-in: it renders an alcohol line whenever the data contains any
 // (see hasAnyPositive there). Zeroing the series is how the flag reaches it —
 // both computeTrends and computeWeeklyDigest suppress alcohol on an all-zero

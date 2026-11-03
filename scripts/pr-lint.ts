@@ -58,7 +58,7 @@ async function main(): Promise<void> {
 
     const fileContents: Record<string, string> = {};
     for (const path of files) {
-        if (!path.startsWith("supabase/migrations/")) continue;
+        if (!path.startsWith("db/migrations/")) continue;
         try {
             fileContents[path] = await readFile(path, "utf8");
         } catch {

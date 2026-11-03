@@ -1,8 +1,11 @@
--- Minimum Supabase-shaped objects that supabase/migrations/ expect on plain Postgres.
--- Safe on a real Supabase database: every statement is a no-op when the object
--- already exists. Nothing here uses CREATE OR REPLACE, ALTER, DROP, GRANT, or
--- COMMENT on existing objects — replacing Supabase's auth.uid() would be a
--- production incident.
+-- Objects the migrations in db/migrations/ expect before the first one runs.
+-- The early migrations were written for Supabase, which ships the anon,
+-- authenticated and service_role roles, an auth schema with auth.users and
+-- auth.uid(), and a storage schema. Plain Postgres has none of them, so
+-- db:migrate runs this file first whenever the auth schema is missing.
+-- Every statement is a no-op when the object already exists. Nothing here uses
+-- CREATE OR REPLACE, ALTER, DROP, GRANT, or COMMENT on existing objects, so it
+-- never replaces an auth.uid() a database already has.
 
 do $$
 begin

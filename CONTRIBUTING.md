@@ -10,15 +10,15 @@ Thanks for taking a look. Foodable is a personal project: one household runs it 
 
 ## Getting set up
 
-You need [Bun](https://bun.sh) (CI uses the version pinned in `.github/workflows/ci.yml`) and a Supabase project, either cloud or local via the Supabase CLI.
+You need [Bun](https://bun.sh) (CI uses the version pinned in `.github/workflows/ci.yml`) and Postgres. `bun run db:dev init` starts a local cluster for you (it needs `initdb` on your `PATH` or `PG_BIN` set); `docker compose up` is the alternative.
 
 ```bash
 git clone https://github.com/MrF1ow/foodable.git
 cd foodable
 bun install
-cp .env.example .env          # fill in Supabase and OAuth values
+bun run db:dev init           # local Postgres on :54330, migrated; prints DATABASE_URL
+cp .env.example .env          # fill in DATABASE_URL and OAuth values
 bun run generate-oauth-creds  # prints OAuth and session secrets for .env
-supabase db push              # after `supabase link`
 bun run dev                   # http://localhost:8080
 ```
 
@@ -43,7 +43,7 @@ bun run typecheck      # src/ only
 bun test
 ```
 
-If you touched `supabase/migrations/`, also run `bun run db:dryrun` (see below).
+If you touched `db/migrations/`, also run `bun run db:dryrun` (see below).
 
 ### Gate files
 
@@ -56,7 +56,7 @@ It is a label and not an approving review because GitHub does not let a PR's aut
 [`CLAUDE.md`](CLAUDE.md) is the detailed map of the codebase and its invariants. It's written for AI coding agents but works just as well for people. The short version:
 
 - `src/domain/` holds pure logic with in-memory stores and tests. New behaviour goes here first.
-- `src/db/` has one thin Supabase adapter per domain.
+- `src/db/` has one thin Postgres adapter per domain (`Bun.sql`, every query through `run()` in `src/db/sql.ts`).
 - `src/mcp/` is the agent surface: one `registerXTools` module per domain under `src/mcp/tools/`.
 - `src/web/` is the household web app (Hono routes, server-rendered pages, plain browser JS).
 - `public/widgets/src/` holds the in-chat widget sources, assembled at startup.
@@ -73,7 +73,7 @@ The rules that come up most in review:
 
 Migrations are the part most likely to hurt a running household, so they get the most scrutiny.
 
-- Schema lives only in `supabase/migrations/`. Name files `YYYYMMDDHHMMSS_short_description.sql`, timestamped after the newest existing one.
+- Schema lives only in `db/migrations/`. Name files `YYYYMMDDHHMMSS_short_description.sql`, timestamped after the newest existing one. `bun run db:migrate` applies them in order and records each version in `foodable_migrations.schema_migrations`; [docs/self-hosting.md](docs/self-hosting.md#how-migrations-work) explains the runner.
 - **Never edit a migration that has been merged.** Once a migration is on `main`, deploys treat it as applied. Write a new file instead.
 - **Expand, backfill, switch, contract.** Add new columns or tables first, backfill them, move the code over, and only drop the old shape in a later migration. One migration never both destroys data and backfills.
 - **Destructive statements** (`DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, column type changes, renames) need a SQL comment on the same migration: `-- foodable:contract <reason>` with a non-empty reason. `DROP POLICY`, `DROP FUNCTION`, and `DROP TRIGGER` do not need the marker. The PR **Contracts** section must explain why the change is safe.
@@ -130,11 +130,11 @@ Every PR declares how risky the change is. In the **Blast radius** section, set 
 
 The floor comes from path rules (see `scripts/conventions/`). In short:
 
-| Floor      | Examples                                                                                                                                                                                  |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **high**   | `supabase/migrations/`, `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun/`, `package.json` |
-| **medium** | Each product area (`fridge`, `grocery`, `nutrition`, …) spans `src/domain/`, `src/mcp/tools/`, and `src/web/` for that pillar; `bun.lock` counts as `deps`                                |
-| **low**    | Docs, copy, and other paths not mapped to a pillar                                                                                                                                        |
+| Floor      | Examples                                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **high**   | `db/`, `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun/`, `package.json` |
+| **medium** | Each product area (`fridge`, `grocery`, `nutrition`, …) spans `src/domain/`, `src/mcp/tools/`, and `src/web/` for that pillar; `bun.lock` counts as `deps`               |
+| **low**    | Docs, copy, and other paths not mapped to a pillar                                                                                                                       |
 
 If a PR touches two different **medium** areas (for example fridge and grocery), the floor becomes **high** even when no single path is in the high table.
 
@@ -149,7 +149,7 @@ Use the template GitHub fills in. Required sections:
 | **Summary**      | What changed and why                                                                                                                            |
 | **Blast radius** | **Level** and **Rollback** (plus **Affects** / **What could break** when helpful)                                                               |
 | **Changes**      | Bullet list                                                                                                                                     |
-| **Migrations**   | Describe migration work, or `None.` Must **not** be `None` when any file under `supabase/migrations/` changes                                   |
+| **Migrations**   | Describe migration work, or `None.` Must **not** be `None` when any file under `db/migrations/` changes                                         |
 | **Contracts**    | Breaking changes, snapshot updates, or `None.` Must **not** be `None` when the title contains `!` or `src/mcp/tools-list.snapshot.json` changes |
 | **Testing**      | Commands run and anything checked by hand                                                                                                       |
 | **Links**        | `Closes #…` when applicable                                                                                                                     |

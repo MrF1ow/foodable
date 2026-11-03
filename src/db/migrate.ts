@@ -130,7 +130,7 @@ export function findTransactionControlStatement(
 }
 
 export function listMigrationFiles(dir?: string): MigrationFile[] {
-    const migrationsDir = dir ?? join(REPO_ROOT, "supabase/migrations");
+    const migrationsDir = dir ?? join(REPO_ROOT, "db/migrations");
     const files = [...new Bun.Glob("*.sql").scanSync(migrationsDir)].sort();
     return files.map((file) => {
         const base = file.replace(/\.sql$/, "");
@@ -155,23 +155,62 @@ async function authSchemaExists(sql: SQL): Promise<boolean> {
     return rows.length > 0;
 }
 
-async function historyTableExists(sql: SQL): Promise<boolean> {
+// Applied versions live in foodable_migrations.schema_migrations. Databases
+// first migrated by the Supabase CLI (or by this runner before it was renamed)
+// have the same table under supabase_migrations; a real migrate renames that
+// schema in place, so the recorded versions carry over and nothing reruns.
+export const HISTORY_SCHEMA = "foodable_migrations";
+const LEGACY_HISTORY_SCHEMA = "supabase_migrations";
+
+async function schemaExists(sql: SQL, name: string): Promise<boolean> {
+    const rows = await sql`
+        select 1 from pg_namespace where nspname = ${name} limit 1
+    `;
+    return rows.length > 0;
+}
+
+async function historyTableExists(sql: SQL, schema: string): Promise<boolean> {
     const rows = await sql`
         select 1
         from information_schema.tables
-        where table_schema = 'supabase_migrations'
+        where table_schema = ${schema}
           and table_name = 'schema_migrations'
         limit 1
     `;
     return rows.length > 0;
 }
 
+/**
+ * The schema whose schema_migrations table holds the history, or null when
+ * neither exists. A dry run reads the legacy schema where it stands.
+ */
+async function historySchema(sql: SQL): Promise<string | null> {
+    if (await historyTableExists(sql, HISTORY_SCHEMA)) return HISTORY_SCHEMA;
+    if (await historyTableExists(sql, LEGACY_HISTORY_SCHEMA)) {
+        return LEGACY_HISTORY_SCHEMA;
+    }
+    return null;
+}
+
+async function renameLegacyHistorySchema(sql: SQL): Promise<boolean> {
+    if (!(await schemaExists(sql, LEGACY_HISTORY_SCHEMA))) return false;
+    if (await schemaExists(sql, HISTORY_SCHEMA)) {
+        throw new Error(
+            `Both ${LEGACY_HISTORY_SCHEMA} and ${HISTORY_SCHEMA} exist; merge or drop one before migrating`,
+        );
+    }
+    await sql`
+        alter schema supabase_migrations rename to foodable_migrations
+    `.simple();
+    return true;
+}
+
 async function ensureHistoryTable(sql: SQL): Promise<void> {
     await sql`
-        create schema if not exists supabase_migrations
+        create schema if not exists foodable_migrations
     `.simple();
     await sql`
-        create table if not exists supabase_migrations.schema_migrations (
+        create table if not exists foodable_migrations.schema_migrations (
             version text primary key,
             statements text[],
             name text
@@ -180,12 +219,13 @@ async function ensureHistoryTable(sql: SQL): Promise<void> {
 }
 
 async function recordedVersions(sql: SQL): Promise<Map<string, string>> {
-    if (!(await historyTableExists(sql))) return new Map();
-    const rows = (await sql`
-        select version, name
-        from supabase_migrations.schema_migrations
-        order by version
-    `) as { version: string; name: string }[];
+    const schema = await historySchema(sql);
+    if (!schema) return new Map();
+    const rows = (await sql.unsafe(
+        `select version, name
+        from ${schema}.schema_migrations
+        order by version`,
+    )) as { version: string; name: string }[];
     return new Map(rows.map((r) => [r.version, r.name]));
 }
 
@@ -234,6 +274,10 @@ export async function migrate(
     const files = listMigrationFiles(opts.dir);
     const log = opts.log ?? (() => {});
 
+    if (!opts.dryRun && (await renameLegacyHistorySchema(sql))) {
+        log(`ok renamed ${LEGACY_HISTORY_SCHEMA} to ${HISTORY_SCHEMA}`);
+    }
+
     const recorded = await recordedVersions(sql);
     const { applied: alreadyApplied, pending: toApply } = splitAppliedPending(
         files,
@@ -272,7 +316,7 @@ export async function migrate(
                 await reserved.begin(async (tx) => {
                     await tx.unsafe(sqlText).simple();
                     await tx.unsafe(
-                        `insert into supabase_migrations.schema_migrations (
+                        `insert into foodable_migrations.schema_migrations (
                             version,
                             name,
                             statements

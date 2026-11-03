@@ -796,7 +796,7 @@ test("EXPORT_ARCHIVE_FILES is the archive's real, ordered file list", () => {
 });
 
 test("an archive assembled from the builders reads back file for file", () => {
-    // The same assembly `exportAllData` performs, minus the Supabase round
+    // The same assembly `exportAllData` performs, minus the database round
     // trips: every builder's output goes in under its name in the constant's
     // order, and comes back out intact.
     const tz = "Europe/Berlin";

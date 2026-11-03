@@ -18,29 +18,30 @@ Every pillar is meant to refer to the same foods. That shared catalog is the hou
 
 ## Self-hosting
 
-This is a single-household deploy. Clone the repo, copy `.env.example` to `.env`, create a Supabase project, push the migrations in `supabase/migrations/`, and run the server.
+This is a single-household deploy. Clone the repo, copy `.env.example` to `.env`, point `DATABASE_URL` at any Postgres, apply the migrations in `db/migrations/`, and run the server.
 
 ```bash
 git clone https://github.com/MrF1ow/foodable.git
 cd foodable
 bun install
-cp .env.example .env   # fill in Supabase and OAuth values
-supabase db push       # after `supabase link --project-ref <ref>`
+bun run db:dev init    # optional: local Postgres on :54330, prints DATABASE_URL
+cp .env.example .env   # fill in DATABASE_URL and OAuth values
+bun run db:migrate     # applies db/migrations/
 bun src/index.ts       # http://localhost:8080
 ```
 
 `bun run generate-oauth-creds` prints `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, and `SESSION_SECRET` (site cookie signing). Open Food Facts barcode lookup needs `OFF_USER_AGENT` in the form `Foodable (you@example.com)`.
 
-The app is set up to run on [Railway](docs/self-hosting.md#railway) against Supabase cloud. Go-live steps are in [docs/deploy-checklist.md](docs/deploy-checklist.md).
+The app is set up to run on [Railway](docs/self-hosting.md#railway) with Railway Postgres; `bun run db:migrate` runs as the pre-deploy command. Go-live steps are in [docs/deploy-checklist.md](docs/deploy-checklist.md).
 
 ## Docs
 
-| Doc                                                  | What it is                                                                             |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Supabase, Railway, an optional Cloudflare domain, and the first-user flow |
-| [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                                   |
-| [docs/roadmap.md](docs/roadmap.md)                   | What comes next: a plain-Postgres option, sharing, and smaller features                |
-| [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                                  |
+| Doc                                                  | What it is                                                                         |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Postgres and migrations, Railway, Cloudflare, and the first-user flow |
+| [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                               |
+| [docs/roadmap.md](docs/roadmap.md)                   | What comes next: row-level security, sharing, and smaller features                 |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                              |
 
 ## Connecting an agent
 

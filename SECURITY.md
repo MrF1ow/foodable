@@ -18,8 +18,8 @@ In scope for this policy:
 
 - The Foodable server (HTTP routes, MCP endpoint, session handling)
 - OAuth and login flows for the household app and MCP clients
-- Supabase row-level security and policies as shipped in this repository
+- Postgres row-level security and policies as shipped in this repository
 
-Out of scope: third-party hosts (Railway, Supabase cloud console), MCP client bugs, and issues that require physical access to your machine or stolen long-lived credentials you pasted into a public channel.
+Out of scope: third-party hosts (Railway, your Postgres provider), MCP client bugs, and issues that require physical access to your machine or stolen long-lived credentials you pasted into a public channel.
 
 We are not asking for step-by-step exploit instructions in the initial report; enough detail to reproduce in a private advisory is sufficient.

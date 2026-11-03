@@ -6,11 +6,11 @@ import { startTempPostgres } from "./pg-temp.js";
 import {
     assertDistinctDatabaseUrls,
     assertMigrationParity,
-    importSupabasePublicData,
+    importPublicData,
     migrationDiff,
     passwordHashParity,
     pgDatabaseIdentity,
-} from "./import-supabase-data.js";
+} from "./import-postgres-data.js";
 
 const pgAvailable = !!(await findPgBin());
 
@@ -109,7 +109,7 @@ export async function seedSource(
 }
 
 test.skipIf(!pgAvailable)(
-    "importSupabasePublicData copies seeded public data",
+    "importPublicData copies seeded public data",
     async () => {
         const sourcePg = await startTempPostgres();
         const targetPg = await startTempPostgres();
@@ -118,7 +118,7 @@ test.skipIf(!pgAvailable)(
             const toUrl = await migratedUrl(targetPg);
             const { userId, mealId } = await seedSource(fromUrl);
 
-            const result = await importSupabasePublicData(fromUrl, toUrl);
+            const result = await importPublicData(fromUrl, toUrl);
             expect(result.ok).toBe(true);
             expect(result.passwordHashOk).toBe(true);
 
@@ -137,6 +137,29 @@ test.skipIf(!pgAvailable)(
     },
 );
 
+test.skipIf(!pgAvailable)(
+    "reads a source history still under supabase_migrations",
+    async () => {
+        const sourcePg = await startTempPostgres();
+        const targetPg = await startTempPostgres();
+        try {
+            const fromUrl = await migratedUrl(sourcePg);
+            const toUrl = await migratedUrl(targetPg);
+            const sql = new SQL(fromUrl, { prepare: false, max: 1 });
+            await sql`
+                alter schema foodable_migrations rename to supabase_migrations
+            `.simple();
+            await sql.close();
+            await expect(
+                assertMigrationParity(fromUrl, toUrl),
+            ).resolves.toBeUndefined();
+        } finally {
+            await sourcePg.stop();
+            await targetPg.stop();
+        }
+    },
+);
+
 test.skipIf(!pgAvailable)("refuses non-empty target", async () => {
     const sourcePg = await startTempPostgres();
     const targetPg = await startTempPostgres();
@@ -145,7 +168,7 @@ test.skipIf(!pgAvailable)("refuses non-empty target", async () => {
         const toUrl = await migratedUrl(targetPg);
         await seedSource(fromUrl);
         await seedSource(toUrl);
-        await expect(importSupabasePublicData(fromUrl, toUrl)).rejects.toThrow(
+        await expect(importPublicData(fromUrl, toUrl)).rejects.toThrow(
             /not empty/,
         );
     } finally {
@@ -217,7 +240,7 @@ test.skipIf(!pgAvailable)(
         const pg = await startTempPostgres();
         try {
             const url = await migratedUrl(pg);
-            await expect(importSupabasePublicData(url, url)).rejects.toThrow(
+            await expect(importPublicData(url, url)).rejects.toThrow(
                 /same database/,
             );
         } finally {
@@ -235,7 +258,7 @@ test.skipIf(!pgAvailable)(
             const fromUrl = await migratedUrl(sourcePg);
             const toUrl = await migratedUrl(targetPg);
             const { userId } = await seedSource(fromUrl);
-            const result = await importSupabasePublicData(fromUrl, toUrl);
+            const result = await importPublicData(fromUrl, toUrl);
             expect(result.ok).toBe(true);
             expect(await passwordHashParity(fromUrl, toUrl)).toBe(true);
 

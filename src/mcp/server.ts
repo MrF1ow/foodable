@@ -223,9 +223,9 @@ async function buildMcpServer(
 // (supportedVersions + capabilities + instructions) and `subscriptions/listen`
 // (refused outright below, but the SDK still reads getCapabilities() and the
 // serverInfo off the instance before refusing). Both are served from
-// newMcpServer, skipping a Supabase profile read and every tool registration.
+// newMcpServer, skipping a database profile read and every tool registration.
 // server/discover is the FIRST request every negotiating client sends, so under
-// Supabase pressure it was the probe that failed — for a response that contains
+// database pressure it was the probe that failed — for a response that contains
 // nothing a registration produces.
 //
 // Safe only because a modern request cannot reach the factory with a header
@@ -340,7 +340,7 @@ const mcpHandler = createMcpHandler(
         // pre-check was actually worth — the factory stays cheap for a listen.
         maxSubscriptions: 0,
         // A stack for anything that might be ours, one line for what is not.
-        // The SDK routes server-factory throws — a Supabase outage inside
+        // The SDK routes server-factory throws — a database outage inside
         // getProfile, a bad icon URL, a bug in registerTools — solely to
         // onerror on BOTH legs, so a message-only line here left on-call with
         // no idea what failed. A ProtocolError is by construction a rejection

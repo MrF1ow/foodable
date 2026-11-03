@@ -1,6 +1,6 @@
 # Deploy checklist
 
-Use this on deploy day. The deployment-audit fixes (#55 to #58) are on `main`, and the #56 migration is already applied to `dapbxswqfiqvxutsobhr`. Environment variables and the first-user flow are in [self-hosting.md](./self-hosting.md).
+Use this on deploy day. Environment variables, how migrations run, and the first-user flow are in [self-hosting.md](./self-hosting.md).
 
 Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app once (MCP tokens are unaffected).
 
@@ -10,11 +10,14 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 - [x] `docker build -t foodable:check .` succeeded on 2026-10-25 on the pinned `oven/bun:1.4.2` image. A container started with the local env answered `GET /health` with `ok` and served the login page.
 - [ ] With the local server up, `bun run inspect` (MCP Inspector) completes OAuth through its loopback callback and lists 67 tools. Not run on 2026-10-25. Grok's `mcp doctor foodable` did pass that day: protocol `2026-07-28`, 67 tools, against the local server.
 
-## Database (Supabase cloud host)
+## Database (Railway Postgres)
 
-- [x] All 43 migrations are applied on `dapbxswqfiqvxutsobhr` as of 2026-10-25 (`supabase migration list --linked`, local and remote in step), including `20261022180000_explicit_data_api_grants` (#95). That grant migration needs to be on the project before Supabase stops auto-granting table privileges on 2026-10-30. It is. A later migration still goes through `bun run db:dryrun`, then `bun run db:migrate --list` / `bunx supabase db push --dry-run`, then apply with `bun run db:migrate` or `bunx supabase db push`.
-- [ ] `DATABASE_URL` on Railway is the Supabase **session pooler** URI (port **5432** on `*.pooler.supabase.com`, from Connect → Session pooler), not the direct connection or the transaction pooler (port 6543 — Foodable does not need that).
-- [ ] SQL editor: no security-definer function in `public` is executable by a client role. Every row must be `f` / `f`:
+- [ ] The Railway project has a **Postgres** service next to the app, with backups turned on.
+- [ ] `DATABASE_URL` on the app service is the reference `${{Postgres.DATABASE_URL}}`, so it uses the private network.
+- [ ] The app service's pre-deploy command is `bun run db:migrate`. The first deploy applies every migration in `db/migrations/` to the empty database.
+- [ ] Moving data from an older database? Do it before anyone signs in, with a temporary TCP proxy on the Railway Postgres: `bun run db:import-postgres --from "$OLD_DATABASE_URL" --to "$RAILWAY_PROXY_URL" --check-only`, then the same without `--check-only`. Both databases must be at the same migration version and the target must be empty. Remove the proxy afterwards.
+- [ ] Before each later deploy that adds a migration: `bun run db:dryrun`, and for real data, `bun run db:dryrun --data prod-data.sql --pending-from <version>` (see [self-hosting.md](./self-hosting.md#upgrading-an-existing-deploy)).
+- [ ] No security-definer function in `public` is executable by a client role. Every row must be `f` / `f`:
 
     ```sql
     select p.proname,
@@ -24,13 +27,11 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
     where n.nspname = 'public' and p.prosecdef order by 1;
     ```
 
-- [ ] Optional: Pro plan, so the project never pauses (free projects pause after 7 days idle).
-
 ## Railway
 
 - [ ] New project → Deploy from GitHub repo → `MrF1ow/foodable` (renamed from `nutrition-mcp`), branch `main`. Region: US East.
 - [ ] Variables (do **not** set `PORT`):
-      `DATABASE_URL` (Supabase session pooler), `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`
+      `DATABASE_URL` (`${{Postgres.DATABASE_URL}}`), `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`
       (all fresh from `bun run generate-oauth-creds`), `OFF_USER_AGENT=Foodable (<email>)`.
 - [ ] Networking → Generate Domain. Set `PUBLIC_ORIGIN=https://<domain>` (no trailing slash). Redeploy.
 - [ ] Optional custom domain: [self-hosting.md](./self-hosting.md#custom-domain-on-cloudflare). Cloudflare SSL/TLS mode is **Full**. Then point `PUBLIC_ORIGIN` at that origin and redeploy.
@@ -73,5 +74,5 @@ Manual fridge add, edit, and delete write `adjust` movements, so after each step
 ## Retire the old deploy (confirm first)
 
 - [ ] Shut down the old server.
-- [ ] Delete the old Supabase project.
+- [ ] Delete the old database once the new one has run for a while and its backups are verified.
 - [ ] Remove old connectors and DNS records.

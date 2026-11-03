@@ -61,7 +61,7 @@ const STATIC_LABELS: LabelDef[] = [
     {
         name: "migration",
         color: "5319e7",
-        description: "Includes supabase migration SQL",
+        description: "Includes database migration SQL",
     },
     {
         name: "migration:contract",

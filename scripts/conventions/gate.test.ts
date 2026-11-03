@@ -42,7 +42,7 @@ describe("isGatePath", () => {
         "src/package.json",
         "scripts/data-api-grants.ts",
         ".github/dependabot.yml",
-        "supabase/migrations/20261031180000_phase8_contract.sql",
+        "db/migrations/20261031180000_phase8_contract.sql",
     ])("%s is not a gate path", (path) => {
         expect(isGatePath(path)).toBe(false);
     });

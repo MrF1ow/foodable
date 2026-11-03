@@ -10,7 +10,7 @@ import {
     e2eSnapshot,
     publicRowFingerprint,
 } from "./e2e-snapshot.js";
-import { seedSource } from "./import-supabase-data.test.js";
+import { seedSource } from "./import-postgres-data.test.js";
 
 const pgAvailable = !!(await findPgBin());
 

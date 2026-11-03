@@ -84,13 +84,13 @@ describe("categorizeError", () => {
         // src/db/* generic persistence failures — the regression case:
         // these contain "token"/"auth" as our own noun, not as a signal, and
         // must NOT be classified auth_expired.
-        ["Failed to insert meal: connection reset", "supabase_error"],
-        ["Failed to store token: duplicate key value", "supabase_error"],
-        ["Failed to delete auth codes: connection reset", "supabase_error"],
-        ["Failed to look up meal: connection reset", "supabase_error"],
-        ["Failed to count water: connection reset", "supabase_error"],
-        ["Failed to check existing meals: connection reset", "supabase_error"],
-        ["Failed to save profile: connection reset", "supabase_error"],
+        ["Failed to insert meal: connection reset", "database_error"],
+        ["Failed to store token: duplicate key value", "database_error"],
+        ["Failed to delete auth codes: connection reset", "database_error"],
+        ["Failed to look up meal: connection reset", "database_error"],
+        ["Failed to count water: connection reset", "database_error"],
+        ["Failed to check existing meals: connection reset", "database_error"],
+        ["Failed to save profile: connection reset", "database_error"],
 
         // Third-party auth text with no "Failed to " prefix of ours
         ["JWT expired", "auth_expired"],

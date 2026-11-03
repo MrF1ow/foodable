@@ -41,12 +41,10 @@ interface AnalyticsContext {
  * prefix — this runs *before* tier 3's auth/rate/date keyword checks
  * specifically so that a message like "Failed to store token" or "Failed to
  * delete auth codes" (which legitimately contain "token"/"auth" as our own
- * noun, not as a signal about the failure) is bucketed as `supabase_error`
- * (the stored label predates the Postgres port; renaming would split history),
+ * noun, not as a signal about the failure) is bucketed as `database_error`,
  * not `auth_expired`, before tier 3 ever sees it. Tier 3 is for third-party
- * text
- * we didn't author (Postgres/PostgREST, native fetch/DNS errors) where only
- * a keyword heuristic is possible.
+ * text we didn't author (Postgres, native fetch/DNS errors) where only a
+ * keyword heuristic is possible.
  */
 export function categorizeError(error: unknown): string {
     const msg =
@@ -90,7 +88,7 @@ export function categorizeError(error: unknown): string {
         return "missing_required_param";
 
     // updateMeal / updateWeight (src/db/nutrition.ts) pre-checks — a stale or
-    // wrong id, not a DB outage, so it shouldn't share supabase_error's bucket.
+    // wrong id, not a DB outage, so it shouldn't share database_error's bucket.
     if (msg.includes("meal not found") || msg.includes("entry not found"))
         return "record_not_found";
 
@@ -124,8 +122,7 @@ export function categorizeError(error: unknown): string {
     // checked *before* tier 3's auth/rate/date keywords below: our own nouns
     // ("Failed to store token", "Failed to delete auth codes") would
     // otherwise false-positive on tier 3's "token"/"auth" check.
-    if (msg.includes("failed to ") || msg.includes("supabase"))
-        return "supabase_error";
+    if (msg.includes("failed to ")) return "database_error";
 
     // ---- Tier 3: keyword heuristics for third-party error text ----
 

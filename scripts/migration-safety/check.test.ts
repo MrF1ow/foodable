@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { checkMigrations } from "./check.js";
 
 const BASE_MIGRATION =
-    "supabase/migrations/20261017180000_profile_nutrition_layout.sql";
+    "db/migrations/20261017180000_profile_nutrition_layout.sql";
 
 async function fileContents(name: string): Promise<string> {
-    return await Bun.file(`supabase/migrations/${name}`).text();
+    return await Bun.file(`db/migrations/${name}`).text();
 }
 
 describe("checkMigrations", () => {
@@ -34,7 +34,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "renamed",
-                    path: "supabase/migrations/20261018120000_renamed.sql",
+                    path: "db/migrations/20261018120000_renamed.sql",
                     previousPath: BASE_MIGRATION,
                     contents: "select 1;",
                 },
@@ -45,12 +45,80 @@ describe("checkMigrations", () => {
         expect(findings.some((f) => f.rule === "contract")).toBe(false);
     });
 
+    test("an unchanged move out of supabase/migrations is allowed", () => {
+        const findings = checkMigrations({
+            changes: [
+                {
+                    status: "renamed",
+                    path: BASE_MIGRATION,
+                    previousPath:
+                        "supabase/migrations/20261017180000_profile_nutrition_layout.sql",
+                    similarity: 100,
+                    contents: "drop table public.old;",
+                },
+            ],
+            newestBaseTimestamp: "20261102120000",
+        });
+        expect(findings).toEqual([]);
+    });
+
+    test.each([
+        ["an edited move", BASE_MIGRATION, 97],
+        [
+            "a move that renames the file",
+            "db/migrations/20261017180000_other.sql",
+            100,
+        ],
+        [
+            "a move to another folder",
+            "db/archive/20261017180000_profile_nutrition_layout.sql",
+            100,
+        ],
+    ])(
+        "%s out of supabase/migrations stays immutable",
+        (_label, path, similarity) => {
+            const previousPath =
+                "supabase/migrations/20261017180000_profile_nutrition_layout.sql";
+            const findings = checkMigrations({
+                changes: [
+                    {
+                        status: "renamed",
+                        path,
+                        previousPath,
+                        similarity,
+                        contents: "select 1;",
+                    },
+                ],
+                newestBaseTimestamp: "20261102120000",
+            });
+            expect(
+                findings.some(
+                    (f) => f.rule === "immutable" && f.path === previousPath,
+                ),
+            ).toBe(true);
+        },
+    );
+
+    test("a new file under supabase/migrations fails the name rule", () => {
+        const findings = checkMigrations({
+            changes: [
+                {
+                    status: "added",
+                    path: "supabase/migrations/20261201120000_late.sql",
+                    contents: "select 1;",
+                },
+            ],
+            newestBaseTimestamp: "20261102120000",
+        });
+        expect(findings.map((f) => f.rule)).toEqual(["name"]);
+    });
+
     test("bad filename yields name rule", () => {
         const findings = checkMigrations({
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/bad_name.sql",
+                    path: "db/migrations/bad_name.sql",
                     contents: "select 1;",
                 },
             ],
@@ -64,7 +132,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261017180000_duplicate.sql",
+                    path: "db/migrations/20261017180000_duplicate.sql",
                     contents: "select 1;",
                 },
             ],
@@ -78,7 +146,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018120000_ok.sql",
+                    path: "db/migrations/20261018120000_ok.sql",
                     contents: "select 1;",
                 },
             ],
@@ -92,7 +160,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018130000_drop_col.sql",
+                    path: "db/migrations/20261018130000_drop_col.sql",
                     contents: "alter table public.foo drop column secret;",
                 },
             ],
@@ -106,7 +174,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018130000_drop_col.sql",
+                    path: "db/migrations/20261018130000_drop_col.sql",
                     contents:
                         "-- foodable:contract remove the unused secret\nalter table public.foo drop column secret;",
                 },
@@ -121,7 +189,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018130000_drop_col.sql",
+                    path: "db/migrations/20261018130000_drop_col.sql",
                     contents:
                         "-- foodable:contract\nalter table public.foo drop column secret;",
                 },
@@ -139,7 +207,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018140000_fn.sql",
+                    path: "db/migrations/20261018140000_fn.sql",
                     contents,
                 },
             ],
@@ -153,7 +221,7 @@ describe("checkMigrations", () => {
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018140000_policy.sql",
+                    path: "db/migrations/20261018140000_policy.sql",
                     contents: `
 drop policy if exists p on public.foo;
 drop trigger if exists t on public.foo;
@@ -170,7 +238,7 @@ drop trigger if exists t on public.foo;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018140000_cascade.sql",
+                    path: "db/migrations/20261018140000_cascade.sql",
                     contents: `
 create table public.parent (id uuid primary key);
 create table public.child (
@@ -197,7 +265,7 @@ alter table public.child enable row level security;
                 changes: [
                     {
                         status: "added",
-                        path: "supabase/migrations/20261018150000_mut.sql",
+                        path: "db/migrations/20261018150000_mut.sql",
                         contents,
                     },
                 ],
@@ -212,7 +280,7 @@ alter table public.child enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018150000_del.sql",
+                    path: "db/migrations/20261018150000_del.sql",
                     contents: "delete from public.foo where id = 1;",
                 },
             ],
@@ -232,7 +300,7 @@ alter table public.child enable row level security;
                 changes: [
                     {
                         status: "added",
-                        path: "supabase/migrations/20261018160000_rename.sql",
+                        path: "db/migrations/20261018160000_rename.sql",
                         contents,
                     },
                 ],
@@ -254,7 +322,7 @@ alter table public.child enable row level security;
                 changes: [
                     {
                         status: "added",
-                        path: "supabase/migrations/20261018160000_ddl.sql",
+                        path: "db/migrations/20261018160000_ddl.sql",
                         contents,
                     },
                 ],
@@ -269,7 +337,7 @@ alter table public.child enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018170000_fn_tag.sql",
+                    path: "db/migrations/20261018170000_fn_tag.sql",
                     contents:
                         "create function f() as $fn1$ begin drop column secret; end $fn1$;",
                 },
@@ -284,7 +352,7 @@ alter table public.child enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018170000_unclosed.sql",
+                    path: "db/migrations/20261018170000_unclosed.sql",
                     contents: "select 1; $$\n drop column secret",
                 },
             ],
@@ -298,7 +366,7 @@ alter table public.child enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018170000_outside.sql",
+                    path: "db/migrations/20261018170000_outside.sql",
                     contents:
                         "create function f() as $fn$ begin end $fn$; alter table public.foo drop column secret;",
                 },
@@ -313,7 +381,7 @@ alter table public.child enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018170000_fn.sql",
+                    path: "db/migrations/20261018170000_fn.sql",
                     contents: `
 create or replace function public.wipe() returns void language sql as $$
     delete from public.foo where id = 1;
@@ -331,7 +399,7 @@ $$;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018180000_comment.sql",
+                    path: "db/migrations/20261018180000_comment.sql",
                     contents: "select 'drop column secret';",
                 },
             ],
@@ -345,7 +413,7 @@ $$;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018190000_tbl.sql",
+                    path: "db/migrations/20261018190000_tbl.sql",
                     contents: "create table public.new_thing (id int);",
                 },
             ],
@@ -359,7 +427,7 @@ $$;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018190000_tbl.sql",
+                    path: "db/migrations/20261018190000_tbl.sql",
                     contents: `
 create table public.new_thing (id int);
 alter table public.new_thing enable row level security;
@@ -379,7 +447,7 @@ alter table public.new_thing enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018200000_tool.sql",
+                    path: "db/migrations/20261018200000_tool.sql",
                     contents,
                 },
             ],
@@ -396,7 +464,7 @@ alter table public.new_thing enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018210000_patreon.sql",
+                    path: "db/migrations/20261018210000_patreon.sql",
                     contents,
                 },
             ],
@@ -413,7 +481,7 @@ alter table public.new_thing enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018220000_landing.sql",
+                    path: "db/migrations/20261018220000_landing.sql",
                     contents,
                 },
             ],
@@ -430,7 +498,7 @@ alter table public.new_thing enable row level security;
             changes: [
                 {
                     status: "added",
-                    path: "supabase/migrations/20261018230000_bootstrap.sql",
+                    path: "db/migrations/20261018230000_bootstrap.sql",
                     contents,
                 },
             ],

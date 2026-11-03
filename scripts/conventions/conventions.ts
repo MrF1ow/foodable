@@ -87,7 +87,6 @@ const HIGH_EXACT = new Set([
 
 const HIGH_PREFIXES = [
     "db/",
-    "supabase/migrations/",
     ".github/workflows/",
     ".github/rulesets/",
     "scripts/conventions/",
@@ -509,7 +508,7 @@ export function lintPr(input: {
 
     const { sections, level: declaredLevel, rollback } = parseBody(input.body);
     const hasMigrationFiles = input.files.some((f) =>
-        f.startsWith("supabase/migrations/"),
+        f.startsWith("db/migrations/"),
     );
     const snapshotChanged = input.files.includes(
         "src/mcp/tools-list.snapshot.json",
@@ -615,7 +614,7 @@ export function lintPr(input: {
     }
     if (input.fileContents) {
         for (const path of input.files) {
-            if (!path.startsWith("supabase/migrations/")) continue;
+            if (!path.startsWith("db/migrations/")) continue;
             const content = input.fileContents[path];
             if (content && hasMigrationContract(content)) {
                 labels.push("migration:contract");

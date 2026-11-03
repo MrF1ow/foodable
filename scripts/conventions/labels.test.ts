@@ -82,7 +82,7 @@ describe("lintPr labels in catalog", () => {
     });
 
     test("migration with contract marker", () => {
-        const path = "supabase/migrations/x.sql";
+        const path = "db/migrations/x.sql";
         const r = lintPr({
             title: "feat(db): add a table",
             branch: "feat/db-add-table",

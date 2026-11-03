@@ -161,7 +161,7 @@ describe("lintPr", () => {
     });
 
     test("db migration with contract marker", () => {
-        const path = "supabase/migrations/20261018120000_add_table.sql";
+        const path = "db/migrations/20261018120000_add_table.sql";
         const r = lintPr({
             title: "feat(db): add a table",
             branch: "feat/db-add-table",

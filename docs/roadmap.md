@@ -4,7 +4,7 @@ What comes after go-live, in rough order. Each item names the rules it has to ke
 
 ## Now: live
 
-- **Hosted on Railway, database on Supabase cloud** (project `dapbxswqfiqvxutsobhr`). The deploy steps are in [deploy-checklist.md](./deploy-checklist.md).
+- **Hosted on Railway, database on Railway Postgres.** Migrations run as the pre-deploy command. The deploy steps are in [deploy-checklist.md](./deploy-checklist.md).
 - **Optional custom domain through Cloudflare DNS** in front of the Railway service ([self-hosting.md](./self-hosting.md#custom-domain-on-cloudflare)).
 
 ## Next: after the deploy has run for a while
@@ -49,7 +49,7 @@ Two kinds of sharing. Neither opens sign-up or adds people to the household. The
 
 ### Own Postgres and auth
 
-Run on plain Postgres through one `DATABASE_URL`, with our own user accounts instead of Supabase Auth. Supabase cloud stays usable as a Postgres host. v1 is parity (no user-visible change); v2 makes row level security the real tenant boundary so a multi-household option stays possible. Phases, decisions and risks are in [postgres-plan.md](./postgres-plan.md).
+v1 is done: Foodable runs on plain Postgres through one `DATABASE_URL`, with its own user accounts. v2 makes row level security the real tenant boundary so a multi-household option stays possible. Phases, decisions and risks are in [postgres-plan.md](./postgres-plan.md).
 
 ## Not planned
 

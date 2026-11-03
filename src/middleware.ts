@@ -89,7 +89,7 @@ export const authenticateBearer = async (c: Context, next: Next) => {
 
     if (lookup.status === "unavailable") {
         // We could not verify the token, so this is not the client's fault:
-        // answer 401 as before, but record no strike. Otherwise a Supabase
+        // answer 401 as before, but record no strike. Otherwise a database
         // outage would ban every active user and outlast the outage itself.
         c.header(
             "WWW-Authenticate",
