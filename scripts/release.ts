@@ -268,7 +268,9 @@ async function main(argv: string[]): Promise<void> {
     }
 
     console.log(`${current} → ${next} (${level}: ${reason})`);
-    console.log(`${prs.length} PRs since ${lastTag ?? "the start"}`);
+    console.log(
+        `${prs.length} PR${prs.length === 1 ? "" : "s"} since ${lastTag ?? "the start"}`,
+    );
     if (dryRun) {
         console.log(`\n${title}\n${newBranch}\n\n${body}`);
         return;
