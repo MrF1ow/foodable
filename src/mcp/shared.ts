@@ -1140,6 +1140,10 @@ export type ToolContext = {
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
     protocolEra?: "legacy" | "modern";
+    // Whether the caller has nutrition goals. The meal-logged widget is only a
+    // progress strip against goals, so without them it would paint an empty
+    // card; the tools that use it drop the link instead.
+    hasGoals: boolean;
     requireUser: () => string;
     personSchema: <T extends z.ZodRawShape>(
         shape: T,
@@ -1178,6 +1182,7 @@ export function createToolContext(
     alcohol: AlcoholDisplay,
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
+    hasGoals = true,
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1361,6 +1366,7 @@ export function createToolContext(
         widgetsEnabled,
         alcohol,
         protocolEra,
+        hasGoals,
         requireUser,
         personSchema,
         nutritionWriteSchema,
