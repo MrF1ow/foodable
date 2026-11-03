@@ -9,7 +9,12 @@ What comes after go-live, in rough order. Each item names the rules it has to ke
 
 ## Next: after the deploy has run for a while
 
-1. **Weekly household digest (optional).** One tool across the pillars: what expires, what ran out, nutrition against goals per member, and suggested grocery lines from the stock ledger. Today's weekly digest covers nutrition only.
+1. **Nutrition calendar with per-day goals.** The Nutrition tab only shows today. Add a calendar view: a month grid where each day shows its calories against that day's goal, opening a day view with the day's meals, totals and macros, where meals can be added and edited for that day. The data is already per day (every meal, water and weight row has `logged_at`, read paths bucket by `dateInTz`, and `get_meals` takes `date` or `from`/`to`), so the view itself needs no schema change.
+    - **Per-day goals.** `nutrition_goals` is one row per user today. Add the new shape first: a `nutrition_goal_days` table (`household_id`, `user_id`, `date`, the same `daily_*` columns, null meaning "use the default") with row level security and `service_role` grants in the same migration. The existing row stays the default; no backfill is needed because "no override" already means "use the default". A weekday pattern (say, a training-day target every Monday, Wednesday and Friday) can come later as a second table if per-date overrides prove tedious.
+    - **One resolver.** A pure `goalsForDate(defaults, overrides, date)` in `src/domain/` with memory-store tests. Every reader that compares a day against goals goes through it: `get_goal_progress`, the meal-progress strip, `get_nutrition_summary`, `get_trends`, the dashboard data, insights and the weekly digest. A range read (trends, the calendar month) resolves each day separately, so averages compare against that day's own target, not today's.
+    - **Surfaces.** Web: the calendar under the Nutrition tab, and a "goal for this day" form in the day view. MCP: let the goals tool take an optional `date` (or `from`/`to`) to set or clear a day's override, and include overrides in `export_all_data` (`goals.csv` or a new `goal_days.csv`, header-only when empty). Tool changes update `src/mcp/tools-list.snapshot.json` and `TOOLS` in the same PR.
+    - Meals keep their denormalized totals; nothing about how meals are written changes.
+2. **Weekly household digest (optional).** One tool across the pillars: what expires, what ran out, nutrition against goals per member, and suggested grocery lines from the stock ledger. Today's weekly digest covers nutrition only.
 
 Still open, and not features:
 
@@ -53,4 +58,6 @@ v1 is done: Foodable runs on plain Postgres through one `DATABASE_URL`, with its
 
 ## Not planned
 
-Public sign-up, billing, a marketing site, translations, and per-user theming beyond the one accent (see `CONTRIBUTING.md`, "Out of scope"). Multi-household hosting is not planned either, but [postgres-plan.md](./postgres-plan.md) v2 keeps it possible.
+Public sign-up, billing, a marketing site, translations, and per-user theming beyond the one accent (see `CONTRIBUTING.md`, "Out of scope").
+
+In-app photo meal estimation is not planned either. Logging a plated meal from a photo already works through the household's own chat agents: `log_meal` tells the agent how to identify each dish, estimate portions, check `search_meals` for hidden ingredients, and confirm with the user before logging. A server-side vision call would add an API key, a per-photo cost, and image storage for something the agents already do. Improvements to that flow go in the `log_meal` / `search_meals` tool descriptions. Multi-household hosting is not planned either, but [postgres-plan.md](./postgres-plan.md) v2 keeps it possible.
