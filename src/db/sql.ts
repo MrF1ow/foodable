@@ -120,6 +120,15 @@ export function pgError(context: string, err: unknown): Error {
     return new Error(`Failed to ${context}: ${message}`, { cause: err });
 }
 
+/** Postgres SQLSTATE from Bun.sql (e.g. `"23505"`), not `err.code`. */
+export function pgCode(err: unknown): string | undefined {
+    if (err && typeof err === "object" && "errno" in err) {
+        const errno = (err as { errno: unknown }).errno;
+        if (typeof errno === "string") return errno;
+    }
+    return undefined;
+}
+
 /** PostgREST / supabase-js omit `undefined` keys on insert and update. */
 export function definedColumns(obj: Record<string, unknown>): {
     row: Record<string, unknown>;

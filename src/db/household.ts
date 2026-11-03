@@ -11,6 +11,7 @@ import {
     type MemberRole,
 } from "../household.js";
 import { getSupabase } from "./client.js";
+import { maybeOne, rows, run } from "./sql.js";
 
 export type HouseholdMembership = {
     householdId: string;
@@ -19,38 +20,64 @@ export type HouseholdMembership = {
     displayName: string;
 };
 
+const HOUSEHOLD_MEMBERS = "household_members";
+const HOUSEHOLDS = "households";
+const MEMBER_COLS = "household_id, user_id, role, display_name";
+
 export async function getHouseholdMembership(
     userId: string,
     householdId?: string,
 ): Promise<HouseholdMembership | null> {
-    let query = getSupabase()
-        .from("household_members")
-        .select("household_id, user_id, role, display_name")
-        .eq("user_id", userId);
-    if (householdId != null) {
-        query = query.eq("household_id", householdId);
-    }
-    const { data, error } = await query.maybeSingle();
-
-    if (error) {
-        throw new Error(
-            `Failed to load household membership: ${error.message}`,
-        );
-    }
-    if (!data) return null;
-    return membershipFromRow(data);
+    return run(async (tx) => {
+        try {
+            const data = await maybeOne<{
+                household_id: string;
+                user_id: string;
+                role: MemberRole;
+                display_name: string;
+            }>(
+                tx,
+                householdId != null
+                    ? tx`
+                          select ${tx.unsafe(MEMBER_COLS)}
+                          from ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                          where user_id = ${userId}
+                            and household_id = ${householdId}
+                      `
+                    : tx`
+                          select ${tx.unsafe(MEMBER_COLS)}
+                          from ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                          where user_id = ${userId}
+                      `,
+                "load household membership",
+            );
+            if (!data) return null;
+            return membershipFromRow(data);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to load household membership: ${message}`);
+        }
+    });
 }
 
 export async function householdExists(): Promise<boolean> {
-    const { data, error } = await getSupabase()
-        .from("households")
-        .select("id")
-        .limit(1)
-        .maybeSingle();
-    if (error) {
-        throw new Error(`Failed to load household: ${error.message}`);
-    }
-    return data != null;
+    return run(async (tx) => {
+        try {
+            const data = await maybeOne<{ id: string }>(
+                tx,
+                tx`
+                    select id
+                    from ${tx.unsafe(HOUSEHOLDS)}
+                    limit 1
+                `,
+                "load household",
+            );
+            return data != null;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to load household: ${message}`);
+        }
+    });
 }
 
 export async function createHouseholdForCaller(
@@ -58,21 +85,31 @@ export async function createHouseholdForCaller(
     name: string,
     displayName: string,
 ): Promise<string> {
-    const { data, error } = await getSupabase().rpc("create_household", {
-        p_user_id: userId,
-        p_name: name,
-        p_display_name: displayName,
-    });
-    if (error) {
-        if (error.message.toLowerCase().includes("household already exists")) {
-            throw new HouseholdAlreadyExistsError();
+    return run(async (tx) => {
+        try {
+            const data = await maybeOne<{ id: string }>(
+                tx,
+                tx`
+                    select public.create_household(
+                        p_user_id => ${userId}::uuid,
+                        p_name => ${name},
+                        p_display_name => ${displayName}
+                    ) as id
+                `,
+                "create household",
+            );
+            if (typeof data?.id !== "string" || data.id.length === 0) {
+                throw new Error("Could not create the household.");
+            }
+            return data.id;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message.toLowerCase().includes("household already exists")) {
+                throw new HouseholdAlreadyExistsError();
+            }
+            throw new Error(message);
         }
-        throw new Error(error.message);
-    }
-    if (typeof data !== "string" || data.length === 0) {
-        throw new Error("Could not create the household.");
-    }
-    return data;
+    });
 }
 
 function membershipFromRow(data: {
@@ -92,16 +129,23 @@ function membershipFromRow(data: {
 export async function listHouseholdMembers(
     householdId: string,
 ): Promise<HouseholdMembership[]> {
-    const { data, error } = await getSupabase()
-        .from("household_members")
-        .select("household_id, user_id, role, display_name")
-        .eq("household_id", householdId)
-        .order("display_name", { ascending: true });
-
-    if (error) {
-        throw new Error(`Failed to list household members: ${error.message}`);
-    }
-    return (data ?? []).map((row) => membershipFromRow(row));
+    return run(async (tx) => {
+        try {
+            const data = await rows(
+                tx,
+                tx`
+                    select ${tx.unsafe(MEMBER_COLS)}
+                    from ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                    where household_id = ${householdId}
+                    order by display_name asc
+                `,
+            );
+            return data.map((row) => membershipFromRow(row as never));
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to list household members: ${message}`);
+        }
+    });
 }
 
 function alreadyRegistered(message: string): boolean {
@@ -158,23 +202,35 @@ function liveAuthAdmin(): AuthUserAdmin {
 function liveAddMemberRpc(): AddMemberRpc {
     return {
         async insertMember({ householdId, userId, displayName }) {
-            const { data, error } = await getSupabase().rpc(
-                "add_household_member",
-                {
-                    p_household_id: householdId,
-                    p_auth_user_id: userId,
-                    p_display_name: displayName,
-                },
-            );
-            if (error || typeof data !== "string" || data.length === 0) {
+            try {
+                const data = await run(async (tx) => {
+                    return await maybeOne<{ id: string }>(
+                        tx,
+                        tx`
+                            select public.add_household_member(
+                                p_household_id => ${householdId}::uuid,
+                                p_auth_user_id => ${userId}::uuid,
+                                p_display_name => ${displayName}
+                            ) as id
+                        `,
+                        "add household member",
+                    );
+                });
+                if (typeof data?.id !== "string" || data.id.length === 0) {
+                    return {
+                        ok: false,
+                        error: "Could not add the household member.",
+                    };
+                }
+                return { ok: true, userId: data.id };
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
                 return {
                     ok: false,
-                    error: error
-                        ? friendlyMemberError(error.message)
-                        : "Could not add the household member.",
+                    error: friendlyMemberError(message),
                 };
             }
-            return { ok: true, userId: data };
         },
     };
 }
@@ -182,9 +238,13 @@ function liveAddMemberRpc(): AddMemberRpc {
 export async function addHouseholdMemberForHousehold(
     householdId: string,
     draft: MemberDraft,
+    deps?: { auth: AuthUserAdmin; rpc?: AddMemberRpc },
 ): Promise<AddMemberResult> {
     return addHouseholdMember(
-        { auth: liveAuthAdmin(), rpc: liveAddMemberRpc() },
+        {
+            auth: deps?.auth ?? liveAuthAdmin(),
+            rpc: deps?.rpc ?? liveAddMemberRpc(),
+        },
         householdId,
         draft,
     );
@@ -193,48 +253,67 @@ export async function addHouseholdMemberForHousehold(
 export async function getHouseholdConfig(
     householdId: string,
 ): Promise<HouseholdConfig> {
-    const { data, error } = await getSupabase()
-        .from("households")
-        .select("name, recipe_search_places, household_preferences")
-        .eq("id", householdId)
-        .maybeSingle();
-
-    if (error) {
-        throw new Error(`Failed to load household config: ${error.message}`);
-    }
-    if (!data) {
-        throw new Error("Failed to load household config");
-    }
-    const parsed = householdConfigFromRow(data);
-    if (!parsed.ok) throw new Error(parsed.error);
-    return parsed.value;
+    return run(async (tx) => {
+        let data;
+        try {
+            data = await maybeOne(
+                tx,
+                tx`
+                    select name, recipe_search_places, household_preferences
+                    from ${tx.unsafe(HOUSEHOLDS)}
+                    where id = ${householdId}
+                `,
+                "load household config",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to load household config: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to load household config");
+        }
+        const parsed = householdConfigFromRow(data as never);
+        if (!parsed.ok) throw new Error(parsed.error);
+        return parsed.value;
+    });
 }
 
 export async function updateHouseholdConfig(
     householdId: string,
     config: HouseholdConfig,
 ): Promise<HouseholdConfig> {
-    const columns = householdConfigToColumns(config);
-    const { data, error } = await getSupabase()
-        .from("households")
-        .update({
-            name: columns.name,
-            recipe_search_places: columns.recipe_search_places,
-            household_preferences: columns.household_preferences,
-        })
-        .eq("id", householdId)
-        .select("name, recipe_search_places, household_preferences")
-        .maybeSingle();
-
-    if (error) {
-        throw new Error(`Failed to update household config: ${error.message}`);
-    }
-    if (!data) {
-        throw new Error("Failed to update household config");
-    }
-    const parsed = householdConfigFromRow(data);
-    if (!parsed.ok) throw new Error(parsed.error);
-    return parsed.value;
+    return run(async (tx) => {
+        const columns = householdConfigToColumns(config);
+        let data;
+        try {
+            data = await maybeOne(
+                tx,
+                tx`
+                    update ${tx.unsafe(HOUSEHOLDS)}
+                    set
+                        name = ${columns.name},
+                        recipe_search_places = ${JSON.stringify(
+                            columns.recipe_search_places,
+                        )}::jsonb,
+                        household_preferences = ${JSON.stringify(
+                            columns.household_preferences,
+                        )}::jsonb
+                    where id = ${householdId}
+                    returning name, recipe_search_places, household_preferences
+                `,
+                "update household config",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to update household config: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to update household config");
+        }
+        const parsed = householdConfigFromRow(data as never);
+        if (!parsed.ok) throw new Error(parsed.error);
+        return parsed.value;
+    });
 }
 
 export async function rotateHouseholdMcpToken(args: {
@@ -242,22 +321,38 @@ export async function rotateHouseholdMcpToken(args: {
     tokenHashHex: string;
     issuedBy: string | null;
 }): Promise<string> {
-    const { data, error } = await getSupabase().rpc(
-        "rotate_household_mcp_token",
-        {
-            p_household_id: args.householdId,
-            p_token_hash_hex: args.tokenHashHex,
-            p_issued_by: args.issuedBy,
-        },
-    );
-
-    if (error) {
-        throw new Error(`Failed to rotate household token: ${error.message}`);
-    }
-    if (typeof data !== "string" || data.length === 0) {
-        throw new Error("Failed to rotate household token: empty issued_at");
-    }
-    return data;
+    return run(async (tx) => {
+        try {
+            const data = await maybeOne<{ issued_at: string }>(
+                tx,
+                tx`
+                    select public.rotate_household_mcp_token(
+                        p_household_id => ${args.householdId}::uuid,
+                        p_token_hash_hex => ${args.tokenHashHex},
+                        p_issued_by => ${args.issuedBy}::uuid
+                    ) as issued_at
+                `,
+                "rotate household mcp token",
+            );
+            if (
+                typeof data?.issued_at !== "string" ||
+                data.issued_at.length === 0
+            ) {
+                throw new Error(
+                    "Failed to rotate household token: empty issued_at",
+                );
+            }
+            return data.issued_at;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (
+                message === "Failed to rotate household token: empty issued_at"
+            ) {
+                throw err instanceof Error ? err : new Error(message);
+            }
+            throw new Error(`Failed to rotate household token: ${message}`);
+        }
+    });
 }
 
 export async function updateMemberDisplayName(
@@ -265,14 +360,19 @@ export async function updateMemberDisplayName(
     userId: string,
     displayName: string,
 ): Promise<void> {
-    const { error } = await getSupabase()
-        .from("household_members")
-        .update({ display_name: displayName })
-        .eq("household_id", householdId)
-        .eq("user_id", userId);
-    if (error) {
-        throw new Error(`Failed to update display name: ${error.message}`);
-    }
+    return run(async (tx) => {
+        try {
+            await tx`
+                update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                set display_name = ${displayName}
+                where household_id = ${householdId}
+                  and user_id = ${userId}
+            `;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to update display name: ${message}`);
+        }
+    });
 }
 
 // Hands the owner role to another member in one transaction. The database
@@ -283,14 +383,20 @@ export async function transferHouseholdOwnership(
     fromUserId: string,
     toUserId: string,
 ): Promise<void> {
-    const { error } = await getSupabase().rpc("transfer_household_ownership", {
-        p_household_id: householdId,
-        p_from_user_id: fromUserId,
-        p_to_user_id: toUserId,
+    return run(async (tx) => {
+        try {
+            await tx`
+                select public.transfer_household_ownership(
+                    p_household_id => ${householdId}::uuid,
+                    p_from_user_id => ${fromUserId}::uuid,
+                    p_to_user_id => ${toUserId}::uuid
+                )
+            `;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to transfer ownership: ${message}`);
+        }
     });
-    if (error) {
-        throw new Error(`Failed to transfer ownership: ${error.message}`);
-    }
 }
 
 // Moves a member between admin and member. The owner row is excluded in the
@@ -301,17 +407,28 @@ export async function setHouseholdMemberRole(
     userId: string,
     role: "admin" | "member",
 ): Promise<void> {
-    const { data, error } = await getSupabase()
-        .from("household_members")
-        .update({ role })
-        .eq("household_id", householdId)
-        .eq("user_id", userId)
-        .neq("role", "owner")
-        .select("user_id");
-    if (error) {
-        throw new Error(`Failed to change role: ${error.message}`);
-    }
-    if ((data ?? []).length === 0) {
-        throw new Error("That person is not a member you can change.");
-    }
+    return run(async (tx) => {
+        try {
+            const updated = await rows<{ user_id: string }>(
+                tx,
+                tx`
+                    update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                    set role = ${role}
+                    where household_id = ${householdId}
+                      and user_id = ${userId}
+                      and role <> 'owner'
+                    returning user_id
+                `,
+            );
+            if (updated.length === 0) {
+                throw new Error("That person is not a member you can change.");
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message === "That person is not a member you can change.") {
+                throw err;
+            }
+            throw new Error(`Failed to change role: ${message}`);
+        }
+    });
 }

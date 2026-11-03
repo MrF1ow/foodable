@@ -1,6 +1,6 @@
 import { isWeightUnit, type WeightUnit } from "../domain/units.js";
 import { isDrinkUnit, type DrinkUnit } from "../alcohol.js";
-import { getSupabase } from "./client.js";
+import { definedColumns, maybeOne, one, run } from "./sql.js";
 
 // ---------- Profiles ----------
 
@@ -28,15 +28,33 @@ export interface Profile {
     updated_at: string;
 }
 
-export async function getProfile(userId: string): Promise<Profile | null> {
-    const { data, error } = await getSupabase()
-        .from("profiles")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
+const PROFILES = "profiles";
 
-    if (error) throw new Error(`Failed to get profile: ${error.message}`);
-    return (data as Profile | null) ?? null;
+function patchKeys(keys: string[]): [string, ...string[]] {
+    return keys as [string, ...string[]];
+}
+
+function profileError(context: string, err: unknown): Error {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Error(`Failed to ${context}: ${message}`);
+}
+
+export async function getProfile(userId: string): Promise<Profile | null> {
+    return run(async (tx) => {
+        try {
+            return await maybeOne<Profile>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(PROFILES)}
+                    where user_id = ${userId}
+                `,
+                "get profile",
+            );
+        } catch (err) {
+            throw profileError("get profile", err);
+        }
+    });
 }
 
 // Returns the timezone the user actually chose with set_timezone, or null if
@@ -171,14 +189,32 @@ export async function upsertProfile(
     if (patch.nutrition_layout !== undefined)
         payload.nutrition_layout = patch.nutrition_layout;
 
-    const { data, error } = await getSupabase()
-        .from("profiles")
-        .upsert(payload, { onConflict: "user_id" })
-        .select()
-        .single();
-
-    if (error) throw new Error(`Failed to save profile: ${error.message}`);
-    return data as Profile;
+    return run(async (tx) => {
+        const { row, keys } = definedColumns(payload);
+        if (Array.isArray(row.nutrition_layout)) {
+            row.nutrition_layout = tx.array(
+                row.nutrition_layout as string[],
+                "text",
+            );
+        }
+        const updateKeys = keys.filter((k) => k !== "user_id");
+        const setClause = updateKeys
+            .map((k) => `${k} = excluded.${k}`)
+            .join(", ");
+        try {
+            return await one<Profile>(
+                tx,
+                tx`
+                    insert into ${tx.unsafe(PROFILES)} ${tx(row, ...patchKeys(keys))}
+                    on conflict (user_id) do update set ${tx.unsafe(setClause)}
+                    returning *
+                `,
+                "save profile",
+            );
+        } catch (err) {
+            throw profileError("save profile", err);
+        }
+    });
 }
 
 export async function setNutritionLayout(

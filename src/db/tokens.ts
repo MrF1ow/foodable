@@ -4,25 +4,45 @@ import {
     householdTokenHashHex,
     type TableLookup,
 } from "../household-token.js";
-import { getSupabase } from "./client.js";
+import { definedColumns, maybeOne, rows, run } from "./sql.js";
 
 // ---------- OAuth tokens ----------
+
+const OAUTH_TOKENS = "oauth_tokens";
+const AUTH_CODES = "auth_codes";
+const REFRESH_TOKENS = "refresh_tokens";
+const REGISTERED_CLIENTS = "registered_clients";
 
 export async function storeToken(token: string, userId: string): Promise<void> {
     const expiresAt = new Date(
         Date.now() + 365 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const { error } = await getSupabase().from("oauth_tokens").upsert(
-        {
-            token,
-            user_id: userId,
-            expires_at: expiresAt,
-        },
-        { onConflict: "token" },
-    );
+    const payload = {
+        token,
+        user_id: userId,
+        expires_at: expiresAt,
+    };
 
-    if (error) throw new Error(`Failed to store token: ${error.message}`);
+    await run(async (tx) => {
+        const { row, keys } = definedColumns(payload);
+        const updateKeys = keys.filter((k) => k !== "token");
+        const setClause = updateKeys
+            .map((k) => `${k} = excluded.${k}`)
+            .join(", ");
+        try {
+            await tx`
+                insert into ${tx.unsafe(OAUTH_TOKENS)} ${tx(
+                    row,
+                    ...(keys as [string, ...string[]]),
+                )}
+                on conflict (token) do update set ${tx.unsafe(setClause)}
+            `;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to store token: ${message}`);
+        }
+    });
 }
 
 // "invalid" means the token definitively isn't valid; "unavailable" means we
@@ -36,26 +56,23 @@ export type TokenLookup =
     | { status: "invalid" }
     | { status: "unavailable" };
 
-// PostgREST's code for "no rows returned" from .single() — a real answer (this
-// token does not exist), not a transport or availability failure.
-const PGRST_NO_ROWS = "PGRST116";
-
 async function lookupOauthToken(token: string): Promise<TableLookup> {
     try {
-        const { data, error } = await getSupabase()
-            .from("oauth_tokens")
-            .select("user_id")
-            .eq("token", token)
-            .gt("expires_at", new Date().toISOString())
-            .single();
-
-        if (error) {
-            return error.code === PGRST_NO_ROWS
-                ? { status: "miss" }
-                : { status: "unavailable" };
-        }
+        const now = new Date().toISOString();
+        const data = await run(async (tx) => {
+            return await maybeOne<{ user_id: string }>(
+                tx,
+                tx`
+                    select user_id
+                    from ${tx.unsafe(OAUTH_TOKENS)}
+                    where token = ${token}
+                      and expires_at > ${now}
+                `,
+                "lookup oauth token",
+            );
+        });
         if (!data?.user_id) return { status: "miss" };
-        return { status: "hit", id: data.user_id as string };
+        return { status: "hit", id: data.user_id };
     } catch {
         return { status: "unavailable" };
     }
@@ -63,20 +80,25 @@ async function lookupOauthToken(token: string): Promise<TableLookup> {
 
 async function lookupHouseholdToken(token: string): Promise<TableLookup> {
     try {
-        const { data, error } = await getSupabase().rpc(
-            "resolve_household_mcp_token",
-            {
-                p_token_hash_hex: householdTokenHashHex(
-                    hashHouseholdToken(token),
-                ),
-            },
-        );
-
-        if (error) return { status: "unavailable" };
-        if (typeof data !== "string" || data.length === 0) {
+        const hex = householdTokenHashHex(hashHouseholdToken(token));
+        const data = await run(async (tx) => {
+            return await maybeOne<{ household_id: string | null }>(
+                tx,
+                tx`
+                    select public.resolve_household_mcp_token(
+                        p_token_hash_hex => ${hex}
+                    ) as household_id
+                `,
+                "resolve household mcp token",
+            );
+        });
+        if (
+            typeof data?.household_id !== "string" ||
+            data.household_id.length === 0
+        ) {
             return { status: "miss" };
         }
-        return { status: "hit", id: data };
+        return { status: "hit", id: data.household_id };
     } catch {
         return { status: "unavailable" };
     }
@@ -100,17 +122,29 @@ export async function storeAuthCode(
 ): Promise<void> {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-    const { error } = await getSupabase()
-        .from("auth_codes")
-        .insert({
-            code,
-            redirect_uri: redirectUri,
-            user_id: userId,
-            code_challenge: codeChallenge ?? null,
-            expires_at: expiresAt,
-        });
-
-    if (error) throw new Error(`Failed to store auth code: ${error.message}`);
+    await run(async (tx) => {
+        try {
+            await tx`
+                insert into ${tx.unsafe(AUTH_CODES)} (
+                    code,
+                    redirect_uri,
+                    user_id,
+                    code_challenge,
+                    expires_at
+                )
+                values (
+                    ${code},
+                    ${redirectUri},
+                    ${userId},
+                    ${codeChallenge ?? null},
+                    ${expiresAt}
+                )
+            `;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to store auth code: ${message}`);
+        }
+    });
 }
 
 export interface AuthCodeData {
@@ -125,16 +159,19 @@ export async function consumeAuthCode(
 ): Promise<AuthCodeData | null> {
     const now = new Date().toISOString();
 
-    const { data, error } = await getSupabase()
-        .from("auth_codes")
-        .delete()
-        .eq("code", code)
-        .gt("expires_at", now)
-        .select()
-        .single();
-
-    if (error || !data) return null;
-    return data as AuthCodeData;
+    return run(async (tx) => {
+        const data = await maybeOne<AuthCodeData>(
+            tx,
+            tx`
+                delete from ${tx.unsafe(AUTH_CODES)}
+                where code = ${code}
+                  and expires_at > ${now}
+                returning code, redirect_uri, user_id, code_challenge
+            `,
+            "consume auth code",
+        );
+        return data;
+    }).catch(() => null);
 }
 
 // ---------- Refresh tokens ----------
@@ -147,29 +184,41 @@ export async function storeRefreshToken(
         Date.now() + 365 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const { error } = await getSupabase().from("refresh_tokens").insert({
-        token,
-        user_id: userId,
-        expires_at: expiresAt,
+    await run(async (tx) => {
+        try {
+            await tx`
+                insert into ${tx.unsafe(REFRESH_TOKENS)} (
+                    token,
+                    user_id,
+                    expires_at
+                )
+                values (${token}, ${userId}, ${expiresAt})
+            `;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to store refresh token: ${message}`);
+        }
     });
-
-    if (error)
-        throw new Error(`Failed to store refresh token: ${error.message}`);
 }
 
 export async function consumeRefreshToken(
     token: string,
 ): Promise<string | null> {
-    const { data, error } = await getSupabase()
-        .from("refresh_tokens")
-        .delete()
-        .eq("token", token)
-        .gt("expires_at", new Date().toISOString())
-        .select("user_id")
-        .single();
+    const now = new Date().toISOString();
 
-    if (error || !data) return null;
-    return data.user_id as string;
+    return run(async (tx) => {
+        const data = await maybeOne<{ user_id: string }>(
+            tx,
+            tx`
+                delete from ${tx.unsafe(REFRESH_TOKENS)}
+                where token = ${token}
+                  and expires_at > ${now}
+                returning user_id
+            `,
+            "consume refresh token",
+        );
+        return data?.user_id ?? null;
+    }).catch(() => null);
 }
 
 // ---------- Registered clients ----------
@@ -178,18 +227,16 @@ export function registerClient(
     clientName: string | null,
     redirectUris: string[],
 ): void {
-    getSupabase()
-        .from("registered_clients")
-        .insert({
-            client_name: clientName,
-            redirect_uris: redirectUris,
-        })
-        .then(({ error }) => {
-            if (error) {
-                console.warn(
-                    "Failed to persist client registration:",
-                    error.message,
-                );
-            }
-        });
+    run(async (tx) => {
+        await tx`
+            insert into ${tx.unsafe(REGISTERED_CLIENTS)} (
+                client_name,
+                redirect_uris
+            )
+            values (${clientName}, ${tx.array(redirectUris, "text")})
+        `;
+    }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("Failed to persist client registration:", message);
+    });
 }
