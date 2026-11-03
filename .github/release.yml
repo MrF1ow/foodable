@@ -1,0 +1,21 @@
+# Sections for the notes `gh release create --generate-notes` writes. The
+# labels are the ones scripts/apply-pr-labels.ts puts on every PR, so the
+# notes sort themselves. A PR lands in the first category that matches, which
+# is why the two "read before updating" sections come first.
+changelog:
+    exclude:
+        authors:
+            - dependabot[bot]
+    categories:
+        - title: Breaking changes
+          labels: [breaking]
+        - title: Contract migrations (back up before updating)
+          labels: ["migration:contract"]
+        - title: Migrations
+          labels: [migration]
+        - title: Features
+          labels: ["type:feat"]
+        - title: Fixes
+          labels: ["type:fix", "type:perf"]
+        - title: Other changes
+          labels: ["*"]

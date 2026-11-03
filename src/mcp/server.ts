@@ -6,6 +6,7 @@ import {
     type McpRequestContext,
 } from "@modelcontextprotocol/server";
 import { getBaseUrl } from "../url.js";
+import { VERSION } from "../version.js";
 import { formatClientId } from "../client-id.js";
 import type { Context } from "hono";
 import type { AuthContext } from "../auth-context.js";
@@ -153,7 +154,7 @@ function newMcpServer(baseUrl: string): McpServer {
         {
             name: "Foodable",
             title: "Foodable",
-            version: "0.1.0",
+            version: VERSION,
             icons: [
                 {
                     src: `${baseUrl}/favicon.ico`,

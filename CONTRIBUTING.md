@@ -124,6 +124,17 @@ Branch from `main` and open the PR against `main`. PRs are squash-merged, so the
 
 Example: `fix(fridge): ignore expired lines in grocery sync`.
 
+## Releases
+
+Railway deploys `main`, so a release is not what ships code. It marks a point on `main` that a self-hosted deploy can safely update to.
+
+- **Cut one** by merging a PR titled `chore(repo): release <version>` that only bumps `version` in `package.json`. When that merges, the **Release** workflow tags the commit `v<version>` and publishes a GitHub release. `package.json` is a gate file, so the code owner signs off on every release.
+- **Version:** `0.y.z` for now. Bump the minor version when the release includes a `breaking` PR or a contract migration, and the patch version otherwise.
+- **Notes** are generated from PR titles and grouped by the labels CI already applies. Breaking changes and contract migrations come first because they are what a forker has to read before updating.
+- **Don't cut one** in the middle of an expand → contract sequence. Release once the code that reads the new shape has merged.
+
+If the workflow failed or the tag is missing, run it again from the Actions tab (**Release → Run workflow**). It does nothing when the current version already has a release.
+
 ## Blast radius
 
 Every PR declares how risky the change is. In the **Blast radius** section, set **Level** to `low`, `medium`, or `high`. That level must be at least the **floor** from the files you touch; declaring lower than the floor fails CI.
