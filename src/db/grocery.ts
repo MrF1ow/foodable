@@ -1,70 +1,103 @@
 import {
     groceryLineFromRow,
     groceryLineToRow,
+    type GroceryLine,
     type GroceryListStore,
 } from "../domain/grocery.js";
-import { getSupabase } from "./client.js";
+import {
+    definedColumns,
+    insertReturning,
+    maybeOne,
+    pgError,
+    rows,
+    run,
+    type Tx,
+} from "./sql.js";
 
+const GROCERY_LINES = "grocery_lines";
 const GROCERY_LINE_COLS =
     "id, household_id, store_id, section_id, kind, display_name, amount, unit, food_id, checked";
+
+async function selectLines(
+    tx: Tx,
+    householdId: string,
+): Promise<GroceryLine[]> {
+    const data = await rows(
+        tx,
+        tx`
+            select ${tx.unsafe(GROCERY_LINE_COLS)}
+            from ${tx.unsafe(GROCERY_LINES)}
+            where household_id = ${householdId}
+            order by created_at asc
+        `,
+    );
+    return data.map((row) => groceryLineFromRow(row as never));
+}
 
 export function liveGroceryStore(): GroceryListStore {
     return {
         async listLines(householdId) {
-            const { data, error } = await getSupabase()
-                .from("grocery_lines")
-                .select(GROCERY_LINE_COLS)
-                .eq("household_id", householdId)
-                .order("created_at", { ascending: true });
-            if (error) {
-                throw new Error(
-                    `Failed to list grocery lines: ${error.message}`,
-                );
-            }
-            return (data ?? []).map(groceryLineFromRow);
+            return run(async (tx) => {
+                try {
+                    return await selectLines(tx, householdId);
+                } catch (err) {
+                    throw pgError("list grocery lines", err);
+                }
+            });
         },
         async insertLine(row) {
-            const { data, error } = await getSupabase()
-                .from("grocery_lines")
-                .insert(groceryLineToRow(row))
-                .select(GROCERY_LINE_COLS)
-                .single();
-            if (error) {
-                throw new Error(`Failed to add grocery line: ${error.message}`);
-            }
-            return groceryLineFromRow(data);
+            return run(async (tx) => {
+                const data = await insertReturning<Record<string, unknown>>(
+                    tx,
+                    GROCERY_LINES,
+                    groceryLineToRow(row),
+                    GROCERY_LINE_COLS,
+                    "add grocery line",
+                );
+                return groceryLineFromRow(data as never);
+            });
         },
         async updateLine(row) {
-            const { data, error } = await getSupabase()
-                .from("grocery_lines")
-                .update({
-                    ...groceryLineToRow(row),
-                    updated_at: new Date().toISOString(),
-                })
-                .eq("id", row.id)
-                .eq("household_id", row.householdId)
-                .select(GROCERY_LINE_COLS)
-                .maybeSingle();
-            if (error) {
-                throw new Error(
-                    `Failed to update grocery line: ${error.message}`,
-                );
-            }
-            return data ? groceryLineFromRow(data) : null;
+            return run(async (tx) => {
+                try {
+                    const payload = {
+                        ...groceryLineToRow(row),
+                        updated_at: new Date().toISOString(),
+                    };
+                    const { row: patch, keys } = definedColumns(payload);
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(GROCERY_LINES)} set ${tx(patch, ...(keys as [string, ...string[]]))}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(GROCERY_LINE_COLS)}
+                        `,
+                        "update grocery line",
+                    );
+                    return data ? groceryLineFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update grocery line", err);
+                }
+            });
         },
         async deleteLine(householdId, id) {
-            const { data, error } = await getSupabase()
-                .from("grocery_lines")
-                .delete()
-                .eq("id", id)
-                .eq("household_id", householdId)
-                .select("id");
-            if (error) {
-                throw new Error(
-                    `Failed to delete grocery line: ${error.message}`,
-                );
-            }
-            return (data ?? []).length > 0;
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(GROCERY_LINES)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete grocery line", err);
+                }
+            });
         },
     };
 }

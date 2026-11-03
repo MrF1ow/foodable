@@ -67,21 +67,37 @@ export class GroceryInputError extends Error {
     }
 }
 
+type MemoryGroceryLine = GroceryLine & { createdAt: string };
+
+// createdAt only orders the memory list, like the live store's
+// `order by created_at`; it is not part of GroceryLine, so it never leaves.
+function publicLine({
+    createdAt: _createdAt,
+    ...row
+}: MemoryGroceryLine): GroceryLine {
+    return { ...row, quantity: { ...row.quantity } };
+}
+
 export function createMemoryGroceryStore(): GroceryListStore {
-    const lines: GroceryLine[] = [];
-    return {
+    const lines: MemoryGroceryLine[] = [];
+    const store: GroceryListStore & {
+        __paritySetLineCreatedAt(id: string, createdAt: string): void;
+    } = {
         async listLines(householdId) {
             return lines
                 .filter((row) => row.householdId === householdId)
-                .map((row) => ({
-                    ...row,
-                    quantity: { ...row.quantity },
-                }));
+                .slice()
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+                .map(publicLine);
         },
         async insertLine(row) {
-            const saved = { ...row, quantity: { ...row.quantity } };
+            const saved: MemoryGroceryLine = {
+                ...row,
+                quantity: { ...row.quantity },
+                createdAt: new Date().toISOString(),
+            };
             lines.push(saved);
-            return { ...saved, quantity: { ...saved.quantity } };
+            return publicLine(saved);
         },
         async updateLine(row) {
             const idx = lines.findIndex(
@@ -89,7 +105,11 @@ export function createMemoryGroceryStore(): GroceryListStore {
                     line.id === row.id && line.householdId === row.householdId,
             );
             if (idx < 0) return null;
-            lines[idx] = { ...row, quantity: { ...row.quantity } };
+            lines[idx] = {
+                ...row,
+                quantity: { ...row.quantity },
+                createdAt: lines[idx]!.createdAt,
+            };
             return { ...row, quantity: { ...row.quantity } };
         },
         async deleteLine(householdId, id) {
@@ -102,7 +122,12 @@ export function createMemoryGroceryStore(): GroceryListStore {
             lines.push(...next);
             return removed;
         },
+        __paritySetLineCreatedAt(id, createdAt) {
+            const row = lines.find((line) => line.id === id);
+            if (row) row.createdAt = createdAt;
+        },
     };
+    return store;
 }
 
 function parseAmount(amount: number): number {

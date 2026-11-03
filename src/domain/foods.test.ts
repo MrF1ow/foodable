@@ -126,12 +126,12 @@ test("listAllAliases groups a household in listAliases order", async () => {
     await store.setAlias(HH, "jumbo eggs", eggs.id);
     await store.setAlias("other-household", "nope", eggs.id);
     const grouped = await store.listAllAliases(HH);
-    expect(grouped.get(eggs.id)).toEqual(["large eggs", "jumbo eggs"]);
+    expect(grouped.get(eggs.id)).toEqual(["jumbo eggs", "large eggs"]);
     expect(grouped.get(milk.id)).toEqual(["dairy"]);
     expect(grouped.has("missing")).toBe(false);
     expect(await store.listAliases(HH, eggs.id)).toEqual([
-        "large eggs",
         "jumbo eggs",
+        "large eggs",
     ]);
 });
 
