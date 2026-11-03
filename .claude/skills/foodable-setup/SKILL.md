@@ -52,6 +52,16 @@ bun install
 
 Without `gh`: they click **Fork** on <https://github.com/MrF1ow/foodable>, then you `git clone` their fork.
 
+Deploy the latest release, not whatever is on upstream `main`. Releases mark points where the schema and the code that needs it have both landed:
+
+```bash
+git fetch upstream --tags
+latest=$(gh release view --repo MrF1ow/foodable --json tagName --jq .tagName)
+git reset --hard "$latest" && git push --force origin main
+```
+
+`gh repo fork --remote` already added the `upstream` remote; after a manual clone, add it with `git remote add upstream https://github.com/MrF1ow/foodable.git`. The fork is brand new, so resetting it loses nothing. If there is no release yet, stay on `main`. Tell them that later updates mean merging the next release tag ("Upgrading an existing deploy" in `docs/self-hosting.md`).
+
 ## Step 2: Railway access
 
 1. `railway login`. A browser opens and they sign in or sign up. Use `railway login --browserless` only when this machine really has no browser (SSH, container). Then the command prints a code and waits: run it in the background and show them the URL and code right away, because the code expires in 10 minutes.

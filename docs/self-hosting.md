@@ -40,6 +40,14 @@ Do not skip migrations, and do not change the schema by hand: schema changes shi
 
 ### Upgrading an existing deploy
 
+Update to a [release](https://github.com/MrF1ow/foodable/releases) rather than whatever is on `main`. Releases are cut at points where every migration and the code that needs it have both landed. Read the notes first: the **Breaking changes** and **Contract migrations** sections list what can affect your data. From a fork:
+
+```bash
+git fetch upstream --tags
+git merge v0.2.0   # the release you are updating to
+git push origin main
+```
+
 1. Back up. Take a host snapshot or `pg_dump`, and run `export_all_data` for each member as a second copy.
 2. Dry-run the pending migrations against a copy of your data, locally:
 

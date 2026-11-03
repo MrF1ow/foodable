@@ -29,6 +29,7 @@ import {
     type VersionNegotiationMode,
 } from "@modelcontextprotocol/client";
 import { Hono } from "hono";
+import pkg from "../package.json" with { type: "json" };
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -4454,6 +4455,12 @@ describe("/mcp serves the 2026-07-28 revision", () => {
         await withHttpClient("u1", "auto", async (client) => {
             expect(client.getProtocolEra()).toBe("modern");
             expect(client.getServerVersion()?.name).toBe("Foodable");
+        });
+    });
+
+    test("serverInfo.version is the package.json version", async () => {
+        await withHttpClient("u1", "auto", async (client) => {
+            expect(client.getServerVersion()?.version).toBe(pkg.version);
         });
     });
 
