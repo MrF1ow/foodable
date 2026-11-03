@@ -143,7 +143,7 @@ describeDb(pgAvailable !== null, "migrate", (ctx) => {
         const files = listMigrationFiles();
         const rows = (await sql`
             select version, name
-            from supabase_migrations.schema_migrations
+            from foodable_migrations.schema_migrations
             order by version
         `) as { version: string; name: string }[];
         expect(rows.length).toBe(files.length);
@@ -204,7 +204,7 @@ select * from table_does_not_exist;`,
             );
 
             const recorded = (await sql`
-                select version from supabase_migrations.schema_migrations
+                select version from foodable_migrations.schema_migrations
             `) as { version: string }[];
             expect(recorded.map((r) => r.version)).toEqual(["20260101120000"]);
 
@@ -225,7 +225,7 @@ select * from table_does_not_exist;`,
             await migrate(sql);
 
             await sql`
-                insert into supabase_migrations.schema_migrations (
+                insert into foodable_migrations.schema_migrations (
                     version,
                     name,
                     statements
@@ -254,7 +254,7 @@ select * from table_does_not_exist;`,
             const migrationsSchema = await pg.scalar(`
                 select count(*)::text
                 from information_schema.schemata
-                where schema_name = 'supabase_migrations'
+                where schema_name = 'foodable_migrations'
             `);
             expect(migrationsSchema).toBe("0");
 
@@ -264,6 +264,94 @@ select * from table_does_not_exist;`,
                 where schema_name = 'auth'
             `);
             expect(authSchema).toBe("0");
+        } finally {
+            await sql.close();
+            await pg.stop();
+        }
+    });
+
+    test("a legacy supabase_migrations history is renamed, not replayed", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-legacy-"));
+            writeFileSync(
+                join(dir, "20260101120000_first.sql"),
+                "create table public.legacy_first(id int);",
+            );
+            writeFileSync(
+                join(dir, "20260101130000_second.sql"),
+                "create table public.legacy_second(id int);",
+            );
+            // A database the Supabase CLI migrated: the first file already
+            // ran and is recorded under the old schema name.
+            await sql`
+                create schema supabase_migrations;
+                create table supabase_migrations.schema_migrations (
+                    version text primary key,
+                    statements text[],
+                    name text
+                );
+                insert into supabase_migrations.schema_migrations (version, name)
+                values ('20260101120000', 'first');
+                create table public.legacy_first(id int);
+            `.simple();
+
+            const dry = await migrate(sql, { dir, dryRun: true });
+            expect(dry.applied).toEqual(["20260101120000_first"]);
+            expect(dry.pending).toEqual(["20260101130000_second"]);
+            expect(
+                await pg.scalar(
+                    `select to_regnamespace('supabase_migrations') is not null
+                        and to_regnamespace('foodable_migrations') is null`,
+                ),
+            ).toBe("t");
+
+            const lines: string[] = [];
+            const result = await migrate(sql, {
+                dir,
+                log: (line) => lines.push(line),
+            });
+            expect(result.applied).toEqual(["20260101130000_second"]);
+            expect(lines).toContain(
+                "ok renamed supabase_migrations to foodable_migrations",
+            );
+
+            const recorded = (await sql`
+                select version from foodable_migrations.schema_migrations
+                order by version
+            `) as { version: string }[];
+            expect(recorded.map((r) => r.version)).toEqual([
+                "20260101120000",
+                "20260101130000",
+            ]);
+            expect(
+                await pg.scalar(
+                    `select to_regnamespace('supabase_migrations') is null`,
+                ),
+            ).toBe("t");
+
+            const again = await migrate(sql, { dir, log: () => {} });
+            expect(again.applied).toEqual([]);
+        } finally {
+            await sql.close();
+            await pg.stop();
+        }
+    });
+
+    test("refuses to migrate when both history schemas exist", async () => {
+        const pg = await startTempPostgres();
+        const sql = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            await sql`
+                create schema supabase_migrations;
+                create schema foodable_migrations;
+            `.simple();
+            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-both-"));
+            writeFileSync(join(dir, "20260101120000_ok.sql"), "select 1;");
+            await expect(migrate(sql, { dir, log: () => {} })).rejects.toThrow(
+                "Both supabase_migrations and foodable_migrations exist",
+            );
         } finally {
             await sql.close();
             await pg.stop();
@@ -296,7 +384,7 @@ select * from missing_relation;`,
 
             const untouched = await pg.scalar(
                 `select to_regclass('public.work_row') is null
-                    and to_regclass('supabase_migrations.schema_migrations') is null
+                    and to_regclass('foodable_migrations.schema_migrations') is null
                     and to_regnamespace('auth') is null`,
             );
             expect(untouched).toBe("t");
@@ -326,7 +414,7 @@ $$;`,
             await migrate(sql, { dir, log: () => {} });
 
             const recorded = (await sql`
-                select version from supabase_migrations.schema_migrations
+                select version from foodable_migrations.schema_migrations
             `) as { version: string }[];
             expect(recorded.map((r) => r.version)).toEqual(["20260101120000"]);
 

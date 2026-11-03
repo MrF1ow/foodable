@@ -1,11 +1,11 @@
 ---
 name: foodable-migration
-description: Add or change files under supabase/migrations/ using Foodable's phased migration workflow.
+description: Add or change files under db/migrations/ using Foodable's phased migration workflow.
 ---
 
 # Foodable database migration
 
-Use for any change under `supabase/migrations/`.
+Use for any change under `db/migrations/`.
 
 Read the **Migrations** section in [CLAUDE.md](CLAUDE.md) and follow expand, backfill, switch, contract there — do not duplicate those rules in the PR or in chat.
 

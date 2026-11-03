@@ -18,42 +18,43 @@ bun src/index.ts               # http://localhost:8080
 
 ## Database
 
-Foodable talks to Postgres only through `DATABASE_URL`. The schema lives in `supabase/migrations/`; apply it with:
+Foodable talks to Postgres through `DATABASE_URL` and nothing else. Any Postgres works: Railway, Neon, RDS, a local `initdb` cluster, or the Docker Compose service below. The app owns its user accounts (`public.users`), so there is no separate auth service to run.
+
+### How migrations work
+
+The schema lives only in `db/migrations/`, one SQL file per change, named `<14-digit timestamp>_<snake_case>.sql`. Apply them with:
 
 ```bash
-bun run db:migrate
+bun run db:migrate          # apply every pending file
+bun run db:migrate --list   # show applied and pending, change nothing
 ```
 
-On **plain Postgres**, `db/bootstrap.sql` runs automatically first (roles and stubs the migrations expect). On **Supabase cloud**, that bootstrap is a no-op because those objects already exist.
+The runner (`src/db/migrate.ts`) does this, in order:
 
-### Supabase as a Postgres host
+1. If the `auth` schema is missing, it runs `db/bootstrap.sql` first. The early migrations were written for Supabase and expect the `anon`, `authenticated` and `service_role` roles, a stub `auth.users`, `auth.uid()`, and a `storage` schema. The bootstrap creates only what is missing, so it is a no-op on a database that already has them.
+2. It reads the applied versions from `foodable_migrations.schema_migrations`. A database first migrated by the Supabase CLI, or by this runner before the rename, has that table under `supabase_migrations`; the first real migrate renames the schema in place, so those versions are not applied again. `--list` reads whichever one exists and renames nothing.
+3. It refuses to run when a recorded version has no file on disk ("Migration history diverged"). Never delete or rename a migration that has been applied anywhere.
+4. It applies each pending file in its own transaction and records the version in the same transaction. A failure rolls that file back, keeps the earlier ones, and stops. A file that contains its own `begin` / `commit` is rejected before anything runs.
 
-[Supabase cloud](https://supabase.com) is a supported host: create a project, copy the **session pooler** connection string from the dashboard **Connect → Session pooler** into `DATABASE_URL`. On the shared pooler host (`*.pooler.supabase.com`), port **5432** is session mode (what Foodable wants for a long-lived server); port **6543** is [transaction mode](https://supabase.com/docs/guides/database/connecting-to-postgres) for short-lived serverless clients — you do not need it. The direct `db.<ref>.supabase.co:5432` string is IPv6-only unless the project has the IPv4 add-on. Then either:
+Do not skip migrations, and do not change the schema by hand: schema changes ship only in those files.
 
-- `bun run db:migrate` from this repo, or
-- `supabase link --project-ref <ref>` and `supabase db push` if you already use the Supabase CLI.
+### Upgrading an existing deploy
 
-Do not skip migrations. Schema changes ship only in those SQL files.
-
-For upgrading an existing deploy when new migrations land:
-
-1. Back up. Take a dashboard backup or `pg_dump`, and run `export_all_data` for each member as a second copy.
+1. Back up. Take a host snapshot or `pg_dump`, and run `export_all_data` for each member as a second copy.
 2. Dry-run the pending migrations against a copy of your data, locally:
 
     ```bash
     pg_dump "$DATABASE_URL" --data-only --schema=public -f prod-data.sql
-    bun run db:dryrun --data prod-data.sql
+    bun run db:dryrun --data prod-data.sql --pending-from <version>
     ```
 
-    This uses a throwaway local Postgres and never touches the remote database. Set `PG_BIN` if `initdb` is not on your `PATH`. Add `--pending-from <version>` naming the first migration your database has not applied (`bun run db:migrate --list` or `supabase migration list` shows which).
+    `<version>` is the first migration your database has not applied (`bun run db:migrate --list` shows it). This uses a throwaway local Postgres and never touches the remote database. Set `PG_BIN` if `initdb` is not on your `PATH`.
 
-3. Apply migrations (`bun run db:migrate` or `supabase db push`), then deploy the matching code. The new code expects the new tables, so do not deploy it first.
-
-Any other Postgres (Railway, Neon, RDS, a local `initdb` cluster) works the same way: set `DATABASE_URL` and run `bun run db:migrate`.
+3. Apply migrations, then run the matching code. The new code expects the new schema, so do not run it first. On Railway the pre-deploy command does this for you (see [Railway](#railway)).
 
 ### Local Postgres (no Docker)
 
-For day-to-day development without Supabase containers, use a persistent local cluster:
+For day-to-day development, use a persistent local cluster:
 
 ```bash
 bun run db:dev init          # creates ~/.local/share/foodable/pg, migrates, prints DATABASE_URL
@@ -61,7 +62,7 @@ bun run db:dev init          # creates ~/.local/share/foodable/pg, migrates, pri
 bun --watch src/index.ts
 ```
 
-Override paths with `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` (default **54330**, chosen to avoid Supabase **54321–54324**; migration dry-run picks a free port unless you set `PG_DRYRUN_PORT`). Logs live in `postgres.log` inside the data directory. Other commands: `start`, `stop`, `status`, `url`, `migrate`. Set `PG_BIN` when `initdb` is not on your `PATH`.
+Override paths with `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` (default **54330**, clear of the Supabase CLI's **54321–54324** in case an old local stack is still around; the migration dry run picks a free port unless you set `PG_DRYRUN_PORT`). Logs live in `postgres.log` inside the data directory. Other commands: `start`, `stop`, `status`, `url`, `migrate`. Set `PG_BIN` when `initdb` is not on your `PATH`.
 
 **Docker Compose** alternative (Postgres 17 + app):
 
@@ -72,17 +73,20 @@ docker compose up --build
 
 A one-shot `migrate` service runs `bun run db:migrate` before the app starts.
 
-**Moving an existing Supabase database** (local or cloud) into plain Postgres:
+### Moving data between databases
 
-1. Apply this repo’s migrations on the Supabase project first (`supabase db push` or `bun run db:migrate` against its session pooler).
-2. Initialize plain Postgres (`bun run db:dev init`).
-3. Copy data:
+`db:import-postgres` copies the `public` data of one migrated Postgres into another. Use it to move hosts, or to pull a copy of production into local development:
+
+1. Bring both databases to the same migration version (`bun run db:migrate` against each).
+2. Initialize the target if it is local (`bun run db:dev init`).
+3. Copy:
 
     ```bash
-    bun run db:import-supabase --from "$OLD_DATABASE_URL"
+    bun run db:import-postgres --from "$OLD_DATABASE_URL" [--to "$NEW_DATABASE_URL"]
+    bun run db:import-postgres --from "$OLD_DATABASE_URL" --check-only   # preconditions only
     ```
 
-The importer checks migration parity and refuses a non-empty target.
+`--to` defaults to the `db:dev` database. The importer refuses when the two URLs name the same database, when the migration histories differ (it reads `foodable_migrations`, or `supabase_migrations` on a source that has not been migrated since the rename), or when the target already has rows. The source is only read. It reports row counts per table and checks that every password hash came across. The same steps move a database off an old Supabase project: its session pooler URL is just another `--from`.
 
 **systemd user unit** to start Postgres at login (adjust paths):
 
@@ -111,7 +115,7 @@ WantedBy=default.target
 
 | Variable                | Required     | Purpose                                                                                                                     |
 | ----------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          | yes          | Postgres connection string (plain host or Supabase session pooler)                                                          |
+| `DATABASE_URL`          | yes          | Postgres connection string                                                                                                  |
 | `OAUTH_CLIENT_ID`       | yes          | MCP OAuth client id (`bun run generate-oauth-creds`)                                                                        |
 | `OAUTH_CLIENT_SECRET`   | yes          | MCP OAuth client secret                                                                                                     |
 | `SESSION_SECRET`        | production   | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). Setting it on a live deploy logs everyone out of the web app once. |
@@ -161,13 +165,17 @@ To allow another callback (for example a self-hosted bot), add its exact redirec
 
 Deploy-day steps: [deploy-checklist.md](./deploy-checklist.md).
 
-`railway.toml` at the repo root builds from the `Dockerfile` (`builder = "DOCKERFILE"`, `dockerfilePath = "Dockerfile"`) and health-checks `GET /health` (`healthcheckTimeout` 60, `restartPolicyType` `ON_FAILURE`). Committing it creates nothing on Railway. Create the project and a service from the GitHub repo yourself; Railway then picks the file up on every deploy.
+`railway.toml` at the repo root builds from the `Dockerfile` (`builder = "DOCKERFILE"`, `dockerfilePath = "Dockerfile"`) and health-checks `GET /health` (`healthcheckTimeout` 60, `restartPolicyType` `ON_FAILURE`). Committing it creates nothing on Railway. Create the project yourself with two services: a Postgres database, and the app from the GitHub repo. Railway then picks the file up on every deploy.
 
-Set the same variables as `.env.example` on the service:
+**Postgres.** Add a database (New → Database → PostgreSQL). Turn on backups in its settings before the household has data in it. The app reaches it over Railway's private network, so the database needs no public TCP proxy; add one only while you run `pg_dump`, `db:dryrun --data` or `db:import-postgres` from your own machine, and remove it afterwards.
+
+**Pre-deploy command.** In the app service's deploy settings, set the pre-deploy command to `bun run db:migrate`. Railway runs it in the new image before it switches traffic, and a failing migration stops the deploy while the old version keeps serving. That is what keeps schema and code in step: a migration and the code that needs it ship in the same commit, and the schema is always updated first.
+
+Set the same variables as `.env.example` on the app service:
 
 | Variable                | Required                | Purpose                                                                                     |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          | yes                     | Supabase session pooler URI or other Postgres host                                          |
+| `DATABASE_URL`          | yes                     | Reference the database service: `${{Postgres.DATABASE_URL}}` (private network)              |
 | `OAUTH_CLIENT_ID`       | yes                     | MCP OAuth client id (`bun run generate-oauth-creds`)                                        |
 | `OAUTH_CLIENT_SECRET`   | yes                     | MCP OAuth client secret                                                                     |
 | `SESSION_SECRET`        | yes                     | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). New value logs web users out once. |

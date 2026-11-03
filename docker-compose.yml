@@ -1,5 +1,4 @@
 # Plain Postgres + Foodable app for local/self-hosted trials.
-# Postgres 17 matches local Supabase (17.11) and current Supabase cloud majors.
 
 services:
     migrate:

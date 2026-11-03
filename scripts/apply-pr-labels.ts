@@ -127,7 +127,7 @@ export async function fetchMigrationContents(
 ): Promise<Record<string, string>> {
     const fileContents: Record<string, string> = {};
     for (const path of paths) {
-        if (!path.startsWith("supabase/migrations/")) continue;
+        if (!path.startsWith("db/migrations/")) continue;
         try {
             const data = (await ghApi(token, `repos/${repo}/contents/${path}`, {
                 ref: headSha,

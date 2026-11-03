@@ -107,15 +107,27 @@ export function assertDistinctDatabaseUrls(
     }
 }
 
+// foodable_migrations is where db:migrate keeps history; a source the Supabase
+// CLI migrated (or one not yet migrated since the rename) still has it under
+// supabase_migrations.
+const HISTORY_SCHEMAS = ["foodable_migrations", "supabase_migrations"];
+
 async function migrationVersions(url: string): Promise<Set<string>> {
     const sql = new SQL(url, { prepare: false, max: 1 });
     try {
-        const rows = (await sql`
-            select version
-            from supabase_migrations.schema_migrations
-            order by version
-        `) as { version: string }[];
-        return new Set(rows.map((r) => r.version));
+        for (const schema of HISTORY_SCHEMAS) {
+            const [found] = (await sql`
+                select to_regclass(${`${schema}.schema_migrations`}) is not null as ok
+            `) as { ok: boolean }[];
+            if (!found?.ok) continue;
+            const rows = (await sql.unsafe(
+                `select version from ${schema}.schema_migrations order by version`,
+            )) as { version: string }[];
+            return new Set(rows.map((r) => r.version));
+        }
+        throw new Error(
+            `no schema_migrations table in ${HISTORY_SCHEMAS.join(" or ")}`,
+        );
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Could not read schema_migrations: ${msg}`);
@@ -144,7 +156,7 @@ export async function assertMigrationParity(
     const diff = migrationDiff(from, to);
     if (diff.onlySource.length || diff.onlyTarget.length) {
         const lines = [
-            "Migration history mismatch (supabase_migrations.schema_migrations).",
+            "Migration history mismatch (schema_migrations).",
             "Apply the same migrations on both databases before importing.",
         ];
         if (diff.onlySource.length) {
@@ -227,7 +239,7 @@ export async function passwordHashParity(
  * pg_dump never writes to the source; optional read-only transactions are
  * not required because pg_dump takes a consistent snapshot read.
  */
-export async function importSupabasePublicData(
+export async function importPublicData(
     fromUrl: string,
     toUrl: string,
 ): Promise<ImportResult> {

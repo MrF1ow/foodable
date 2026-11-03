@@ -22,8 +22,8 @@
  * users, so truncate cannot touch users while tokens exist; restoring OAuth
  * would sign Grok out mid-session.
  *
- * Needs: DATABASE_URL or E2E_DB_URL pointing at Postgres (plain local or
- * Supabase-as-host), server on E2E_SERVER (default :8080), and Grok signed
+ * Needs: DATABASE_URL or E2E_DB_URL pointing at Postgres (local or
+ * hosted), server on E2E_SERVER (default :8080), and Grok signed
  * into the foodable MCP server for full runs. Snapshot/restore use PG_BIN tools.
  */
 

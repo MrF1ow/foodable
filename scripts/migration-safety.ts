@@ -1,6 +1,9 @@
 import { checkServiceRoleGrants } from "./data-api-grants.js";
 import {
     checkMigrations,
+    isRelocation,
+    LEGACY_MIGRATIONS_DIR,
+    MIGRATIONS_DIR,
     type MigrationChange,
 } from "./migration-safety/check.js";
 
@@ -52,6 +55,7 @@ function parseDiffLine(line: string): MigrationChange | null {
             status: "renamed",
             path: parts[2]!,
             previousPath: parts[1]!,
+            similarity: Number(status.slice(1)),
         };
     }
     return null;
@@ -68,7 +72,8 @@ function newestBaseTimestamp(base: string): string | null {
         "--name-only",
         base,
         "--",
-        "supabase/migrations",
+        MIGRATIONS_DIR,
+        LEGACY_MIGRATIONS_DIR,
     ]);
     if (!res.ok) return null;
     let max: string | null = null;
@@ -91,7 +96,8 @@ const diff = git([
     "-M",
     base,
     "--",
-    "supabase/migrations",
+    MIGRATIONS_DIR,
+    LEGACY_MIGRATIONS_DIR,
 ]);
 if (!diff.ok) {
     console.error(diff.stderr);
@@ -124,6 +130,7 @@ const findings: { rule: string; path: string; message: string }[] = [
 ];
 
 for (const change of changes) {
+    if (isRelocation(change)) continue;
     if (
         (change.status === "added" || change.status === "renamed") &&
         change.contents !== undefined

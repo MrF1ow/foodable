@@ -13,8 +13,8 @@ afterEach(() => {
 
 describe("fetchMigrationContents", () => {
     test("omits paths that 404 at head and still throws on other errors", async () => {
-        const present = "supabase/migrations/20260101000000_present.sql";
-        const missing = "supabase/migrations/20260101000000_renamed.sql";
+        const present = "db/migrations/20260101000000_present.sql";
+        const missing = "db/migrations/20260101000000_renamed.sql";
         const sql = "-- foodable:contract reason\nSELECT 1;\n";
         const b64 = Buffer.from(sql, "utf8").toString("base64");
 
@@ -51,7 +51,7 @@ describe("fetchMigrationContents", () => {
             fetchMigrationContents(
                 "token",
                 "owner/repo",
-                ["supabase/migrations/server_broken.sql"],
+                ["db/migrations/server_broken.sql"],
                 "abc123",
             ),
         ).rejects.toThrow(/failed \(500\)/);

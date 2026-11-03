@@ -732,7 +732,7 @@ describe("caffeine never reaches an energy figure", () => {
 });
 
 // The insights module renders an alcohol line purely from the data, because it
-// stays free of Supabase and so cannot see the per-user opt-in. gateAlcohol is
+// stays free of the database and so cannot see the per-user opt-in. gateAlcohol is
 // where that flag reaches it, so these assert the end result rather than the
 // zeroing: no alcohol wording in either narrative when tracking is off.
 describe("gateAlcohol", () => {

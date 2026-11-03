@@ -47,9 +47,9 @@ export async function e2eSnapshot(
 }
 
 // No --disable-triggers in the dump: its ALTER TABLE … DISABLE TRIGGER ALL
-// needs a superuser, which `postgres` is not on Supabase. Restoring with
-// session_replication_role = replica already keeps foreign-key triggers from
-// firing, and that setting is allowed there.
+// needs a superuser, which a managed host's `postgres` role often is not.
+// Restoring with session_replication_role = replica already keeps foreign-key
+// triggers from firing, and that setting is allowed there.
 async function restoreArgs(
     dbUrl: string,
 ): Promise<{ bin: string; tables: string }> {

@@ -157,7 +157,7 @@ const MESSAGES = {
 };
 
 // Shaped like SignInError from src/domain/auth.ts (legacy GoTrue status/code).
-function supabaseError(status: number | undefined, code?: string): Error {
+function signInError(status: number | undefined, code?: string): Error {
     return Object.assign(new Error("Invalid login credentials"), {
         status,
         code,
@@ -178,7 +178,7 @@ test("a wrong password after the owner exists says so and never signs up", async
                 password: "wrong-password",
                 authUserCount: async () => 1,
                 signInUser: async () => {
-                    throw supabaseError(400, "invalid_credentials");
+                    throw signInError(400, "invalid_credentials");
                 },
                 signUpUser: async () => {
                     signUps += 1;
@@ -195,9 +195,9 @@ test("a wrong password after the owner exists says so and never signs up", async
 });
 
 for (const [label, err] of [
-    ["a timeout with no status", supabaseError(undefined)],
-    ["a rate limit", supabaseError(429, "over_request_rate_limit")],
-    ["a Supabase 500", supabaseError(500, "unexpected_failure")],
+    ["a timeout with no status", signInError(undefined)],
+    ["a rate limit", signInError(429, "over_request_rate_limit")],
+    ["a server 500", signInError(500, "unexpected_failure")],
 ] as const) {
     test(`${label} is not reported as a wrong password`, async () => {
         const originalError = console.error;
@@ -222,28 +222,28 @@ for (const [label, err] of [
 }
 
 test("classifySignInFailure separates typos, account states and outages", () => {
-    expect(
-        classifySignInFailure(supabaseError(400, "invalid_credentials")),
-    ).toBe("credentials");
-    expect(classifySignInFailure(supabaseError(400))).toBe("credentials");
+    expect(classifySignInFailure(signInError(400, "invalid_credentials"))).toBe(
+        "credentials",
+    );
+    expect(classifySignInFailure(signInError(400))).toBe("credentials");
     // An unconfirmed email is not a wrong password and not an outage.
-    expect(
-        classifySignInFailure(supabaseError(400, "email_not_confirmed")),
-    ).toBe("account");
-    expect(classifySignInFailure(supabaseError(403, "user_banned"))).toBe(
+    expect(classifySignInFailure(signInError(400, "email_not_confirmed"))).toBe(
+        "account",
+    );
+    expect(classifySignInFailure(signInError(403, "user_banned"))).toBe(
         "account",
     );
     expect(
-        classifySignInFailure(supabaseError(429, "over_request_rate_limit")),
+        classifySignInFailure(signInError(429, "over_request_rate_limit")),
     ).toBe("unavailable");
-    expect(classifySignInFailure(supabaseError(503))).toBe("unavailable");
+    expect(classifySignInFailure(signInError(503))).toBe("unavailable");
     expect(classifySignInFailure(new Error("network down"))).toBe(
         "unavailable",
     );
     expect(classifySignInFailure("nope")).toBe("unavailable");
 });
 
-test("an account-state refusal shows Supabase's own message", async () => {
+test("an account-state refusal shows the sign-in error's own message", async () => {
     const originalWarn = console.warn;
     console.warn = () => {};
     try {
@@ -306,7 +306,7 @@ function buildTestApp() {
         return c.text("ok");
     });
     // These tests send deliberately malformed bodies so handlers bail out before
-    // touching Supabase; swallow the resulting throws instead of logging 30 of
+    // touching the database; swallow the resulting throws instead of logging 30 of
     // them per path. Status codes are what the assertions look at.
     app.onError((_err, c) => c.text("handler error", 500));
     return { app, mcpHits: () => mcpHits };

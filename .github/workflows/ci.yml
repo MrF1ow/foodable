@@ -105,7 +105,7 @@ jobs:
                     fi
                   fi
                   git cat-file -e "${base}^{commit}"
-                  changed="$(git diff --name-only -M "$base" -- supabase/migrations)"
+                  changed="$(git diff --name-only -M "$base" -- db/migrations supabase/migrations)"
                   if [ -z "$changed" ]; then
                     echo "no migration changes"
                     exit 0

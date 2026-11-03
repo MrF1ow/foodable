@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { checkServiceRoleGrants } from "./data-api-grants.js";
 
-const PATH = "supabase/migrations/20261022190000_tbl.sql";
+const PATH = "db/migrations/20261022190000_tbl.sql";
 
 describe("checkServiceRoleGrants", () => {
     test("create table without a service_role grant is grant", () => {

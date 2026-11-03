@@ -1,13 +1,14 @@
-// Dry-run the pending Supabase migrations on a throwaway local Postgres.
+// Dry-run the pending migrations on a throwaway local Postgres.
 //
 //   bun run db:dryrun                         fixture mode (seed.sql + check.sql)
 //   bun run db:dryrun --data prod-data.sql    real data from a data-only dump
 //
-// It stubs the bits of Supabase the migrations touch (roles, auth.users,
-// auth.uid(), storage), applies every migration older than --pending-from as
-// the baseline production already has, loads data, then applies the pending
-// ones one transaction per file in order and stops at the first failure — the
-// way `supabase db push` would. Nothing here connects to a remote database.
+// It loads db/bootstrap.sql (the roles, auth.users, auth.uid() and storage
+// stubs the early migrations were written against), applies every migration
+// older than --pending-from as the baseline production already has, loads
+// data, then applies the pending ones one transaction per file in order and
+// stops at the first failure, the way `bun run db:migrate` does. Nothing here
+// connects to a remote database.
 //
 // Real data: take a data-only dump of the public schema with plain pg_dump,
 //   pg_dump "$DATABASE_URL" --data-only --schema=public -f prod-data.sql
@@ -38,7 +39,7 @@ const RERUNNABLE = [
 const RERUN_BEFORE = "20261031180000_phase8_contract.sql";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const MIGRATIONS = `${ROOT}supabase/migrations`;
+const MIGRATIONS = `${ROOT}db/migrations`;
 const FIXTURES = `${ROOT}scripts/migration-dryrun`;
 const BOOTSTRAP = `${ROOT}db/bootstrap.sql`;
 const PORT = process.env.PG_DRYRUN_PORT

@@ -4479,7 +4479,7 @@ describe("/mcp serves the 2026-07-28 revision", () => {
 
     // server/discover is the first request every negotiating client sends and
     // its response — supportedVersions, capabilities, instructions — contains
-    // nothing a tool registration produces. Paying a Supabase round-trip for it
+    // nothing a tool registration produces. Paying a database round-trip for it
     // made the probe the request that failed first under rate pressure.
     test("server/discover costs no profile read and still answers in full", async () => {
         const r = await rpc(

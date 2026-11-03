@@ -1,5 +1,5 @@
 // Generic in-memory TTL cache with in-flight coalescing. Pure (no
-// Supabase/Hono import) so it can be unit-tested and reused by any route that
+// database/Hono import) so it can be unit-tested and reused by any route that
 // wants "serve a cached value, refresh it on expiry, and fall back to the
 // last-good value if the refresh fails".
 export interface TtlCacheResult<T> {

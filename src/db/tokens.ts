@@ -47,7 +47,7 @@ export async function storeToken(token: string, userId: string): Promise<void> {
 
 // "invalid" means the token definitively isn't valid; "unavailable" means we
 // could not find out. Callers must not treat the two alike: counting an
-// unavailable lookup as a failed auth attempt would let a brief Supabase outage
+// unavailable lookup as a failed auth attempt would let a brief database outage
 // — during which *every* token looks invalid — trip the repeat-failure bans in
 // rate-limit.ts and keep clients shed long after the database recovered.
 export type TokenLookup =

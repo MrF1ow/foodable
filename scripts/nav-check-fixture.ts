@@ -1,7 +1,7 @@
 /**
  * Renders every household-app page with fixture data, in light and dark, and
  * serves the result next to the real /app.css so the pages can be looked at
- * without Supabase. The widget equivalent is scripts/widget-harness.ts.
+ * without a database. The widget equivalent is scripts/widget-harness.ts.
  *
  *   bun run scripts/nav-check-fixture.ts   # fixture server for check:nav (:4791)
  *

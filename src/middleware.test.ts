@@ -23,12 +23,12 @@ const realTokens = { ...actualTokens };
 // wholesale breaks every other suite that imports lookupBearer — and restored
 // afterwards so no later file sees the stub.
 let tokenLookups = 0;
-let supabaseAvailable = true;
+let tokenStoreAvailable = true;
 mock.module("./db/tokens.js", () => ({
     ...actualTokens,
     lookupBearer: async (token: string) => {
         tokenLookups++;
-        if (!supabaseAvailable) return { status: "unavailable" };
+        if (!tokenStoreAvailable) return { status: "unavailable" };
         return token === "valid-token"
             ? { status: "valid", kind: "user", userId: "user-1" }
             : token === "hh-token"
@@ -74,7 +74,7 @@ const from = (ip: string, token?: string) =>
 beforeEach(() => {
     _resetBuckets();
     tokenLookups = 0;
-    supabaseAvailable = true;
+    tokenStoreAvailable = true;
 });
 afterEach(() => _resetBuckets());
 
@@ -128,7 +128,7 @@ test("a banned IP is shed without a token lookup", async () => {
 
     for (let i = 0; i < 25; i++) await app.fetch(from("4.4.4.4", "bad-token"));
 
-    // Shedding happens ahead of authenticateBearer, so the Supabase round trip
+    // Shedding happens ahead of authenticateBearer, so the database round trip
     // the ban is meant to save is genuinely never made.
     expect(lookupsBeforeBan).toBe(20);
     expect(tokenLookups).toBe(20);
@@ -154,7 +154,7 @@ test("a success resets strikes, so a shared IP is never banned", async () => {
 
 test("a token lookup outage never bans anyone", async () => {
     const { app } = buildApp();
-    supabaseAvailable = false;
+    tokenStoreAvailable = false;
 
     // Every token looks unverifiable while the database is down. If those
     // counted as strikes, the outage would ban the entire active user base and
@@ -165,7 +165,7 @@ test("a token lookup outage never bans anyone", async () => {
         );
     }
 
-    supabaseAvailable = true;
+    tokenStoreAvailable = true;
     expect((await app.fetch(from("3.3.3.3", "valid-token"))).status).toBe(200);
 });
 

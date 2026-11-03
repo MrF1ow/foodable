@@ -4,6 +4,8 @@ export type MigrationChange = {
     status: MigrationStatus;
     path: string;
     previousPath?: string;
+    /** git's rename similarity, 0-100; 100 means the contents are identical. */
+    similarity?: number;
     contents?: string;
 };
 
@@ -13,7 +15,12 @@ export type Finding = {
     message: string;
 };
 
-const MIGRATION_NAME_RE = /^supabase\/migrations\/(\d{14})_([a-z0-9_]+)\.sql$/;
+export const MIGRATIONS_DIR = "db/migrations";
+// Where migrations lived before the move to db/migrations. Still diffed, so a
+// stray file there fails the name rule instead of slipping past CI.
+export const LEGACY_MIGRATIONS_DIR = "supabase/migrations";
+
+const MIGRATION_NAME_RE = /^db\/migrations\/(\d{14})_([a-z0-9_]+)\.sql$/;
 
 const CONTRACT_MARKER_RE = /^--[ \t]*foodable:contract[ \t]+\S/m;
 
@@ -205,6 +212,19 @@ function checkRls(path: string, contents: string): Finding[] {
     return findings;
 }
 
+/**
+ * The one rename CI allows: an applied migration moved unchanged from the
+ * legacy folder to db/migrations under the same file name. The runner keys
+ * history by version, so the database cannot tell the difference.
+ */
+export function isRelocation(change: MigrationChange): boolean {
+    if (change.status !== "renamed" || change.similarity !== 100) return false;
+    const prev = change.previousPath ?? "";
+    const prefix = `${LEGACY_MIGRATIONS_DIR}/`;
+    if (!prev.startsWith(prefix)) return false;
+    return change.path === `${MIGRATIONS_DIR}/${prev.slice(prefix.length)}`;
+}
+
 function immutableMessage(path: string): string {
     return `immutable: ${path} exists on the base branch and cannot be edited, renamed, or deleted.`;
 }
@@ -221,7 +241,7 @@ function checkNewFile(
             rule: "name",
             path,
             message:
-                "migration filename must match supabase/migrations/<14-digit timestamp>_<snake_case>.sql",
+                "migration filename must match db/migrations/<14-digit timestamp>_<snake_case>.sql",
         });
         return findings;
     }
@@ -267,6 +287,8 @@ export function checkMigrations(opts: {
             });
             continue;
         }
+
+        if (isRelocation(change)) continue;
 
         if (change.status === "renamed") {
             const prev = change.previousPath ?? change.path;
