@@ -129,7 +129,7 @@ Example: `fix(fridge): ignore expired lines in grocery sync`.
 Railway deploys `main`, so a release is not what ships code. It marks a point on `main` that a self-hosted deploy can safely update to.
 
 - **Cut one** with `bun run release` on an up-to-date `main`. It reads the labels on the PRs merged since the last tag, suggests a level, bumps `version` in `package.json` on a `chore/repo-release-<version>` branch, and opens `chore(repo): release <version>` listing those PRs. Pass `patch`, `minor` or `major` to override the suggestion, and `--dry-run` to see the PR without opening it. When the PR merges, the **Release** workflow tags the commit `v<version>` and publishes a GitHub release. `package.json` is a gate file, so the code owner signs off on every release.
-- **Level:** while the version is `0.y.z`, a `breaking` PR, a contract migration or a feature bumps the minor version, and anything else bumps the patch version. Major is never suggested: going to `1.0.0` is a deliberate call. From then on, breaking changes and contract migrations suggest major.
+- **Level:** while the version is `0.y.z`, a `breaking` PR, a contract migration or a feature that touches the product (any area besides `repo`, `docs`, `test` and `deps`) bumps the minor version, and anything else bumps the patch version. Major is never suggested: going to `1.0.0` is a deliberate call. From then on, breaking changes and contract migrations suggest major.
 - **Notes** are generated from PR titles and grouped by the labels CI already applies. Breaking changes and contract migrations come first because they are what a forker has to read before updating.
 - **Don't cut one** in the middle of an expand → contract sequence. Release once the code that reads the new shape has merged.
 
