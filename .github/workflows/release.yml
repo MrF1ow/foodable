@@ -1,0 +1,55 @@
+name: Release
+
+# A release is a merged PR that bumps the version in package.json. When that
+# lands on main this tags the commit v<version> and publishes a GitHub release
+# with notes grouped by PR label (.github/release.yml). Nothing is built or
+# uploaded: deploys build from source. Run it by hand to tag the current
+# version if the tag is missing; an existing tag is left alone.
+
+on:
+    push:
+        branches: ["main"]
+        paths: ["package.json"]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: release
+    cancel-in-progress: false
+
+jobs:
+    release:
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        permissions:
+            # Creates the tag and the release.
+            contents: write
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Tag and publish if the version is new
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  REPO: ${{ github.repository }}
+                  SHA: ${{ github.sha }}
+              run: |
+                  version=$(jq -r .version package.json)
+                  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "::error::package.json version '$version' is not x.y.z"
+                    exit 1
+                  fi
+                  tag="v$version"
+                  if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+                    echo "$tag is already released; nothing to do."
+                    exit 0
+                  fi
+                  gh release create "$tag" \
+                    --repo "$REPO" \
+                    --target "$SHA" \
+                    --title "$tag" \
+                    --generate-notes
