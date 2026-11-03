@@ -18,6 +18,8 @@ Every pillar is meant to refer to the same foods. That shared catalog is the hou
 
 ## Self-hosting
 
+Easiest path: open this repo in your AI agent and say _"Read `.claude/skills/foodable-setup/SKILL.md` and walk me through setting up Foodable."_ It asks what accounts you have (GitHub, Railway, optionally Cloudflare), runs the commands it can, and tells you what to click for the rest.
+
 This is a single-household deploy. Clone the repo, copy `.env.example` to `.env`, point `DATABASE_URL` at any Postgres, apply the migrations in `db/migrations/`, and run the server.
 
 ```bash
