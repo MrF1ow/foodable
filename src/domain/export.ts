@@ -1,4 +1,7 @@
-import { getSupabase } from "../db/client.js";
+import {
+    liveExportArchiveStore,
+    type ExportArchiveStore,
+} from "../db/exports.js";
 import {
     exportArchivePath,
     getAllMealItems,
@@ -21,7 +24,6 @@ import { formatLocalDateTime } from "./tz.js";
 import { fromGrams, isWeightUnit, type WeightUnit } from "./units.js";
 import { buildZip, type ZipEntry } from "../zip.js";
 
-const EXPORT_BUCKET = "exports";
 // Signed link lifetime. The cleanup sweep ages files out on the same horizon.
 const EXPORT_TTL_SECONDS = 60 * 60; // 60 minutes
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000; // every 10 minutes
@@ -463,7 +465,10 @@ export interface FullExportResult {
  * tool used to sit beside it, and the archive absorbed it, which is why
  * `buildMealsCsv` still emits exactly the columns the importer reads.
  */
-export async function exportAllData(userId: string): Promise<FullExportResult> {
+export async function exportAllData(
+    userId: string,
+    store: ExportArchiveStore = liveExportArchiveStore(),
+): Promise<FullExportResult> {
     // One round of five independent queries rather than five awaited in turn:
     // an account with years of history pages through meals, water and weight,
     // and serialising those pushes the tool past the point where a host gives
@@ -551,29 +556,14 @@ export async function exportAllData(userId: string): Promise<FullExportResult> {
     // spelled out twice — the two drifting apart is how a deleted account left
     // its archive behind.
     const path = exportArchivePath(userId);
-    const storage = getSupabase().storage.from(EXPORT_BUCKET);
-
-    const { error: uploadErr } = await storage.upload(path, archive, {
-        contentType: "application/zip",
-        upsert: true,
-    });
-    if (uploadErr)
-        throw new Error(`Failed to upload export: ${uploadErr.message}`);
-
-    const { data, error: signErr } = await storage.createSignedUrl(
-        path,
-        EXPORT_TTL_SECONDS,
-    );
-    if (signErr || !data)
-        throw new Error(
-            `Failed to create download link: ${signErr?.message ?? "unknown error"}`,
-        );
+    await store.upload(path, archive);
+    const url = await store.signedUrl(path, EXPORT_TTL_SECONDS);
 
     return {
         counts,
         goals: goals !== null,
         profile: profile !== null,
-        url: data.signedUrl,
+        url,
     };
 }
 
@@ -582,52 +572,10 @@ export async function exportAllData(userId: string): Promise<FullExportResult> {
  * export file outlives its signed URL by more than one sweep interval, even
  * across server restarts and for users who never export again.
  */
-export async function sweepStaleExports(): Promise<void> {
-    const storage = getSupabase().storage.from(EXPORT_BUCKET);
-    const cutoff = Date.now() - EXPORT_TTL_SECONDS * 1000;
-
-    // Files live under per-user folders, so list the root to enumerate folders,
-    // then list each folder to reach the files (with their timestamps).
-    const { data: folders, error: rootErr } = await storage.list("", {
-        limit: 1000,
-    });
-    if (rootErr) {
-        console.warn("Export sweep: failed to list bucket:", rootErr.message);
-        return;
-    }
-    if (!folders) return;
-
-    const stalePaths: string[] = [];
-    for (const folder of folders) {
-        const { data: files, error: listErr } = await storage.list(
-            folder.name,
-            { limit: 1000 },
-        );
-        if (listErr) {
-            console.warn(
-                `Export sweep: failed to list ${folder.name}:`,
-                listErr.message,
-            );
-            continue;
-        }
-        for (const file of files ?? []) {
-            const ts = file.updated_at ?? file.created_at;
-            if (ts && new Date(ts).getTime() < cutoff) {
-                stalePaths.push(`${folder.name}/${file.name}`);
-            }
-        }
-    }
-
-    if (stalePaths.length === 0) return;
-    const { error: removeErr } = await storage.remove(stalePaths);
-    if (removeErr) {
-        console.warn(
-            "Export sweep: failed to remove files:",
-            removeErr.message,
-        );
-        return;
-    }
-    console.log(`Export sweep: removed ${stalePaths.length} stale file(s).`);
+export async function sweepStaleExports(
+    store: ExportArchiveStore = liveExportArchiveStore(),
+): Promise<void> {
+    await store.sweepOlderThan(Date.now() - EXPORT_TTL_SECONDS * 1000);
 }
 
 let sweepRunning = false;

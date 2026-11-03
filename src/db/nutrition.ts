@@ -2,6 +2,7 @@ import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
+import { liveExportArchiveStore } from "./exports.js";
 import { getSupabase } from "./client.js";
 
 // ---------- Idempotency ----------
@@ -1348,11 +1349,7 @@ export async function deleteAllUserData(userId: string): Promise<void> {
 
     // Remove any export file from the "exports" storage bucket. Missing paths
     // are not an error, so this is a no-op for users who never exported.
-    const { error: exportErr } = await sb.storage
-        .from("exports")
-        .remove(exportStoragePaths(userId));
-    if (exportErr)
-        throw new Error(`Failed to delete exports: ${exportErr.message}`);
+    await liveExportArchiveStore().remove(exportStoragePaths(userId));
 
     // recipe_portions.user_id carries no foreign key, so the auth delete below
     // would leave these rows behind. The recipes themselves are household
