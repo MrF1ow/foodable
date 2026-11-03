@@ -4552,6 +4552,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
     test.each(ERAS)(
         "tools/list carries the MCP Apps links and output schemas (%p)",
         async (mode) => {
+            db.goals = goals({ user_id: "u1" });
             await withHttpClient("u1", mode, async (client) => {
                 const { tools } = await client.listTools();
                 expect(tools.length).toBeGreaterThan(30);
@@ -4560,6 +4561,39 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     resourceUri: "ui://widget/meal-logged.html",
                 });
                 expect(logMeal?.outputSchema?.type).toBe("object");
+            });
+        },
+    );
+
+    // meal-logged is a progress strip against goals: with none it would paint
+    // an empty card in the chat, so its three tools drop the link. Every other
+    // widget link stays, and the resource itself is still served.
+    test.each(ERAS)(
+        "without goals the meal tools carry no widget link (%p)",
+        async (mode) => {
+            db.goals = null;
+            await withHttpClient("u1", mode, async (client) => {
+                const { tools } = await client.listTools();
+                for (const name of [
+                    "log_meal",
+                    "log_recipe_portion",
+                    "update_meal",
+                ]) {
+                    const tool = tools.find((t) => t.name === name);
+                    expect(tool?._meta?.ui).toBeUndefined();
+                    expect(
+                        tool?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    expect(tool?.outputSchema?.type).toBe("object");
+                }
+                expect(
+                    tools.find((t) => t.name === "get_goal_progress")?._meta
+                        ?.ui,
+                ).toEqual({ resourceUri: "ui://widget/goal-progress.html" });
+                const res = await client.readResource({
+                    uri: "ui://widget/meal-logged.html",
+                });
+                expect(res.contents).toHaveLength(1);
             });
         },
     );
@@ -4673,6 +4707,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
 
 describe("/mcp still serves 2025-era clients unchanged", () => {
     test("a legacy client completes initialize and lists tools", async () => {
+        db.goals = goals({ user_id: "u1" });
         await withHttpClient("u1", "legacy", async (client) => {
             expect(client.getProtocolEra()).toBe("legacy");
             expect(client.getServerVersion()?.name).toBe("Foodable");

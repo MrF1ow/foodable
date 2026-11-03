@@ -399,7 +399,9 @@ export function registerNutritionWriteTools(
         callerHouseholdId,
         analytics,
         uiMeta,
+        hasGoals,
     } = ctx;
+    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
     server.registerTool(
         "log_meal",
         {
@@ -514,9 +516,9 @@ export function registerNutritionWriteTools(
             }),
             outputSchema: MEAL_PROGRESS_OUTPUT_SCHEMA,
             // Link the tool to its progress UI (MCP Apps). update_meal reuses
-            // the SAME widget; see buildMealProgress / meal-logged.html. The
-            // widget renders nothing when no goals are set.
-            ...uiMeta(MEAL_LOGGED_WIDGET_URI),
+            // the SAME widget; see buildMealProgress / meal-logged.html. With
+            // no goals the link is dropped (ToolContext.hasGoals).
+            ...mealLoggedUiMeta,
         },
         async ({ user_id, target_member, items, ...mealArgs }) => {
             return withAnalytics(
@@ -627,7 +629,7 @@ export function registerNutritionWriteTools(
                     ),
             }),
             outputSchema: MEAL_PROGRESS_OUTPUT_SCHEMA,
-            ...uiMeta(MEAL_LOGGED_WIDGET_URI),
+            ...mealLoggedUiMeta,
         },
         async ({
             user_id,
@@ -967,7 +969,9 @@ export function registerNutritionEditTools(
         callerHouseholdId,
         analytics,
         uiMeta,
+        hasGoals,
     } = ctx;
+    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
     server.registerTool(
         "delete_meal",
         {
@@ -1079,8 +1083,8 @@ export function registerNutritionEditTools(
             outputSchema: MEAL_PROGRESS_OUTPUT_SCHEMA,
             // Reuses the SAME meal-logged widget as log_meal (see
             // buildMealProgress / meal-logged.html); `action: "updated"` just
-            // changes its header. Renders nothing when no goals are set.
-            ...uiMeta(MEAL_LOGGED_WIDGET_URI),
+            // changes its header. Unlinked when no goals are set.
+            ...mealLoggedUiMeta,
         },
         async ({ id, user_id, target_member, items, ...fields }) => {
             return withAnalytics(

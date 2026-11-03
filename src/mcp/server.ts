@@ -15,6 +15,7 @@ import {
     preferredDrinkUnitFromProfile,
     getProfile,
 } from "../db/profiles.js";
+import { getNutritionGoals } from "../db/nutrition.js";
 import {
     createToolContext,
     NUTRIENT_COVERAGE,
@@ -112,6 +113,7 @@ export function registerTools(
     // is exactly what a non-HTTP embedding should record.
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
+    hasGoals = true,
 ) {
     const ctx = createToolContext(
         auth,
@@ -119,6 +121,7 @@ export function registerTools(
         alcohol,
         protocolEra,
         baseUrl,
+        hasGoals,
     );
     // Original registerTool order is not grouped by domain. Call consecutive
     // runs so tools/list stays byte-identical, including order.
@@ -204,7 +207,16 @@ async function buildMcpServer(
     // resolves to a drink unit only when tracking is on — null is what every
     // display path treats as "this user does not track alcohol" (storage is
     // never affected).
-    const profile = auth.kind === "user" ? await getProfile(auth.userId) : null;
+    // Goals are read beside the profile, not after it: they only decide whether
+    // the meal-logged widget is linked (see ToolContext.hasGoals). A household
+    // token has no single member to read goals for, so it keeps the link.
+    const [profile, goals] =
+        auth.kind === "user"
+            ? await Promise.all([
+                  getProfile(auth.userId),
+                  getNutritionGoals(auth.userId),
+              ])
+            : [null, undefined];
     const drinkUnit = preferredDrinkUnitFromProfile(profile);
 
     registerTools(
@@ -214,6 +226,7 @@ async function buildMcpServer(
         alcoholTrackingEnabledFromProfile(profile) ? (drinkUnit ?? "us") : null,
         protocolEra,
         baseUrl,
+        goals !== null,
     );
     return server;
 }
