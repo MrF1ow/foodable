@@ -171,6 +171,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/site-session.ts": "platform",
     "src/ttl-cache.ts": "platform",
     "src/url.ts": "platform",
+    "src/version.ts": "platform",
     "src/widgets.ts": "platform",
     "bun.lock": "deps",
 };
