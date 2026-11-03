@@ -398,29 +398,33 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
         const { sql } = ctx();
         setSqlForTests(sql);
 
-        await run(async (tx) => {
-            try {
-                await tx`select 1 / 0`;
-            } catch (err) {
-                const wrapped = pgError("list things", err);
-                expect(wrapped.message).toMatch(/^Failed to list things: /);
-                expect(wrapped.cause).toBe(err);
-            }
-        });
+        // Catch outside run(). Bun 1.4.4 rejects sql.begin() when the server
+        // answers COMMIT with ROLLBACK because the transaction already aborted.
+        const divideByZero = await run(async (tx) => {
+            await tx`select 1 / 0`;
+        }).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(divideByZero).not.toBeNull();
+        const wrapped = pgError("list things", divideByZero);
+        expect(wrapped.message).toMatch(/^Failed to list things: /);
+        expect(wrapped.cause).toBe(divideByZero);
 
-        await run(async (tx) => {
-            try {
-                await tx`
-                    do $$ begin
-                      raise exception 'not a household member';
-                    end $$
-                `;
-            } catch (err) {
-                const wrapped = pgError("add member", err);
-                expect(wrapped.message).toBe(
-                    "Failed to add member: not a household member",
-                );
-            }
-        });
+        const raised = await run(async (tx) => {
+            await tx`
+                do $$ begin
+                  raise exception 'not a household member';
+                end $$
+            `;
+        }).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(raised).not.toBeNull();
+        const wrappedRaise = pgError("add member", raised);
+        expect(wrappedRaise.message).toBe(
+            "Failed to add member: not a household member",
+        );
     });
 });
