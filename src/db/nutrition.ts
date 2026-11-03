@@ -4,7 +4,7 @@ import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
 import { liveExportArchiveStore, type ExportArchiveStore } from "./exports.js";
-import { getSupabase } from "./client.js";
+import { deleteAuthUser } from "./users.js";
 import {
     definedColumns,
     insertReturning,
@@ -1693,8 +1693,8 @@ export async function deleteAllUserData(
 ): Promise<void> {
     // Export removal is idempotent and lives outside Postgres; run it first so
     // a later DB failure does not leave a downloadable archive for an account
-    // we failed to erase. GoTrue deleteUser runs last so every public row is
-    // gone before auth.users disappears.
+    // we failed to erase. public.users is deleted last inside the same
+    // transaction, after the four no-action tables, so FK checks still pass.
     await (deps?.exportStore ?? liveExportArchiveStore()).remove(
         exportStoragePaths(userId),
     );
@@ -1727,13 +1727,14 @@ export async function deleteAllUserData(
         await deleteUserRows("oauth_tokens", "delete tokens");
         await deleteUserRows("refresh_tokens", "delete refresh tokens");
         await deleteUserRows("auth_codes", "delete auth codes");
-    });
 
-    if (deps?.auth) {
-        await deps.auth.deleteUser(userId);
-        return;
-    }
-    const { error: userErr } =
-        await getSupabase().auth.admin.deleteUser(userId);
-    if (userErr) throw new Error(`Failed to delete user: ${userErr.message}`);
+        if (deps?.auth) {
+            await deps.auth.deleteUser(userId);
+            return;
+        }
+        const deleted = await deleteAuthUser(userId, tx);
+        if (!deleted) {
+            throw new Error("Failed to delete user: User not found");
+        }
+    });
 }

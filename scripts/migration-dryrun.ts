@@ -30,6 +30,7 @@ const DEFAULT_PENDING_FROM = "20261004230000";
 const RERUNNABLE = [
     "20261005010100_food_catalog_backfill.sql",
     "20261005010200_fridge_locations_from_household.sql",
+    "20261101120100_users_backfill.sql",
 ];
 
 // The backfills above read columns the Phase 8 contract drops, so the re-run
@@ -59,18 +60,24 @@ function fail(message: string): never {
     throw new Error("dry run failed");
 }
 
-const COUNTS_SQL = `
+function countsSql(includeUsers: boolean): string {
+    const users = includeUsers
+        ? "'users', (select count(*) from public.users),"
+        : "";
+    return `
     select json_build_object(
         'foods', (select count(*) from public.foods),
         'foods_with_calories', (select count(*) from public.foods where calories is not null),
         'food_barcodes', (select count(*) from public.food_barcodes),
         'fridge_locations', (select count(*) from public.fridge_locations),
+        ${users}
         'null_food_id', (
             (select count(*) from public.fridge_items where food_id is null)
             + (select count(*) from public.grocery_lines where food_id is null)
             + (select count(*) from public.recipe_ingredients where food_id is null)
         )
     )`;
+}
 
 let pg: Awaited<ReturnType<typeof startTempPostgres>> | undefined;
 
@@ -110,15 +117,20 @@ try {
         console.log("data: fixture seed.sql");
     }
 
-    let rerunDone = false;
-    async function rerunCheck(applied: string[]): Promise<void> {
-        rerunDone = true;
-        const before = await scalar(COUNTS_SQL);
-        for (const file of RERUNNABLE.filter((f) => applied.includes(f))) {
+    async function rerunCheck(
+        applied: string[],
+        label: string,
+        includeUsers: boolean,
+    ): Promise<void> {
+        const files = RERUNNABLE.filter((f) => applied.includes(f));
+        if (files.length === 0) return;
+        const sql = countsSql(includeUsers);
+        const before = await scalar(sql);
+        for (const file of files) {
             const res = await applyFile(`${MIGRATIONS}/${file}`);
             if (!res.ok) fail(`re-running ${file} failed:\n${res.out}`);
         }
-        const after = await scalar(COUNTS_SQL);
+        const after = await scalar(sql);
         if (
             JSON.stringify(JSON.parse(after)) !==
             JSON.stringify(JSON.parse(before))
@@ -127,20 +139,26 @@ try {
                 `re-running changed counts:\n  before ${before}\n  after  ${after}`,
             );
         }
-        console.log("re-run: no-op");
+        console.log(`re-run (${label}): no-op`);
     }
 
     console.log(`pending: ${pending.length} migrations`);
     const applied: string[] = [];
     for (const file of pending) {
-        if (file === RERUN_BEFORE) await rerunCheck(applied);
+        if (file === RERUN_BEFORE) {
+            await rerunCheck(
+                applied.filter((f) => f < RERUN_BEFORE),
+                "pre-phase8",
+                false,
+            );
+        }
         const res = await applyFile(`${MIGRATIONS}/${file}`);
         if (!res.ok) fail(`  FAIL ${file}\n${res.out}`);
         console.log(`  ok   ${file}`);
         applied.push(file);
     }
 
-    const counts = JSON.parse(await scalar(COUNTS_SQL));
+    const counts = JSON.parse(await scalar(countsSql(true)));
     console.log("result:", counts);
     if (counts.null_food_id !== 0) {
         fail(`${counts.null_food_id} item rows have no food_id`);
@@ -152,7 +170,11 @@ try {
         console.log("fixture expectations: ok");
     }
 
-    if (!rerunDone) await rerunCheck(applied);
+    await rerunCheck(
+        applied.filter((f) => f >= RERUN_BEFORE),
+        "post-pending",
+        true,
+    );
     console.log("\ndry run passed");
 } catch (err) {
     if (process.exitCode !== 1) {

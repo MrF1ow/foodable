@@ -134,7 +134,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
     let signUps = 0;
     const userId = await resolveApproveUser({
         email: "founder@example.com",
-        password: "secret12",
+        password: "secret123456",
         authUserCount: async () => 0,
         signInUser: async () => {
             throw new Error("Invalid login credentials");
@@ -142,7 +142,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
         signUpUser: async (email, password) => {
             signUps += 1;
             expect(email).toBe("founder@example.com");
-            expect(password).toBe("secret12");
+            expect(password).toBe("secret123456");
             return "11111111-1111-4111-8111-111111111111";
         },
         messages: MESSAGES,
@@ -271,7 +271,7 @@ test("existing users still sign in after signup closes", async () => {
     let signUps = 0;
     const userId = await resolveApproveUser({
         email: "founder@example.com",
-        password: "secret12",
+        password: "secret123456",
         authUserCount: async () => 1,
         signInUser: async () => "11111111-1111-4111-8111-111111111111",
         signUpUser: async () => {

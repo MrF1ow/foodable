@@ -1,9 +1,10 @@
 -- Fixture for the Phase 2 food catalog backfill, loaded onto the schema as it
 -- stood before 20261004230000. Each row is an edge case check.sql asserts on.
 
-insert into auth.users (id, email) values
-    ('00000000-0000-0000-0000-0000000000a1', 'a@example.com'),
-    ('00000000-0000-0000-0000-0000000000b2', 'b@example.com');
+-- Non-null hashes so check.sql's password_hash comparison compares values.
+insert into auth.users (id, email, encrypted_password) values
+    ('00000000-0000-0000-0000-0000000000a1', 'a@example.com', '$2a$10$fixturehashaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+    ('00000000-0000-0000-0000-0000000000b2', 'b@example.com', '$2a$10$fixturehashbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
 
 -- 'Freezer' twice: the location copy must not trip the unique key.
 insert into public.households (id, name, fridge_locations) values

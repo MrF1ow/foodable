@@ -111,6 +111,25 @@ begin
         raise exception 'profiles.nutrition_layout missing or not nullable text[]';
     end if;
 
+    if (select count(*) from auth.users) <>
+       (select count(*) from public.users) then
+        raise exception 'auth.users and public.users counts differ: auth=% public=%',
+            (select count(*) from auth.users),
+            (select count(*) from public.users);
+    end if;
+
+    if exists (
+        select 1
+        from auth.users a
+        left join public.users u on u.id = a.id
+        where u.id is null
+           or u.email is distinct from a.email
+           or u.created_at is distinct from a.created_at
+           or u.password_hash is distinct from a.encrypted_password
+    ) then
+        raise exception 'public.users does not mirror auth.users';
+    end if;
+
     if has_function_privilege('anon', 'public.add_household_member(uuid,uuid,text)', 'execute')
        or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute') then
         raise exception 'household RPCs are still executable by client roles';

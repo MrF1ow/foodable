@@ -84,7 +84,7 @@ test("household server error reopens add-member and remove confirm modals", () =
         isOwner: true,
         canManage: true,
         viewerUserId: alice.userId,
-        error: "Password must be at least 8 characters.",
+        error: "Password must be at least 12 characters.",
         openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     } as never);
     expect(addHtml).toMatch(

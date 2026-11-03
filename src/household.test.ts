@@ -115,7 +115,7 @@ test("addHouseholdMember after createHousehold inserts a member", async () => {
         {
             displayName: "Bob",
             login: { kind: "username", username: "bob" },
-            password: "password1",
+            password: "password1234",
         },
     );
 
