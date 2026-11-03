@@ -846,8 +846,8 @@ export function registerNutritionWriteTools(
                     );
                     // One profile read serves both: the timezone, and whether the
                     // user ever configured one via timezoneFromProfile (null
-                    // means never set — see the Profile.timezone doc comment in
-                    // supabase.ts, #99). Rows without an explicit offset are
+                    // means never set — see Profile.timezone in
+                    // src/db/profiles.ts, #99). Rows without an explicit offset are
                     // placed with it, so the import warns rather than silently
                     // guessing.
                     const profile = await getProfile(userId);

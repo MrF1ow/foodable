@@ -260,7 +260,7 @@ export interface ParsedLoggedAt {
 /**
  * Place a caller-supplied timestamp on the timeline, reading offset-less input
  * in `tz`. This is the one resolver every write path shares — the bulk importer
- * (`resolveLoggedAt` in src/import.ts) and the manual log/update tools
+ * (`resolveLoggedAt` in src/domain/import.ts) and the manual log/update tools
  * (`resolveWriteLoggedAt` below) differ only in how they report failure and in
  * the window they accept around now. Sharing it is what makes one string mean
  * one instant: the same "2026-01-05 08:30:00" has to land on the same local day

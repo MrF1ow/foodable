@@ -6,7 +6,7 @@
 // inline version had a real bug (issue #65): it only closed a chunk when the
 // calendar date changed, so a run of same-date rows straddling `max` kept
 // growing past it — the server hard-rejects anything over MAX_ROWS_PER_CALL
-// (src/import.ts), so those oversized chunks always failed. The widget
+// (src/domain/import.ts), so those oversized chunks always failed. The widget
 // inlines this file's compiled output via @inlinets (src/widgets.ts).
 
 export interface ChunkedRows<T> {
@@ -21,7 +21,7 @@ export interface ChunkedRows<T> {
      * that date: two byte-identical rows land in different calls, each the
      * only occurrence of its content in its own call, so both independently
      * compute occurrence-ordinal 0 and produce the SAME idempotency key
-     * (`import:<digest>:0`, see rowContentDigest in src/import.ts) — the
+     * (`import:<digest>:0`, see rowContentDigest in src/domain/import.ts) — the
      * second call's copy then dedupes against the first as if it were a
      * re-import, instead of writing a second row. Callers should warn the
      * user when this list is non-empty.

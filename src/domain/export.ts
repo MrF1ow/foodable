@@ -496,7 +496,7 @@ export async function exportAllData(
 
     // Both preferences come off the profile row already in hand. The
     // getUserTimezone / getPreferredWeightUnit wrappers each run their own
-    // `select * from profiles` (src/supabase.ts says so explicitly), so calling
+    // `select * from profiles` (see src/db/profiles.ts), so calling
     // them here would repeat an identical query twice for no new information.
     const configuredTz = timezoneFromProfile(profile);
     const tz = configuredTz ?? "UTC";
