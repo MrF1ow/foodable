@@ -28,6 +28,22 @@ export function bumpVersion(v: string, level: Level): string {
     return `${major}.${minor}.${patch + 1}`;
 }
 
+// Areas a deploy never notices. A feature confined to them (a new script, a
+// docs page) does not earn a minor bump on its own.
+const NON_PRODUCT_AREAS = new Set([
+    "area:repo",
+    "area:docs",
+    "area:test",
+    "area:deps",
+]);
+
+// A PR with no area labels counts as product: an unlabelled PR is unknown,
+// and over-suggesting minor is the safe mistake.
+export function touchesProduct(labels: string[]): boolean {
+    const areas = labels.filter((l) => l.startsWith("area:"));
+    return areas.length === 0 || areas.some((a) => !NON_PRODUCT_AREAS.has(a));
+}
+
 // Before 1.0 a breaking change or a contract migration is a minor bump, and
 // major is never suggested: 1.0.0 is a deliberate call, not a label count.
 // From 1.0 on they are major.
@@ -48,12 +64,17 @@ export function suggestLevel(
             reason: `breaking change or contract migration in ${refs}`,
         };
     }
-    const feats = prs.filter((p) => p.labels.includes("type:feat"));
+    const feats = prs.filter(
+        (p) => p.labels.includes("type:feat") && touchesProduct(p.labels),
+    );
     if (feats.length > 0) {
         const refs = feats.map((p) => `#${p.number}`).join(", ");
         return { level: "minor", reason: `features in ${refs}` };
     }
-    return { level: "patch", reason: "fixes and maintenance only" };
+    return {
+        level: "patch",
+        reason: "fixes, maintenance and tooling only",
+    };
 }
 
 // Squash merges end their subject with "(#123)".

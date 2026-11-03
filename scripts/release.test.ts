@@ -44,6 +44,33 @@ describe("suggestLevel", () => {
         expect(s.reason).toContain("#2");
     });
 
+    test("a feature confined to repo tooling or docs is a patch", () => {
+        expect(
+            suggestLevel("0.1.0", [
+                pr(1, "type:feat", "area:repo"),
+                pr(2, "type:feat", "area:docs", "area:test"),
+            ]).level,
+        ).toBe("patch");
+    });
+
+    test("a feature that also touches the product is a minor", () => {
+        expect(
+            suggestLevel("0.1.0", [
+                pr(1, "type:feat", "area:repo", "area:fridge"),
+            ]).level,
+        ).toBe("minor");
+    });
+
+    test("an unlabelled feature counts as product", () => {
+        expect(suggestLevel("0.1.0", [pr(1, "type:feat")]).level).toBe("minor");
+    });
+
+    test("a breaking repo-only change still bumps", () => {
+        expect(
+            suggestLevel("0.1.0", [pr(1, "breaking", "area:repo")]).level,
+        ).toBe("minor");
+    });
+
     test("before 1.0 a breaking change or contract is minor, never major", () => {
         expect(suggestLevel("0.4.2", [pr(1, "breaking")]).level).toBe("minor");
         expect(
