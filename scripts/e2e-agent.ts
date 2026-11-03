@@ -8,12 +8,6 @@
  *   bun run e2e:agent --keep           # leave the test writes in place
  *   bun run e2e:agent --restore        # reload the last snapshot (after --keep)
  *
- * Needs: the local stack from ~/.local/share/foodable-dev (server on :8080,
- * Supabase on :54322), and Grok signed in to its `foodable` MCP server
- * (`grok` → /mcps → foodable → i). Grok acts as whoever signed in; the
- * scenarios are written for the seeded household (owner Ethan, member
- * Morgan), so the actor must be a member of it.
- *
  * Every agent turn is checked three ways:
  *   - which tools ran, as whom, and that none failed (tool_analytics rows
  *     written by the server during the turn, not the agent's own account);
@@ -21,10 +15,16 @@
  *   - invariants: every food's fridge stock still equals its stock ledger
  *     (the real ledgerMatchesStock), and no fridge amount is negative.
  *
- * Before the run the public schema's data is snapshotted (as supabase_admin,
- * inside the DB container); afterwards it is restored, so the seed data comes
- * back unchanged. OAuth tables and tool_analytics are left out of both:
- * restoring an older refresh token would sign Grok out mid-session.
+ * Before the run the public schema's data is snapshotted with host pg_dump;
+ * afterwards it is restored with psql, so the seed data comes back unchanged.
+ * OAuth tables, tool_analytics, public.users and export_archives are left out
+ * (see src/db/testing/e2e-snapshot.ts): Phase 3 OAuth FKs use NO ACTION on
+ * users, so truncate cannot touch users while tokens exist; restoring OAuth
+ * would sign Grok out mid-session.
+ *
+ * Needs: DATABASE_URL or E2E_DB_URL pointing at Postgres (plain local or
+ * Supabase-as-host), server on E2E_SERVER (default :8080), and Grok signed
+ * into the foodable MCP server for full runs. Snapshot/restore use PG_BIN tools.
  */
 
 import { SQL } from "bun";
@@ -33,12 +33,17 @@ import { foodFromRow } from "../src/domain/foods.js";
 import { fridgeItemFromRow, type FridgeItem } from "../src/domain/fridge.js";
 import { ledgerMatchesStock, type StockMovement } from "../src/domain/stock.js";
 import { movementFromRow } from "../src/db/stock.js";
+import {
+    e2eRehearseRestore,
+    e2eRestore,
+    e2eSnapshot,
+} from "../src/db/testing/e2e-snapshot.js";
 
 const DB_URL =
     process.env.E2E_DB_URL ??
+    process.env.DATABASE_URL ??
     "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const SERVER = process.env.E2E_SERVER ?? "http://localhost:8080";
-const CONTAINER = process.env.E2E_DB_CONTAINER ?? "supabase_db_foodable-dev";
 const GROK = process.env.GROK_BIN ?? `${process.env.HOME}/.grok/bin/grok`;
 const MCP_NAME = process.env.E2E_MCP_NAME ?? "foodable";
 const TURN_TIMEOUT_MS = 240_000;
@@ -47,15 +52,6 @@ const OUT_DIR = "tmp/e2e-agent";
 // Grok resumes sessions per working directory, and an empty one keeps repo
 // instructions out of the agent's context.
 const WORK_DIR = `${OUT_DIR}/work`;
-const SNAPSHOT_IN_CONTAINER = "/tmp/foodable-e2e-snapshot.sql";
-const NOT_SNAPSHOTTED = [
-    "oauth_tokens",
-    "refresh_tokens",
-    "registered_clients",
-    "auth_codes",
-    "tool_analytics",
-];
-
 const sql = new SQL(DB_URL);
 
 // ---- terminal output ----
@@ -685,12 +681,97 @@ const SCENARIOS: Scenario[] = [
     {
         id: "eat",
         title: "Eat something from the fridge",
-        covers: "eat_fridge_item → fridge decrement + food-backed meal with computed totals",
+        covers: "eat_fridge_item when it is in stock; otherwise log_meal and the fridge left alone",
         async run(ctx) {
             const yogurt = await foodId("Greek yogurt");
             const before = await stockOf(yogurt);
             const [food] =
                 await sql`select calories::float8 from foods where id = ${yogurt}`;
+            // The checks follow the fridge as it is: eating something the
+            // fridge does not hold must log the meal and leave stock alone.
+            const inStock = (before.g ?? 0) >= 150;
+            const expectedKcal = Math.round(
+                (Number(food.calories) * 150) / 100,
+            );
+            if (!inStock) {
+                // Nothing to deduct. The meal still happened, so it must be
+                // logged, with the fridge left alone. Asking which meal it
+                // was before logging is fine: answer and check then.
+                let logged = false;
+                const t1 = await ctx.turn(
+                    "Eat yogurt (none in the fridge)",
+                    "I just ate 150 g of the Greek yogurt from the fridge.",
+                    undefined,
+                    async (t, c) => {
+                        c.check(
+                            !called(t, "eat_fridge_item"),
+                            "no yogurt in the fridge, so eat_fridge_item was not used",
+                            toolList(t),
+                        );
+                        const moves = await movementsSince(t.since);
+                        c.check(
+                            moves.length === 0,
+                            "no stock movement at all",
+                            moves,
+                        );
+                        c.near(
+                            (await stockOf(yogurt)).g ?? 0,
+                            before.g ?? 0,
+                            "yogurt stock unchanged",
+                        );
+                        const fresh = await mealsSince(t);
+                        c.check(
+                            fresh.length <= 1 &&
+                                fresh.every((m) => m.user_id === ctx.me.userId),
+                            "at most one meal, logged for me",
+                            fresh,
+                        );
+                        logged = fresh.length === 1;
+                        if (logged) {
+                            c.near(
+                                fresh[0]!.calories,
+                                expectedKcal,
+                                "meal calories match 150 g of the food",
+                                1,
+                            );
+                        }
+                    },
+                );
+                if (logged) return;
+                await ctx.turn(
+                    "Answer: it was a snack",
+                    "It was a snack.",
+                    { resume: t1 },
+                    async (t, c) => {
+                        const fresh = (await mealsSince(t1)).filter(
+                            (m) => m.user_id === ctx.me.userId,
+                        );
+                        c.check(
+                            fresh.length === 1,
+                            "one meal logged for me",
+                            fresh,
+                        );
+                        c.near(
+                            fresh[0]?.calories ?? null,
+                            expectedKcal,
+                            "meal calories match 150 g of the food",
+                            1,
+                        );
+                        c.check(
+                            !called(t, "eat_fridge_item"),
+                            "still nothing taken from the fridge",
+                            toolList(t),
+                        );
+                        const moves = await movementsSince(t1.since);
+                        c.check(
+                            moves.length === 0,
+                            "no stock movement at all",
+                            moves,
+                        );
+                    },
+                );
+                return;
+            }
             await ctx.turn(
                 "Eat yogurt",
                 "I just ate 150 g of the Greek yogurt from the fridge.",
@@ -742,9 +823,49 @@ const SCENARIOS: Scenario[] = [
                     );
                     c.near(
                         meal?.calories ?? null,
-                        Math.round((Number(food.calories) * 150) / 100),
+                        expectedKcal,
                         "meal calories computed from the food (per 100 g × 150 g)",
                         1,
+                    );
+                },
+            );
+        },
+    },
+    {
+        id: "ate-out",
+        title: "Eat out: log the meal, leave the fridge alone",
+        covers: "log_meal for food not from the fridge → a meal and no stock change",
+        async run(ctx) {
+            await ctx.turn(
+                "Burger at a restaurant",
+                "I had a cheeseburger and fries at a restaurant for lunch, about 1100 calories.",
+                undefined,
+                async (t, c) => {
+                    c.check(called(t, "log_meal"), "log_meal was called");
+                    c.check(
+                        !called(t, "eat_fridge_item") &&
+                            !called(t, "cook_recipe"),
+                        "nothing taken from the fridge",
+                        toolList(t),
+                    );
+                    const fresh = await mealsSince(t);
+                    c.check(
+                        fresh.length === 1 &&
+                            fresh[0]!.user_id === ctx.me.userId,
+                        "one meal, logged for me",
+                        fresh,
+                    );
+                    c.near(
+                        fresh[0]?.calories ?? null,
+                        1100,
+                        "about 1100 kcal stored",
+                        50,
+                    );
+                    const moves = await movementsSince(t.since);
+                    c.check(
+                        moves.length === 0,
+                        "no stock movement at all",
+                        moves,
                     );
                 },
             );
@@ -763,13 +884,27 @@ const SCENARIOS: Scenario[] = [
                 undefined,
                 async (t, c) => {
                     c.check(
+                        !called(t, "eat_fridge_item") && !called(t, "log_meal"),
+                        "nothing logged as eaten",
+                    );
+                    c.check(
+                        (await mealsSince(t)).length === 0,
+                        "no meal was created",
+                    );
+                    if ((before.g ?? 0) === 0) {
+                        // Nothing to throw out: the fridge must stay as it was.
+                        const moves = await movementsSince(t.since);
+                        c.check(
+                            moves.length === 0,
+                            "no spinach in the fridge, so no stock movement",
+                            moves,
+                        );
+                        return;
+                    }
+                    c.check(
                         called(t, "discard_fridge_item"),
                         "discard_fridge_item was called",
                         toolList(t),
-                    );
-                    c.check(
-                        !called(t, "eat_fridge_item") && !called(t, "log_meal"),
-                        "nothing logged as eaten",
                     );
                     c.near(
                         (await stockOf(spinach)).g ?? 0,
@@ -783,10 +918,6 @@ const SCENARIOS: Scenario[] = [
                         discard.reduce((s, m) => s + m.delta, 0),
                         -(before.g ?? 0),
                         `discard movements total -${before.g ?? 0} g`,
-                    );
-                    c.check(
-                        (await mealsSince(t)).length === 0,
-                        "no meal was created",
                     );
                 },
             );
@@ -822,17 +953,27 @@ const SCENARIOS: Scenario[] = [
                         "cook movements, all tied to the recipe",
                         cook,
                     );
-                    // Recipe yields 4; 2 portions use half: 250 g chicken, 150 g broccoli.
+                    // Recipe yields 4; 2 portions use half: 250 g chicken,
+                    // 150 g broccoli. Cooking takes what the fridge holds and
+                    // never goes below zero; anything missing is a shortfall.
+                    const used = (have: number | null, need: number) =>
+                        Math.min(have ?? 0, need);
                     c.near(
                         (await stockOf(chicken)).g ?? 0,
-                        (chickenBefore.g ?? 0) - 250,
-                        "250 g chicken used",
+                        (chickenBefore.g ?? 0) - used(chickenBefore.g, 250),
+                        `${used(chickenBefore.g, 250)} g chicken used (of 250 g needed)`,
                     );
                     c.near(
                         (await stockOf(broccoli)).g ?? 0,
-                        (broccoliBefore.g ?? 0) - 150,
-                        "150 g broccoli used",
+                        (broccoliBefore.g ?? 0) - used(broccoliBefore.g, 150),
+                        `${used(broccoliBefore.g, 150)} g broccoli used (of 150 g needed)`,
                     );
+                    if ((chickenBefore.g ?? 0) < 250) {
+                        c.check(
+                            /chicken/i.test(t.text),
+                            "the reply says the chicken was short",
+                        );
+                    }
                     const fresh = await mealsSince(t);
                     c.check(
                         fresh.filter((m) => m.user_id === ctx.me.userId)
@@ -1000,25 +1141,11 @@ const SCENARIOS: Scenario[] = [
 // ---- snapshot / restore ----
 
 async function snapshot(): Promise<void> {
-    const excludes = NOT_SNAPSHOTTED.map(
-        (t) => `--exclude-table-data=public.${t}`,
-    );
-    await Bun.$`docker exec ${CONTAINER} pg_dump -U supabase_admin -d postgres --data-only --schema=public --disable-triggers ${excludes} -f ${SNAPSHOT_IN_CONTAINER}`.quiet();
-    await Bun.$`docker cp ${CONTAINER}:${SNAPSHOT_IN_CONTAINER} ${OUT_DIR}/snapshot.sql`.quiet();
+    await e2eSnapshot(DB_URL, `${OUT_DIR}/snapshot.sql`);
 }
 
 async function restore(): Promise<void> {
-    const tables = (
-        await sql`select tablename from pg_tables where schemaname = 'public'`
-    )
-        .map((r: Record<string, unknown>) => String(r.tablename))
-        .filter((t: string) => !NOT_SNAPSHOTTED.includes(t))
-        .map((t: string) => `public.${t}`)
-        .join(", ");
-    // One transaction: truncate every snapshotted table together (no
-    // CASCADE, so an excluded table can never be emptied by accident), then
-    // reload the snapshot.
-    await Bun.$`docker exec ${CONTAINER} psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 --single-transaction -q -c ${"set session_replication_role = replica"} -c ${`truncate ${tables}`} -f ${SNAPSHOT_IN_CONTAINER}`.quiet();
+    await e2eRestore(DB_URL, `${OUT_DIR}/snapshot.sql`);
 }
 
 // ---- main ----
@@ -1095,7 +1222,10 @@ async function main() {
         );
 
     await snapshot();
-    console.log(dim(`Snapshot saved to ${OUT_DIR}/snapshot.sql`));
+    await e2eRehearseRestore(DB_URL, `${OUT_DIR}/snapshot.sql`);
+    console.log(
+        dim(`Snapshot saved to ${OUT_DIR}/snapshot.sql (restore rehearsed)`),
+    );
 
     const results: Array<{
         scenario: string;
