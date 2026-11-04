@@ -25,6 +25,10 @@ Still open, and not features:
 
 ## Later: planned features
 
+### Usual products
+
+A plain food ("Eggs") gets products (Kirkland, Great Value, farmers' market eggs, with or without a barcode) and one usual product. Recipes, grocery lines and logged items keep pointing at the plain food and read nutrition and unit factors through the usual product, so switching brands updates every recipe while logged meals keep their snapshots. Any product counts as its food for "already have", cooking and grocery aisles. It ships after a layout change: Settings moves behind a gear in the top bar, and the bottom tab becomes Household (Members, Items, Usual products). Comes before recipe import, which needs it for macros. Full plan: [usual-products-plan.md](./usual-products-plan.md).
+
 ### Camera barcode scanning
 
 Scan a barcode with the phone camera in the web app instead of typing the digits. The lookup side already exists: `lookupBarcode` / `normalizeBarcode` (Open Food Facts) behind the web food picker (`runBarcodeLookupAction` in `src/web/components/food-picker.ts`), and the `lookup_barcode` MCP tool, which takes digits typed by the user or read from a photo of the package.
