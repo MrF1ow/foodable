@@ -1,6 +1,6 @@
 # Usual products: implementation plan
 
-Status: proposed 2026-11-04. Comes before recipe import from links ([roadmap.md](./roadmap.md#recipe-import-from-social-posts-and-links)), which leans on it for macros.
+Status: proposed 2026-11-04. Comes before recipe import from links ([recipe-import-plan.md](./recipe-import-plan.md)), which leans on it for macros.
 
 ## Goal
 
