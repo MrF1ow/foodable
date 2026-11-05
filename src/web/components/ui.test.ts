@@ -319,7 +319,7 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "household-make-owner",
         title: "Transfer ownership",
         message: "Bob becomes the owner.",
-        action: "/settings/household/members/u2/make-owner",
+        action: "/household/members/u2/make-owner",
         confirmLabel: "Make Bob the owner",
         submitSlot: "owner-label",
         submitDisabled: true,

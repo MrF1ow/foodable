@@ -614,7 +614,7 @@ test("dialog fill checks boxes and falls back to the first select option", async
     const button = fakeNode("button", {
         command: "show-modal",
         commandfor: "food-edit",
-        "data-fill-action": "/settings/foods/f1",
+        "data-fill-action": "/household/items/f1",
         "data-fill-field-allergens": "milk",
         "data-fill-field-archived": "true",
         "data-fill-field-qty_unit": "nope",
@@ -637,7 +637,7 @@ test("dialog fill checks boxes and falls back to the first select option", async
     expect(archived.checked).toBe(true);
     expect(unit.value).toBe("g");
     expect(submit.disabled).toBe(false);
-    expect(form.getAttribute("action")).toBe("/settings/foods/f1");
+    expect(form.getAttribute("action")).toBe("/household/items/f1");
 });
 
 function fakeTemplate(id: string, build: () => FakeNode[]): FakeNode {

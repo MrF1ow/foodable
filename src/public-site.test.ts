@@ -264,7 +264,7 @@ describe("runtime surfaces that stay", () => {
             "/grocery",
             "/recipes",
             "/settings",
-            "/settings/foods",
+            "/household/items",
         ]) {
             const r = await app.request(`http://x${path}`);
             expect(r.status).toBe(200);

@@ -5180,8 +5180,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('action="/add-household-member"');
     });
 
-    test("POST /settings/household as owner adds a username member", async () => {
-        const r = await siteApp.request("http://x/settings/household", {
+    test("POST /household as owner adds a username member", async () => {
+        const r = await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -5190,7 +5190,7 @@ describe("authenticated dashboard HTTP", () => {
             body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household");
+        expect(r.headers.get("location")).toBe("/household");
         expect(db.members).toContainEqual({
             householdId: "hh-1",
             userId: "55555555-5555-4555-8555-555555555555",
@@ -5203,8 +5203,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(await home.text()).toContain("Kid");
     });
 
-    test("POST /settings/household as a member is 403 and adds nobody", async () => {
-        const r = await siteApp.request("http://x/settings/household", {
+    test("POST /household as a member is 403 and adds nobody", async () => {
+        const r = await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -5217,14 +5217,11 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.addedLogins).toEqual([]);
     });
 
-    test("POST /settings/household/rotate-token as owner issues a token once", async () => {
-        const r = await siteApp.request(
-            "http://x/settings/household/rotate-token",
-            {
-                method: "POST",
-                headers: { cookie: cookieFor(alice) },
-            },
-        );
+    test("POST /household/rotate-token as owner issues a token once", async () => {
+        const r = await siteApp.request("http://x/household/rotate-token", {
+            method: "POST",
+            headers: { cookie: cookieFor(alice) },
+        });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("Household bot token (shown once):");
@@ -5247,12 +5244,9 @@ describe("authenticated dashboard HTTP", () => {
     }
 
     test("the owner can make another member the owner", async () => {
-        const r = await postForm(
-            `/settings/household/members/${bob}/make-owner`,
-            alice,
-        );
+        const r = await postForm(`/household/members/${bob}/make-owner`, alice);
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household");
+        expect(r.headers.get("location")).toBe("/household");
         expect(db.ownershipTransfers).toEqual([{ from: alice, to: bob }]);
         expect(
             db.members.map((m) => `${m.displayName}:${m.role}`).sort(),
@@ -5260,17 +5254,14 @@ describe("authenticated dashboard HTTP", () => {
     });
 
     test("a member cannot take or hand out ownership", async () => {
-        const r = await postForm(
-            `/settings/household/members/${bob}/make-owner`,
-            bob,
-        );
+        const r = await postForm(`/household/members/${bob}/make-owner`, bob);
         expect(r.status).toBe(403);
         expect(db.ownershipTransfers).toEqual([]);
     });
 
     test("ownership cannot go to someone outside the household", async () => {
         const r = await postForm(
-            `/settings/household/members/${outsider}/make-owner`,
+            `/household/members/${outsider}/make-owner`,
             alice,
         );
         expect(r.status).toBe(400);
@@ -5282,21 +5273,18 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner removes a member after confirming", async () => {
         const r = await postForm(
-            `/settings/household/members/${bob}/remove`,
+            `/household/members/${bob}/remove`,
             alice,
             "confirm=yes",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household");
+        expect(r.headers.get("location")).toBe("/household");
         expect(db.wipedUsers).toEqual([bob]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice"]);
     });
 
     test("removing a member without the confirm box erases nothing", async () => {
-        const r = await postForm(
-            `/settings/household/members/${bob}/remove`,
-            alice,
-        );
+        const r = await postForm(`/household/members/${bob}/remove`, alice);
         expect(r.status).toBe(400);
         expect(await r.text()).toContain(
             "Tick the box to confirm removing Bob.",
@@ -5306,7 +5294,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner cannot remove themselves", async () => {
         const r = await postForm(
-            `/settings/household/members/${alice}/remove`,
+            `/household/members/${alice}/remove`,
             alice,
             "confirm=yes",
         );
@@ -5317,7 +5305,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("a member cannot remove anyone", async () => {
         const r = await postForm(
-            `/settings/household/members/${alice}/remove`,
+            `/household/members/${alice}/remove`,
             bob,
             "confirm=yes",
         );
@@ -5327,7 +5315,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("removing someone outside the household erases nothing", async () => {
         const r = await postForm(
-            `/settings/household/members/${outsider}/remove`,
+            `/household/members/${outsider}/remove`,
             alice,
             "confirm=yes",
         );
@@ -5335,20 +5323,17 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.wipedUsers).toEqual([]);
     });
 
-    test("POST /settings/household/rotate-token as a member is 403", async () => {
-        const r = await siteApp.request(
-            "http://x/settings/household/rotate-token",
-            {
-                method: "POST",
-                headers: { cookie: cookieFor(bob) },
-            },
-        );
+    test("POST /household/rotate-token as a member is 403", async () => {
+        const r = await siteApp.request("http://x/household/rotate-token", {
+            method: "POST",
+            headers: { cookie: cookieFor(bob) },
+        });
         expect(r.status).toBe(403);
         expect(db.tokenRotations).toHaveLength(0);
     });
 
-    test("POST /settings/household with a short password stays on the page", async () => {
-        const r = await siteApp.request("http://x/settings/household", {
+    test("POST /household with a short password stays on the page", async () => {
+        const r = await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -5359,7 +5344,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("Password must be at least 12 characters.");
-        expect(html).toContain('action="/settings/household"');
+        expect(html).toContain('action="/household"');
         expect(html).toMatch(
             /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
         );
@@ -5367,8 +5352,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /settings/household logged out does not add a member", async () => {
-        const r = await siteApp.request("http://x/settings/household", {
+    test("POST /household logged out does not add a member", async () => {
+        const r = await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 "content-type": "application/x-www-form-urlencoded",
@@ -5378,13 +5363,13 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(401);
         const html = await r.text();
         expect(html).toContain('action="/approve"');
-        expect(html).not.toContain('action="/settings/household"');
+        expect(html).not.toContain('action="/household"');
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /settings/household duplicate username stays on the page", async () => {
-        await siteApp.request("http://x/settings/household", {
+    test("POST /household duplicate username stays on the page", async () => {
+        await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -5392,7 +5377,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "display_name=Kid&password=password1234&username=kid",
         });
-        const r = await siteApp.request("http://x/settings/household", {
+        const r = await siteApp.request("http://x/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -5403,7 +5388,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("That login is already in use.");
-        expect(html).toContain('action="/settings/household"');
+        expect(html).toContain('action="/household"');
         expect(
             db.members.filter((m) => m.displayName.startsWith("Kid")),
         ).toHaveLength(1);
@@ -5967,15 +5952,14 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("coming-soon");
     });
 
-    test("GET /settings/foods lists the catalog", async () => {
-        const r = await siteApp.request("http://x/settings/foods", {
+    test("GET /household/items lists the catalog", async () => {
+        const r = await siteApp.request("http://x/household/items", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Foods</h1>");
-        expect(html).toContain('href="/settings"');
-        expect(html).toContain('href="/settings/household"');
+        expect(html).toContain('href="/settings/foods" aria-current="page"');
         expect(html).toContain("No foods in the catalog yet.");
     });
 
@@ -5992,28 +5976,28 @@ describe("authenticated dashboard HTTP", () => {
         expect(outsiderRes.status).toBe(403);
     });
 
-    test("GET /settings/household shows owner add-member form", async () => {
-        const r = await siteApp.request("http://x/settings/household", {
+    test("GET /household shows owner add-member form", async () => {
+        const r = await siteApp.request("http://x/household", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
-        expect(html).toContain('action="/settings/household"');
+        expect(html).toContain('action="/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
     });
 
-    test("GET /settings/household as a member is read-only", async () => {
+    test("GET /household as a member is read-only", async () => {
         db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/settings/household", {
+        const r = await siteApp.request("http://x/household", {
             headers: { cookie: cookieFor(bob) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
         expect(html).not.toContain('commandfor="household-add-member"');
-        expect(html).not.toContain('action="/settings/household/stores"');
+        expect(html).not.toContain('action="/household/stores"');
     });
 
     test("GET /settings/help is available to members", async () => {
@@ -6027,20 +6011,17 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('id="food-vs-household-item"');
     });
 
-    test("POST /settings/household/stores seeds default sections", async () => {
-        const add = await siteApp.request(
-            "http://x/settings/household/stores",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "name=Safeway",
+    test("POST /household/stores seeds default sections", async () => {
+        const add = await siteApp.request("http://x/household/stores", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
             },
-        );
+            body: "name=Safeway",
+        });
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/settings/household", {
+        const page = await siteApp.request("http://x/household", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();

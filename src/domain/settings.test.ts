@@ -104,7 +104,7 @@ test("section rename updates the stored name", async () => {
     ).rejects.toThrow(/already exists/i);
 });
 
-test("owner household page has add-member form on /settings/household only", () => {
+test("owner household page has add-member form on /household only", () => {
     const html = renderHouseholdSettingsPage({
         chrome,
         householdName: "Home",
@@ -121,7 +121,7 @@ test("owner household page has add-member form on /settings/household only", () 
     });
     expect(html).toContain("<h1>Household</h1>");
     expect(html).toContain('href="/settings/foods"');
-    expect(html).toContain('action="/settings/household"');
+    expect(html).toContain('action="/household"');
     expect(html).toContain('commandfor="household-add-member"');
     expect(html).toContain("Alice");
     expect(html).toContain("Bob");
@@ -132,17 +132,13 @@ test("owner household page has add-member form on /settings/household only", () 
         `<template id="household-member-actions-${bob.userId}">`,
     );
     expect(html).toContain(
-        `data-fill-action="/settings/household/members/${bob.userId}/make-owner"`,
+        `data-fill-action="/household/members/${bob.userId}/make-owner"`,
     );
     expect(html).toContain(
-        `data-fill-action="/settings/household/members/${bob.userId}/remove"`,
+        `data-fill-action="/household/members/${bob.userId}/remove"`,
     );
-    expect(html).not.toContain(
-        `/settings/household/members/${alice.userId}/remove`,
-    );
-    expect(html).not.toContain(
-        `/settings/household/members/${alice.userId}/make-owner`,
-    );
+    expect(html).not.toContain(`/household/members/${alice.userId}/remove`);
+    expect(html).not.toContain(`/household/members/${alice.userId}/make-owner`);
     expect(html).toContain('name="confirm" value="yes" required');
 });
 
@@ -162,9 +158,9 @@ test("member household page is read-only without add-member", () => {
         viewerUserId: bob.userId,
     });
     expect(html).toContain("Seattle");
-    expect(html).not.toContain('action="/settings/household"');
+    expect(html).not.toContain('action="/household"');
     expect(html).not.toContain('commandfor="household-add-member"');
-    expect(html).not.toContain('action="/settings/household/stores"');
+    expect(html).not.toContain('action="/household/stores"');
     expect(html).not.toContain("/make-owner");
     expect(html).not.toContain("/remove");
 });
@@ -198,7 +194,7 @@ test("household settings groups owner tools into cards and modals", () => {
     expect(html).toContain('<li class="allergen pill pill-bad">');
     expect(html).toContain('<li class="dislike pill pill-dim">Olives</li>');
     expect(html).toContain(
-        '<form method="post" action="/settings/household/name" class="household-name inline-form">',
+        '<form method="post" action="/household/name" class="household-name inline-form">',
     );
 });
 
@@ -215,7 +211,7 @@ test("owner can make a member an admin without giving up ownership", () => {
         viewerUserId: alice.userId,
     });
     expect(html).toContain(
-        `data-fill-action="/settings/household/members/${bob.userId}/role"`,
+        `data-fill-action="/household/members/${bob.userId}/role"`,
     );
     expect(html).toContain('data-fill-field-role="admin"');
     expect(html).toContain("You stay the owner.");
@@ -242,10 +238,8 @@ test("admin manages the household but not roles, removal or the token", () => {
         viewerUserId: admin.userId,
     });
     expect(html).toContain('commandfor="household-add-member"');
-    expect(html).toContain('action="/settings/household/name"');
-    expect(html).toContain(
-        `action="/settings/household/members/${carol.userId}/rules"`,
-    );
+    expect(html).toContain('action="/household/name"');
+    expect(html).toContain(`action="/household/members/${carol.userId}/rules"`);
     expect(html).not.toContain("/role");
     expect(html).not.toContain("/make-owner");
     expect(html).not.toContain("household-rotate-token");
@@ -285,14 +279,12 @@ test("member edits their own rules and only their own", () => {
         canManage: false,
         viewerUserId: bob.userId,
     });
+    expect(html).toContain(`action="/household/members/${bob.userId}/rules"`);
     expect(html).toContain(
-        `action="/settings/household/members/${bob.userId}/rules"`,
-    );
-    expect(html).toContain(
-        `action="/settings/household/members/${bob.userId}/rules/r1/remove"`,
+        `action="/household/members/${bob.userId}/rules/r1/remove"`,
     );
     expect(html).not.toContain(
-        `action="/settings/household/members/${alice.userId}/rules"`,
+        `action="/household/members/${alice.userId}/rules"`,
     );
-    expect(html).not.toContain('action="/settings/household/name"');
+    expect(html).not.toContain('action="/household/name"');
 });
