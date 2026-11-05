@@ -63,6 +63,10 @@ describe("settingsBackHref", () => {
                 origin,
             }),
         ).toBe("/");
+        expect(settingsBackHref({ from: "/\\evil", origin })).toBe("/");
+        expect(settingsBackHref({ from: "/login", origin })).toBe("/");
+        expect(settingsBackHref({ from: "/authorize", origin })).toBe("/");
+        expect(settingsBackHref({ from: "/approve", origin })).toBe("/");
     });
 
     test("default is home", () => {

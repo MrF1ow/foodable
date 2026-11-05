@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     APP_TABS,
+    appBar,
     appHead,
     bottomNav,
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
+    renderSettingsPage,
     resolveTheme,
     themeColorMeta,
 } from "./shell.js";
@@ -81,12 +83,15 @@ test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).toContain('href="/fridge" aria-current="page"');
-    expect(html).toContain('href="/settings"');
+    expect(html).toContain('href="/settings" data-turbo="false"');
     expect(html).toContain('aria-label="Settings"');
     expect(html).toContain('class="btn-icon app-bar-action"');
     expect(html).not.toContain('href="/logout"');
     expect(html).toContain('class="app-bar-logo"');
     expect(html).toContain('href="/"');
+    expect(html).not.toMatch(
+        /class="app-bar-logo" href="\/" data-turbo="false"/,
+    );
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
@@ -151,6 +156,25 @@ test("appHead emits foodable-theme for every preference", () => {
     expect(appHead("T", "system")).toContain(
         '<meta name="foodable-theme" content="system" />',
     );
+});
+
+test("settings chrome full-loads into and out of tabs", () => {
+    const settings = renderSettingsPage({
+        title: "Settings",
+        theme: "light",
+        backHref: "/fridge",
+        body: "<h1>Settings</h1>",
+    });
+    expect(settings).toContain(
+        'class="settings-back" href="/fridge" data-turbo="false"',
+    );
+    expect(settings).toContain(
+        'class="app-bar-logo" href="/" data-turbo="false"',
+    );
+    expect(appBar("app")).not.toContain(
+        'class="app-bar-logo" href="/" data-turbo="false"',
+    );
+    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {

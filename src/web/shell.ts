@@ -62,13 +62,15 @@ export function themeColorMeta(
 export type AppBarVariant = "app" | "settings" | "gate";
 
 export function appBar(variant: AppBarVariant): string {
+    const logoTurbo = variant === "settings" ? ' data-turbo="false"' : "";
     const action =
         variant === "app"
-            ? `<a class="btn-icon app-bar-action" href="/settings" aria-label="Settings" title="Settings">${iconSettings()}</a>`
+            ? `<!-- iOS only retints toolbar on full load; Settings uses page chrome, tabs use nav chrome. -->
+<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
             : variant === "gate"
               ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
               : "";
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"${logoTurbo}><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
 }
 
 export function appHead(
@@ -144,7 +146,7 @@ ${appHead(shell.title, shell.theme, "page")}
 </head>
 <body>
 ${appBar("settings")}
-<main class="app-main native"><a class="settings-back" href="${escapeHtml(shell.backHref)}">‹ Back</a>${shell.body}</main>
+<main class="app-main native"><!-- iOS only retints toolbar on full load; Settings uses page chrome, tabs use nav chrome. --><a class="settings-back" href="${escapeHtml(shell.backHref)}" data-turbo="false">‹ Back</a>${shell.body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

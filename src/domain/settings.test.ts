@@ -41,6 +41,12 @@ test("theme save form posts account fields to /settings", () => {
     expect(html).toContain("<h1>Settings</h1>");
     expect(html).toContain('href="/settings/help?from=%2Ffridge"');
     expect(html).toContain('class="settings-back" href="/fridge"');
+    expect(html).toContain(
+        '<form method="POST" action="/settings" class="appearance panel" data-turbo="false">',
+    );
+    expect(html).not.toContain(
+        'class="appearance nutrition-prefs panel" data-turbo="false"',
+    );
     expect(html).toContain('<a href="/logout" data-turbo="false">Log out</a>');
     expect(html).not.toContain("bottom-nav");
     expect(html).toContain('content="page"');
