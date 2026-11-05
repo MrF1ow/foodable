@@ -165,16 +165,7 @@ The total goes from 67 to 69 tools. `src/mcp/tools-list.snapshot.json` and `TOOL
 
 ## Layout change (ships first, its own PR)
 
-A pure move under "moves before changes": no new feature, no behaviour change beyond where things live.
-
-- **Top bar:** the logout icon becomes a Settings gear linking to `/settings`.
-- **Settings page:** a bare page (`renderBarePage`, no bottom nav) with a back button that returns to the previous page, or to `/` when there is none. It holds Account (profile, theme, timezone), Help, and Log out at the bottom. The logout link keeps `data-turbo="false"` and the account form keeps its Turbo opt-out (the iOS toolbar tint).
-- **Bottom tab:** Settings becomes **Household** (`/household`), with section links:
-    - **Members:** today's household card, members, rules and grocery stores. Whether grocery stores move to the Groceries tab stays open.
-    - **Items:** today's `/settings/foods`.
-    - **Usual products:** added in the usual-products UI PR.
-- **Old URLs:** `/settings/household` and `/settings/foods` redirect (301) to the new paths, for bookmarks and Turbo history.
-- **Tests and checks:** `src/web/shell.test.ts` (`APP_TABS`), `src/domain/settings.test.ts`, `src/domain/foods-settings.test.ts`, `src/app-js.test.ts` and `src/public-site.test.ts` pin the current paths and update with the move. `bun run check:nav` must pass: bare pages use the page `--bg` theme colour, tabbed pages the nav colour.
+Settings moves behind a gear in the top bar and the bottom tab becomes **Household** (Members, Items; Usual products is added in PR 5). The full plan, including routes, redirects, the back button, copy and tests, is [layout-plan.md](./layout-plan.md).
 
 ## Tests
 
