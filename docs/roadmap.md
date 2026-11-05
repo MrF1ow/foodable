@@ -37,21 +37,11 @@ Scan a barcode with the phone camera in the web app instead of typing the digits
 - Camera access needs HTTPS (or localhost). The production deploy has it; the tailnet `:8080` dev deploy may not.
 - MCP agents already have `lookup_barcode`. Check whether they need more, for example a tool that adds a scanned product straight to the fridge or grocery list as a food with its barcode attached.
 
-### Recipe import from social posts and links
+### Recipe import from links
 
-[ReciMe](https://www.recime.app) lets you share an Instagram, TikTok, Pinterest or YouTube post, or any recipe website, and get back a recipe with its ingredients and steps. That import is the part worth copying. Foodable already has the rest: `import_recipe_from_text` turns pasted text into a recipe, and `add_recipe_to_grocery`, the fridge and the grocery aisles take it from there. Planning recipes onto days is the nutrition calendar (Next, item 1), not a separate feature.
+Paste a link and get a recipe, with the link kept and its source shown as an icon. Recipe websites are read from their schema.org `Recipe` data. A terms-of-service review on 2026-11-04 ([research](./research/recipe-import-terms-2026-11.md)) found that Instagram, Facebook, Threads, TikTok, Pinterest and YouTube all forbid automated reading of their posts. So reading a TikTok page or Facebook's oEmbed caption is an opt-in per platform, off by default, with the risks stated before it can be switched on. Every other case, and any failed read, falls back to pasting the caption.
 
-- **Study the flow first.** Use ReciMe as a normal user and note what each source produces: caption-only recipes, recipes only spoken in the video, posts that link to a blog, carousels. Write the findings here before building. Only study what the app shows a user. Do not decompile it, call its private API, or copy its content.
-- **One entry point.** An `import_recipe_from_url` tool and an "Import from link" action on the Recipes tab. Both take a URL, work out the source, fetch what that source exposes publicly, and hand the text to the same parser and `normalizeFoodName` food resolution that `import_recipe_from_text` uses. The result is a draft the user reviews before it is saved, because caption parsing is guesswork.
-- **Per source**, checked against each platform's current docs when building:
-    - **Websites, and Pinterest pins that link to one:** the page's schema.org `Recipe` JSON-LD, falling back to the page text.
-    - **TikTok:** the public oEmbed endpoint, whose `title` is the caption. No key.
-    - **Instagram and Facebook:** Meta's oEmbed endpoints, tokenless for public posts since June 2026 (rate limited). Check whether the response still carries the caption. If it does not, fall back to asking the user to paste it.
-    - **YouTube:** the video description through the Data API (needs a key, so it is optional and off without one), with a link in the description followed as a website.
-    - **Video-only recipes**, with nothing in the caption, stay out of scope for the server: no transcription or vision call, for the same reasons as photo meal estimation (see "Not planned"). The chat agent can still watch or read the post and call `import_recipe_from_text`.
-- **Keep the fetcher safe.** `https` only, an allowlist of the hosts above plus a generic website path, a timeout, a size cap, no private or loopback addresses, and redirects re-checked at every hop, so the import cannot be used to make the server fetch arbitrary URLs (SSRF). The shared-recipe importer under "Sharing" uses the same fetcher.
-- **Keep the source.** Fill the existing `recipes.source_url` with the original post and show it as a link, so the creator stays credited and a re-import of the same URL can be spotted.
-- Pure logic (source detection, JSON-LD and caption extraction) goes in `src/domain/recipe-import.ts`, tested against saved fixtures, with no network in the tests. The tool and the route only adapt. New tools update `src/mcp/tools-list.snapshot.json` and `TOOLS` in the same PR.
+Foodable always identifies itself honestly, never impersonates another bot, and always honours `robots.txt`, which keeps Instagram on paste. Parsing stays deterministic (`parse-ingredient`). A recipe that does not pass the check is saved as **unverified**, blocked from the grocery list and cooking, and fixed by the household's agent on a schedule. Ingredients may have no amount ("to taste"). Every outcome has a clear message. Comes after usual products. Full plan: [recipe-import-plan.md](./recipe-import-plan.md).
 
 ### Sharing
 
