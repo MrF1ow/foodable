@@ -36,6 +36,11 @@ import {
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
+import { legacyHouseholdPath } from "../src/web/routes/household.js";
+import {
+    settingsBackHref,
+    settingsUrlWithBack,
+} from "../src/web/settings-back.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4791;
@@ -316,6 +321,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
         settings: renderSettingsPage({
             chrome,
+            backHref: "/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
             weightUnit: "kg",
@@ -354,7 +360,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             isOwner: true,
         } as never),
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
-        help: renderSettingsHelpPage({ chrome } as never),
+        help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -409,8 +415,8 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes": "recipes",
     "/settings": "settings",
     "/settings/help": "help",
-    "/settings/household": "household",
-    "/settings/foods": "foods",
+    "/household": "household",
+    "/household/items": "foods",
     "/create-household": "create-household",
 };
 
@@ -573,7 +579,7 @@ function renderFailedModal(pathname: string, modalId: string): string | null {
             openModalId: modalId,
         } as never);
     }
-    if (pathname === "/settings/foods" && modalId.startsWith("food-edit-")) {
+    if (pathname === "/household/items" && modalId.startsWith("food-edit-")) {
         const id = modalId.slice("food-edit-".length);
         const view = foodsSettingsFixture(chrome);
         if (!id || !view.foods.some((item) => item.id === id)) return null;
@@ -652,6 +658,12 @@ const server = Bun.serve({
     async fetch(req) {
         const url = new URL(req.url);
         const path = url.pathname;
+        const legacyTarget = legacyHouseholdPath(path + url.search);
+        if (legacyTarget) {
+            const status =
+                req.method === "GET" || req.method === "HEAD" ? 301 : 308;
+            return Response.redirect(legacyTarget, status);
+        }
         if (path === "/__stats") {
             return Response.json({
                 gets,
@@ -808,7 +820,15 @@ const server = Bun.serve({
             const referer =
                 req.headers.get("referer") || "http://127.0.0.1:4791/fridge";
             const dest = new URL(referer);
-            const destKey = dest.pathname + dest.search;
+            let destKey = dest.pathname + dest.search;
+            if (path === "/settings") {
+                const fromRaw = entries.find(([k]) => k === "from")?.[1];
+                const backHref = settingsBackHref({
+                    from: fromRaw,
+                    origin: url.origin,
+                });
+                destKey = settingsUrlWithBack(backHref);
+            }
             const file = routeHtmlFile(dest.pathname);
             let html = applyAccountTheme(
                 await fileHtml(file, destKey + "#post"),

@@ -373,6 +373,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         settings: renderSettingsPage({
             chrome,
+            backHref: "/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
             weightUnit: "kg",
@@ -414,7 +415,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
         } as never),
-        help: renderSettingsHelpPage({ chrome } as never),
+        help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
