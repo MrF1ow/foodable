@@ -240,6 +240,7 @@ const MACROS = {
     alcohol_g: 0,
     incomplete: false,
     incompleteReasons: [],
+    gaps: [],
 };
 
 function food(id: string, name: string, calories: number | null) {

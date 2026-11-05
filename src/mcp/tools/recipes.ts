@@ -56,6 +56,15 @@ const RECIPE_FIELDS = {
 const INSTRUCTIONS_DESCRIPTION =
     'Method steps, one per line. Leave a blank line between steps to write one step over several lines. Numbering ("1.", "Step 2:") is optional and stripped on display.';
 
+const RECIPE_GAP_REASON = z.enum([
+    "no_food",
+    "no_nutrition",
+    "partial_nutrition",
+    "unknown_unit",
+    "missing_grams_per_each",
+    "missing_grams_per_ml",
+]);
+
 const MACROS_ITEM = z.object({
     calories: z.number().nullable(),
     protein_g: z.number().nullable(),
@@ -65,7 +74,45 @@ const MACROS_ITEM = z.object({
     sugar_g: z.number().nullable(),
     alcohol_g: z.number().nullable(),
     incomplete: z.boolean(),
+    gaps: z.array(
+        z.object({
+            ingredient_id: z.string(),
+            display_name: z.string(),
+            food_id: z.string().nullable(),
+            reason: RECIPE_GAP_REASON,
+            missing_nutrients: z.array(z.string()),
+            usual_product: z
+                .object({ id: z.string(), name: z.string() })
+                .nullable(),
+            message: z.string(),
+        }),
+    ),
 });
+
+export const MACROS_ITEM_OUTPUT_SCHEMA = MACROS_ITEM;
+
+function wireMacros(macros: ReturnType<typeof macrosForPerson>) {
+    return {
+        calories: macros.calories,
+        protein_g: macros.protein_g,
+        carbs_g: macros.carbs_g,
+        fat_g: macros.fat_g,
+        fiber_g: macros.fiber_g,
+        sugar_g: macros.sugar_g,
+        alcohol_g: macros.alcohol_g,
+        incomplete: macros.incomplete,
+        incompleteReasons: macros.incompleteReasons,
+        gaps: macros.gaps.map((gap) => ({
+            ingredient_id: gap.ingredientId,
+            display_name: gap.displayName,
+            food_id: gap.foodId,
+            reason: gap.reason,
+            missing_nutrients: gap.missingNutrients,
+            usual_product: gap.usualProduct,
+            message: gap.message,
+        })),
+    };
+}
 
 function recipeFields(recipe: Recipe) {
     return {
@@ -194,7 +241,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Recipe",
             description:
-                "Get a recipe as viewed by a household member, including per-portion and per-person amounts.",
+                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. When macros are incomplete, `macros_per_portion.gaps` lists one entry per missing piece (nutrition, unit conversion, and so on).",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -259,11 +306,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         1,
                         catalog,
                     );
+                    const wiredMacros = wireMacros(macrosPerPortion);
                     const payload = {
                         ...recipeFields(view),
                         steps: recipeSteps(view.instructions),
                         portion_count: view.portionCount,
-                        macros_per_portion: macrosPerPortion,
+                        macros_per_portion: wiredMacros,
                         ingredients: view.ingredients.map((ingredient) => {
                             const eff = ingredient.foodId
                                 ? catalog.get(ingredient.foodId)
@@ -290,7 +338,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${macrosPerPortion.incomplete && macrosPerPortion.calories == null ? "macros incomplete" : `${macrosPerPortion.calories ?? "—"} kcal`}\n${payload.ingredients
+                                text: `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${wiredMacros.incompleteReasons.length > 0 ? ` (${wiredMacros.incompleteReasons.join("; ")})` : ""}\n${payload.ingredients
                                     .map(
                                         (ingredient) =>
                                             `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,

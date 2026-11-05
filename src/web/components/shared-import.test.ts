@@ -147,6 +147,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
             alcohol_g: null,
             incomplete: true,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
     });

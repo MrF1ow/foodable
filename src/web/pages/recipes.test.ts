@@ -37,10 +37,49 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
             alcohol_g: null,
             incomplete: true,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
     };
 }
+
+test("incomplete macros render reasons in recipe-macros-reasons", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({}),
+        macros: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [
+                "Half and half: no nutrition — add it, or pick a usual product",
+            ],
+            gaps: [],
+        },
+        macrosPerPortion: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [
+                "Half and half: no nutrition — add it, or pick a usual product",
+            ],
+            gaps: [],
+        },
+    });
+    expect(html).toContain("recipe-macros-reasons");
+    expect(html).toContain(
+        "Half and half: no nutrition — add it, or pick a usual product",
+    );
+});
 
 test("a recipe without steps offers to add them", () => {
     const html = renderRecipeDetailPage(detail({}));

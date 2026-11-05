@@ -72,19 +72,41 @@ export function fromGrams(
     return roundAmount(grams / one);
 }
 
+export type GramsGapReason =
+    "unknown_unit" | "missing_grams_per_each" | "missing_grams_per_ml";
+
+export function missingGramsGap(
+    displayName: string,
+    quantity: { unit: string },
+    food: FoodQuantityFactors | null | undefined,
+): { reason: GramsGapReason; message: string } | null {
+    if (!isQuantityUnit(quantity.unit)) {
+        return {
+            reason: "unknown_unit",
+            message: `${displayName}: unknown unit`,
+        };
+    }
+    const dim = dimensionOf(quantity.unit);
+    if (dim === "mass") return null;
+    if (toGrams({ amount: 1, unit: quantity.unit }, food) != null) return null;
+    if (dim === "count") {
+        return {
+            reason: "missing_grams_per_each",
+            message: `${displayName}: set grams per each`,
+        };
+    }
+    return {
+        reason: "missing_grams_per_ml",
+        message: `${displayName}: set grams per millilitre`,
+    };
+}
+
 export function missingGramsReason(
     displayName: string,
     quantity: { unit: string },
     food: FoodQuantityFactors | null | undefined,
 ): string | null {
-    if (!isQuantityUnit(quantity.unit)) {
-        return `${displayName}: unknown unit`;
-    }
-    const dim = dimensionOf(quantity.unit);
-    if (dim === "mass") return null;
-    if (toGrams({ amount: 1, unit: quantity.unit }, food) != null) return null;
-    if (dim === "count") return `${displayName}: set grams per each`;
-    return `${displayName}: set grams per millilitre`;
+    return missingGramsGap(displayName, quantity, food)?.message ?? null;
 }
 
 export function storedFoodUnit(

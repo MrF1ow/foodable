@@ -6,15 +6,12 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     FoodsInputError,
+    type EffectiveFood,
     type Food,
     type FoodsStore,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
-import {
-    missingGramsReason,
-    storedFoodUnit,
-    toGrams,
-} from "./food-quantity.js";
+import { missingGramsGap, storedFoodUnit, toGrams } from "./food-quantity.js";
 import {
     resolveGrocerySectionId,
     suggestGrocerySection,
@@ -27,7 +24,6 @@ import {
     type LinkedNeed,
     type RecipeGroceryRemainderLine,
 } from "./linking.js";
-import { dimensionOf, isQuantityUnit } from "./quantity.js";
 import type { MemberAllergen } from "./rules.js";
 import type { SettingsStore } from "./settings.js";
 
@@ -86,6 +82,26 @@ export type RecipeView = Recipe & {
     ingredients: RecipeIngredientView[];
 };
 
+export type RecipeGapReason =
+    | "no_food"
+    | "no_nutrition"
+    | "partial_nutrition"
+    | "unknown_unit"
+    | "missing_grams_per_each"
+    | "missing_grams_per_ml";
+
+export type RecipeGapNutrient = "calories" | "protein_g" | "carbs_g" | "fat_g";
+
+export type RecipeGap = {
+    ingredientId: string;
+    displayName: string;
+    foodId: string | null;
+    reason: RecipeGapReason;
+    missingNutrients: RecipeGapNutrient[];
+    usualProduct: { id: string; name: string } | null;
+    message: string;
+};
+
 export type RecipeMacros = {
     calories: number | null;
     protein_g: number | null;
@@ -96,6 +112,7 @@ export type RecipeMacros = {
     alcohol_g: number | null;
     incomplete: boolean;
     incompleteReasons: string[];
+    gaps: RecipeGap[];
 };
 
 export type RecipesStore = {
@@ -383,6 +400,105 @@ export function isNutritionComplete(
     );
 }
 
+const REQUIRED_MACRO_KEYS: RecipeGapNutrient[] = [
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+];
+
+const NUTRIENT_WORD: Record<RecipeGapNutrient, string> = {
+    calories: "calories",
+    protein_g: "protein",
+    carbs_g: "carbs",
+    fat_g: "fat",
+};
+
+function missingRequiredNutrients(
+    nutrition: IngredientNutrition,
+): RecipeGapNutrient[] {
+    return REQUIRED_MACRO_KEYS.filter((key) => nutrition[key] == null);
+}
+
+function formatMissingNutrientList(missing: RecipeGapNutrient[]): string {
+    const words = missing.map((key) => NUTRIENT_WORD[key]);
+    if (words.length === 1) return words[0]!;
+    if (words.length === 2) return `${words[0]} and ${words[1]}`;
+    return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+function usualProductRef(
+    food: Food | undefined,
+): { id: string; name: string } | null {
+    if (!food || !("product" in food)) return null;
+    const product = (food as EffectiveFood).product;
+    if (!product) return null;
+    return { id: product.id, name: product.name };
+}
+
+function gapBase(
+    ingredient: RecipeIngredient,
+    food: Food | undefined,
+): Pick<RecipeGap, "ingredientId" | "displayName" | "foodId" | "usualProduct"> {
+    return {
+        ingredientId: ingredient.id,
+        displayName: ingredient.displayName,
+        foodId: ingredient.foodId,
+        usualProduct: usualProductRef(food),
+    };
+}
+
+export function recipeIngredientGaps(
+    ingredient: RecipeIngredient,
+    food: Food | undefined,
+): RecipeGap[] {
+    if (!ingredient.foodId || !food) {
+        return [
+            {
+                ...gapBase(ingredient, food),
+                reason: "no_food",
+                missingNutrients: [],
+                message: `${ingredient.displayName}: not linked to a food`,
+            },
+        ];
+    }
+    const gaps: RecipeGap[] = [];
+    const nutrition = nutritionFromCatalogFood(food);
+    if (nutrition == null) {
+        const usual = usualProductRef(food);
+        gaps.push({
+            ...gapBase(ingredient, food),
+            reason: "no_nutrition",
+            missingNutrients: [],
+            message: usual
+                ? `${ingredient.displayName}: no nutrition — its usual product, ${usual.name}, has none either`
+                : `${ingredient.displayName}: no nutrition — add it, or pick a usual product`,
+        });
+    } else if (!isNutritionComplete(nutrition)) {
+        const missing = missingRequiredNutrients(nutrition);
+        gaps.push({
+            ...gapBase(ingredient, food),
+            reason: "partial_nutrition",
+            missingNutrients: missing,
+            message: `${ingredient.displayName}: missing ${formatMissingNutrientList(missing)}`,
+        });
+    }
+    const gramsGap = missingGramsGap(
+        ingredient.displayName,
+        ingredient.quantity,
+        food,
+    );
+    if (gramsGap) {
+        gaps.push({
+            ...gapBase(ingredient, food),
+            reason: gramsGap.reason,
+            missingNutrients: [],
+            message: gramsGap.message,
+        });
+    }
+    return gaps;
+}
+
 function scaleNutrient(value: number | null, factor: number): number | null {
     if (value == null) return null;
     return roundAmount(value * factor);
@@ -390,7 +506,7 @@ function scaleNutrient(value: number | null, factor: number): number | null {
 
 type MacroNutrient = Exclude<
     keyof RecipeMacros,
-    "incomplete" | "incompleteReasons"
+    "incomplete" | "incompleteReasons" | "gaps"
 >;
 
 export function macrosForPerson(
@@ -399,8 +515,7 @@ export function macrosForPerson(
     portionCount: number,
     foodsById: ReadonlyMap<string, Food> = new Map(),
 ): RecipeMacros {
-    let incomplete = false;
-    const incompleteReasons: string[] = [];
+    const gaps: RecipeGap[] = [];
     const sum: RecipeMacros = {
         calories: null,
         protein_g: null,
@@ -411,16 +526,16 @@ export function macrosForPerson(
         alcohol_g: null,
         incomplete: false,
         incompleteReasons: [],
+        gaps: [],
     };
     for (const ingredient of ingredients) {
         const catalog = ingredient.foodId
             ? foodsById.get(ingredient.foodId)
             : undefined;
-        const nutrition = catalog ? nutritionFromCatalogFood(catalog) : null;
-        if (!isNutritionComplete(nutrition)) {
-            incomplete = true;
-            continue;
-        }
+        const ingredientGaps = recipeIngredientGaps(ingredient, catalog);
+        gaps.push(...ingredientGaps);
+        if (ingredientGaps.length > 0) continue;
+        const nutrition = nutritionFromCatalogFood(catalog!)!;
         const eaten = amountForPortion(
             ingredient.quantity.amount,
             yieldPortions,
@@ -430,20 +545,7 @@ export function macrosForPerson(
             { amount: eaten, unit: ingredient.quantity.unit },
             catalog,
         );
-        if (grams == null || nutrition.basisAmount <= 0) {
-            incomplete = true;
-            const reason = missingGramsReason(
-                ingredient.displayName,
-                ingredient.quantity,
-                catalog,
-            );
-            if (reason) incompleteReasons.push(reason);
-            continue;
-        }
-        if (nutrition.basisUnit !== "g") {
-            incomplete = true;
-            continue;
-        }
+        if (grams == null) continue;
         const factor = grams / nutrition.basisAmount;
         const add = (key: MacroNutrient) => {
             const scaled = scaleNutrient(nutrition[key], factor);
@@ -458,8 +560,16 @@ export function macrosForPerson(
         add("sugar_g");
         add("alcohol_g");
     }
-    sum.incomplete = incomplete;
-    sum.incompleteReasons = incompleteReasons;
+    sum.gaps = gaps;
+    const seen = new Set<string>();
+    sum.incompleteReasons = gaps
+        .map((gap) => gap.message)
+        .filter((message) => {
+            if (seen.has(message)) return false;
+            seen.add(message);
+            return true;
+        });
+    sum.incomplete = gaps.length > 0;
     return sum;
 }
 
@@ -1120,17 +1230,25 @@ export function ingredientGaps(
     food: Food | undefined,
 ): IngredientGapKind[] {
     const missing: IngredientGapKind[] = [];
-    const nutrition = food ? nutritionFromCatalogFood(food) : null;
-    if (!isNutritionComplete(nutrition)) missing.push("nutrition");
-    if (!food) return missing;
-    const unit = ingredient.quantity.unit;
-    if (isQuantityUnit(unit)) {
-        const dim = dimensionOf(unit);
-        if (dim === "count" && food.gramsPerEach == null) {
-            missing.push("grams_per_each");
-        }
-        if (dim === "volume" && food.gramsPerMl == null) {
-            missing.push("grams_per_ml");
+    for (const gap of recipeIngredientGaps(ingredient, food)) {
+        switch (gap.reason) {
+            case "no_food":
+            case "no_nutrition":
+            case "partial_nutrition":
+                if (!missing.includes("nutrition")) missing.push("nutrition");
+                break;
+            case "missing_grams_per_each":
+                if (!missing.includes("grams_per_each")) {
+                    missing.push("grams_per_each");
+                }
+                break;
+            case "missing_grams_per_ml":
+                if (!missing.includes("grams_per_ml")) {
+                    missing.push("grams_per_ml");
+                }
+                break;
+            default:
+                break;
         }
     }
     return missing;

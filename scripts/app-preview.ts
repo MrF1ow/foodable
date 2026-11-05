@@ -263,8 +263,22 @@ const MACROS = {
     fiber_g: 5,
     sugar_g: 9,
     alcohol_g: 0,
-    incomplete: false,
-    incompleteReasons: [],
+    incomplete: true,
+    incompleteReasons: [
+        "Buttermilk: no nutrition — add it, or pick a usual product",
+    ],
+    gaps: [
+        {
+            ingredientId: "ing0",
+            displayName: "Buttermilk",
+            foodId: "f-buttermilk",
+            reason: "no_nutrition",
+            missingNutrients: [],
+            usualProduct: null,
+            message:
+                "Buttermilk: no nutrition — add it, or pick a usual product",
+        },
+    ],
 };
 
 function food(
