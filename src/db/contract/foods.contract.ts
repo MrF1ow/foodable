@@ -230,6 +230,50 @@ export function runFoodsStoreContract(
             expect(map.get(food.id)?.length).toBe(1001);
         });
 
+        test("generic_food_id and usual_product_id round trip", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const plain = sampleFood(c.householdId, {
+                name: "Plain eggs",
+                normalizedName: "plain-eggs",
+            });
+            await store.insertFood(plain);
+            const product = sampleFood(c.householdId, {
+                name: "Brand eggs",
+                normalizedName: "brand-eggs",
+                genericFoodId: plain.id,
+            });
+            await store.insertFood(product);
+            const linkedPlain = await store.updateFoodRow({
+                ...plain,
+                usualProductId: product.id,
+            });
+            expect(linkedPlain?.usualProductId).toBe(product.id);
+            expect(
+                (await store.getFood(c.householdId, product.id))?.genericFoodId,
+            ).toBe(plain.id);
+            expect(
+                (await store.listFoods(c.householdId)).find(
+                    (f) => f.id === plain.id,
+                )?.usualProductId,
+            ).toBe(product.id);
+            await store.updateFoodRow({
+                ...plain,
+                usualProductId: null,
+            });
+            await store.updateFoodRow({
+                ...product,
+                genericFoodId: null,
+            });
+            expect(
+                (await store.getFood(c.householdId, plain.id))?.usualProductId,
+            ).toBeNull();
+            expect(
+                (await store.getFood(c.householdId, product.id))?.genericFoodId,
+            ).toBeNull();
+        });
+
         test("household scoping on listFoods", async () => {
             await reset();
             const c = ctx();
