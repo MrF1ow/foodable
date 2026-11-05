@@ -11,7 +11,7 @@ import {
     type PersonRule,
     type StoreRule,
 } from "../../domain/rules.js";
-import { renderSettingsNav } from "../components/settings-nav.js";
+import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
@@ -591,7 +591,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
                 : undefined,
         })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderSettingsNav("household")}
+        ${renderHouseholdNav("members")}
         ${token}
         ${panel({ title: "Household", body: householdCard })}
         ${panel({

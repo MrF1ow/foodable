@@ -30,6 +30,7 @@ const chrome = { theme: "light" as const };
 test("theme save form posts account fields to /settings", () => {
     const html = renderSettingsPage({
         chrome: { theme: "dark" },
+        backHref: "/fridge",
         displayName: "Alice",
         timezone: "America/Los_Angeles",
         weightUnit: "lb",
@@ -38,8 +39,11 @@ test("theme save form posts account fields to /settings", () => {
         drinkUnit: "",
     });
     expect(html).toContain("<h1>Settings</h1>");
-    expect(html).toContain('href="/settings/household"');
-    expect(html).toContain('href="/settings/foods"');
+    expect(html).toContain('href="/settings/help?from=%2Ffridge"');
+    expect(html).toContain('class="settings-back" href="/fridge"');
+    expect(html).toContain('<a href="/logout" data-turbo="false">Log out</a>');
+    expect(html).not.toContain("bottom-nav");
+    expect(html).toContain('content="page"');
     expect(html).toContain('name="theme" value="dark" checked');
     expect(html).toContain('name="theme" value="system"');
     expect(html).toContain('name="theme" value="light"');
@@ -51,6 +55,7 @@ test("theme save form posts account fields to /settings", () => {
 test("a cleared theme preference checks System", () => {
     const html = renderSettingsPage({
         chrome: { theme: "system" },
+        backHref: "/",
         displayName: "Alice",
         timezone: "",
         weightUnit: "",
@@ -120,7 +125,7 @@ test("owner household page has add-member form on /household only", () => {
         viewerUserId: alice.userId,
     });
     expect(html).toContain("<h1>Household</h1>");
-    expect(html).toContain('href="/settings/foods"');
+    expect(html).toContain('href="/household/items"');
     expect(html).toContain('action="/household"');
     expect(html).toContain('commandfor="household-add-member"');
     expect(html).toContain("Alice");
@@ -185,7 +190,7 @@ test("household settings groups owner tools into cards and modals", () => {
         viewerUserId: alice.userId,
     } as never);
     expect(html).toContain(
-        '<a href="/settings/household" aria-current="page">Household</a>',
+        '<a href="/household" aria-current="page">Members</a>',
     );
     for (const heading of ["Household", "Members", "Grocery stores", "Rules"]) {
         expect(html).toContain(`<h2>${heading}</h2>`);

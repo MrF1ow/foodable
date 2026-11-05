@@ -1,5 +1,9 @@
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
-import { errorBanner, pageHeader, field } from "../components/ui.js";
+import {
+    escapeHtml,
+    renderSettingsPage as renderSettingsShell,
+    type ViewerChrome,
+} from "../shell.js";
+import { errorBanner, pageHeader, field, panel } from "../components/ui.js";
 import { DRINK_UNITS, isDrinkUnit, type DrinkUnit } from "../../alcohol.js";
 import {
     WEIGHT_UNITS,
@@ -10,6 +14,7 @@ import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsPageView = {
     chrome: ViewerChrome;
+    backHref: string;
     displayName: string;
     timezone: string;
     weightUnit: WeightUnit | "";
@@ -86,6 +91,10 @@ const THEME_CHOICES = [
     { value: "dark", label: "Dark" },
 ] as const;
 
+function hiddenFrom(backHref: string): string {
+    return `<input type="hidden" name="from" value="${escapeHtml(backHref)}" />`;
+}
+
 export function renderSettingsPage(view: SettingsPageView): string {
     const themes = THEME_CHOICES.map(({ value, label }) => {
         const checked = view.chrome.theme === value ? " checked" : "";
@@ -93,15 +102,14 @@ export function renderSettingsPage(view: SettingsPageView): string {
     }).join("");
     const widgetsChecked = view.widgetsEnabled ? " checked" : "";
     const alcoholChecked = view.alcoholTrackingEnabled ? " checked" : "";
-    // The account form saves the theme, so it opts out of Turbo: iOS Safari
-    // colours its toolbar from the page once per load, and an in-place theme
-    // switch left the toolbar in the old theme.
+    const fromField = hiddenFrom(view.backHref);
     const body = `
         ${pageHeader({ title: "Settings" })}
         ${errorBanner(view.error)}
-        ${renderSettingsNav("account")}
+        ${renderSettingsNav("account", view.backHref)}
         <form method="POST" action="/settings" class="appearance panel" data-turbo="false">
             <input type="hidden" name="group" value="account" />
+            ${fromField}
             <h2>Account</h2>
             ${field({ id: "display_name", label: "Display name", control: `<input id="display_name" name="display_name" value="${escapeHtml(view.displayName)}" maxlength="80" autocomplete="nickname" />` })}
             <fieldset class="choice-row">
@@ -112,6 +120,7 @@ export function renderSettingsPage(view: SettingsPageView): string {
         </form>
         <form method="POST" action="/settings" class="appearance nutrition-prefs panel">
             <input type="hidden" name="group" value="nutrition" />
+            ${fromField}
             <h2>Nutrition prefs</h2>
             ${field({ id: "timezone", label: "Timezone", control: `<input id="timezone" name="timezone" value="${escapeHtml(view.timezone)}" placeholder="America/Los_Angeles" autocomplete="off" />` })}
             ${field({ id: "preferred_weight_unit", label: "Weight unit", control: `<select id="preferred_weight_unit" name="preferred_weight_unit">${optionList(WEIGHT_UNITS, view.weightUnit)}</select>` })}
@@ -120,11 +129,15 @@ export function renderSettingsPage(view: SettingsPageView): string {
             ${field({ id: "preferred_drink_unit", label: "Drink unit", control: `<select id="preferred_drink_unit" name="preferred_drink_unit">${optionList(DRINK_UNITS, view.drinkUnit, { us: "US drinks", uk: "UK units" })}</select>` })}
             <button type="submit" class="btn-primary">Save nutrition prefs</button>
         </form>
+        ${panel({
+            title: "Session",
+            body: '<a href="/logout" data-turbo="false">Log out</a>',
+        })}
     `;
-    return renderAppShell({
+    return renderSettingsShell({
         title: "Settings",
-        active: "household",
         theme: view.chrome.theme,
+        backHref: view.backHref,
         body,
     });
 }

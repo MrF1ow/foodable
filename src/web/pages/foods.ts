@@ -1,7 +1,7 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import type { Food } from "../../domain/foods.js";
-import { renderSettingsNav } from "../components/settings-nav.js";
+import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     emptyState,
@@ -203,15 +203,15 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
             : undefined;
 
     const body = `
-        ${pageHeader({ title: "Foods", actions: headerActions })}
+        ${pageHeader({ title: "Items", actions: headerActions })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderSettingsNav("foods")}
+        ${renderHouseholdNav("items")}
         ${list || emptyState("No foods in the catalog yet.")}
         ${editModal}
         ${mergeModal}
     `;
     return renderAppShell({
-        title: "Foods",
+        title: "Items",
         active: "household",
         theme: view.chrome.theme,
         body,

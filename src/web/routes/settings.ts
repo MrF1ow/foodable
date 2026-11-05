@@ -18,16 +18,35 @@ import {
 import { upsertProfile } from "../../db/profiles.js";
 import { validateTz } from "../../domain/tz.js";
 import { redirectWithToast } from "../components/toast.js";
+import { getBaseUrl } from "../../url.js";
+import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
 
 export const settingsRoutes = new Hono();
 
+function resolveBackHref(c: Parameters<typeof getBaseUrl>[0] & {
+    req: {
+        query: (key: string) => string | undefined;
+        header: (key: string) => string | undefined;
+    };
+}) {
+    return settingsBackHref({
+        from: c.req.query("from"),
+        referer: c.req.header("referer"),
+        origin: getBaseUrl(c),
+    });
+}
+
 settingsRoutes.get("/settings", requireSiteUser, async (c) => {
-    const page = await renderSettingsAccountPage(c.get("userId"));
+    const backHref = resolveBackHref(c);
+    const page = await renderSettingsAccountPage(c.get("userId"), {
+        backHref,
+    });
     return c.html(page.html, page.status);
 });
 
 settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
-    const page = await renderSettingsHelpRoute(c.get("userId"));
+    const backHref = resolveBackHref(c);
+    const page = await renderSettingsHelpRoute(c.get("userId"), { backHref });
     return c.html(page.html, page.status);
 });
 
@@ -35,6 +54,13 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
+    const origin = getBaseUrl(c);
+    const backHref = settingsBackHref({
+        from: formText(body, "from"),
+        referer: undefined,
+        origin,
+    });
+    const redirectTo = settingsUrlWithBack(backHref);
     const group = formText(body, "group");
     if (group === "nutrition") {
         const prefs = parseNutritionPrefsInput({
@@ -47,17 +73,17 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         });
         if (prefs.timezone) {
             if (!validateTz(prefs.timezone)) {
-                const page = await renderSettingsAccountPage(
-                    userId,
-                    "Enter a valid IANA timezone.",
-                );
+                const page = await renderSettingsAccountPage(userId, {
+                    backHref,
+                    error: "Enter a valid IANA timezone.",
+                });
                 return c.html(page.html, 400);
             }
         } else {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
-        return redirectWithToast(c, "/settings", "settings.nutrition.saved");
+        return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
     }
     const appearance = parseAppearanceInput({ theme: body.theme });
     await upsertProfile(userId, appearance);
@@ -65,7 +91,7 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);
     }
-    return redirectWithToast(c, "/settings", "settings.profile.saved");
+    return redirectWithToast(c, redirectTo, "settings.profile.saved");
 });
 
 settingsRoutes.post("/create-household", requireSiteUser, async (c) => {

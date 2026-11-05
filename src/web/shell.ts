@@ -128,6 +128,28 @@ ${appBar("gate")}
 </html>`;
 }
 
+export type SettingsPageShell = {
+    title: string;
+    theme: ThemePref;
+    backHref: string;
+    body: string;
+};
+
+/** Bare Settings / Help chrome: back link, no bottom nav, page theme meta. */
+export function renderSettingsPage(shell: SettingsPageShell): string {
+    return `<!doctype html>
+${htmlOpen(shell.theme)}
+<head>
+${appHead(shell.title, shell.theme, "page")}
+</head>
+<body>
+${appBar("settings")}
+<main class="app-main native"><a class="settings-back" href="${escapeHtml(shell.backHref)}">‹ Back</a>${shell.body}</main>
+<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
+</body>
+</html>`;
+}
+
 /** The settings form posts theme=system|light|dark. System, or anything
  *  unrecognised, clears the preference (null) rather than pinning light. */
 export function parseAppearanceInput(input: { theme?: unknown }): {

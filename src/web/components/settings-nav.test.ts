@@ -1,9 +1,23 @@
 import { test, expect } from "bun:test";
-import { renderSettingsNav } from "./settings-nav.js";
+import { renderHouseholdNav, renderSettingsNav } from "./settings-nav.js";
 
-test("settings nav links every section and marks the active one", () => {
-    const html = renderSettingsNav("household");
-    expect(html).toBe(
-        '<nav class="subnav" aria-label="Settings sections"><a href="/settings">Account</a><a href="/settings/household" aria-current="page">Household</a><a href="/settings/foods">Foods</a><a href="/settings/help">Help</a></nav>',
+test("settings nav omits from query when back is home", () => {
+    expect(renderSettingsNav("account", "/")).toBe(
+        '<nav class="subnav" aria-label="Settings sections"><a href="/settings" aria-current="page">Account</a><a href="/settings/help">Help</a></nav>',
+    );
+});
+
+test("settings nav carries from on each link", () => {
+    expect(renderSettingsNav("help", "/fridge")).toBe(
+        '<nav class="subnav" aria-label="Settings sections"><a href="/settings?from=%2Ffridge">Account</a><a href="/settings/help?from=%2Ffridge" aria-current="page">Help</a></nav>',
+    );
+});
+
+test("household nav", () => {
+    expect(renderHouseholdNav("members")).toContain(
+        '<a href="/household" aria-current="page">Members</a>',
+    );
+    expect(renderHouseholdNav("items")).toContain(
+        '<a href="/household/items" aria-current="page">Items</a>',
     );
 });

@@ -421,6 +421,7 @@ test("every page's h1 comes from pageHeader once", async () => {
             "settings",
             renderSettingsPage({
                 chrome,
+                backHref: "/",
                 displayName: "Alice",
                 timezone: "",
                 weightUnit: "",
@@ -444,7 +445,7 @@ test("every page's h1 comes from pageHeader once", async () => {
                 viewerUserId: "u1",
             }),
         ],
-        ["help", renderSettingsHelpPage({ chrome })],
+        ["help", renderSettingsHelpPage({ chrome, backHref: "/" })],
         ["create-household", createHouseholdFormHtml()],
         ["app-shell", shellPage()],
     ];

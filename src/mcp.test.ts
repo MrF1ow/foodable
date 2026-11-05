@@ -5946,10 +5946,13 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Settings</h1>");
-        expect(html).toContain('href="/settings/household"');
-        expect(html).toContain('href="/settings/foods"');
-        expect(html).toContain('href="/household" aria-current="page"');
-        expect(html).toContain('href="/settings"');
+        expect(html).toContain('href="/settings/help"');
+        expect(html).toContain('href="/settings" aria-current="page"');
+        expect(html).toContain(
+            '<a href="/logout" data-turbo="false">Log out</a>',
+        );
+        expect(html).not.toContain("bottom-nav");
+        expect(html).toContain('name="foodable-theme-chrome" content="page"');
         expect(html).not.toContain("coming-soon");
     });
 
@@ -5959,8 +5962,8 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Foods</h1>");
-        expect(html).toContain('href="/household" aria-current="page"');
+        expect(html).toContain("<h1>Items</h1>");
+        expect(html).toContain('href="/household/items" aria-current="page"');
         expect(html).toContain("No foods in the catalog yet.");
     });
 
@@ -6159,6 +6162,32 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain('<html lang="en" data-theme="dark">');
         expect(html).not.toContain("--accent");
+    });
+
+    test("POST /settings with from=/fridge redirects back with query", async () => {
+        const save = await siteApp.request("http://x/settings", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "group=account&theme=light&from=%2Ffridge",
+        });
+        expect(save.status).toBe(303);
+        expect(save.headers.get("location")).toBe("/settings?from=%2Ffridge");
+    });
+
+    test("POST /settings ignores unsafe from in redirect", async () => {
+        const save = await siteApp.request("http://x/settings", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "group=account&theme=light&from=//evil.example",
+        });
+        expect(save.status).toBe(303);
+        expect(save.headers.get("location")).toBe("/settings");
     });
 
     test("POST /settings with System clears the saved theme", async () => {
