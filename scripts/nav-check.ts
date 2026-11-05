@@ -209,11 +209,21 @@ async function snap(): Promise<Snap> {
         auth: !!document.querySelector("form.auth-form"),
     }))()`);
 }
+// The selector goes in as a call argument, not spliced into evaluated source.
 async function clickSel(sel: string) {
-    const found = await ev<boolean>(
-        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el; })()`,
-    );
-    if (!found) throw new Error(`clickSel: no element matches ${sel}`);
+    const doc = (await send("Runtime.evaluate", {
+        expression: "document",
+    })) as { result: { objectId: string } };
+    const res = (await send("Runtime.callFunctionOn", {
+        objectId: doc.result.objectId,
+        functionDeclaration:
+            "function (sel) { const el = this.querySelector(sel); if (el) el.click(); return !!el; }",
+        arguments: [{ value: sel }],
+        returnByValue: true,
+    })) as { result?: { value?: boolean } };
+    if (!res.result?.value) {
+        throw new Error(`clickSel: no element matches ${sel}`);
+    }
 }
 async function setMarker() {
     await ev(`window.__marker = "stay"`);
