@@ -6,7 +6,6 @@ import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { listFridge } from "../../domain/fridge.js";
 import {
-    addRecipeIngredientByBarcode,
     addRecipeIngredientById,
     addRecipeManualIngredient,
     addRecipeToGrocery,
@@ -24,6 +23,10 @@ import {
 import { listHouseholdMembers } from "../../db/household.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import {
+    findOrCreateFoodByBarcodeResult,
+    linkProductPromptPath,
+} from "../../domain/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
@@ -122,6 +125,7 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
         c.req.param("id"),
         {
             member: c.req.query("member"),
+            linkProductId: c.req.query("link_product"),
         },
     );
     return c.html(page.html, page.status);
@@ -463,18 +467,32 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                 },
             );
         } else if (formText(body, "barcode")) {
-            await addRecipeIngredientByBarcode(
-                liveRecipesStore(),
-                liveFoodsStore(),
-                {
-                    householdId: member.householdId,
-                    recipeId,
-                    barcode: formText(body, "barcode"),
-                    amount,
-                    unit: formText(body, "qty_unit"),
-                },
-                { lookup: fridgeBarcodeLookup },
+            const foods = liveFoodsStore();
+            const { food, created } = await findOrCreateFoodByBarcodeResult(
+                foods,
+                member.householdId,
+                formText(body, "barcode"),
+                fridgeBarcodeLookup,
             );
+            await addRecipeIngredientById(liveRecipesStore(), foods, {
+                householdId: member.householdId,
+                recipeId,
+                foodId: food.id,
+                amount,
+                unit: formText(body, "qty_unit"),
+            });
+            if (created) {
+                const catalog = await foods.listFoods(member.householdId);
+                const prompt = linkProductPromptPath(
+                    food,
+                    catalog,
+                    `/recipes/${recipeId}`,
+                );
+                if (prompt) {
+                    // toast: none (link-product prompt on destination)
+                    return c.redirect(prompt, 303);
+                }
+            }
         } else {
             await addRecipeManualIngredient(
                 liveRecipesStore(),

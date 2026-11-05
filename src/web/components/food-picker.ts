@@ -48,12 +48,14 @@ export type FoodPickerOptions = {
     /** Extra HTML inserted inside each POST form (after hidden fields). */
     formExtras?: string;
     includeQuantity?: boolean;
+    includeManual?: boolean;
 };
 
 export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
     const id = opts.id ?? "food-picker";
     const action = opts.action ?? "#";
     const method = opts.method ?? "get";
+    const includeManual = opts.includeManual !== false;
     const extras =
         hiddenInputs(opts.hiddenFields ?? {}) + (opts.formExtras ?? "");
     const qty = opts.includeQuantity
@@ -104,11 +106,19 @@ ${manualQty}
             : `${field({ id: `${id}-name`, label: "Name", control: `<input id="${escapeHtml(id)}-name" name="food_name" type="text" autocomplete="off" />` })}
 ${manualQty}`;
     const hit = method === "post" ? "submit" : "text";
+    const manualTab = includeManual
+        ? `<button type="button" role="tab" class="seg-btn" id="${escapeHtml(id)}-tab-manual" data-tab="manual" aria-controls="${escapeHtml(manualPanel)}" aria-selected="false">Manual</button>`
+        : "";
+    const manualPanelBlock = includeManual
+        ? `<div class="food-picker-panel" role="tabpanel" id="${escapeHtml(manualPanel)}" data-panel="manual" aria-labelledby="${escapeHtml(id)}-tab-manual" hidden>
+${manualBlock}
+</div>`
+        : "";
     return `<div class="food-picker" id="${escapeHtml(id)}" data-food-picker data-hit="${hit}">
 <div class="food-picker-tabs seg" role="tablist" aria-label="Food identity">
 <button type="button" role="tab" class="seg-btn" id="${escapeHtml(id)}-tab-barcode" data-tab="barcode" aria-controls="${escapeHtml(barcodePanel)}" aria-selected="true">Barcode</button>
 <button type="button" role="tab" class="seg-btn" id="${escapeHtml(id)}-tab-search" data-tab="search" aria-controls="${escapeHtml(searchPanel)}" aria-selected="false">Search</button>
-<button type="button" role="tab" class="seg-btn" id="${escapeHtml(id)}-tab-manual" data-tab="manual" aria-controls="${escapeHtml(manualPanel)}" aria-selected="false">Manual</button>
+${manualTab}
 </div>
 <div class="food-picker-panel" role="tabpanel" id="${escapeHtml(barcodePanel)}" data-panel="barcode" aria-labelledby="${escapeHtml(id)}-tab-barcode">
 <form class="food-picker-barcode" data-barcode-form data-lookup-path="lookupBarcode" action="${escapeHtml(action)}" method="${method}">
@@ -122,8 +132,6 @@ ${qty}
 <div class="food-picker-panel" role="tabpanel" id="${escapeHtml(searchPanel)}" data-panel="search" aria-labelledby="${escapeHtml(id)}-tab-search" hidden>
 ${searchFields}
 </div>
-<div class="food-picker-panel" role="tabpanel" id="${escapeHtml(manualPanel)}" data-panel="manual" aria-labelledby="${escapeHtml(id)}-tab-manual" hidden>
-${manualBlock}
-</div>
+${manualPanelBlock}
 </div>`;
 }

@@ -42,6 +42,11 @@ export function renderSettingsNav(
 const HOUSEHOLD_SECTIONS = [
     { id: "members", href: "/household", label: "Members" },
     { id: "items", href: "/household/items", label: "Items" },
+    {
+        id: "usual-products",
+        href: "/household/usual-products",
+        label: "Usual products",
+    },
 ] as const;
 
 export type HouseholdSection = (typeof HOUSEHOLD_SECTIONS)[number]["id"];

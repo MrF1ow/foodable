@@ -20,4 +20,7 @@ test("household nav", () => {
     expect(renderHouseholdNav("items")).toContain(
         '<a href="/household/items" aria-current="page">Items</a>',
     );
+    expect(renderHouseholdNav("usual-products")).toContain(
+        '<a href="/household/usual-products" aria-current="page">Usual products</a>',
+    );
 });

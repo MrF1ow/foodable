@@ -37,9 +37,25 @@ import {
 import { renderRecipeDetailPage, renderRecipesPage } from "./pages/recipes.js";
 import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
+import {
+    renderUsualProductsListPage as renderUsualProductsListHtml,
+    renderUsualProductsPickerPage as renderUsualProductsPickerHtml,
+} from "./pages/usual-products.js";
+import type { LinkProductPromptView } from "./components/link-product-prompt.js";
 import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
-import { effectiveFoodsByIds } from "../domain/foods.js";
+import {
+    effectiveFoodsByIds,
+    foodHasNoNutrition,
+    suggestFoodFor,
+    usualProductRows,
+    type Food,
+} from "../domain/foods.js";
+import {
+    plainFoodIdForUsualPicker,
+    safeReturnPath,
+    usualProductsPickerHref,
+} from "./usual-products-path.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
@@ -188,14 +204,23 @@ export async function renderFridgeInventoryPage(
     viewerUserId: string,
     error?: string,
     openModalId?: string,
+    linkProductId?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
-    const snapshot = await listFridge(
-        liveFridgeStore(),
-        gate.viewer.householdId,
-    );
+    const householdId = gate.viewer.householdId;
+    const snapshot = await listFridge(liveFridgeStore(), householdId);
+    const allFoods = await liveFoodsStore().listFoods(householdId);
+    const linkProductPrompt = linkProductId
+        ? linkProductPromptFromFoods(
+              allFoods,
+              linkProductId,
+              "/fridge",
+              true,
+              error,
+          )
+        : null;
     return {
         status: 200,
         html: renderFridgePage({
@@ -203,6 +228,7 @@ export async function renderFridgeInventoryPage(
             chrome: viewerChromeFromProfile(profile),
             error,
             openModalId,
+            linkProductPrompt,
         }),
     };
 }
@@ -214,6 +240,7 @@ export async function renderGroceryListPage(
         allergenWarning?: string;
         allergenRetry?: GroceryAllergenRetry;
         openModalId?: string;
+        linkProductId?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -241,7 +268,16 @@ export async function renderGroceryListPage(
     const rulesByStore = new Map(
         storeRules.map((row) => [row.storeId, row.rules]),
     );
-    const catalog = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
+    const foodsStore = liveFoodsStore();
+    const allFoods = await foodsStore.listFoods(householdId);
+    const productsByPlain = new Map<string, Food[]>();
+    for (const row of allFoods) {
+        if (!row.genericFoodId || row.archivedAt) continue;
+        const list = productsByPlain.get(row.genericFoodId) ?? [];
+        list.push(row);
+        productsByPlain.set(row.genericFoodId, list);
+    }
+    const catalog = await effectiveFoodsByIds(foodsStore, householdId, [
         ...snapshot.lines.map((line) => line.foodId),
         ...fridge.items.map((item) => item.foodId),
     ]);
@@ -262,24 +298,65 @@ export async function renderGroceryListPage(
                 ...section,
                 lines: storeLines
                     .filter((line) => line.sectionId === section.id)
-                    .map((line) => ({
-                        ...line,
-                        alreadyHave: alreadyHaveTag(
-                            line,
-                            fridge.items,
-                            catalog,
-                        ),
-                        lastLocationId:
-                            fridge.items
-                                .filter(
-                                    (item) =>
-                                        item.foodId &&
-                                        item.foodId === line.foodId,
-                                )
-                                .at(-1)?.locationId ??
-                            fridge.locations[0]?.id ??
-                            null,
-                    })),
+                    .map((line) => {
+                        const effective = line.foodId
+                            ? catalog.get(line.foodId)
+                            : null;
+                        const products = line.foodId
+                            ? (productsByPlain.get(line.foodId) ?? [])
+                            : [];
+                        const plain = line.foodId
+                            ? allFoods.find((row) => row.id === line.foodId)
+                            : null;
+                        const usualId = plain?.usualProductId ?? null;
+                        const putAwayProducts =
+                            products.length > 0 && plain
+                                ? [
+                                      {
+                                          id: plain.id,
+                                          label: plain.name,
+                                      },
+                                      ...products.map((product) => ({
+                                          id: product.id,
+                                          label: product.brand
+                                              ? `${product.name} · ${product.brand}`
+                                              : product.name,
+                                      })),
+                                  ]
+                                : null;
+                        return {
+                            ...line,
+                            alreadyHave: alreadyHaveTag(
+                                line,
+                                fridge.items,
+                                catalog,
+                            ),
+                            lastLocationId:
+                                fridge.items
+                                    .filter(
+                                        (item) =>
+                                            item.foodId &&
+                                            item.foodId === line.foodId,
+                                    )
+                                    .at(-1)?.locationId ??
+                                fridge.locations[0]?.id ??
+                                null,
+                            usualProductName: effective?.product?.name ?? null,
+                            usualPickerHref: line.foodId
+                                ? usualProductsPickerHref(
+                                      plainFoodIdForUsualPicker(
+                                          line.foodId,
+                                          allFoods.find(
+                                              (row) => row.id === line.foodId,
+                                          ),
+                                      ),
+                                      "/grocery",
+                                  )
+                                : null,
+                            putAwayProducts,
+                            putAwayProductId: usualId ?? plain?.id ?? null,
+                        };
+                    }),
             }));
         return {
             ...store,
@@ -296,6 +373,15 @@ export async function renderGroceryListPage(
         );
         return warning != null && !warning.blocking;
     });
+    const linkProductPrompt = opts.linkProductId
+        ? linkProductPromptFromFoods(
+              allFoods,
+              opts.linkProductId,
+              "/grocery",
+              true,
+              opts.error,
+          )
+        : null;
     return {
         status: 200,
         html: renderGroceryPage({
@@ -311,6 +397,7 @@ export async function renderGroceryListPage(
                 id: loc.id,
                 name: loc.name,
             })),
+            linkProductPrompt,
         }),
     };
 }
@@ -366,9 +453,80 @@ export async function renderSettingsHelpRoute(
     };
 }
 
+function linkProductPromptFromFoods(
+    foods: Food[],
+    productId: string,
+    from: string,
+    openOnLoad: boolean,
+    error?: string,
+): LinkProductPromptView | null {
+    const product = foods.find((row) => row.id === productId);
+    if (!product || product.archivedAt || product.genericFoodId) {
+        return null;
+    }
+    const plains = foods.filter(
+        (row) =>
+            !row.archivedAt &&
+            !row.genericFoodId &&
+            row.kind === product.kind &&
+            row.id !== product.id,
+    );
+    const suggested = suggestFoodFor(product.name, plains);
+    if (!suggested) return null;
+    return {
+        product: {
+            id: product.id,
+            name: product.name,
+            brand: product.brand,
+        },
+        plainOptions: plains.map((row) => ({
+            id: row.id,
+            name: row.name,
+        })),
+        suggestedId: suggested.id,
+        from,
+        openOnLoad,
+        error,
+    };
+}
+
+async function foodUsageSets(householdId: string): Promise<{
+    recipeFoodIds: Set<string>;
+    groceryFoodIds: Set<string>;
+}> {
+    const recipesStore = liveRecipesStore();
+    const recipes = await recipesStore.listRecipes(householdId);
+    const recipeFoodIds = new Set<string>();
+    for (const recipe of recipes) {
+        const ingredients = await recipesStore.listIngredients(
+            householdId,
+            recipe.id,
+        );
+        for (const row of ingredients) {
+            if (row.foodId) recipeFoodIds.add(row.foodId);
+        }
+    }
+    const snapshot = await listGrocery(
+        liveGroceryStore(),
+        liveSettingsStore(),
+        householdId,
+    );
+    const groceryFoodIds = new Set(
+        snapshot.lines
+            .map((line) => line.foodId)
+            .filter((id): id is string => Boolean(id)),
+    );
+    return { recipeFoodIds, groceryFoodIds };
+}
+
 export async function renderSettingsFoodsPage(
     viewerUserId: string,
-    opts: { error?: string; openModalId?: string } = {},
+    opts: {
+        error?: string;
+        openModalId?: string;
+        linkProductId?: string;
+        from?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -381,6 +539,16 @@ export async function renderSettingsFoodsPage(
         ...food,
         aliases: aliasMap.get(food.id) ?? [],
     }));
+    const from = safeReturnPath(opts.from, "/household/items");
+    const linkProductPrompt = opts.linkProductId
+        ? linkProductPromptFromFoods(
+              foods,
+              opts.linkProductId,
+              from,
+              true,
+              opts.error,
+          )
+        : null;
     return {
         status: 200,
         html: renderFoodsSettingsPage({
@@ -388,6 +556,69 @@ export async function renderSettingsFoodsPage(
             foods: withAliases,
             error: opts.error,
             openModalId: opts.openModalId,
+            linkProductPrompt,
+        }),
+    };
+}
+
+export async function renderUsualProductsListPage(
+    viewerUserId: string,
+    opts: { error?: string; from?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const foods = await liveFoodsStore().listFoods(householdId);
+    const usage = await foodUsageSets(householdId);
+    const { needsUsual, rows } = usualProductRows({
+        foods,
+        recipeFoodIds: usage.recipeFoodIds,
+        groceryFoodIds: usage.groceryFoodIds,
+    });
+    return {
+        status: 200,
+        html: renderUsualProductsListHtml({
+            chrome: viewerChromeFromProfile(profile),
+            needsUsual,
+            rows,
+            from: opts.from,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderUsualProductsPickerPage(
+    viewerUserId: string,
+    foodId: string,
+    opts: { error?: string; from?: string } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const store = liveFoodsStore();
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt || food.genericFoodId) {
+        const page = await renderUsualProductsListPage(viewerUserId, {
+            error: "Unknown food.",
+        });
+        return { status: 404, html: page.html };
+    }
+    const foods = await store.listFoods(householdId);
+    const products = foods
+        .filter((row) => row.genericFoodId === foodId && !row.archivedAt)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const from = safeReturnPath(opts.from, "/household/usual-products");
+    return {
+        status: 200,
+        html: renderUsualProductsPickerHtml({
+            chrome: viewerChromeFromProfile(profile),
+            food,
+            products,
+            usualProductId: food.usualProductId,
+            from,
+            error: opts.error,
         }),
     };
 }
@@ -533,6 +764,7 @@ export async function renderRecipeDetailRoute(
         member?: string;
         error?: string;
         openModalId?: string;
+        linkProductId?: string;
     } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -595,12 +827,40 @@ export async function renderRecipeDetailRoute(
             ? [...catalog.values()].flatMap((food) => food.allergens)
             : null,
     );
+    const allFoods = await liveFoodsStore().listFoods(householdId);
+    const linkProductPrompt = opts.linkProductId
+        ? linkProductPromptFromFoods(
+              allFoods,
+              opts.linkProductId,
+              `/recipes/${recipeId}`,
+              true,
+              opts.error,
+          )
+        : null;
+    const ingredientRows = view.ingredients.map((row) => {
+        const effective = row.foodId ? catalog.get(row.foodId) : null;
+        let displayName = row.displayName;
+        if (effective?.product) {
+            displayName = `${row.displayName} · ${effective.product.name}`;
+        }
+        const pickUsualHref =
+            effective && row.foodId && foodHasNoNutrition(effective)
+                ? usualProductsPickerHref(
+                      plainFoodIdForUsualPicker(
+                          row.foodId,
+                          allFoods.find((f) => f.id === row.foodId),
+                      ),
+                      `/recipes/${recipeId}`,
+                  )
+                : null;
+        return { ...row, displayName, pickUsualHref };
+    });
     return {
         status: 200,
         html: renderRecipeDetailPage({
             chrome: viewerChromeFromProfile(profile),
             recipe: view,
-            ingredients: view.ingredients,
+            ingredients: ingredientRows,
             members: members.map((member) => ({
                 userId: member.userId,
                 displayName: member.displayName,
@@ -625,6 +885,7 @@ export async function renderRecipeDetailRoute(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             openModalId: opts.openModalId,
+            linkProductPrompt,
         }),
     };
 }

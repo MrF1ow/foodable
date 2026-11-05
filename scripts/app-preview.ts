@@ -23,6 +23,7 @@ import {
 } from "../src/web/pages/recipes.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
+import { renderUsualProductsListPage } from "../src/web/pages/usual-products.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
@@ -37,6 +38,7 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
+import { usualProductRows } from "../src/domain/foods.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -179,11 +181,33 @@ function groceryView(chrome: unknown) {
                         line("s1", "sec1", "g2", "Spinach", 300, "g", true),
                     ]),
                     section("s1", "sec2", "Other", true, [
-                        line("s1", "sec2", "g3", "Eggs", 12, "each", false, {
-                            cover: "partial",
-                            have: { amount: 6, unit: "each" },
-                            need: { amount: 12, unit: "each" },
-                        }),
+                        {
+                            ...line(
+                                "s1",
+                                "sec2",
+                                "g3",
+                                "Eggs",
+                                12,
+                                "each",
+                                false,
+                                {
+                                    cover: "partial",
+                                    have: { amount: 6, unit: "each" },
+                                    need: { amount: 12, unit: "each" },
+                                },
+                            ),
+                            usualProductName: "Kirkland Large Eggs",
+                            usualPickerHref:
+                                "/household/usual-products/f-eggs?from=%2Fgrocery",
+                            putAwayProducts: [
+                                { id: "f-eggs", label: "Eggs" },
+                                {
+                                    id: "f-kirkland",
+                                    label: "Kirkland Large Eggs · Kirkland",
+                                },
+                            ],
+                            putAwayProductId: "f-kirkland",
+                        },
                     ]),
                 ],
             },
@@ -243,7 +267,12 @@ const MACROS = {
     incompleteReasons: [],
 };
 
-function food(id: string, name: string, calories: number | null) {
+function food(
+    id: string,
+    name: string,
+    calories: number | null,
+    over: Record<string, unknown> = {},
+) {
     return {
         id,
         householdId: H,
@@ -272,13 +301,39 @@ function food(id: string, name: string, calories: number | null) {
         createdAt: "2026-10-01T00:00:00Z",
         updatedAt: "2026-10-01T00:00:00Z",
         aliases: [],
+        ...over,
     };
 }
 
 // Views are cast with `as never`: this script is not typechecked (CI's
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
+function previewFoodCatalog() {
+    const catalog = [
+        food("f-eggs", "Eggs", null, {
+            usualProductId: "f-kirkland",
+            gramsPerEach: 50,
+        }),
+        food("f-kirkland", "Kirkland Large Eggs", 140, {
+            genericFoodId: "f-eggs",
+            brand: "Kirkland",
+        }),
+        food("f-gv", "Great Value Eggs", 130, { genericFoodId: "f-eggs" }),
+        food("f-buttermilk", "Buttermilk", null),
+        food("f2", "Milk", 64),
+    ];
+    const recipeFoodIds = new Set(["f-eggs", "f-buttermilk"]);
+    const groceryFoodIds = new Set(["f-eggs"]);
+    const usual = usualProductRows({
+        foods: catalog,
+        recipeFoodIds,
+        groceryFoodIds,
+    });
+    return { catalog, usual, recipeFoodIds, groceryFoodIds };
+}
+
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const chrome = viewerChromeFromProfile({ theme });
+    const { catalog, usual } = previewFoodCatalog();
     const nutrition = await renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -334,13 +389,26 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 {
                     id: "ing1",
                     recipeId: "r1",
-                    foodId: "f1",
-                    displayName: "Banana",
+                    foodId: "f-eggs",
+                    displayName: "Eggs · Kirkland Large Eggs",
                     quantity: { amount: 3, unit: "each" },
                     note: null,
                     sortOrder: 0,
                     perPortionAmount: 0.3,
                     personAmount: 0.3,
+                },
+                {
+                    id: "ing0",
+                    recipeId: "r1",
+                    foodId: "f-buttermilk",
+                    displayName: "Buttermilk",
+                    quantity: { amount: 200, unit: "ml" },
+                    note: null,
+                    sortOrder: 0,
+                    perPortionAmount: 20,
+                    personAmount: 20,
+                    pickUsualHref:
+                        "/household/usual-products/f-buttermilk?from=%2Frecipes%2Fr1",
                 },
                 {
                     id: "ing2",
@@ -415,7 +483,12 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         foods: renderFoodsSettingsPage({
             chrome,
-            foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
+            foods: catalog.map((row) => ({ ...row, aliases: [] })),
+        } as never),
+        "usual-products": renderUsualProductsListPage({
+            chrome,
+            needsUsual: usual.needsUsual,
+            rows: usual.rows,
         } as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),

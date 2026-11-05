@@ -1,8 +1,14 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import type { Food } from "../../domain/foods.js";
+import { suggestFoodFor } from "../../domain/foods.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
+import {
+    renderLinkProductPrompt,
+    type LinkProductPromptView,
+    LINK_PRODUCT_MODAL_ID,
+} from "../components/link-product-prompt.js";
 import {
     emptyState,
     errorBanner,
@@ -20,12 +26,15 @@ export type FoodsSettingsView = {
     foods: Array<Food & { aliases: string[] }>;
     error?: string;
     openModalId?: string;
+    linkProductPrompt?: LinkProductPromptView | null;
 };
 
 export const FOODS_MERGE_MODAL_ID = "foods-merge";
 /** One edit dialog for every food. Triggers fill it; routes still reopen `food-edit-<id>`. */
 export const FOOD_EDIT_MODAL_ID = "food-edit";
+export const FOOD_BELONGS_MODAL_ID = "food-belongs";
 const FOOD_EDIT_PREFIX = "food-edit-";
+const FOOD_BELONGS_PREFIX = "food-belongs-";
 
 type FoodRow = Food & { aliases: string[] };
 
@@ -43,6 +52,41 @@ function editReopenFood(view: FoodsSettingsView): FoodRow | null {
     );
 }
 
+function belongsReopenFood(view: FoodsSettingsView): FoodRow | null {
+    return (
+        sharedDialogItem({
+            openModalId: view.openModalId,
+            prefix: FOOD_BELONGS_PREFIX,
+            lookup: (id) => view.foods.find((food) => food.id === id) ?? null,
+        })?.item ?? null
+    );
+}
+
+function liveProducts(view: FoodsSettingsView, plainId: string): FoodRow[] {
+    return view.foods.filter(
+        (row) => row.genericFoodId === plainId && !row.archivedAt,
+    );
+}
+
+function plainFoodOptions(
+    view: FoodsSettingsView,
+    product: FoodRow,
+): FoodRow[] {
+    return view.foods.filter(
+        (row) =>
+            !row.archivedAt &&
+            !row.genericFoodId &&
+            row.kind === product.kind &&
+            row.id !== product.id,
+    );
+}
+
+function isTopLevelRow(food: FoodRow, view: FoodsSettingsView): boolean {
+    if (food.archivedAt) return true;
+    if (!food.genericFoodId) return true;
+    return false;
+}
+
 function nutrientInput(
     id: string,
     name: string,
@@ -54,7 +98,51 @@ function nutrientInput(
 </label>`;
 }
 
-function foodFill(food: FoodRow): ModalFill {
+function editProductFieldsTemplate(
+    view: FoodsSettingsView,
+    food: FoodRow,
+): string {
+    if (food.archivedAt) return "";
+    if (food.genericFoodId) {
+        const plains = plainFoodOptions(view, food);
+        const options = [
+            `<option value="">None</option>`,
+            ...plains.map((row) => {
+                const sel = row.id === food.genericFoodId ? " selected" : "";
+                return `<option value="${escapeHtml(row.id)}"${sel}>${escapeHtml(row.name)}</option>`;
+            }),
+        ].join("");
+        return `${field({
+            id: `food-edit-belongs-${food.id}`,
+            label: "Belongs to",
+            control: `<select id="food-edit-belongs-${food.id}" name="generic_food_id">${options}</select>`,
+        })}`;
+    }
+    const products = liveProducts(view, food.id);
+    if (products.length === 0) return "";
+    const names = products
+        .map((p) => `<li>${escapeHtml(p.name)}</li>`)
+        .join("");
+    const usualOptions = [
+        `<option value="">None</option>`,
+        ...products.map((p) => {
+            const sel = p.id === food.usualProductId ? " selected" : "";
+            return `<option value="${escapeHtml(p.id)}"${sel}>${escapeHtml(p.name)}</option>`;
+        }),
+    ].join("");
+    return `<div class="psec">
+<p class="subsection-title">Products</p>
+<ul class="list">${names}</ul>
+</div>
+${field({
+    id: `food-edit-usual-${food.id}`,
+    label: "Usual product",
+    control: `<select id="food-edit-usual-${food.id}" name="usual_product_id">${usualOptions}</select>`,
+})}`;
+}
+
+function foodFill(view: FoodsSettingsView, food: FoodRow): ModalFill {
+    const extra = editProductFieldsTemplate(view, food);
     return {
         action: `/household/items/${food.id}`,
         title: `Edit ${food.name}`,
@@ -77,10 +165,87 @@ function foodFill(food: FoodRow): ModalFill {
             allergens: food.allergens.join(","),
             archived: Boolean(food.archivedAt),
         },
+        templates: extra
+            ? { product_fields: `food-edit-product-fields-${food.id}` }
+            : undefined,
     };
 }
 
-function foodEditForm(food: FoodRow | null, modalError?: string): string {
+function belongsFill(view: FoodsSettingsView, product: FoodRow): ModalFill {
+    const plains = plainFoodOptions(view, product);
+    const suggested = suggestFoodFor(product.name, plains);
+    const options = [
+        `<option value="">None</option>`,
+        ...plains.map((row) => {
+            const sel = row.id === suggested?.id ? " selected" : "";
+            return `<option value="${escapeHtml(row.id)}"${sel}>${escapeHtml(row.name)}</option>`;
+        }),
+    ].join("");
+    return {
+        action: `/household/items/${product.id}/link`,
+        title: "Belongs to",
+        templates: {
+            belongs_select: `food-belongs-select-${product.id}`,
+        },
+        fields: {
+            belongs_html: options,
+        },
+    };
+}
+
+function belongsSelectTemplate(
+    view: FoodsSettingsView,
+    product: FoodRow,
+): string {
+    return `<template id="food-belongs-select-${escapeHtml(product.id)}">${belongsSelectInner(view, product)}</template>`;
+}
+
+function productFieldsSlot(
+    view: FoodsSettingsView,
+    food: FoodRow | null,
+): string {
+    if (!food) return `<div data-fill-slot="product_fields"></div>`;
+    const html = editProductFieldsTemplate(view, food);
+    if (!html) return `<div data-fill-slot="product_fields"></div>`;
+    const templateId = `food-edit-product-fields-${food.id}`;
+    return `<div data-fill-slot="product_fields" data-filled-template="${escapeHtml(templateId)}">${html}</div>`;
+}
+
+function belongsSelectInner(view: FoodsSettingsView, product: FoodRow): string {
+    const plains = plainFoodOptions(view, product);
+    const suggested = suggestFoodFor(product.name, plains);
+    const options = [
+        `<option value="">None</option>`,
+        ...plains.map((row) => {
+            const sel = row.id === suggested?.id ? " selected" : "";
+            return `<option value="${escapeHtml(row.id)}"${sel}>${escapeHtml(row.name)}</option>`;
+        }),
+    ].join("");
+    return `<form method="post" action="/household/items/${escapeHtml(product.id)}/link">
+${field({
+    id: `food-belongs-food-${product.id}`,
+    label: "Food",
+    control: `<select id="food-belongs-food-${product.id}" name="food_id">${options}</select>`,
+})}
+<label><input type="checkbox" name="make_usual" value="1" /> Make it our usual</label>
+<button type="submit" class="btn-primary">Save</button>
+</form>`;
+}
+
+function belongsSelectSlot(
+    view: FoodsSettingsView,
+    product: FoodRow | null,
+): string {
+    if (!product) return `<div data-fill-slot="belongs_select"></div>`;
+    const templateId = `food-belongs-select-${product.id}`;
+    return `<div data-fill-slot="belongs_select" data-filled-template="${escapeHtml(templateId)}">${belongsSelectInner(view, product)}</div>`;
+}
+
+function foodEditForm(
+    food: FoodRow | null,
+    modalError?: string,
+    productFields?: string,
+): string {
     const allergenBoxes = [...NAMED_ALLERGENS, "other" as const]
         .map((code) => {
             const checked = food?.allergens.includes(code) ? " checked" : "";
@@ -108,50 +273,140 @@ ${nutrientInput("food-edit-alc", "alcohol_g", "Alcohol g", food?.alcoholG)}
 ${nutrientInput("food-edit-caf", "caffeine_mg", "Caffeine mg", food?.caffeineMg)}
 </div>
 <fieldset class="allergens choice-row"><legend>Allergens</legend>${allergenBoxes}</fieldset>
+${productFields ?? `<div data-fill-slot="product_fields"></div>`}
 <label><input type="checkbox" name="archived" value="1"${archived} /> Archived</label>
 <button type="submit" class="btn-primary">Save food</button>
 </form>`;
 }
 
-function foodRow(food: FoodRow): string {
+function productNestedRow(
+    view: FoodsSettingsView,
+    product: FoodRow,
+    usualId: string | null,
+): string {
+    const brand = product.brand
+        ? ` <span class="muted">${escapeHtml(product.brand)}</span>`
+        : "";
+    const usualPill =
+        product.id === usualId
+            ? ` <span class="pill pill-dim">Usual</span>`
+            : "";
+    return `<li><div class="row">
+<p class="row-title">${escapeHtml(product.name)}${brand}${usualPill}</p>
+<div class="row-actions">${modalTrigger({
+        target: FOOD_EDIT_MODAL_ID,
+        label: "Edit",
+        className: "btn-sm",
+        fill: foodFill(view, product),
+    })}</div>
+</div></li>`;
+}
+
+function foodRow(view: FoodsSettingsView, food: FoodRow): string {
+    if (food.archivedAt || food.genericFoodId) {
+        const brand = food.brand
+            ? ` <span class="muted">${escapeHtml(food.brand)}</span>`
+            : "";
+        const archivedPill = food.archivedAt
+            ? ` <span class="pill pill-dim">Archived</span>`
+            : "";
+        const kcal =
+            food.calories == null
+                ? "kcal unknown"
+                : `${escapeHtml(String(food.calories))} kcal / 100 g`;
+        return `<li class="food-row" data-food-id="${escapeHtml(food.id)}">
+<div class="row">
+<p class="row-title">${escapeHtml(food.name)}${brand}${archivedPill}</p>
+<p class="row-meta">${kcal}</p>
+<div class="row-actions">${modalTrigger({
+            target: FOOD_EDIT_MODAL_ID,
+            label: "Edit",
+            className: "btn-sm",
+            fill: foodFill(view, food),
+        })}</div>
+</div>
+</li>`;
+    }
+
     const brand = food.brand
         ? ` <span class="muted">${escapeHtml(food.brand)}</span>`
-        : "";
-    const archivedPill = food.archivedAt
-        ? ` <span class="pill pill-dim">Archived</span>`
         : "";
     const kcal =
         food.calories == null
             ? "kcal unknown"
             : `${escapeHtml(String(food.calories))} kcal / 100 g`;
-    return `<li class="food-row" data-food-id="${escapeHtml(food.id)}">
-<div class="row">
-<p class="row-title">${escapeHtml(food.name)}${brand}${archivedPill}</p>
-<p class="row-meta">${kcal}</p>
-<div class="row-actions">${modalTrigger({
+    const products = liveProducts(view, food.id);
+    const nested =
+        products.length === 0
+            ? ""
+            : `<ul class="food-products list">${products
+                  .map((p) => productNestedRow(view, p, food.usualProductId))
+                  .join("")}</ul>`;
+    const belongsBtn =
+        products.length === 0
+            ? modalTrigger({
+                  target: FOOD_BELONGS_MODAL_ID,
+                  label: "Belongs to…",
+                  className: "btn-sm",
+                  fill: belongsFill(view, food),
+              })
+            : "";
+    const actions = `<div class="row-actions">${belongsBtn}${modalTrigger({
         target: FOOD_EDIT_MODAL_ID,
         label: "Edit",
         className: "btn-sm",
-        fill: foodFill(food),
-    })}</div>
+        fill: foodFill(view, food),
+    })}</div>`;
+
+    return `<li class="food-row" data-food-id="${escapeHtml(food.id)}">
+<div class="row">
+<p class="row-title">${escapeHtml(food.name)}${brand}</p>
+<p class="row-meta">${kcal}</p>
+${actions}
 </div>
+${nested}
 </li>`;
 }
 
 export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
     const editFood = editReopenFood(view);
+    const belongsFood = belongsReopenFood(view);
     const editOpen =
         editFood != null &&
         modalOpen(view, `${FOOD_EDIT_PREFIX}${editFood.id}`);
+    const belongsOpen =
+        belongsFood != null &&
+        modalOpen(view, `${FOOD_BELONGS_PREFIX}${belongsFood.id}`);
     const modalIds: string[] = [];
-    if (editFood && view.error)
+    if (editFood && view.error && !belongsOpen)
         modalIds.push(`${FOOD_EDIT_PREFIX}${editFood.id}`);
-    const rows = view.foods.map((food) => foodRow(food)).join("");
+    if (belongsFood && view.error && belongsOpen)
+        modalIds.push(`${FOOD_BELONGS_PREFIX}${belongsFood.id}`);
+
+    const topLevel = view.foods.filter((food) => isTopLevelRow(food, view));
+    const rows = topLevel.map((food) => foodRow(view, food)).join("");
+    const editTemplates = view.foods
+        .map((food) => {
+            const html = editProductFieldsTemplate(view, food);
+            if (!html) return "";
+            return `<template id="food-edit-product-fields-${escapeHtml(food.id)}">${html}</template>`;
+        })
+        .join("");
+    const belongsTemplates = view.foods
+        .filter(
+            (food) =>
+                !food.archivedAt &&
+                !food.genericFoodId &&
+                liveProducts(view, food.id).length === 0,
+        )
+        .map((food) => belongsSelectTemplate(view, food))
+        .join("");
+
     const list =
-        view.foods.length === 0
+        topLevel.length === 0
             ? ""
             : panel({
-                  body: `<ul class="food-list list">${rows}</ul>`,
+                  body: `<ul class="food-list list">${rows}</ul>${editTemplates}${belongsTemplates}`,
               });
     const editModal =
         view.foods.length === 0
@@ -163,38 +418,49 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   body: foodEditForm(
                       editFood,
                       editOpen ? errorBanner(view.error) : "",
+                      editOpen && editFood
+                          ? productFieldsSlot(view, editFood)
+                          : undefined,
                   ),
                   submitDisabled: editFood == null,
               });
-    const options = view.foods
+    const belongsModal = modal({
+        id: FOOD_BELONGS_MODAL_ID,
+        title: belongsFood ? "Belongs to" : "Belongs to",
+        openOnLoad: belongsOpen,
+        body: `${belongsSelectSlot(view, belongsOpen ? belongsFood : null)}${belongsOpen ? errorBanner(view.error) : ""}`,
+        submitDisabled: belongsFood == null,
+    });
+    const mergeOptions = view.foods
+        .filter((food) => !food.genericFoodId)
         .map(
             (food) =>
                 `<option value="${escapeHtml(food.id)}">${escapeHtml(food.name)}</option>`,
         )
         .join("");
     const mergeModal =
-        view.foods.length >= 2
+        view.foods.filter((f) => !f.genericFoodId).length >= 2
             ? modal({
                   id: FOODS_MERGE_MODAL_ID,
                   title: "Merge foods",
                   openOnLoad: modalOpen(view, FOODS_MERGE_MODAL_ID),
                   body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/household/items/merge" class="food-merge field-grid">
 <label>Keep
-<select id="keep_id" name="keep_id">${options}</select>
+<select id="keep_id" name="keep_id">${mergeOptions}</select>
 </label>
 <label>Drop
-<select id="drop_id" name="drop_id">${options}</select>
+<select id="drop_id" name="drop_id">${mergeOptions}</select>
 </label>
 <button type="submit" class="btn-danger">Merge</button>
 </form>`,
               })
             : "";
-    if (view.foods.length >= 2) {
+    if (view.foods.filter((f) => !f.genericFoodId).length >= 2) {
         modalIds.push(FOODS_MERGE_MODAL_ID);
     }
 
     const headerActions =
-        view.foods.length >= 2
+        view.foods.filter((f) => !f.genericFoodId).length >= 2
             ? modalTrigger({
                   target: FOODS_MERGE_MODAL_ID,
                   label: "Merge foods",
@@ -202,13 +468,20 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
               })
             : undefined;
 
+    const linkPrompt = renderLinkProductPrompt(view.linkProductPrompt ?? null);
+    if (view.linkProductPrompt?.openOnLoad) {
+        modalIds.push(LINK_PRODUCT_MODAL_ID);
+    }
+
     const body = `
         ${pageHeader({ title: "Items", actions: headerActions })}
         ${pageLevelErrorBanner(view, modalIds)}
         ${renderHouseholdNav("items")}
         ${list || emptyState("No foods in the catalog yet.")}
         ${editModal}
+        ${belongsModal}
         ${mergeModal}
+        ${linkPrompt}
     `;
     return renderAppShell({
         title: "Items",

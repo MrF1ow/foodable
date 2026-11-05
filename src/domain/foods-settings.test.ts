@@ -54,7 +54,7 @@ test("foods settings use modals for edit and merge", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-primary" disabled>Save food</button>',
     );
-    expect((html.match(/<dialog/g) ?? []).length).toBe(2);
+    expect((html.match(/<dialog/g) ?? []).length).toBe(3);
 });
 
 test("food edit dialog count does not grow with the catalog", () => {
@@ -72,7 +72,7 @@ test("food edit dialog count does not grow with the catalog", () => {
     });
     const dialogs = (html: string) => (html.match(/<dialog/g) ?? []).length;
     expect(dialogs(few)).toBe(dialogs(many));
-    expect(dialogs(many)).toBe(2);
+    expect(dialogs(many)).toBe(3);
 });
 
 function expectErrorOnceInModal(
@@ -123,4 +123,31 @@ test("foods server error reopens edit and merge modals", () => {
         FOODS_MERGE_MODAL_ID,
         "Pick two different foods.",
     );
+});
+
+test("food edit error reopen prefills usual product slot", () => {
+    const plain = {
+        ...food,
+        id: "p1",
+        usualProductId: "k1",
+    };
+    const kirkland = {
+        ...food,
+        id: "k1",
+        name: "Kirkland Large Eggs",
+        normalizedName: "kirkland large eggs",
+        genericFoodId: "p1",
+        brand: "Kirkland",
+    };
+    const html = renderFoodsSettingsPage({
+        chrome,
+        foods: [plain, kirkland],
+        error: "Grams per item and grams per millilitre must be greater than zero.",
+        openModalId: "food-edit-p1",
+    });
+    expect(html).toContain('data-fill-slot="product_fields"');
+    expect(html).toContain(
+        'data-filled-template="food-edit-product-fields-p1"',
+    );
+    expect(html).toContain('name="usual_product_id"');
 });

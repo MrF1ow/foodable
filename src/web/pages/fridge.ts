@@ -14,6 +14,10 @@ import {
 import { iconPencil, iconTrash } from "../components/icons.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
+    renderLinkProductPrompt,
+    type LinkProductPromptView,
+} from "../components/link-product-prompt.js";
+import {
     confirmModal,
     emptyState,
     errorBanner,
@@ -47,6 +51,7 @@ export type FridgePageView = FridgeSnapshot & {
     chrome: ViewerChrome;
     error?: string;
     openModalId?: string;
+    linkProductPrompt?: LinkProductPromptView | null;
 };
 
 function quantityLabel(item: FridgeItem): string {
@@ -491,6 +496,7 @@ ${field({ id: "location_name", label: "Location name", control: `<input id="loca
         ${expiring}
         ${sections}
         ${modals}
+        ${renderLinkProductPrompt(view.linkProductPrompt ?? null)}
     `;
     return renderAppShell({
         title: "Fridge",

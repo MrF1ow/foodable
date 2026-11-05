@@ -1,9 +1,6 @@
 import { Hono, type Context } from "hono";
 
-import {
-    renderHouseholdSettingsRoute,
-    renderSettingsFoodsPage,
-} from "../loaders.js";
+import { renderHouseholdSettingsRoute } from "../loaders.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -51,7 +48,27 @@ import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveFoodsStore } from "../../db/foods.js";
-import { FoodsInputError, mergeFoods, updateFood } from "../../domain/foods.js";
+import {
+    buildFoodUpdate,
+    createProduct,
+    findFoodById,
+    findOrCreateFoodByBarcode,
+    FoodsInputError,
+    linkProduct,
+    mergeFoods,
+    setUsualProduct,
+    updateFood,
+} from "../../domain/foods.js";
+import { fridgeBarcodeLookup } from "./fridge.js";
+import {
+    renderFridgeInventoryPage,
+    renderGroceryListPage,
+    renderRecipeDetailRoute,
+    renderSettingsFoodsPage,
+    renderUsualProductsListPage,
+    renderUsualProductsPickerPage,
+} from "../loaders.js";
+import { safeReturnPath } from "../usual-products-path.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
@@ -89,6 +106,7 @@ householdRoutes.use("*", async (c, next) => {
     if (target == null) return next();
     const method = c.req.method;
     const status = method === "GET" || method === "HEAD" ? 301 : 308;
+    // toast: none (legacy redirect; status is 301 or 308)
     return c.redirect(target, status);
 });
 
@@ -116,8 +134,237 @@ householdRoutes.get("/household", requireSiteUser, async (c) => {
 });
 
 householdRoutes.get("/household/items", requireSiteUser, async (c) => {
-    const page = await renderSettingsFoodsPage(c.get("userId"));
+    const page = await renderSettingsFoodsPage(c.get("userId"), {
+        linkProductId: c.req.query("link_product"),
+        from: c.req.query("from") ?? "/household/items",
+    });
     return c.html(page.html, page.status);
+});
+
+householdRoutes.get("/household/usual-products", requireSiteUser, async (c) => {
+    const food = c.req.query("food");
+    if (food) {
+        const from = c.req.query("from");
+        const target = `/household/usual-products/${encodeURIComponent(food)}${from ? `?from=${encodeURIComponent(from)}` : ""}`;
+        return c.redirect(target, 302);
+    }
+    const page = await renderUsualProductsListPage(c.get("userId"), {
+        from: c.req.query("from"),
+    });
+    return c.html(page.html, page.status);
+});
+
+householdRoutes.get(
+    "/household/usual-products/:foodId",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderUsualProductsPickerPage(
+            c.get("userId"),
+            c.req.param("foodId"),
+            { from: c.req.query("from") },
+        );
+        return c.html(page.html, page.status);
+    },
+);
+
+async function usualPickerFormError(
+    userId: string,
+    foodId: string,
+    err: unknown,
+    from?: string,
+) {
+    const message =
+        err instanceof FoodsInputError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Could not update the usual product.";
+    const page = await renderUsualProductsPickerPage(userId, foodId, {
+        error: message,
+        from,
+    });
+    return { html: page.html, status: 400 as const };
+}
+
+householdRoutes.post(
+    "/household/usual-products/:foodId",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("foodId");
+        const body = await c.req.parseBody();
+        const from = formText(body, "from");
+        const productRaw = formText(body, "product_food_id");
+        const productId = productRaw.trim() === "" ? null : productRaw.trim();
+        try {
+            await setUsualProduct(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+                productId,
+            );
+        } catch (err) {
+            const page = await usualPickerFormError(userId, foodId, err, from);
+            return c.html(page.html, page.status);
+        }
+        // toast: none (return path after pick)
+        return c.redirect(
+            safeReturnPath(from, "/household/usual-products"),
+            303,
+        );
+    },
+);
+
+householdRoutes.post(
+    "/household/usual-products/:foodId/pick",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("foodId");
+        const body = await c.req.parseBody();
+        const from = formText(body, "from");
+        const store = liveFoodsStore();
+        try {
+            const pickedId = formText(body, "food_id");
+            const picked = pickedId
+                ? await findFoodById(store, member.householdId, pickedId)
+                : formText(body, "barcode")
+                  ? await findOrCreateFoodByBarcode(
+                        store,
+                        member.householdId,
+                        formText(body, "barcode"),
+                        fridgeBarcodeLookup,
+                    )
+                  : null;
+            if (!picked) {
+                throw new FoodsInputError("Pick a food or scan a barcode.");
+            }
+            await setUsualProduct(store, member.householdId, foodId, picked.id);
+        } catch (err) {
+            const page = await usualPickerFormError(userId, foodId, err, from);
+            return c.html(page.html, page.status);
+        }
+        // toast: none (return path after pick)
+        return c.redirect(
+            safeReturnPath(from, "/household/usual-products"),
+            303,
+        );
+    },
+);
+
+householdRoutes.post(
+    "/household/usual-products/:foodId/products",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("foodId");
+        const body = await c.req.parseBody({ all: true });
+        const asText = body as Record<string, string | File>;
+        const from = formText(asText, "from");
+        try {
+            await createProduct(liveFoodsStore(), member.householdId, foodId, {
+                name: formText(asText, "name"),
+                brand: formText(asText, "brand"),
+                gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
+                gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
+                calories: formOptionalNutrient(asText, "calories"),
+                proteinG: formOptionalNutrient(asText, "protein_g"),
+                carbsG: formOptionalNutrient(asText, "carbs_g"),
+                fatG: formOptionalNutrient(asText, "fat_g"),
+                fiberG: formOptionalNutrient(asText, "fiber_g"),
+                sugarG: formOptionalNutrient(asText, "sugar_g"),
+                alcoholG: formOptionalNutrient(asText, "alcohol_g"),
+                caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
+                allergens: formAllergens(body),
+                makeUsual: true,
+            });
+        } catch (err) {
+            const page = await usualPickerFormError(userId, foodId, err, from);
+            return c.html(page.html, page.status);
+        }
+        // toast: none (return path after add product)
+        return c.redirect(
+            safeReturnPath(from, "/household/usual-products"),
+            303,
+        );
+    },
+);
+
+async function linkProductFormError(
+    userId: string,
+    productId: string,
+    from: string | undefined,
+    err: unknown,
+) {
+    const message =
+        err instanceof FoodsInputError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Could not link that food.";
+    const back = safeReturnPath(from, "/household/items");
+    if (back.startsWith("/grocery")) {
+        const page = await renderGroceryListPage(userId, {
+            error: message,
+            linkProductId: productId,
+        });
+        return { html: page.html, status: 400 as const };
+    }
+    if (back.startsWith("/fridge")) {
+        const page = await renderFridgeInventoryPage(
+            userId,
+            message,
+            undefined,
+            productId,
+        );
+        return { html: page.html, status: 400 as const };
+    }
+    if (back.startsWith("/recipes/")) {
+        const recipeId = back.slice("/recipes/".length).split("?")[0]!;
+        const page = await renderRecipeDetailRoute(userId, recipeId, {
+            error: message,
+            linkProductId: productId,
+        });
+        return { html: page.html, status: 400 as const };
+    }
+    const page = await renderSettingsFoodsPage(userId, {
+        error: message,
+        openModalId: `food-belongs-${productId}`,
+        linkProductId: productId,
+        from: back,
+    });
+    return { html: page.html, status: 400 as const };
+}
+
+householdRoutes.post("/household/items/:id/link", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const productId = c.req.param("id");
+    const body = await c.req.parseBody();
+    const from = formText(body, "from");
+    const plainRaw = formText(body, "food_id");
+    const plainId = plainRaw.trim() === "" ? null : plainRaw.trim();
+    const makeUsual = formText(body, "make_usual") === "1";
+    const store = liveFoodsStore();
+    try {
+        await linkProduct(store, member.householdId, productId, plainId);
+        if (makeUsual && plainId) {
+            await setUsualProduct(
+                store,
+                member.householdId,
+                plainId,
+                productId,
+            );
+        }
+    } catch (err) {
+        const page = await linkProductFormError(userId, productId, from, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none (return path after link)
+    return c.redirect(safeReturnPath(from, "/household/items"), 303);
 });
 
 householdRoutes.post("/household", requireManager, async (c) => {
@@ -626,41 +873,54 @@ householdRoutes.post("/household/items/merge", requireMember, async (c) => {
 householdRoutes.post("/household/items/:id", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
+    const foodId = c.req.param("id");
     const body = await c.req.parseBody({ all: true });
     const asText = body as Record<string, string | File>;
+    const store = liveFoodsStore();
+    const patch = {
+        name: formText(asText, "name"),
+        brand: formText(asText, "brand"),
+        aliases: formText(asText, "aliases")
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean),
+        defaultUnit: formText(asText, "default_unit"),
+        gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
+        gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
+        calories: formOptionalNutrient(asText, "calories"),
+        proteinG: formOptionalNutrient(asText, "protein_g"),
+        carbsG: formOptionalNutrient(asText, "carbs_g"),
+        fatG: formOptionalNutrient(asText, "fat_g"),
+        fiberG: formOptionalNutrient(asText, "fiber_g"),
+        sugarG: formOptionalNutrient(asText, "sugar_g"),
+        alcoholG: formOptionalNutrient(asText, "alcohol_g"),
+        caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
+        allergens: formAllergens(body),
+        archived: formText(asText, "archived") === "1",
+    };
     try {
-        await updateFood(
-            liveFoodsStore(),
-            member.householdId,
-            c.req.param("id"),
-            {
-                name: formText(asText, "name"),
-                brand: formText(asText, "brand"),
-                aliases: formText(asText, "aliases")
-                    .split(",")
-                    .map((part) => part.trim())
-                    .filter(Boolean),
-                defaultUnit: formText(asText, "default_unit"),
-                gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
-                gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
-                calories: formOptionalNutrient(asText, "calories"),
-                proteinG: formOptionalNutrient(asText, "protein_g"),
-                carbsG: formOptionalNutrient(asText, "carbs_g"),
-                fatG: formOptionalNutrient(asText, "fat_g"),
-                fiberG: formOptionalNutrient(asText, "fiber_g"),
-                sugarG: formOptionalNutrient(asText, "sugar_g"),
-                alcoholG: formOptionalNutrient(asText, "alcohol_g"),
-                caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
-                allergens: formAllergens(body),
-                archived: formText(asText, "archived") === "1",
-            },
-        );
+        await buildFoodUpdate(store, member.householdId, foodId, patch);
+        if ("generic_food_id" in asText) {
+            const raw = formText(asText, "generic_food_id");
+            await linkProduct(
+                store,
+                member.householdId,
+                foodId,
+                raw.trim() === "" ? null : raw.trim(),
+            );
+        }
+        if ("usual_product_id" in asText) {
+            const raw = formText(asText, "usual_product_id");
+            await setUsualProduct(
+                store,
+                member.householdId,
+                foodId,
+                raw.trim() === "" ? null : raw.trim(),
+            );
+        }
+        await updateFood(store, member.householdId, foodId, patch);
     } catch (err) {
-        const page = await foodsFormError(
-            userId,
-            err,
-            `food-edit-${c.req.param("id")}`,
-        );
+        const page = await foodsFormError(userId, err, `food-edit-${foodId}`);
         return c.html(page.html, page.status);
     }
     return redirectWithToast(c, "/household/items", "settings.foods.updated");
