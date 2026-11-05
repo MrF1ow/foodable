@@ -1447,12 +1447,26 @@ try {
         })()`);
     }
 
+    async function themeMetaContents() {
+        return ev<string[]>(
+            `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("content") ?? "")`,
+        );
+    }
+    async function themeChromeKind() {
+        return ev<string | null>(
+            `document.querySelector('meta[name="foodable-theme-chrome"]')?.getAttribute("content") ?? null`,
+        );
+    }
+    function systemMetaPair(kind: "page" | "nav") {
+        const colors = kind === "page" ? THEME_COLOR : THEME_NAV_COLOR;
+        return [colors.light, colors.dark];
+    }
+
     await control("session=app&theme=dark&reset=posts&post=ok");
     await goto("/settings");
     await setMarker();
     const darkStart = await themeSnap();
     const settingsPageBg = THEME_COLOR.dark;
-    const tabNavBg = THEME_NAV_COLOR.dark;
     await ev(`(() => {
         const light = document.querySelector('input[name="theme"][value="light"]');
         if (light) light.checked = true;
@@ -1460,29 +1474,24 @@ try {
     })()`);
     await sleep(600);
     const afterLight = await themeSnap();
+
+    await setMarker();
     await clickSel("a.settings-back");
-    await sleep(250);
-    const nutritionLight = await themeSnap();
-    await clickSel('a.app-bar-action[href="/settings"]');
-    await sleep(200);
-    await ev(`(() => {
-        const system = document.querySelector('input[name="theme"][value="system"]');
-        if (system) system.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(600);
-    const afterSystem = await themeSnap();
-    async function themeMetaContents() {
-        return ev<string[]>(
-            `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("content") ?? "")`,
-        );
-    }
+    await sleep(400);
+    const afterBack = await themeSnap();
+    const backMeta = await themeMetaContents();
+    const backChrome = await themeChromeKind();
+    record(
+        "settings back full load to tab",
+        afterBack.marker == null &&
+            backChrome === "nav" &&
+            afterBack.dataTheme === "light" &&
+            afterBack.bg === THEME_COLOR.light &&
+            backMeta.join(",") === THEME_NAV_COLOR.light,
+        { afterBack, backMeta, backChrome, ex: drain() },
+    );
 
-    function systemMetaPair(kind: "page" | "nav") {
-        const colors = kind === "page" ? THEME_COLOR : THEME_NAV_COLOR;
-        return [colors.light, colors.dark];
-    }
-
+    await setMarker();
     const themeMetaBaseline = await ev<{
         count: number;
         ids: number[];
@@ -1495,12 +1504,6 @@ try {
             ids: metas.map((m) => m.__foodableNavCheck),
             contents: metas.map((m) => m.getAttribute("content")),
         };
-    })()`);
-    await clickSel("a.settings-back");
-    await sleep(250);
-    await ev(`(() => {
-        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
-        metas.forEach((m, i) => { m.__foodableNavCheck = 100 + i; });
     })()`);
     await clickSel('nav.bottom-nav a[href="/fridge"]');
     await sleep(200);
@@ -1520,48 +1523,80 @@ try {
             sameNodes: metas.every((m, i) => m.__foodableNavCheck === 100 + i),
         };
     })()`);
-    await clickSel('a.app-bar-action[href="/settings"]');
-    await sleep(200);
-    const settingsAgain = await themeSnap();
-    const settingsMeta = await themeMetaContents();
+    record(
+        "fridge tab visit keeps theme-color metas in place",
+        fridgeTheme.marker === "stay" &&
+            fridgeTheme.dataTheme === "light" &&
+            fridgeTheme.bg === THEME_COLOR.light &&
+            fridgeMeta.join(",") === THEME_NAV_COLOR.light &&
+            themeMetaOnFridge.count === themeMetaBaseline.count &&
+            themeMetaOnFridge.sameNodes,
+        {
+            fridgeTheme,
+            fridgeMeta,
+            themeMetaOnFridge,
+            themeMetaBaseline,
+            ex: drain(),
+        },
+    );
 
+    await setMarker();
+    await clickSel('a.app-bar-action[href="/settings"]');
+    await sleep(400);
+    const afterGear = await themeSnap();
+    const gearMeta = await themeMetaContents();
+    const gearChrome = await themeChromeKind();
+    record(
+        "settings gear full load from tab",
+        afterGear.marker == null &&
+            gearChrome === "page" &&
+            afterGear.dataTheme === "light" &&
+            afterGear.bg === THEME_COLOR.light &&
+            gearMeta.join(",") === THEME_COLOR.light,
+        { afterGear, gearMeta, gearChrome, ex: drain() },
+    );
+
+    await ev(`(() => {
+        const system = document.querySelector('input[name="theme"][value="system"]');
+        if (system) system.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterSystem = await themeSnap();
+    const settingsSystemMeta = await themeMetaContents();
     const pageSystemMeta = systemMetaPair("page").join(",");
-    const navSystemMeta = systemMetaPair("nav").join(",");
+
+    await setMarker();
+    await clickSel('nav.subnav a[href="/settings/help"]');
+    await sleep(300);
+    const afterHelp = await themeSnap();
+    const helpMeta = await themeMetaContents();
+    const helpChrome = await themeChromeKind();
+    record(
+        "settings help sub-nav turbo visit",
+        afterHelp.marker === "stay" &&
+            helpChrome === "page" &&
+            helpMeta.join(",") === pageSystemMeta,
+        { afterHelp, helpMeta, helpChrome, ex: drain() },
+    );
 
     record(
-        "theme sync across morph refresh and tab visits",
+        "theme sync across account form and settings chrome",
         darkStart.dataTheme === "dark" &&
             darkStart.marker === "stay" &&
             darkStart.bg === settingsPageBg &&
             afterLight.dataTheme === "light" &&
             afterLight.meta === "light" &&
             afterLight.bg === THEME_COLOR.light &&
-            nutritionLight.dataTheme === "light" &&
-            nutritionLight.bg === THEME_COLOR.light &&
             afterSystem.dataTheme === null &&
             afterSystem.meta === "system" &&
             afterSystem.bg === THEME_COLOR.light &&
-            fridgeTheme.dataTheme === null &&
-            fridgeTheme.bg === THEME_COLOR.light &&
-            settingsAgain.dataTheme === null &&
-            settingsAgain.meta === "system" &&
-            settingsAgain.bg === THEME_COLOR.light &&
-            themeMetaBaseline.contents.join(",") === pageSystemMeta &&
-            fridgeMeta.join(",") === navSystemMeta &&
-            themeMetaOnFridge.count === themeMetaBaseline.count &&
-            themeMetaOnFridge.sameNodes &&
-            settingsMeta.join(",") === pageSystemMeta,
+            settingsSystemMeta.join(",") === pageSystemMeta,
         {
             darkStart,
             afterLight,
-            nutritionLight,
             afterSystem,
-            fridgeTheme,
-            settingsAgain,
-            themeMetaBaseline,
-            fridgeMeta,
-            themeMetaOnFridge,
-            settingsMeta,
+            settingsSystemMeta,
             ex: drain(),
         },
     );

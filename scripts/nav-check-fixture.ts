@@ -442,11 +442,6 @@ function applyAccountTheme(html: string): string {
         .replace(
             /<meta name="foodable-theme" content="[^"]+" \/>/,
             '<meta name="foodable-theme" content="system" />',
-        )
-        .replace(
-            /<meta name="theme-color" content="[^"]+" \/>/,
-            `<meta name="theme-color" content="#fefefd" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#131615" media="(prefers-color-scheme: dark)" />`,
         );
 }
 
