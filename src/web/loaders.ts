@@ -85,7 +85,7 @@ export function createHouseholdFormHtml(
         "Create household",
         `${pageHeader({
             title: "Create household",
-            sub: `<p class="muted">Name the household. Everyone else is added from Settings.</p>`,
+            sub: `<p class="muted">Name the household. Everyone else is added from Household.</p>`,
         })}
         ${errorBanner(error)}
         <form method="POST" action="/create-household" class="create-household panel">
@@ -328,7 +328,7 @@ export async function groceryAllergenMembers(householdId: string) {
 
 export async function renderSettingsAccountPage(
     viewerUserId: string,
-    error?: string,
+    opts: { error?: string; backHref?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -338,19 +338,21 @@ export async function renderSettingsAccountPage(
         status: 200,
         html: renderSettingsPage({
             chrome,
+            backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
             timezone: profile?.timezone ?? "",
             weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
             widgetsEnabled: widgetsEnabledFromProfile(profile),
             alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
             drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
-            error,
+            error: opts.error,
         }),
     };
 }
 
 export async function renderSettingsHelpRoute(
     viewerUserId: string,
+    opts: { backHref?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -359,6 +361,7 @@ export async function renderSettingsHelpRoute(
         status: 200,
         html: renderSettingsHelpPageHtml({
             chrome: viewerChromeFromProfile(profile),
+            backHref: opts.backHref ?? "/",
         }),
     };
 }

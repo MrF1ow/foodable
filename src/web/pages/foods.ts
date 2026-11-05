@@ -1,7 +1,7 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import type { Food } from "../../domain/foods.js";
-import { renderSettingsNav } from "../components/settings-nav.js";
+import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     emptyState,
@@ -56,7 +56,7 @@ function nutrientInput(
 
 function foodFill(food: FoodRow): ModalFill {
     return {
-        action: `/settings/foods/${food.id}`,
+        action: `/household/items/${food.id}`,
         title: `Edit ${food.name}`,
         fields: {
             food_id: food.id,
@@ -89,7 +89,7 @@ function foodEditForm(food: FoodRow | null, modalError?: string): string {
         .join("");
     const archived = food?.archivedAt ? " checked" : "";
     const id = food ? escapeHtml(food.id) : "";
-    return `${modalError ?? ""}<form method="post" action="${food ? `/settings/foods/${id}` : ""}" class="food-edit">
+    return `${modalError ?? ""}<form method="post" action="${food ? `/household/items/${id}` : ""}" class="food-edit">
 <input type="hidden" name="food_id" value="${id}" />
 ${field({ id: "food-edit-name", label: "Name", control: `<input id="food-edit-name" name="name" value="${escapeHtml(food?.name ?? "")}" required maxlength="120" />` })}
 ${field({ id: "food-edit-brand", label: "Brand", control: `<input id="food-edit-brand" name="brand" value="${escapeHtml(food?.brand ?? "")}" maxlength="80" />` })}
@@ -178,7 +178,7 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   id: FOODS_MERGE_MODAL_ID,
                   title: "Merge foods",
                   openOnLoad: modalOpen(view, FOODS_MERGE_MODAL_ID),
-                  body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/foods/merge" class="food-merge field-grid">
+                  body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/household/items/merge" class="food-merge field-grid">
 <label>Keep
 <select id="keep_id" name="keep_id">${options}</select>
 </label>
@@ -203,16 +203,16 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
             : undefined;
 
     const body = `
-        ${pageHeader({ title: "Foods", actions: headerActions })}
+        ${pageHeader({ title: "Items", actions: headerActions })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderSettingsNav("foods")}
+        ${renderHouseholdNav("items")}
         ${list || emptyState("No foods in the catalog yet.")}
         ${editModal}
         ${mergeModal}
     `;
     return renderAppShell({
-        title: "Foods",
-        active: "settings",
+        title: "Items",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });

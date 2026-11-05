@@ -43,24 +43,24 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 ## Members and bots
 
-- [ ] Settings → Household: add each person (name, email or username, password). Hand them the login yourself.
+- [ ] Household › Members: add each person (name, email or username, password). Hand them the login yourself.
 - [ ] Each person: Claude.ai → Settings → Connectors → Add custom connector → `https://<domain>/mcp`, then sign in.
       Same URL in ChatGPT and Claude Code. Confirm `tools/list` loads. Remove any old nutrition-mcp connector.
 - [ ] Grok CLI: point the `foodable` MCP server at `https://<domain>/mcp` and sign in again (`/mcps` → foodable → `i`). The local session on `http://localhost:8080/mcp` does not carry over.
 - [ ] A username member signs in by typing just the username.
-- [ ] As a member (not the owner), adding a person and rotating the token in Settings → Household are both refused.
-- [ ] Optional: as the owner, hand ownership to a member and back (Settings → Household → Manage).
+- [ ] As a member (not the owner), adding a person and rotating the token in Household › Members are both refused.
+- [ ] Optional: as the owner, hand ownership to a member and back (Household › Members → Manage).
 - [ ] As the owner, make a member an admin: they can add a person but cannot rotate the token, and you stay the owner. As a plain member, add and remove one of your own rules.
-- [ ] Bots: Settings → Household → rotate the token, copy it once, then configure
+- [ ] Bots: Household › Members → rotate the token, copy it once, then configure
       `Authorization: Bearer nt_hh_…` against `https://<domain>/mcp`. The bot passes `user_id` for the person it acts for.
 
 ## Walk
 
 Run this on the live site with two members.
 
-- [ ] **Foods.** On `/settings/foods`, save **Eggs** with grams per each and calories per 100 g. Save **Toast** the same way.
+- [ ] **Foods.** On `/household/items`, save **Eggs** with grams per each and calories per 100 g. Save **Toast** the same way.
 - [ ] **Food-backed meal.** On `/`, set Meal type to Breakfast. Add Eggs: amount 2, unit each. Use **Add another food** for Toast: amount 1, unit each. Submit **Log meal**. Expect the meal total to equal the sum of the item snapshots.
-- [ ] **Snapshot.** Change the egg calories on `/settings/foods`. Expect the logged breakfast to keep the old total.
+- [ ] **Snapshot.** Change the egg calories on `/household/items`. Expect the logged breakfast to keep the old total.
 - [ ] **Recipe to grocery.** On `/recipes`, save a recipe that uses eggs. Put a note on an ingredient and a tag on the recipe. Submit **Add to grocery**. Expect only what is not already stocked to be added.
 - [ ] **Put away.** On `/grocery`, check that line and submit **Put away**. Expect `/fridge` to show the new stock. **Clear checked** does not stock the fridge.
 - [ ] **Cook.** On the recipe, submit **Cooked it** with **Log meals** checked, for both members. Expect the fridge count to drop and two meals to appear, one per member. If stock is short, the shortfall is reported and the fridge does not go negative. With two lots of the same food, the earlier expiry is used first.

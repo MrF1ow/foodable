@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 /** POST routes that return 200 HTML on success must opt forms out of Turbo. */
 const POST_200_HTML_SUCCESS: { route: string; turboFalse: true }[] = [
-    { route: "/settings/household/rotate-token", turboFalse: true },
+    { route: "/household/rotate-token", turboFalse: true },
 ];
 
 test("POST 200-success forms opt out of Turbo Drive", () => {

@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     APP_TABS,
+    appBar,
     appHead,
     bottomNav,
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
+    renderSettingsPage,
     resolveTheme,
     themeColorMeta,
 } from "./shell.js";
@@ -15,10 +17,10 @@ import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
-    active: "fridge" | "settings" = "fridge",
+    active: "fridge" | "household" = "fridge",
     theme: "system" | "light" | "dark" = "system",
 ): string {
-    const title = active === "fridge" ? "Fridge" : "Settings";
+    const title = active === "fridge" ? "Fridge" : "Household";
     return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
 }
 
@@ -30,21 +32,21 @@ test("bottom nav hrefs and tab order", () => {
         "grocery",
         "nutrition",
         "recipes",
-        "settings",
+        "household",
     ]);
     expect(APP_TABS.map((tab) => tab.href)).toEqual([
         "/fridge",
         "/grocery",
         "/",
         "/recipes",
-        "/settings",
+        "/household",
     ]);
     expect(APP_TABS.map((tab) => tab.label)).toEqual([
         "Fridge",
         "Groceries",
         "Nutrition",
         "Recipes",
-        "Settings",
+        "Household",
     ]);
 
     const html = bottomNav("nutrition");
@@ -54,7 +56,7 @@ test("bottom nav hrefs and tab order", () => {
         "/grocery",
         "/",
         "/recipes",
-        "/settings",
+        "/household",
     ]);
     expect(html).toContain('href="/" aria-current="page"');
     expect(html).not.toContain('href="/fridge" aria-current="page"');
@@ -64,7 +66,7 @@ test("bottom nav hrefs and tab order", () => {
         "Groceries",
         "Nutrition",
         "Recipes",
-        "Settings",
+        "Household",
     ]);
     const inner = html.replace(/^<nav[^>]*>/, "").replace(/<\/nav>$/, "");
     expect(inner.replace(/<[^>]+>/g, "").trim()).toBe("");
@@ -81,11 +83,15 @@ test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).toContain('href="/fridge" aria-current="page"');
-    expect(html).toContain('href="/logout"');
-    expect(html).toContain('aria-label="Log out"');
-    expect(html).toContain('href="/logout" data-turbo="false"');
+    expect(html).toContain('href="/settings" data-turbo="false"');
+    expect(html).toContain('aria-label="Settings"');
+    expect(html).toContain('class="btn-icon app-bar-action"');
+    expect(html).not.toContain('href="/logout"');
     expect(html).toContain('class="app-bar-logo"');
     expect(html).toContain('href="/"');
+    expect(html).not.toMatch(
+        /class="app-bar-logo" href="\/" data-turbo="false"/,
+    );
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
@@ -113,7 +119,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
 });
 
 test("an explicit theme stamps data-theme on html", () => {
-    const html = shellPage("settings", "dark");
+    const html = shellPage("household", "dark");
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain(
         `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,
@@ -150,6 +156,25 @@ test("appHead emits foodable-theme for every preference", () => {
     expect(appHead("T", "system")).toContain(
         '<meta name="foodable-theme" content="system" />',
     );
+});
+
+test("settings chrome full-loads into and out of tabs", () => {
+    const settings = renderSettingsPage({
+        title: "Settings",
+        theme: "light",
+        backHref: "/fridge",
+        body: "<h1>Settings</h1>",
+    });
+    expect(settings).toContain(
+        'class="settings-back" href="/fridge" data-turbo="false"',
+    );
+    expect(settings).toContain(
+        'class="app-bar-logo" href="/" data-turbo="false"',
+    );
+    expect(appBar("app")).not.toContain(
+        'class="app-bar-logo" href="/" data-turbo="false"',
+    );
+    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {

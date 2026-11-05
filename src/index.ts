@@ -29,6 +29,7 @@ import { fridgeRoutes } from "./web/routes/fridge.js";
 import { groceryRoutes } from "./web/routes/grocery.js";
 import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
+import { householdRoutes } from "./web/routes/household.js";
 import { settingsRoutes } from "./web/routes/settings.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
@@ -269,6 +270,7 @@ app.route("/", foodsRoutes);
 app.route("/", fridgeRoutes);
 app.route("/", groceryRoutes);
 app.route("/", recipesRoutes);
+app.route("/", householdRoutes);
 app.route("/", settingsRoutes);
 
 app.get("/logout", (c) => {

@@ -11,7 +11,7 @@ import {
     type PersonRule,
     type StoreRule,
 } from "../../domain/rules.js";
-import { renderSettingsNav } from "../components/settings-nav.js";
+import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
     confirmModal,
@@ -118,7 +118,7 @@ function addMemberModal(view: HouseholdSettingsView): string {
         id: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
         title: "Add household member",
         openOnLoad: modalOpen(view, HOUSEHOLD_ADD_MEMBER_MODAL_ID),
-        body: `<form method="POST" action="/settings/household" class="add-member">
+        body: `<form method="POST" action="/household" class="add-member">
 ${modalError}${addMemberFormBody()}
 </form>`,
     });
@@ -161,7 +161,7 @@ function removeConfirmLabel(member: HouseholdMember): string {
 
 function ownerFill(member: HouseholdMember): ModalFill {
     return {
-        action: `/settings/household/members/${member.userId}/make-owner`,
+        action: `/household/members/${member.userId}/make-owner`,
         message: ownerMessage(member),
         text: { "owner-label": ownerConfirmLabel(member) },
     };
@@ -169,7 +169,7 @@ function ownerFill(member: HouseholdMember): ModalFill {
 
 function removeFill(member: HouseholdMember): ModalFill {
     return {
-        action: `/settings/household/members/${member.userId}/remove`,
+        action: `/household/members/${member.userId}/remove`,
         title: `Remove ${member.displayName}`,
         fields: { confirm: "" },
         text: {
@@ -195,7 +195,7 @@ ${modalTrigger({
 
 function manageFill(member: HouseholdMember): ModalFill {
     return {
-        action: `/settings/household/members/${member.userId}/role`,
+        action: `/household/members/${member.userId}/role`,
         title: `Manage ${member.displayName}`,
         fields: { role: roleValue(member) },
         text: {
@@ -218,9 +218,7 @@ function memberActionsTemplate(member: HouseholdMember): string {
 }
 
 function manageFormHtml(member: HouseholdMember | null): string {
-    const action = member
-        ? `/settings/household/members/${member.userId}/role`
-        : "";
+    const action = member ? `/household/members/${member.userId}/role` : "";
     const role = member ? roleValue(member) : "";
     const blurb = member ? roleBlurb(member) : "";
     const label = member ? roleSubmitLabel(member) : "Make admin";
@@ -275,7 +273,7 @@ ${memberActionsSlot(manageMember)}`,
                 ? ownerMessage(ownerMember)
                 : "This member becomes the owner. You stay in the household as a member and lose the owner settings.",
             action: ownerMember
-                ? `/settings/household/members/${ownerMember.userId}/make-owner`
+                ? `/household/members/${ownerMember.userId}/make-owner`
                 : "",
             confirmLabel: ownerMember
                 ? ownerConfirmLabel(ownerMember)
@@ -292,7 +290,7 @@ ${memberActionsSlot(manageMember)}`,
                 : "Remove member",
             openOnLoad: removeOpen,
             submitDisabled: removeMember == null,
-            body: `${removeOpen ? errorBanner(view.error) : ""}<form method="post" action="${escapeHtml(removeMember ? `/settings/household/members/${removeMember.userId}/remove` : "")}" class="remove-member">
+            body: `${removeOpen ? errorBanner(view.error) : ""}<form method="post" action="${escapeHtml(removeMember ? `/household/members/${removeMember.userId}/remove` : "")}" class="remove-member">
 <label><input type="checkbox" name="confirm" value="yes" required /> <span data-fill-slot="remove-copy">${escapeHtml(removeSentence)}</span></label>
 <button type="submit" class="btn-danger" data-fill-slot="remove-label"${removeMember ? "" : " disabled"}>${escapeHtml(removeMember ? removeConfirmLabel(removeMember) : "Remove")}</button>
 </form>`,
@@ -305,7 +303,7 @@ function sectionRow(section: GrocerySection, canEdit: boolean): string {
         return `<li class="store-section">${escapeHtml(section.name)}</li>`;
     }
     return `<li class="store-section">
-<form class="section-rename inline-form" method="post" action="/settings/household/sections/${escapeHtml(section.id)}">
+<form class="section-rename inline-form" method="post" action="/household/sections/${escapeHtml(section.id)}">
 <label class="visually-hidden" for="section-name-${escapeHtml(section.id)}">Section name</label>
 <input id="section-name-${escapeHtml(section.id)}" name="name" value="${escapeHtml(section.name)}" required maxlength="80" />
 <button type="submit" class="btn-sm">Rename</button>
@@ -334,7 +332,7 @@ function storeCard(
               id: ruleModalId,
               title: "Add store rule",
               openOnLoad: modalOpen(view, ruleModalId),
-              body: `${ruleModalError}<form method="post" action="/settings/household/stores/${escapeHtml(store.id)}/rules" class="store-rule-form">
+              body: `${ruleModalError}<form method="post" action="/household/stores/${escapeHtml(store.id)}/rules" class="store-rule-form">
 ${field({ id: `store-rule-${store.id}`, label: "Store rule", control: `<textarea id="store-rule-${escapeHtml(store.id)}" name="body" required maxlength="500"></textarea>` })}
 <button type="submit" class="btn-primary">Save store rule</button>
 </form>`,
@@ -388,7 +386,7 @@ function memberRulesCard(
             `<option value="${code}">${escapeHtml(ALLERGEN_LABELS[code])}</option>`,
     ).join("");
     const rulesModalId = householdMemberRulesModalId(view.member.userId);
-    const base = `/settings/household/members/${escapeHtml(view.member.userId)}`;
+    const base = `/household/members/${escapeHtml(view.member.userId)}`;
     const removeRow = (kind: string, id: string, label: string) =>
         `<li class="row">
 <span class="row-title">${escapeHtml(label)}</span>
@@ -415,7 +413,7 @@ function memberRulesCard(
               id: rulesModalId,
               title: `Rules for ${view.member.displayName}`,
               openOnLoad: modalOpen(pageView, rulesModalId),
-              body: `${rulesModalError}${currentList}<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
+              body: `${rulesModalError}${currentList}<form method="post" action="/household/members/${escapeHtml(view.member.userId)}/allergens" class="allergen-form">
 ${field({
     id: `allergen-${view.member.userId}`,
     label: "Allergen",
@@ -427,11 +425,11 @@ ${allergenOptions}
 ${field({ id: `allergen-other-${view.member.userId}`, label: "Other allergen", control: `<input id="allergen-other-${escapeHtml(view.member.userId)}" name="other_label" maxlength="80" />` })}
 <button type="submit" class="btn-primary">Save allergen</button>
 </form>
-<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/dislikes" class="dislike-form">
+<form method="post" action="/household/members/${escapeHtml(view.member.userId)}/dislikes" class="dislike-form">
 ${field({ id: `dislike-${view.member.userId}`, label: "Dislike", control: `<input id="dislike-${escapeHtml(view.member.userId)}" name="display_name" required maxlength="80" />` })}
 <button type="submit" class="btn-primary">Save dislike</button>
 </form>
-<form method="post" action="/settings/household/members/${escapeHtml(view.member.userId)}/rules" class="person-rule-form">
+<form method="post" action="/household/members/${escapeHtml(view.member.userId)}/rules" class="person-rule-form">
 ${field({ id: `person-rule-${view.member.userId}`, label: "Person rule", control: `<textarea id="person-rule-${escapeHtml(view.member.userId)}" name="body" required maxlength="500"></textarea>` })}
 <button type="submit" class="btn-primary">Save person rule</button>
 </form>`,
@@ -498,11 +496,11 @@ export function renderHouseholdSettingsPage(
           })}</div>`
         : "";
     const householdCard = view.canManage
-        ? `<form method="post" action="/settings/household/name" class="household-name inline-form">
+        ? `<form method="post" action="/household/name" class="household-name inline-form">
 ${field({ id: "household_name", label: "Household name", control: `<input id="household_name" name="name" value="${escapeHtml(view.householdName)}" required maxlength="80" />` })}
 <button type="submit">Save</button>
 </form>
-<form method="post" action="/settings/household/location" class="household-location inline-form">
+<form method="post" action="/household/location" class="household-location inline-form">
 ${field({ id: "household_location", label: "Household location", control: `<input id="household_location" name="location" value="${escapeHtml(view.location)}" maxlength="120" />` })}
 <button type="submit">Save</button>
 </form>
@@ -561,7 +559,7 @@ ${rotateToken}`
                   id: HOUSEHOLD_ADD_STORE_MODAL_ID,
                   title: "Add store",
                   openOnLoad: modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID),
-                  body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/stores" class="add-store">
+                  body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/household/stores" class="add-store">
 ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_name" name="name" required maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
@@ -573,7 +571,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
                   title: "Rotate household token",
                   message:
                       "Issue a new household bot token? The old token stops working immediately.",
-                  action: "/settings/household/rotate-token",
+                  action: "/household/rotate-token",
                   confirmLabel: "Rotate token",
                   formClass: "rotate-token modal-confirm",
                   turboFalse: true,
@@ -593,7 +591,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
                 : undefined,
         })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderSettingsNav("household")}
+        ${renderHouseholdNav("members")}
         ${token}
         ${panel({ title: "Household", body: householdCard })}
         ${panel({
@@ -609,7 +607,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
     `;
     return renderAppShell({
         title: "Household",
-        active: "settings",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });
@@ -617,7 +615,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
 
 /** @deprecated Use modal markup; kept for tests that import the form fields. */
 export function addMemberFormHtml(error?: string): string {
-    return `<form method="POST" action="/settings/household" class="add-member">
+    return `<form method="POST" action="/household" class="add-member">
 ${addMemberFormBody(error)}
 </form>`;
 }

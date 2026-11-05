@@ -26,7 +26,7 @@ import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
-    active: "fridge" | "settings" = "fridge",
+    active: "fridge" | "household" = "fridge",
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Settings";
@@ -109,19 +109,19 @@ test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
     ).toBe('<p class="empty-fridge">Add a location, then add an item.</p>');
     expect(
         emptyState(
-            "Add a grocery store in Settings, then add a line.",
+            "Add a grocery store under Household, then add a line.",
             "empty-grocery",
         ),
     ).toBe(
-        '<p class="empty-grocery">Add a grocery store in Settings, then add a line.</p>',
+        '<p class="empty-grocery">Add a grocery store under Household, then add a line.</p>',
     );
     expect(
         emptyState(
-            "Add a grocery store in Settings, then add this recipe to the list.",
+            "Add a grocery store under Household, then add this recipe to the list.",
             "empty-recipe-store",
         ),
     ).toBe(
-        '<p class="empty-recipe-store">Add a grocery store in Settings, then add this recipe to the list.</p>',
+        '<p class="empty-recipe-store">Add a grocery store under Household, then add this recipe to the list.</p>',
     );
     expect(emptyState("No foods in the catalog yet.")).toBe(
         '<p class="empty">No foods in the catalog yet.</p>',
@@ -319,7 +319,7 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "household-make-owner",
         title: "Transfer ownership",
         message: "Bob becomes the owner.",
-        action: "/settings/household/members/u2/make-owner",
+        action: "/household/members/u2/make-owner",
         confirmLabel: "Make Bob the owner",
         submitSlot: "owner-label",
         submitDisabled: true,
@@ -421,6 +421,7 @@ test("every page's h1 comes from pageHeader once", async () => {
             "settings",
             renderSettingsPage({
                 chrome,
+                backHref: "/",
                 displayName: "Alice",
                 timezone: "",
                 weightUnit: "",
@@ -444,7 +445,7 @@ test("every page's h1 comes from pageHeader once", async () => {
                 viewerUserId: "u1",
             }),
         ],
-        ["help", renderSettingsHelpPage({ chrome })],
+        ["help", renderSettingsHelpPage({ chrome, backHref: "/" })],
         ["create-household", createHouseholdFormHtml()],
         ["app-shell", shellPage()],
     ];

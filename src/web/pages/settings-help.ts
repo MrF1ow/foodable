@@ -1,9 +1,14 @@
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import {
+    escapeHtml,
+    renderSettingsPage as renderSettingsShell,
+    type ViewerChrome,
+} from "../shell.js";
 import { pageHeader, panel } from "../components/ui.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsHelpView = {
     chrome: ViewerChrome;
+    backHref: string;
 };
 
 type GlossaryEntry = {
@@ -69,16 +74,16 @@ function glossaryHtml(): string {
 export function renderSettingsHelpPage(view: SettingsHelpView): string {
     const body = `
         ${pageHeader({ title: "Help" })}
-        ${renderSettingsNav("help")}
+        ${renderSettingsNav("help", view.backHref)}
         ${panel({
             title: "Glossary",
             body: glossaryHtml(),
         })}
     `;
-    return renderAppShell({
+    return renderSettingsShell({
         title: "Help",
-        active: "settings",
         theme: view.chrome.theme,
+        backHref: view.backHref,
         body,
     });
 }

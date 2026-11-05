@@ -54,11 +54,11 @@ import { registerHouseholdTools } from "./tools/household.js";
 // question is resolved") is repeated in log_meal's own description. Keep both
 // in sync. Note this is guidance only: the client model decides whether to
 // follow it, so the loop cannot be strictly enforced from here.
-const SERVER_INSTRUCTIONS = `Foodable is a household kitchen: nutrition, fridge, grocery, recipes, and settings, for one household.
+const SERVER_INSTRUCTIONS = `Foodable is a household kitchen: nutrition, fridge, grocery, recipes, and household, for one household.
 
 All nutrition figures are estimates and this server does not provide medical or dietary advice.
 
-Five pillars — nutrition (meals, water, weight, goals, trends), fridge (what is in the house), grocery (what to buy), recipes (what we cook), and settings (members, stores, preferences). They share one food catalog. Adding household members (owner or admin), changing a member's role and rotating the household bot token (owner only) happen in the web app at Settings → Household; there is no MCP tool for any of them — point the user there instead of guessing.
+Five pillars — nutrition (meals, water, weight, goals, trends), fridge (what is in the house), grocery (what to buy), recipes (what we cook), and household (members, stores, items). They share one food catalog. Adding household members (owner or admin), changing a member's role and rotating the household bot token (owner only) happen in the web app under Household › Members; there is no MCP tool for any of them — point the user there instead of guessing.
 
 Foods are the shared identity. Always search_food (or lookup_barcode for a packaged product) and then pass food_id into writes — add_fridge_item, add_grocery_line, add_recipe_ingredient, log_meal items, upsert_food. Do not invent a parallel name for something the catalog already has. get_food reads a catalog row; merge_foods is how duplicates get cleaned up.
 

@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { THEME_COLOR, THEME_NAV_COLOR } from "../src/tokens.js";
 
 const CDP_PORT = 9223;
 const BASE = "http://127.0.0.1:4791";
@@ -208,10 +209,21 @@ async function snap(): Promise<Snap> {
         auth: !!document.querySelector("form.auth-form"),
     }))()`);
 }
+// The selector goes in as a call argument, not spliced into evaluated source.
 async function clickSel(sel: string) {
-    await ev(
-        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); })()`,
-    );
+    const doc = (await send("Runtime.evaluate", {
+        expression: "document",
+    })) as { result: { objectId: string } };
+    const res = (await send("Runtime.callFunctionOn", {
+        objectId: doc.result.objectId,
+        functionDeclaration:
+            "function (sel) { const el = this.querySelector(sel); if (el) el.click(); return !!el; }",
+        arguments: [{ value: sel }],
+        returnByValue: true,
+    })) as { result?: { value?: boolean } };
+    if (!res.result?.value) {
+        throw new Error(`clickSel: no element matches ${sel}`);
+    }
 }
 async function setMarker() {
     await ev(`window.__marker = "stay"`);
@@ -507,6 +519,14 @@ try {
     await control("post=ok&modal=&reset=posts&delay=0");
 
     await goto("/settings/foods");
+    const legacyFoodsPath = await ev<string>("location.pathname");
+    record(
+        "legacy /settings/foods redirects to household items",
+        legacyFoodsPath === "/household/items",
+        { legacyFoodsPath, ex: drain() },
+    );
+
+    await goto("/household/items");
     await setMarker();
     await clickSel('button[data-fill-title="Edit Eggs"]');
     await sleep(40);
@@ -535,7 +555,7 @@ try {
     record(
         "foods shared edit dialog",
         milkEdit.open === true &&
-            milkEdit.action === "/settings/foods/f2" &&
+            milkEdit.action === "/household/items/f2" &&
             milkEdit.name === "Milk" &&
             milkEdit.calories === "64" &&
             milkEdit.title === "Edit Milk" &&
@@ -544,7 +564,7 @@ try {
     );
     await ev(`document.getElementById("food-edit")?.close()`);
     await control("post=fail&modal=food-edit-f1&reset=posts&delay=0");
-    await goto("/settings/foods");
+    await goto("/household/items");
     await clickSel('button[data-fill-title="Edit Eggs"]');
     await sleep(40);
     await clickSel("#food-edit button[type='submit']");
@@ -571,7 +591,7 @@ try {
     record(
         "foods shared edit server error",
         foodEditError.open === true &&
-            foodEditError.action === "/settings/foods/f1" &&
+            foodEditError.action === "/household/items/f1" &&
             foodEditError.name === "Eggs" &&
             foodEditError.title === "Edit Eggs" &&
             foodEditError.error === "Name is required" &&
@@ -1082,7 +1102,7 @@ try {
     );
     await ev(`document.getElementById("grocery-add-food")?.close()`);
 
-    await goto("/settings/household");
+    await goto("/household");
     await clickSel('button[data-fill-title="Manage Sam"]');
     await sleep(40);
     await clickSel(
@@ -1181,7 +1201,7 @@ try {
             rileyManage.role === "member" &&
             rileyManage.label === "Make member" &&
             rileyManage.className === "" &&
-            rileyManage.action === "/settings/household/members/u3/role" &&
+            rileyManage.action === "/household/members/u3/role" &&
             rileyOwner.includes("Riley becomes the owner") &&
             !rileyOwner.includes("Sam becomes the owner") &&
             rileyRemove.title === "Remove Riley" &&
@@ -1189,8 +1209,8 @@ try {
                 "Delete Riley's login and their meals, water, weight and goals. This can't be undone." &&
             rileyRemove.label === "Remove Riley" &&
             rileyRemove.checked === false &&
-            rileyOwnerAction === "/settings/household/members/u3/make-owner" &&
-            rileyRemove.action === "/settings/household/members/u3/remove",
+            rileyOwnerAction === "/household/members/u3/make-owner" &&
+            rileyRemove.action === "/household/members/u3/remove",
         {
             samOwner,
             samRemove,
@@ -1438,12 +1458,26 @@ try {
         })()`);
     }
 
-    const NAV_THEME = { light: "#fefefd", dark: "#131615" };
+    async function themeMetaContents() {
+        return ev<string[]>(
+            `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("content") ?? "")`,
+        );
+    }
+    async function themeChromeKind() {
+        return ev<string | null>(
+            `document.querySelector('meta[name="foodable-theme-chrome"]')?.getAttribute("content") ?? null`,
+        );
+    }
+    function systemMetaPair(kind: "page" | "nav") {
+        const colors = kind === "page" ? THEME_COLOR : THEME_NAV_COLOR;
+        return [colors.light, colors.dark];
+    }
 
     await control("session=app&theme=dark&reset=posts&post=ok");
     await goto("/settings");
     await setMarker();
     const darkStart = await themeSnap();
+    const settingsPageBg = THEME_COLOR.dark;
     await ev(`(() => {
         const light = document.querySelector('input[name="theme"][value="light"]');
         if (light) light.checked = true;
@@ -1451,18 +1485,24 @@ try {
     })()`);
     await sleep(600);
     const afterLight = await themeSnap();
-    await clickSel('nav.bottom-nav a[href="/"]');
-    await sleep(250);
-    const nutritionLight = await themeSnap();
-    await clickSel('nav.bottom-nav a[href="/settings"]');
-    await sleep(200);
-    await ev(`(() => {
-        const system = document.querySelector('input[name="theme"][value="system"]');
-        if (system) system.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(600);
-    const afterSystem = await themeSnap();
+
+    await setMarker();
+    await clickSel("a.settings-back");
+    await sleep(400);
+    const afterBack = await themeSnap();
+    const backMeta = await themeMetaContents();
+    const backChrome = await themeChromeKind();
+    record(
+        "settings back full load to tab",
+        afterBack.marker == null &&
+            backChrome === "nav" &&
+            afterBack.dataTheme === "light" &&
+            afterBack.bg === THEME_COLOR.light &&
+            backMeta.join(",") === THEME_NAV_COLOR.light,
+        { afterBack, backMeta, backChrome, ex: drain() },
+    );
+
+    await setMarker();
     const themeMetaBaseline = await ev<{
         count: number;
         ids: number[];
@@ -1479,10 +1519,8 @@ try {
     await clickSel('nav.bottom-nav a[href="/fridge"]');
     await sleep(200);
     const fridgeTheme = await themeSnap();
-    await clickSel('nav.bottom-nav a[href="/settings"]');
-    await sleep(200);
-    const settingsAgain = await themeSnap();
-    const themeMetaAfter = await ev<{
+    const fridgeMeta = await themeMetaContents();
+    const themeMetaOnFridge = await ev<{
         count: number;
         ids: (number | null)[];
         contents: string[];
@@ -1496,35 +1534,82 @@ try {
             sameNodes: metas.every((m, i) => m.__foodableNavCheck === 100 + i),
         };
     })()`);
+    record(
+        "fridge tab visit keeps theme-color metas in place",
+        fridgeTheme.marker === "stay" &&
+            fridgeTheme.dataTheme === "light" &&
+            fridgeTheme.bg === THEME_COLOR.light &&
+            fridgeMeta.join(",") === THEME_NAV_COLOR.light &&
+            themeMetaOnFridge.count === themeMetaBaseline.count &&
+            themeMetaOnFridge.sameNodes,
+        {
+            fridgeTheme,
+            fridgeMeta,
+            themeMetaOnFridge,
+            themeMetaBaseline,
+            ex: drain(),
+        },
+    );
+
+    await setMarker();
+    await clickSel('a.app-bar-action[href="/settings"]');
+    await sleep(400);
+    const afterGear = await themeSnap();
+    const gearMeta = await themeMetaContents();
+    const gearChrome = await themeChromeKind();
+    record(
+        "settings gear full load from tab",
+        afterGear.marker == null &&
+            gearChrome === "page" &&
+            afterGear.dataTheme === "light" &&
+            afterGear.bg === THEME_COLOR.light &&
+            gearMeta.join(",") === THEME_COLOR.light,
+        { afterGear, gearMeta, gearChrome, ex: drain() },
+    );
+
+    await ev(`(() => {
+        const system = document.querySelector('input[name="theme"][value="system"]');
+        if (system) system.checked = true;
+        document.querySelector("form.appearance.panel")?.requestSubmit();
+    })()`);
+    await sleep(600);
+    const afterSystem = await themeSnap();
+    const settingsSystemMeta = await themeMetaContents();
+    const pageSystemMeta = systemMetaPair("page").join(",");
+
+    await setMarker();
+    await clickSel('nav.subnav a[href^="/settings/help"]');
+    await sleep(300);
+    const afterHelp = await themeSnap();
+    const helpPath = await ev<string>(`location.pathname`);
+    const helpMeta = await themeMetaContents();
+    const helpChrome = await themeChromeKind();
+    record(
+        "settings help sub-nav turbo visit",
+        helpPath === "/settings/help" &&
+            afterHelp.marker === "stay" &&
+            helpChrome === "page" &&
+            helpMeta.join(",") === pageSystemMeta,
+        { helpPath, afterHelp, helpMeta, helpChrome, ex: drain() },
+    );
 
     record(
-        "theme sync across morph refresh and tab visits",
+        "theme sync across account form and settings chrome",
         darkStart.dataTheme === "dark" &&
             darkStart.marker === "stay" &&
+            darkStart.bg === settingsPageBg &&
             afterLight.dataTheme === "light" &&
             afterLight.meta === "light" &&
-            afterLight.bg === "#fbfaf7" &&
-            nutritionLight.widgetTheme === "light" &&
-            nutritionLight.marker === "stay" &&
-            afterLight.marker === "stay" &&
+            afterLight.bg === THEME_COLOR.light &&
             afterSystem.dataTheme === null &&
             afterSystem.meta === "system" &&
-            fridgeTheme.dataTheme === null &&
-            settingsAgain.dataTheme === null &&
-            settingsAgain.meta === "system" &&
-            themeMetaAfter.count === themeMetaBaseline.count &&
-            themeMetaAfter.sameNodes &&
-            themeMetaAfter.contents.join() ===
-                themeMetaBaseline.contents.join(),
+            afterSystem.bg === THEME_COLOR.light &&
+            settingsSystemMeta.join(",") === pageSystemMeta,
         {
             darkStart,
             afterLight,
-            nutritionLight,
             afterSystem,
-            fridgeTheme,
-            settingsAgain,
-            themeMetaBaseline,
-            themeMetaAfter,
+            settingsSystemMeta,
             ex: drain(),
         },
     );
@@ -1713,9 +1798,9 @@ try {
     });
 
     await control("session=app");
-    await goto("/fridge");
+    await goto("/settings");
     await setMarker();
-    await clickSel('a[href="/logout"]');
+    await clickSel('main a[href="/logout"][data-turbo="false"]');
     await sleep(300);
     const logout = await ev<{ marker: string | null; out: string | null }>(`({
         marker: window.__marker ?? null,

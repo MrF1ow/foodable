@@ -71,7 +71,8 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     expect(html).not.toContain("window.__WIDGET_DATA__=");
     expect(html).toContain('src="/app/widgets/nutrition-summary?v=');
     expect(html).toContain("data-widget-data=");
-    expect(html).toContain('href="/logout"');
+    expect(html).toContain('href="/settings"');
+    expect(html).not.toContain('href="/logout"');
     expect(html).not.toContain('action="/approve"');
     expect(html).toContain(`href="/?member=${bob.userId}"`);
     expect(html).toContain('class="bottom-nav"');
@@ -257,6 +258,7 @@ test("create-household form posts name fields and has no widgets", () => {
     expect(html).toContain("<h1>Create household</h1>");
     expect(html).not.toContain("<iframe");
     expect(html).toContain('href="/logout"');
+    expect(html).toContain('data-turbo="false"');
 });
 
 test("bare pages use the app stylesheet, not the deleted marketing one", () => {
