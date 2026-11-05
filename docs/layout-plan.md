@@ -150,7 +150,7 @@ Each step is a commit that passes the tests:
 4. Copy, docs, `CLAUDE.md`, `SERVER_INSTRUCTIONS`.
 5. `nav-check` and `app-preview` updates, then the screenshots.
 
-PR title: `refactor(web): move Settings behind a top-bar gear and add a Household tab`. Branch: `refactor/web-household-tab`. Check both against `scripts/conventions/` before opening.
+PR title: `refactor(web): move settings behind a top-bar gear and add a household tab` (subjects are all lowercase). Branch: `refactor/web-household-tab`. Check both against `scripts/conventions/` before opening.
 
 ## Out of scope
 
