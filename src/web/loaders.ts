@@ -85,7 +85,7 @@ export function createHouseholdFormHtml(
         "Create household",
         `${pageHeader({
             title: "Create household",
-            sub: `<p class="muted">Name the household. Everyone else is added from Settings.</p>`,
+            sub: `<p class="muted">Name the household. Everyone else is added from Household.</p>`,
         })}
         ${errorBanner(error)}
         <form method="POST" action="/create-household" class="create-household panel">

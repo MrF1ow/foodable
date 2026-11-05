@@ -109,19 +109,19 @@ test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
     ).toBe('<p class="empty-fridge">Add a location, then add an item.</p>');
     expect(
         emptyState(
-            "Add a grocery store in Settings, then add a line.",
+            "Add a grocery store under Household, then add a line.",
             "empty-grocery",
         ),
     ).toBe(
-        '<p class="empty-grocery">Add a grocery store in Settings, then add a line.</p>',
+        '<p class="empty-grocery">Add a grocery store under Household, then add a line.</p>',
     );
     expect(
         emptyState(
-            "Add a grocery store in Settings, then add this recipe to the list.",
+            "Add a grocery store under Household, then add this recipe to the list.",
             "empty-recipe-store",
         ),
     ).toBe(
-        '<p class="empty-recipe-store">Add a grocery store in Settings, then add this recipe to the list.</p>',
+        '<p class="empty-recipe-store">Add a grocery store under Household, then add this recipe to the list.</p>',
     );
     expect(emptyState("No foods in the catalog yet.")).toBe(
         '<p class="empty">No foods in the catalog yet.</p>',

@@ -301,8 +301,8 @@ export function renderGroceryPage(view: GroceryPageView): string {
             : "";
     const empty =
         view.stores.length === 0
-            ? `${emptyState("Add a grocery store in Settings, then add a line.", "empty-grocery")}
-<p><a href="/household">Household settings</a></p>`
+            ? `${emptyState("Add a grocery store under Household, then add a line.", "empty-grocery")}
+<p><a href="/household">Household</a></p>`
             : "";
     const locations = view.locations ?? [];
     const stores = view.stores

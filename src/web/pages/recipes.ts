@@ -380,7 +380,7 @@ ${field({ id: "portion-count", label: "Your portion", control: `<input id="porti
     const grocery =
         view.stores.length === 0
             ? emptyState(
-                  "Add a grocery store in Settings, then add this recipe to the list.",
+                  "Add a grocery store under Household, then add this recipe to the list.",
                   "empty-recipe-store",
               )
             : `<form class="recipe-add-grocery" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/add-to-grocery">

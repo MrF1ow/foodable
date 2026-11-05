@@ -395,7 +395,8 @@ test("owner grocery page has a short add-store form and no add-supply", () => {
     expect(html).toContain('id="grocery_store_name"');
     expect(html).toContain('name="name"');
     expect(html).toContain("Add store");
-    expect(html).toContain("Household settings");
+    expect(html).toContain('href="/household">Household</a>');
+    expect(html).toContain("under Household");
     expect(html).not.toContain("<h3>Add supply</h3>");
     expect(html).not.toContain("grocery-add-supply");
     expect(html).not.toContain('name="kind" value="supply"');
@@ -429,7 +430,8 @@ test("member grocery page does not get the add-store form", () => {
         canManage: false,
     });
     expect(html).toContain("<h1>Groceries</h1>");
-    expect(html).toContain("Household settings");
+    expect(html).toContain('href="/household">Household</a>');
+    expect(html).toContain("under Household");
     expect(html).not.toContain("grocery-add-store");
     expect(html).not.toContain('action="/grocery/stores"');
     expect(html).not.toContain("<h3>Add supply</h3>");

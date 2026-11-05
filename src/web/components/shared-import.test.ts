@@ -238,7 +238,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(grocery).toContain('class="error-banner"');
     expect(grocery).toContain("Enter a store name.");
     expect(grocery).toContain(
-        '<p class="empty-grocery">Add a grocery store in Settings, then add a line.</p>',
+        '<p class="empty-grocery">Add a grocery store under Household, then add a line.</p>',
     );
     expect(grocery).toContain('class="grocery-add-store"');
     expect(grocery).not.toContain("<h3>Add supply</h3>");

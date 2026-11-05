@@ -158,7 +158,7 @@ export async function resolveApproveUser(args: {
             return await args.signUpUser(args.email, args.password);
         }
     }
-    // Once the owner exists, accounts are only created in Settings →
+    // Once the owner exists, accounts are only created in Household ›
     // Household, so a failed sign-in never falls through to sign-up.
     try {
         return await args.signInUser(args.email, args.password);
