@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
 import { parseNutritionPrefsInput } from "../pages/settings.js";
@@ -23,14 +23,7 @@ import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
 
 export const settingsRoutes = new Hono();
 
-function resolveBackHref(
-    c: Parameters<typeof getBaseUrl>[0] & {
-        req: {
-            query: (key: string) => string | undefined;
-            header: (key: string) => string | undefined;
-        };
-    },
-) {
+function resolveBackHref(c: Context) {
     return settingsBackHref({
         from: c.req.query("from"),
         referer: c.req.header("referer"),

@@ -61,12 +61,15 @@ export function themeColorMeta(
 
 export type AppBarVariant = "app" | "settings" | "gate";
 
+// Settings uses page theme chrome and the tabs use nav chrome. Turbo's head
+// merge replaces a theme-color meta whose colour differs, and iOS Safari only
+// retints its toolbar on a page load, so every link between the two (the gear,
+// Back, and the Settings logo) opts out of Turbo.
 export function appBar(variant: AppBarVariant): string {
     const logoTurbo = variant === "settings" ? ' data-turbo="false"' : "";
     const action =
         variant === "app"
-            ? `<!-- iOS only retints toolbar on full load; Settings uses page chrome, tabs use nav chrome. -->
-<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
+            ? `<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
             : variant === "gate"
               ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
               : "";
@@ -137,7 +140,8 @@ export type SettingsPageShell = {
     body: string;
 };
 
-/** Bare Settings / Help chrome: back link, no bottom nav, page theme meta. */
+/** Bare Settings / Help chrome: back link, no bottom nav, page theme meta.
+ *  Back skips Turbo for the same reason as the gear (see appBar). */
 export function renderSettingsPage(shell: SettingsPageShell): string {
     return `<!doctype html>
 ${htmlOpen(shell.theme)}
@@ -146,7 +150,7 @@ ${appHead(shell.title, shell.theme, "page")}
 </head>
 <body>
 ${appBar("settings")}
-<main class="app-main native"><!-- iOS only retints toolbar on full load; Settings uses page chrome, tabs use nav chrome. --><a class="settings-back" href="${escapeHtml(shell.backHref)}" data-turbo="false">‹ Back</a>${shell.body}</main>
+<main class="app-main native"><a class="settings-back" href="${escapeHtml(shell.backHref)}" data-turbo="false">‹ Back</a>${shell.body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

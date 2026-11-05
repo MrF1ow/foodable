@@ -210,9 +210,10 @@ async function snap(): Promise<Snap> {
     }))()`);
 }
 async function clickSel(sel: string) {
-    await ev(
-        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); })()`,
+    const found = await ev<boolean>(
+        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el; })()`,
     );
+    if (!found) throw new Error(`clickSel: no element matches ${sel}`);
 }
 async function setMarker() {
     await ev(`window.__marker = "stay"`);
@@ -1567,17 +1568,19 @@ try {
     const pageSystemMeta = systemMetaPair("page").join(",");
 
     await setMarker();
-    await clickSel('nav.subnav a[href="/settings/help"]');
+    await clickSel('nav.subnav a[href^="/settings/help"]');
     await sleep(300);
     const afterHelp = await themeSnap();
+    const helpPath = await ev<string>(`location.pathname`);
     const helpMeta = await themeMetaContents();
     const helpChrome = await themeChromeKind();
     record(
         "settings help sub-nav turbo visit",
-        afterHelp.marker === "stay" &&
+        helpPath === "/settings/help" &&
+            afterHelp.marker === "stay" &&
             helpChrome === "page" &&
             helpMeta.join(",") === pageSystemMeta,
-        { afterHelp, helpMeta, helpChrome, ex: drain() },
+        { helpPath, afterHelp, helpMeta, helpChrome, ex: drain() },
     );
 
     record(
