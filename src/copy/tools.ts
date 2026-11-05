@@ -504,6 +504,7 @@ const TOOLS_BASE: ToolIdentity[] = [
         params: [
             { name: "line_ids", required: true },
             { name: "location_id", required: false },
+            { name: "product_food_ids", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -706,6 +707,7 @@ const TOOLS_BASE: ToolIdentity[] = [
         badges: ["edit"],
         params: [
             { name: "food_id", required: false },
+            { name: "generic_food_id", required: false },
             { name: "kind", required: false },
             { name: "name", required: false },
             { name: "brand", required: false },
@@ -724,6 +726,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "allergens", required: false },
             { name: "aliases", required: false },
             { name: "archived", required: false },
+            { name: "barcode", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -734,6 +737,26 @@ const TOOLS_BASE: ToolIdentity[] = [
         params: [
             { name: "keep_id", required: true },
             { name: "drop_id", required: true },
+        ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "link_product",
+        category: "logging-food-meals",
+        badges: ["edit"],
+        params: [
+            { name: "product_food_id", required: true },
+            { name: "food_id", required: true },
+        ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "set_usual_product",
+        category: "logging-food-meals",
+        badges: ["edit"],
+        params: [
+            { name: "food_id", required: true },
+            { name: "product_food_id", required: true },
         ],
         hasPhotoHint: false,
     },
@@ -784,6 +807,8 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "get_food",
     "upsert_food",
     "merge_foods",
+    "link_product",
+    "set_usual_product",
 ] as const;
 
 export const NUTRITION_WRITE_TOOL_NAMES = [

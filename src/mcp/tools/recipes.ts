@@ -224,6 +224,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         food_id: z.string().nullable(),
                         per_portion_amount: z.number(),
                         person_amount: z.number(),
+                        product: z
+                            .object({
+                                food_id: z.string(),
+                                name: z.string(),
+                            })
+                            .nullable(),
                     }),
                 ),
             }),
@@ -258,16 +264,27 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         steps: recipeSteps(view.instructions),
                         portion_count: view.portionCount,
                         macros_per_portion: macrosPerPortion,
-                        ingredients: view.ingredients.map((ingredient) => ({
-                            id: ingredient.id,
-                            display_name: ingredient.displayName,
-                            amount: ingredient.quantity.amount,
-                            unit: ingredient.quantity.unit,
-                            note: ingredient.note,
-                            food_id: ingredient.foodId,
-                            per_portion_amount: ingredient.perPortionAmount,
-                            person_amount: ingredient.personAmount,
-                        })),
+                        ingredients: view.ingredients.map((ingredient) => {
+                            const eff = ingredient.foodId
+                                ? catalog.get(ingredient.foodId)
+                                : undefined;
+                            return {
+                                id: ingredient.id,
+                                display_name: ingredient.displayName,
+                                amount: ingredient.quantity.amount,
+                                unit: ingredient.quantity.unit,
+                                note: ingredient.note,
+                                food_id: ingredient.foodId,
+                                per_portion_amount: ingredient.perPortionAmount,
+                                person_amount: ingredient.personAmount,
+                                product: eff?.product
+                                    ? {
+                                          food_id: eff.product.id,
+                                          name: eff.product.name,
+                                      }
+                                    : null,
+                            };
+                        }),
                     };
                     return {
                         content: [

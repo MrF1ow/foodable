@@ -62,6 +62,8 @@
     "get_food",
     "upsert_food",
     "merge_foods",
+    "link_product",
+    "set_usual_product",
     "list_members",
     "get_household_config",
     "update_household_config",

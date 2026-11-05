@@ -81,7 +81,12 @@ import {
 import { createMemoryFridgeStore } from "./domain/fridge.js";
 import { createMemoryStockStore, ledgerMatchesStock } from "./domain/stock.js";
 import { createMemoryFoodsStore } from "./domain/foods.js";
-import { findOrCreateManualFood, updateFood } from "./domain/foods.js";
+import {
+    findOrCreateFoodByBarcode,
+    findOrCreateManualFood,
+    updateFood,
+} from "./domain/foods.js";
+import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { createMemoryRecipesStore } from "./domain/recipes.js";
 import {
@@ -4081,8 +4086,402 @@ describe("phone-app domain MCP tools", () => {
                     barcode: "070852010016",
                     food_id: null,
                     calories: 98,
+                    generic_food_id: null,
+                    generic_food_name: null,
                 }),
             ]);
+        });
+    });
+
+    test("set_usual_product links a standalone product and sets the usual", async () => {
+        await withPat(async (call) => {
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const brand = await call("upsert_food", {
+                name: "Kirkland Large Eggs",
+                brand: "Kirkland",
+                calories: 140,
+                protein_g: 12,
+            });
+            const productId = brand.structuredContent?.id as string;
+            FOOD_OUTPUT.parse(brand.structuredContent);
+            expect(brand.structuredContent?.generic_food_id).toBeNull();
+            const set = await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+            });
+            expect(set.isError).toBeFalsy();
+            FOOD_OUTPUT.parse(set.structuredContent);
+            expect(set.structuredContent?.usual_product_id).toBe(productId);
+            const linked = await call("get_food", { food_id: productId });
+            expect(linked.structuredContent?.generic_food_id).toBe(eggsId);
+        });
+    });
+
+    test("link_product with food_id null unlinks", async () => {
+        await withPat(async (call) => {
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const brand = await call("upsert_food", {
+                name: "Store Eggs",
+                calories: 130,
+            });
+            const productId = brand.structuredContent?.id as string;
+            await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+            });
+            const unlinked = await call("link_product", {
+                product_food_id: productId,
+                food_id: null,
+            });
+            expect(unlinked.isError).toBeFalsy();
+            FOOD_OUTPUT.parse(unlinked.structuredContent);
+            expect(unlinked.structuredContent?.generic_food_id).toBeNull();
+            const plain = await call("get_food", { food_id: eggsId });
+            expect(plain.structuredContent?.usual_product_id).toBeNull();
+        });
+    });
+
+    test("link_product rejects linking a product to a product", async () => {
+        await withPat(async (call) => {
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const a = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Brand A",
+                calories: 100,
+            });
+            const b = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Brand B",
+                calories: 110,
+            });
+            const r = await call("link_product", {
+                product_food_id: b.structuredContent?.id as string,
+                food_id: a.structuredContent?.id as string,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("product of another food");
+        });
+    });
+
+    test("get_food returns products, usual_product_id, and effective nutrition", async () => {
+        await withPat(async (call) => {
+            const eggs = await call("upsert_food", {
+                name: "Eggs",
+                calories: 10,
+            });
+            const eggsId = eggs.structuredContent?.id as string;
+            const brand = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Kirkland Eggs",
+                calories: 155,
+                protein_g: 13,
+            });
+            const productId = brand.structuredContent?.id as string;
+            await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+            });
+            const got = await call("get_food", { food_id: eggsId });
+            expect(got.isError).toBeFalsy();
+            const payload = GET_FOOD_OUTPUT.parse(got.structuredContent);
+            expect(payload.calories).toBe(10);
+            expect(payload.usual_product_id).toBe(productId);
+            expect(payload.effective.calories).toBe(155);
+            expect(payload.effective.protein_g).toBe(13);
+            expect(payload.products).toEqual([
+                expect.objectContaining({
+                    id: productId,
+                    usual: true,
+                }),
+            ]);
+        });
+    });
+
+    test("upsert_food with generic_food_id creates a product", async () => {
+        await withPat(async (call) => {
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const created = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Hand-entered Eggs",
+                calories: 148,
+            });
+            expect(created.isError).toBeFalsy();
+            const payload = FOOD_OUTPUT.parse(created.structuredContent);
+            expect(payload.generic_food_id).toBe(eggsId);
+            expect(payload.name).toBe("Hand-entered Eggs");
+        });
+    });
+
+    test("upsert_food with generic_food_id inherits a supply's kind", async () => {
+        await withPat(async (call) => {
+            const foil = await call("upsert_food", {
+                name: "Foil",
+                kind: "supply",
+            });
+            const foilId = foil.structuredContent?.id as string;
+            const created = await call("upsert_food", {
+                generic_food_id: foilId,
+                name: "Reynolds Wrap",
+            });
+            expect(created.isError).toBeFalsy();
+            const payload = FOOD_OUTPUT.parse(created.structuredContent);
+            expect(payload.kind).toBe("supply");
+            expect(payload.generic_food_id).toBe(foilId);
+            const mismatched = await call("upsert_food", {
+                generic_food_id: foilId,
+                name: "Foil sandwich",
+                kind: "food",
+            });
+            expect(mismatched.isError).toBe(true);
+        });
+    });
+
+    test("put_away_grocery_lines with product_food_ids records the chosen product", async () => {
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const usual = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Usual Eggs",
+                calories: 140,
+            });
+            const usualId = usual.structuredContent?.id as string;
+            const other = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Sale Eggs",
+                calories: 120,
+            });
+            const otherId = other.structuredContent?.id as string;
+            await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: usualId,
+            });
+            const line = await call("add_grocery_line", {
+                store_id: store.id,
+                kind: "food",
+                food_id: eggsId,
+                amount: 12,
+                unit: "each",
+            });
+            const lineId = (line.structuredContent as { id?: string })?.id!;
+            const put = await call("put_away_grocery_lines", {
+                line_ids: [lineId],
+                location_id: locationId,
+                product_food_ids: { [lineId]: otherId },
+            });
+            expect(put.isError).toBeFalsy();
+            expect(put.structuredContent?.put_away).toEqual([
+                expect.objectContaining({
+                    line_id: lineId,
+                    product_food_id: otherId,
+                }),
+            ]);
+            const fridge = await call("get_fridge");
+            expect(textOf(fridge)).toContain("Sale Eggs");
+        });
+    });
+
+    test("upsert_food without food_id matches name and brand separately", async () => {
+        await withPat(async (call) => {
+            const branded = await call("upsert_food", {
+                name: "Half and half",
+                brand: "Laura Lynn",
+                calories: 100,
+            });
+            expect(branded.isError).toBeFalsy();
+            const brandedId = branded.structuredContent?.id as string;
+            FOOD_OUTPUT.parse(branded.structuredContent);
+            const plain = await call("upsert_food", { name: "Half and half" });
+            expect(plain.isError).toBeFalsy();
+            expect(plain.structuredContent?.id).not.toBe(brandedId);
+            expect(plain.structuredContent?.brand).toBeNull();
+            const lauraStill = await call("get_food", { food_id: brandedId });
+            expect(lauraStill.structuredContent?.calories).toBe(100);
+            const edited = await call("upsert_food", {
+                name: "Half and half",
+                brand: "Laura Lynn",
+                calories: 130,
+            });
+            expect(edited.isError).toBeFalsy();
+            expect(edited.structuredContent?.id).toBe(brandedId);
+            expect(edited.structuredContent?.calories).toBe(130);
+        });
+    });
+
+    test("upsert_food create path attaches barcode and rejects duplicates", async () => {
+        await withPat(async (call) => {
+            const plain = await call("upsert_food", { name: "Half and half" });
+            const plainId = plain.structuredContent?.id as string;
+            const created = await call("upsert_food", {
+                generic_food_id: plainId,
+                name: "Member's Mark Half and Half",
+                brand: "Member's Mark",
+                barcode: "193968379117",
+                calories: 130,
+            });
+            expect(created.isError).toBeFalsy();
+            const payload = FOOD_OUTPUT.parse(created.structuredContent);
+            expect(payload.barcodes).toEqual(["193968379117"]);
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            const dup = await call("upsert_food", {
+                generic_food_id: plainId,
+                name: "Other Half and Half",
+                brand: "Other",
+                barcode: "193968379117",
+                calories: 120,
+            });
+            expect(dup.isError).toBe(true);
+            expect(textOf(dup)).toContain("That barcode already belongs to");
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+    });
+
+    test("upsert_food edit path attaches barcode and rejects conflicts", async () => {
+        await withPat(async (call) => {
+            const a = await call("upsert_food", { name: "Barcode food A" });
+            const b = await call("upsert_food", { name: "Barcode food B" });
+            const aId = a.structuredContent?.id as string;
+            const bId = b.structuredContent?.id as string;
+            const attached = await call("upsert_food", {
+                food_id: aId,
+                barcode: "737628064502",
+            });
+            expect(attached.isError).toBeFalsy();
+            expect(attached.structuredContent?.barcodes).toEqual([
+                "737628064502",
+            ]);
+            const conflict = await call("upsert_food", {
+                food_id: bId,
+                barcode: "737628064502",
+            });
+            expect(conflict.isError).toBe(true);
+            expect(textOf(conflict)).toContain(
+                "That barcode already belongs to",
+            );
+        });
+    });
+
+    test("upsert_food rejects invalid barcodes without writing", async () => {
+        await withPat(async (call) => {
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            const r = await call("upsert_food", {
+                name: "Bad barcode food",
+                barcode: "12ab",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("Enter a valid barcode");
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+    });
+
+    test("a rejected upsert_food leaves no row and no barcode behind", async () => {
+        await withPat(async (call) => {
+            const barcodeOwner = async (barcode: string) =>
+                db.foodsStore.getBarcodeFoodId("hh-1", barcode);
+            const plain = await call("upsert_food", { name: "Milk" });
+            const plainId = plain.structuredContent?.id as string;
+            await call("upsert_food", { name: "Milk", brand: "A" });
+            const pear = await call("upsert_food", {
+                name: "Pear",
+                aliases: ["nashi"],
+            });
+            const pearId = pear.structuredContent?.id as string;
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+
+            const collide = await call("upsert_food", {
+                food_id: plainId,
+                name: "Milk",
+                brand: "A",
+                barcode: "012345678905",
+            });
+            expect(collide.isError).toBe(true);
+            expect(await barcodeOwner("012345678905")).toBeNull();
+            expect(
+                (await db.foodsStore.getFood("hh-1", plainId))?.brand,
+            ).toBeNull();
+
+            const blankName = await call("upsert_food", {
+                food_id: pearId,
+                name: "   ",
+                barcode: "193968379117",
+            });
+            expect(blankName.isError).toBe(true);
+            expect(await barcodeOwner("193968379117")).toBeNull();
+
+            const badGrams = await call("upsert_food", {
+                name: "Bad grams",
+                barcode: "737628064502",
+                grams_per_each: 0,
+            });
+            expect(badGrams.isError).toBe(true);
+            expect(await barcodeOwner("737628064502")).toBeNull();
+
+            const badProduct = await call("upsert_food", {
+                generic_food_id: plainId,
+                name: "Bad product",
+                barcode: "737628064502",
+                aliases: ["nashi"],
+            });
+            expect(badProduct.isError).toBe(true);
+            expect(await barcodeOwner("737628064502")).toBeNull();
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+    });
+
+    test("upsert_food by name re-saves a food with its own barcode", async () => {
+        await withPat(async (call) => {
+            const first = await call("upsert_food", {
+                name: "Oat milk",
+                brand: "Oatly",
+                barcode: "7394376616037",
+            });
+            expect(first.isError).toBeFalsy();
+            const again = await call("upsert_food", {
+                name: "Oat milk",
+                brand: "Oatly",
+                barcode: "7394376616037",
+                calories: 46,
+            });
+            expect(again.isError).toBeFalsy();
+            expect(again.structuredContent?.id).toBe(
+                first.structuredContent?.id,
+            );
+            expect(again.structuredContent?.calories).toBe(46);
+        });
+    });
+
+    test("upsert_food barcode resolves through findOrCreateFoodByBarcode", async () => {
+        await withPat(async (call) => {
+            const plain = await call("upsert_food", { name: "Half and half" });
+            const plainId = plain.structuredContent?.id as string;
+            const product = await call("upsert_food", {
+                generic_food_id: plainId,
+                name: "Member's Mark Half and Half",
+                brand: "Member's Mark",
+                barcode: "193968379117",
+                calories: 130,
+            });
+            const productId = product.structuredContent?.id as string;
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            const resolved = await findOrCreateFoodByBarcode(
+                db.foodsStore,
+                "hh-1",
+                "193968379117",
+                async () => null,
+            );
+            expect(resolved.id).toBe(productId);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
         });
     });
 
