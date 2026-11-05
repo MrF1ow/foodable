@@ -39,7 +39,7 @@ import { renderSettingsPage } from "./pages/settings.js";
 import { renderFoodsSettingsPage } from "./pages/foods.js";
 import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
-import { foodsByIds } from "../domain/foods.js";
+import { effectiveFoodsByIds } from "../domain/foods.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
@@ -241,7 +241,7 @@ export async function renderGroceryListPage(
     const rulesByStore = new Map(
         storeRules.map((row) => [row.storeId, row.rules]),
     );
-    const catalog = await foodsByIds(liveFoodsStore(), householdId, [
+    const catalog = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
         ...snapshot.lines.map((line) => line.foodId),
         ...fridge.items.map((item) => item.foodId),
     ]);
@@ -473,7 +473,12 @@ export async function renderRecipesListPage(
     let recipes;
     if (tag || canMakeNow || safeForId) {
         const fridge = await listFridge(liveFridgeStore(), householdId);
-        const foods = await liveFoodsStore().listFoods(householdId);
+        const allFoods = await liveFoodsStore().listFoods(householdId);
+        const foodsById = await effectiveFoodsByIds(
+            liveFoodsStore(),
+            householdId,
+            allFoods.map((food) => food.id),
+        );
         let safeFor = null;
         if (safeForId) {
             const rules = liveRulesStore();
@@ -486,7 +491,7 @@ export async function renderRecipesListPage(
         recipes = await listRecipesFiltered(
             liveRecipesStore(),
             householdId,
-            new Map(foods.map((food) => [food.id, food])),
+            foodsById,
             fridge.items.map((item) => ({
                 quantity: item.quantity,
                 foodId: item.foodId,
@@ -556,7 +561,7 @@ export async function renderRecipeDetailRoute(
         }
         throw err;
     }
-    const catalog = await foodsByIds(
+    const catalog = await effectiveFoodsByIds(
         liveFoodsStore(),
         householdId,
         view.ingredients.map((row) => row.foodId),

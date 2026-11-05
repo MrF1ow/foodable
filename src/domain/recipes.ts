@@ -1,5 +1,7 @@
 import type { FoodResult } from "../foods.js";
 import {
+    effectiveFoodsByIds,
+    familyOf,
     findFoodById,
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
@@ -7,6 +9,7 @@ import {
     type Food,
     type FoodsStore,
 } from "./foods.js";
+import { familyIdOf } from "./food-quantity.js";
 import {
     missingGramsReason,
     storedFoodUnit,
@@ -1006,6 +1009,7 @@ export async function addRecipeToGrocery(opts: {
     /** See resolveTotalPortions. */
     totalPortions?: number | null;
     foodsById?: ReadonlyMap<string, Food>;
+    foods?: FoodsStore;
 }): Promise<{
     added: GroceryLine[];
     skipped: RecipeGroceryRemainderLine[];
@@ -1057,6 +1061,16 @@ export async function addRecipeToGrocery(opts: {
         (row) => row.storeId === opts.storeId,
     );
     const existingLines = await opts.grocery.listLines(opts.householdId);
+    const foodsById = opts.foodsById ?? new Map<string, Food>();
+    let familyById: Map<string, string>;
+    if (opts.foods) {
+        const listed = await opts.foods.listFoods(opts.householdId);
+        familyById = new Map(listed.map((row) => [row.id, familyOf(row)]));
+    } else {
+        familyById = new Map(
+            [...foodsById.values()].map((row) => [row.id, familyOf(row)]),
+        );
+    }
     const added: GroceryLine[] = [];
     const skipped: RecipeGroceryRemainderLine[] = [];
     for (const line of plan) {
@@ -1064,9 +1078,14 @@ export async function addRecipeToGrocery(opts: {
             skipped.push(line);
             continue;
         }
+        const lineFamily = line.foodId
+            ? familyIdOf(line.foodId, foodsById)
+            : null;
         const ingredient = ingredients.find(
             (row) =>
-                (line.foodId && row.foodId === line.foodId) ||
+                (lineFamily &&
+                    row.foodId &&
+                    familyIdOf(row.foodId, foodsById) === lineFamily) ||
                 row.displayName === line.displayName,
         );
         const kind = ingredient?.kind ?? "food";
@@ -1078,6 +1097,7 @@ export async function addRecipeToGrocery(opts: {
             kind,
             foodId,
             displayName: line.displayName,
+            familyById,
         });
         const inserted = await opts.grocery.insertLine({
             id: crypto.randomUUID(),
@@ -1325,8 +1345,10 @@ export async function importRecipeFromText(
             }),
         );
     }
-    const catalog = new Map(
-        (await foods.listFoods(input.householdId)).map((row) => [row.id, row]),
+    const catalog = await effectiveFoodsByIds(
+        foods,
+        input.householdId,
+        imported.map((row) => row.foodId),
     );
     const gaps: IngredientGap[] = imported.map((ingredient) => ({
         ingredientId: ingredient.id,

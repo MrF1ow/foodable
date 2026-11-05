@@ -64,7 +64,7 @@ import { alreadyHaveTag } from "../domain/linking.js";
 import { listFridge } from "../domain/fridge.js";
 import { groceryAllergenWarning } from "../domain/grocery.js";
 import { listRecipes } from "../domain/recipes.js";
-import { foodsByIds } from "../domain/foods.js";
+import { effectiveFoodsByIds } from "../domain/foods.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -1095,7 +1095,7 @@ export async function groceryLineExtras(
         listFridge(liveFridgeStore(), householdId),
         listHouseholdMembers(householdId),
     ]);
-    const catalog = await foodsByIds(liveFoodsStore(), householdId, [
+    const catalog = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
         line.foodId,
         ...fridge.items.map((item) => item.foodId),
     ]);

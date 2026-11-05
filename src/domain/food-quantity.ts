@@ -9,7 +9,16 @@ import {
 export type FoodQuantityFactors = {
     gramsPerEach: number | null;
     gramsPerMl: number | null;
+    genericFoodId?: string | null;
 };
+
+/** Family id of a food reference: the plain food's id for a product, else the id itself. */
+export function familyIdOf(
+    foodId: string,
+    foodsById: ReadonlyMap<string, { genericFoodId?: string | null }>,
+): string {
+    return foodsById.get(foodId)?.genericFoodId ?? foodId;
+}
 
 function roundAmount(amount: number): number {
     return Math.round(amount * 10) / 10;

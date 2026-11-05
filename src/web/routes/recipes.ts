@@ -28,7 +28,7 @@ import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
-import { foodsByIds } from "../../domain/foods.js";
+import { effectiveFoodsByIds } from "../../domain/foods.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import {
     descriptionFromItems,
@@ -547,12 +547,16 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             }),
         );
         const fridge = await listFridge(liveFridgeStore(), member.householdId);
-        const foods = await foodsByIds(liveFoodsStore(), member.householdId, [
-            ...(
-                await recipes.listIngredients(member.householdId, recipeId)
-            ).map((row) => row.foodId),
-            ...fridge.items.map((item) => item.foodId),
-        ]);
+        const foods = await effectiveFoodsByIds(
+            liveFoodsStore(),
+            member.householdId,
+            [
+                ...(
+                    await recipes.listIngredients(member.householdId, recipeId)
+                ).map((row) => row.foodId),
+                ...fridge.items.map((item) => item.foodId),
+            ],
+        );
         const added = await addRecipeToGrocery({
             recipes,
             grocery: liveGroceryStore(),
@@ -570,6 +574,7 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
                 "total_portions",
             ),
             foodsById: foods,
+            foods: liveFoodsStore(),
         });
         const flash = addRecipeToGroceryToastFlash(added.added.length);
         return redirectWithToast(c, "/grocery", flash.key, flash.params);

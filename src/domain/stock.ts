@@ -1,5 +1,8 @@
 import {
+    effectiveFoodsByIds,
+    familyOf,
     findFoodById,
+    foodsByIds,
     FoodsInputError,
     type Food,
     type FoodsStore,
@@ -84,6 +87,7 @@ export type ApplyMovementInput = {
 
 export type ApplyMovementResult = {
     movement: StockMovement;
+    movements: StockMovement[];
     shortfall: StockShortfall | null;
     item: FridgeItem | null;
 };
@@ -170,6 +174,79 @@ function unitsCompatible(
     food: FoodQuantityFactors | null | undefined,
 ): boolean {
     return convertStockAmount(1, fromUnit, toUnit, food) != null;
+}
+
+function mergeQuantityFactors(
+    row: FoodQuantityFactors | null | undefined,
+    need: FoodQuantityFactors | null | undefined,
+): FoodQuantityFactors {
+    return {
+        gramsPerEach: row?.gramsPerEach ?? need?.gramsPerEach ?? null,
+        gramsPerMl: row?.gramsPerMl ?? need?.gramsPerMl ?? null,
+    };
+}
+
+function quantityFactorsEqual(
+    a: FoodQuantityFactors,
+    b: FoodQuantityFactors,
+): boolean {
+    return (
+        (a.gramsPerEach ?? null) === (b.gramsPerEach ?? null) &&
+        (a.gramsPerMl ?? null) === (b.gramsPerMl ?? null)
+    );
+}
+
+function recentLocationForFood(
+    items: readonly FridgeItem[],
+    foodId: string,
+): string | null {
+    const forFood = items.filter((item) => item.foodId === foodId);
+    return forFood[forFood.length - 1]?.locationId ?? null;
+}
+
+export type DecrementLedgerLine = {
+    foodId: string;
+    delta: number;
+    unit: string;
+    fridgeItemId: string | null;
+};
+
+/**
+ * The per-item movement for a decrement, written the way `ledgerMatchesStock`
+ * reads it back: the change in the item food's default unit, converted with
+ * that food's own factors, so before and after round identically on both
+ * sides. Falls back to the item's own unit when that conversion is unknown.
+ */
+function ledgerLineFor(
+    item: FridgeItem,
+    food: Food | undefined,
+    amountBefore: number,
+    amountAfter: number,
+): { delta: number; unit: string } {
+    const unit = item.quantity.unit;
+    if (food) {
+        const ledgerUnit = food.defaultUnit || "g";
+        const before = convertStockAmount(amountBefore, unit, ledgerUnit, food);
+        const after =
+            amountAfter === 0
+                ? 0
+                : convertStockAmount(amountAfter, unit, ledgerUnit, food);
+        if (before != null && after != null) {
+            return { delta: roundAmount(after - before), unit: ledgerUnit };
+        }
+    }
+    return { delta: roundAmount(amountAfter - amountBefore), unit };
+}
+
+async function loadFamilyFoodMap(
+    foods: FoodsStore,
+    householdId: string,
+    itemFoodIds: string[],
+    inputFoodId: string,
+): Promise<Map<string, Food>> {
+    const ids = new Set(itemFoodIds);
+    ids.add(inputFoodId);
+    return foodsByIds(foods, householdId, [...ids]);
 }
 
 function expirySortKey(item: FridgeItem): number {
@@ -304,13 +381,17 @@ async function incrementInto(
 
 async function decrementFrom(
     fridge: FridgeStore,
-    food: Food,
+    foods: FoodsStore,
+    needFood: Food,
+    effectiveNeed: FoodQuantityFactors,
     input: ApplyMovementInput,
 ): Promise<{
     item: FridgeItem | null;
     applied: number;
     unit: string;
     shortfall: number;
+    ledgerLines: DecrementLedgerLine[];
+    useSingleMovementForm: boolean;
 }> {
     const need = roundAmount(Math.abs(input.delta));
     if (!(need > 0)) {
@@ -318,10 +399,27 @@ async function decrementFrom(
     }
     const unit = input.unit.trim();
     const items = await fridge.listItems(input.householdId);
+    const familyFoodMap = await loadFamilyFoodMap(
+        foods,
+        input.householdId,
+        items.map((item) => item.foodId).filter(Boolean) as string[],
+        input.foodId,
+    );
+    const rawNeedFactors: FoodQuantityFactors = {
+        gramsPerEach: needFood.gramsPerEach ?? null,
+        gramsPerMl: needFood.gramsPerMl ?? null,
+    };
+    let useSingleMovementForm = true;
+    const needFamily = familyOf(needFood);
     const pool = (
         input.fridgeItemId
             ? items.filter((item) => item.id === input.fridgeItemId)
-            : items.filter((item) => item.foodId === input.foodId)
+            : items.filter((item) => {
+                  if (!item.foodId) return false;
+                  const row = familyFoodMap.get(item.foodId);
+                  if (!row) return item.foodId === input.foodId;
+                  return familyOf(row) === needFamily;
+              })
     ).slice();
     if (input.fridgeItemId) {
         const target = pool[0];
@@ -338,17 +436,31 @@ async function decrementFrom(
 
     let remaining = need;
     let lastItem: FridgeItem | null = null;
+    const ledgerLines: DecrementLedgerLine[] = [];
     for (const item of pool) {
         if (remaining <= 0) break;
+        const rowFood = item.foodId
+            ? familyFoodMap.get(item.foodId)
+            : undefined;
+        const factors = mergeQuantityFactors(rowFood, effectiveNeed);
+        if (item.foodId !== input.foodId) {
+            useSingleMovementForm = false;
+        }
+        if (!quantityFactorsEqual(factors, rawNeedFactors)) {
+            useSingleMovementForm = false;
+        }
         const haveInNeed = convertStockAmount(
             item.quantity.amount,
             item.quantity.unit,
             unit,
-            food,
+            factors,
         );
         if (haveInNeed == null || haveInNeed <= 0) continue;
         const take = Math.min(haveInNeed, remaining);
         const leaveInNeed = roundAmount(haveInNeed - take);
+        const amountBefore = item.quantity.amount;
+        let amountAfter = 0;
+        let itemAfter: FridgeItem | null = null;
         if (leaveInNeed <= 0) {
             await fridge.deleteItem(input.householdId, item.id);
             lastItem = null;
@@ -357,19 +469,40 @@ async function decrementFrom(
                 leaveInNeed,
                 unit,
                 item.quantity.unit,
-                food,
+                factors,
             );
             if (leaveInItem == null || leaveInItem <= 0) {
                 await fridge.deleteItem(input.householdId, item.id);
                 lastItem = null;
             } else {
-                lastItem = await fridge.updateItem({
+                amountAfter = leaveInItem;
+                itemAfter = await fridge.updateItem({
                     ...item,
                     ...datesOf(item),
                     quantity: {
                         amount: leaveInItem,
                         unit: item.quantity.unit,
                     },
+                });
+                lastItem = itemAfter;
+            }
+        }
+        // Rounding the leftover back into the item's unit can land on the
+        // amount it already had. Nothing left the shelf, so nothing counts as
+        // taken: the remainder stays a shortfall.
+        if (itemAfter && amountAfter === amountBefore) continue;
+        if (item.foodId) {
+            const line = ledgerLineFor(
+                item,
+                rowFood,
+                amountBefore,
+                amountAfter,
+            );
+            if (line.delta !== 0) {
+                ledgerLines.push({
+                    ...line,
+                    foodId: item.foodId,
+                    fridgeItemId: itemAfter?.id ?? null,
                 });
             }
         }
@@ -381,6 +514,8 @@ async function decrementFrom(
         applied,
         unit,
         shortfall: remaining > 0 ? remaining : 0,
+        ledgerLines,
+        useSingleMovementForm,
     };
 }
 
@@ -409,28 +544,61 @@ export async function applyMovement(
     }
     const now = input.now ?? new Date();
     const signed = input.delta;
-    const changed =
-        signed > 0
-            ? await incrementInto(fridge, food, { ...input, unit }, now)
-            : await decrementFrom(fridge, food, { ...input, unit });
-    const appliedSigned = signed > 0 ? changed.applied : -changed.applied;
-    if (appliedSigned === 0 && signed < 0) {
+    const movementBase = {
+        householdId: input.householdId,
+        reason: input.reason,
+        groceryLineId: input.groceryLineId ?? null,
+        recipeId: input.recipeId ?? null,
+        mealId: input.mealId ?? null,
+        actorUserId: input.actorUserId ?? null,
+        createdAt: now.toISOString(),
+    };
+
+    if (signed > 0) {
+        const changed = await incrementInto(
+            fridge,
+            food,
+            { ...input, unit },
+            now,
+        );
+        const appliedSigned = changed.applied;
         const movement = await stock.insertMovement({
             id: crypto.randomUUID(),
-            householdId: input.householdId,
+            foodId: food.id,
+            fridgeItemId: changed.item?.id ?? null,
+            delta: appliedSigned,
+            unit: changed.unit,
+            ...movementBase,
+        });
+        return {
+            movement,
+            movements: [movement],
+            shortfall: null,
+            item: changed.item,
+        };
+    }
+
+    const effectiveMap = await effectiveFoodsByIds(foods, input.householdId, [
+        input.foodId,
+    ]);
+    const effectiveNeed = effectiveMap.get(input.foodId) ?? food;
+    const changed = await decrementFrom(fridge, foods, food, effectiveNeed, {
+        ...input,
+        unit,
+    });
+    const appliedSigned = -changed.applied;
+    if (appliedSigned === 0) {
+        const movement = await stock.insertMovement({
+            id: crypto.randomUUID(),
             foodId: food.id,
             fridgeItemId: input.fridgeItemId ?? null,
             delta: 0,
             unit,
-            reason: input.reason,
-            groceryLineId: input.groceryLineId ?? null,
-            recipeId: input.recipeId ?? null,
-            mealId: input.mealId ?? null,
-            actorUserId: input.actorUserId ?? null,
-            createdAt: now.toISOString(),
+            ...movementBase,
         });
         return {
             movement,
+            movements: [movement],
             shortfall: {
                 foodId: food.id,
                 displayName: food.name,
@@ -440,24 +608,38 @@ export async function applyMovement(
             item: null,
         };
     }
-    const movement = await stock.insertMovement({
-        id: crypto.randomUUID(),
-        householdId: input.householdId,
-        foodId: food.id,
-        fridgeItemId: changed.item?.id ?? null,
-        delta: appliedSigned,
-        unit: changed.unit,
-        reason: input.reason,
-        groceryLineId: input.groceryLineId ?? null,
-        recipeId: input.recipeId ?? null,
-        mealId: input.mealId ?? null,
-        actorUserId: input.actorUserId ?? null,
-        createdAt: now.toISOString(),
-    });
-    const shortfallAmount =
-        signed < 0 && "shortfall" in changed ? changed.shortfall : 0;
+
+    const movements: StockMovement[] = [];
+    if (changed.useSingleMovementForm) {
+        movements.push(
+            await stock.insertMovement({
+                id: crypto.randomUUID(),
+                foodId: food.id,
+                fridgeItemId: changed.item?.id ?? null,
+                delta: appliedSigned,
+                unit: changed.unit,
+                ...movementBase,
+            }),
+        );
+    } else {
+        for (const line of changed.ledgerLines) {
+            movements.push(
+                await stock.insertMovement({
+                    id: crypto.randomUUID(),
+                    foodId: line.foodId,
+                    fridgeItemId: line.fridgeItemId,
+                    delta: line.delta,
+                    unit: line.unit,
+                    ...movementBase,
+                }),
+            );
+        }
+    }
+    const movement = movements[movements.length - 1]!;
+    const shortfallAmount = changed.shortfall;
     return {
         movement,
+        movements,
         shortfall:
             shortfallAmount > 0
                 ? {
@@ -570,6 +752,7 @@ export type PutAwayResult = {
     line: GroceryLine;
     movement: StockMovement;
     item: FridgeItem | null;
+    productFoodId: string;
 };
 
 export async function putAwayGroceryLines(
@@ -583,11 +766,11 @@ export async function putAwayGroceryLines(
         locationId?: string | null;
         actorUserId?: string | null;
         expiresOn?: string | null;
+        productFoodIds?: Record<string, string | null>;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
-    const results: PutAwayResult[] = [];
-    for (const lineId of input.lineIds) {
+    const selected = input.lineIds.map((lineId) => {
         const line = lines.find((row) => row.id === lineId);
         if (!line) throw new StockInputError("Unknown grocery line.");
         if (!line.foodId) {
@@ -595,12 +778,59 @@ export async function putAwayGroceryLines(
                 `${line.displayName} is not linked to a food.`,
             );
         }
-        const locationId =
-            input.locationId ||
-            (await lastUsedLocationId(fridge, input.householdId, line.foodId));
+        return line;
+    });
+    const lineFoodIds = selected.map((line) => line.foodId!);
+    const explicitChosen = selected.map((line) => {
+        const pick = input.productFoodIds?.[line.id];
+        return pick != null && pick !== "" ? pick : null;
+    });
+    const effective = await effectiveFoodsByIds(
+        foods,
+        input.householdId,
+        lineFoodIds,
+    );
+    const preloadIds = new Set(lineFoodIds);
+    for (const id of explicitChosen) {
+        if (id) preloadIds.add(id);
+    }
+    for (const line of selected) {
+        const eff = effective.get(line.foodId!);
+        if (eff?.product?.id) preloadIds.add(eff.product.id);
+    }
+    const rawFoods = await foodsByIds(foods, input.householdId, [
+        ...preloadIds,
+    ]);
+    const plans: { line: GroceryLine; chosenId: string }[] = [];
+    for (let i = 0; i < selected.length; i++) {
+        const line = selected[i]!;
+        const lineFood = rawFoods.get(line.foodId!)!;
+        const eff = effective.get(line.foodId!)!;
+        const chosen = explicitChosen[i] ?? eff.product?.id ?? line.foodId!;
+        const chosenRow = rawFoods.get(chosen);
+        if (!chosenRow || chosenRow.archivedAt) {
+            throw new StockInputError("Unknown food.");
+        }
+        if (familyOf(chosenRow) !== familyOf(lineFood)) {
+            throw new StockInputError(
+                `That product is not one of ${line.displayName}'s products.`,
+            );
+        }
+        plans.push({ line, chosenId: chosen });
+    }
+    const fridgeItems = await fridge.listItems(input.householdId);
+    const results: PutAwayResult[] = [];
+    for (const { line, chosenId } of plans) {
+        let locationId = input.locationId;
+        if (!locationId) {
+            locationId =
+                recentLocationForFood(fridgeItems, chosenId) ??
+                recentLocationForFood(fridgeItems, line.foodId!) ??
+                (await lastUsedLocationId(fridge, input.householdId, chosenId));
+        }
         const applied = await applyMovement(fridge, stock, foods, {
             householdId: input.householdId,
-            foodId: line.foodId,
+            foodId: chosenId,
             delta: line.quantity.amount,
             unit: line.quantity.unit,
             reason: "purchase",
@@ -614,6 +844,7 @@ export async function putAwayGroceryLines(
             line,
             movement: applied.movement,
             item: applied.item,
+            productFoodId: chosenId,
         });
     }
     return results;
@@ -778,11 +1009,16 @@ export async function updateFridgeItemQuantityAdjust(
     } catch (err) {
         wrapFoodsError(err);
     }
+    const effectiveMap = await effectiveFoodsByIds(foods, input.householdId, [
+        current.foodId,
+    ]);
+    const effectiveNeed = effectiveMap.get(current.foodId) ?? food;
+    const factors = mergeQuantityFactors(food, effectiveNeed);
     const currentInUnit = convertStockAmount(
         current.quantity.amount,
         current.quantity.unit,
         unit,
-        food,
+        factors,
     );
     if (currentInUnit == null) {
         throw new StockInputError(

@@ -27,7 +27,7 @@ import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
-import { findFoodById } from "../../domain/foods.js";
+import { effectiveFoodsByIds, findFoodById } from "../../domain/foods.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 
@@ -135,7 +135,12 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     foodId,
                 );
                 previewName = food.name;
-                catalogAllergens = food.allergens;
+                const catalog = await effectiveFoodsByIds(
+                    foods,
+                    member.householdId,
+                    [foodId],
+                );
+                catalogAllergens = catalog.get(foodId)?.allergens ?? null;
             } else if (formText(body, "barcode")) {
                 previewName =
                     (
