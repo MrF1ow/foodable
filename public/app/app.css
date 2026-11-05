@@ -164,7 +164,7 @@ html:has(dialog.modal[open]) {
     width: 27px;
     height: auto;
 }
-.app-bar-logout {
+.app-bar-action {
     display: inline-grid;
     place-items: center;
     width: 36px;
@@ -178,15 +178,15 @@ html:has(dialog.modal[open]) {
     text-decoration: none;
     cursor: pointer;
 }
-.app-bar-logout:hover {
+.app-bar-action:hover {
     color: var(--text);
     background: color-mix(in srgb, var(--text) 8%, transparent);
 }
-.app-bar-logout:focus-visible {
+.app-bar-action:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
-.app-bar-logout svg {
+.app-bar-action svg {
     width: 20px;
     height: 20px;
 }

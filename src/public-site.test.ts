@@ -264,6 +264,7 @@ describe("runtime surfaces that stay", () => {
             "/grocery",
             "/recipes",
             "/settings",
+            "/household",
             "/household/items",
         ]) {
             const r = await app.request(`http://x${path}`);

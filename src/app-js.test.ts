@@ -11,7 +11,7 @@ import type { HouseholdMember } from "./household.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
-    active: "fridge" | "settings" = "fridge",
+    active: "fridge" | "household" = "fridge",
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Settings";

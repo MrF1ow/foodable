@@ -212,7 +212,7 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
     `;
     return renderAppShell({
         title: "Foods",
-        active: "settings",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });

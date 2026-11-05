@@ -123,7 +123,7 @@ export function renderSettingsPage(view: SettingsPageView): string {
     `;
     return renderAppShell({
         title: "Settings",
-        active: "settings",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });

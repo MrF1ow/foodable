@@ -2,7 +2,7 @@ import { escapeHtml } from "../html.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import { bottomNav } from "./components/bottom-nav.js";
-import { iconLogOut } from "./components/icons.js";
+import { iconLogOut, iconSettings } from "./components/icons.js";
 
 export { bottomNav, escapeHtml };
 
@@ -11,7 +11,7 @@ export const APP_TABS = [
     { id: "grocery", href: "/grocery", label: "Groceries" },
     { id: "nutrition", href: "/", label: "Nutrition" },
     { id: "recipes", href: "/recipes", label: "Recipes" },
-    { id: "settings", href: "/settings", label: "Settings" },
+    { id: "household", href: "/household", label: "Household" },
 ] as const;
 
 export type AppTabId = (typeof APP_TABS)[number]["id"];
@@ -59,8 +59,16 @@ export function themeColorMeta(
 <meta name="theme-color" content="${colors.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
-export function appBar(): string {
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-logout" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
+export type AppBarVariant = "app" | "settings" | "gate";
+
+export function appBar(variant: AppBarVariant): string {
+    const action =
+        variant === "app"
+            ? `<a class="btn-icon app-bar-action" href="/settings" aria-label="Settings" title="Settings">${iconSettings()}</a>`
+            : variant === "gate"
+              ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
+              : "";
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
 }
 
 export function appHead(
@@ -91,7 +99,7 @@ ${htmlOpen(chrome.theme)}
 ${appHead(chrome.title, chrome.theme)}
 </head>
 <body class="has-bottom-nav">
-${appBar()}
+${appBar("app")}
 <main class="app-main native">${chrome.body}</main>
 ${bottomNav(chrome.active)}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
@@ -113,7 +121,7 @@ ${htmlOpen(theme)}
 ${appHead(title, theme, "page")}
 </head>
 <body>
-${appBar()}
+${appBar("gate")}
 <main class="app-main native">${body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>

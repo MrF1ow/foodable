@@ -607,7 +607,7 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
     `;
     return renderAppShell({
         title: "Household",
-        active: "settings",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });

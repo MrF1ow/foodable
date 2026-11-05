@@ -5948,7 +5948,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("<h1>Settings</h1>");
         expect(html).toContain('href="/settings/household"');
         expect(html).toContain('href="/settings/foods"');
-        expect(html).toContain('href="/settings" aria-current="page"');
+        expect(html).toContain('href="/household" aria-current="page"');
+        expect(html).toContain('href="/settings"');
         expect(html).not.toContain("coming-soon");
     });
 
@@ -5959,7 +5960,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Foods</h1>");
-        expect(html).toContain('href="/settings/foods" aria-current="page"');
+        expect(html).toContain('href="/household" aria-current="page"');
         expect(html).toContain("No foods in the catalog yet.");
     });
 

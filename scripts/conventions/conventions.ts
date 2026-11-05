@@ -138,6 +138,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/settings.ts": "settings",
     "src/web/pages/settings-help.ts": "settings",
     "src/mcp/tools/household.ts": "household",
+    "src/web/routes/household.ts": "household",
+    "src/web/routes/household.test.ts": "household",
     "src/web/pages/household.ts": "household",
     "src/household.ts": "household",
     "src/household-token.ts": "household",

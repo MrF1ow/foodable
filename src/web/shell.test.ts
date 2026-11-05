@@ -15,10 +15,10 @@ import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
-    active: "fridge" | "settings" = "fridge",
+    active: "fridge" | "household" = "fridge",
     theme: "system" | "light" | "dark" = "system",
 ): string {
-    const title = active === "fridge" ? "Fridge" : "Settings";
+    const title = active === "fridge" ? "Fridge" : "Household";
     return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
 }
 
@@ -30,21 +30,21 @@ test("bottom nav hrefs and tab order", () => {
         "grocery",
         "nutrition",
         "recipes",
-        "settings",
+        "household",
     ]);
     expect(APP_TABS.map((tab) => tab.href)).toEqual([
         "/fridge",
         "/grocery",
         "/",
         "/recipes",
-        "/settings",
+        "/household",
     ]);
     expect(APP_TABS.map((tab) => tab.label)).toEqual([
         "Fridge",
         "Groceries",
         "Nutrition",
         "Recipes",
-        "Settings",
+        "Household",
     ]);
 
     const html = bottomNav("nutrition");
@@ -54,7 +54,7 @@ test("bottom nav hrefs and tab order", () => {
         "/grocery",
         "/",
         "/recipes",
-        "/settings",
+        "/household",
     ]);
     expect(html).toContain('href="/" aria-current="page"');
     expect(html).not.toContain('href="/fridge" aria-current="page"');
@@ -64,7 +64,7 @@ test("bottom nav hrefs and tab order", () => {
         "Groceries",
         "Nutrition",
         "Recipes",
-        "Settings",
+        "Household",
     ]);
     const inner = html.replace(/^<nav[^>]*>/, "").replace(/<\/nav>$/, "");
     expect(inner.replace(/<[^>]+>/g, "").trim()).toBe("");
@@ -81,9 +81,10 @@ test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).toContain('href="/fridge" aria-current="page"');
-    expect(html).toContain('href="/logout"');
-    expect(html).toContain('aria-label="Log out"');
-    expect(html).toContain('href="/logout" data-turbo="false"');
+    expect(html).toContain('href="/settings"');
+    expect(html).toContain('aria-label="Settings"');
+    expect(html).toContain('class="btn-icon app-bar-action"');
+    expect(html).not.toContain('href="/logout"');
     expect(html).toContain('class="app-bar-logo"');
     expect(html).toContain('href="/"');
     expect(html).toMatch(
@@ -113,7 +114,7 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
 });
 
 test("an explicit theme stamps data-theme on html", () => {
-    const html = shellPage("settings", "dark");
+    const html = shellPage("household", "dark");
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain(
         `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,

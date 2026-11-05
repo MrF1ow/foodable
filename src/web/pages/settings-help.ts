@@ -77,7 +77,7 @@ export function renderSettingsHelpPage(view: SettingsHelpView): string {
     `;
     return renderAppShell({
         title: "Help",
-        active: "settings",
+        active: "household",
         theme: view.chrome.theme,
         body,
     });
