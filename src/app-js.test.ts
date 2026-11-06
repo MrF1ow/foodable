@@ -31,6 +31,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         "./src/web/client/food-picker.js",
         "./src/web/client/nutrition-log.js",
         "./src/web/client/grocery.js",
+        "./src/web/client/usual-buy.js",
         "./src/web/client/dialog-fill.js",
         "./src/web/client/modal.js",
         "./src/web/client/arrange.js",
@@ -38,7 +39,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(8);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(9);
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {
