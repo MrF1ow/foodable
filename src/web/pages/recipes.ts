@@ -305,7 +305,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
         title: "Import from link",
         openOnLoad: modalOpen(view, IMPORT_RECIPE_MODAL_ID),
         body: `${importDuplicateBanner}${importErrorBanner}<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
-                ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="url" inputmode="url" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
+                ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
                 <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
             </form>`,
     });

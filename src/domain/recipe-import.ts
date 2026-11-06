@@ -1,7 +1,11 @@
 import { TOASTS, type ToastKey } from "../copy/toasts.js";
 import type { FetchFailure } from "../fetch-safe.js";
 import type { SafeFetcher } from "../fetch-safe.js";
-import { findOrCreateManualFood, type FoodsStore } from "./foods.js";
+import {
+    findOrCreateManualFood,
+    FoodsInputError,
+    type FoodsStore,
+} from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
 import { parseIngredientLines } from "./ingredient-lines.js";
 import {
@@ -556,102 +560,217 @@ export async function importRecipeFromUrl(
         });
     }
 
-    const parsed = parseIngredientLines(jsonld.ingredients);
-    const instructions =
-        jsonld.instructions.length > 0 ? jsonld.instructions.join("\n") : null;
-    const recipeName = jsonld.name?.trim() || sourceInfo.label;
+    const prepared = prepareImportedRecipe({
+        name: jsonld.name,
+        fallbackName: sourceInfo.label,
+        yieldPortions: jsonld.yieldPortions,
+        steps: jsonld.instructions,
+        prepMinutes: jsonld.prepMinutes,
+        cookMinutes: jsonld.cookMinutes,
+        parsed: parseIngredientLines(jsonld.ingredients),
+    });
+    const parsed = prepared.parsed;
+    const instructions = prepared.instructions;
+    const recipeName = prepared.name;
 
     const runTx = deps.transaction ?? ((fn) => fn());
 
-    return runTx(async () => {
-        const resolved: {
-            item: (typeof parsed.items)[number];
-            food: Awaited<ReturnType<typeof findOrCreateManualFood>>;
-        }[] = [];
+    // Values were clamped above, so an input error here is unexpected; it
+    // still becomes an outcome rather than a 500 or an MCP isError.
+    try {
+        return await runTx(async () => {
+            const resolved: {
+                item: (typeof parsed.items)[number];
+                food: Awaited<ReturnType<typeof findOrCreateManualFood>>;
+            }[] = [];
 
-        for (const item of parsed.items) {
-            const food = await findOrCreateManualFood(
-                deps.foods,
+            for (const item of parsed.items) {
+                const food = await findOrCreateManualFood(
+                    deps.foods,
+                    input.householdId,
+                    "food",
+                    item.name,
+                );
+                resolved.push({ item, food });
+            }
+
+            const recipe = await createRecipe(deps.recipes, {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+                name: recipeName,
+                yieldPortions: prepared.yieldPortions,
+                instructions,
+                sourceUrl: cleaned,
+                prepMinutes: prepared.prepMinutes,
+                cookMinutes: prepared.cookMinutes,
+                verification: "unverified",
+            });
+
+            const importedAt = new Date().toISOString();
+            await deps.recipes.upsertImport({
+                recipeId: recipe.id,
+                householdId: input.householdId,
+                sourceKind: "website",
+                sourceUrl: cleaned,
+                sourceText: null,
+                sourceTextOrigin: null,
+                transcript: null,
+                credit: null,
+                unresolvedLines: parsed.unresolved,
+                problems: [],
+                importedAt,
+            });
+
+            const ingredients: RecipeIngredient[] = [];
+            for (const [index, row] of resolved.entries()) {
+                const storedQuantity =
+                    row.item.quantity == null
+                        ? null
+                        : {
+                              amount: row.item.quantity.amount,
+                              unit: storedFoodUnit(
+                                  row.item.quantity.unit,
+                                  row.food,
+                              ),
+                          };
+                ingredients.push(
+                    await deps.recipes.insertIngredient({
+                        id: crypto.randomUUID(),
+                        householdId: input.householdId,
+                        recipeId: recipe.id,
+                        kind: "food",
+                        displayName: row.food.name,
+                        quantity: storedQuantity,
+                        foodId: row.food.id,
+                        sortOrder: index,
+                        note: row.item.note,
+                    }),
+                );
+            }
+
+            const checked = await recheckRecipe(
+                deps.recipes,
                 input.householdId,
-                "food",
-                item.name,
+                recipe.id,
             );
-            resolved.push({ item, food });
+
+            const status: RecipeImportStatus = checked.verified
+                ? "imported"
+                : "unverified_needs_review";
+
+            return emptyOutcome(status, {
+                recipeId: recipe.id,
+                recipeName: recipe.name,
+                verification: checked.verification,
+                problems: checked.problems,
+                source: sourceFromInfo(sourceInfo, cleaned),
+                unresolvedLines: parsed.unresolved,
+            });
+        });
+    } catch (err) {
+        if (err instanceof RecipeInputError || err instanceof FoodsInputError) {
+            return emptyOutcome("no_recipe_on_page", {
+                source: sourceFromInfo(sourceInfo, cleaned),
+            });
         }
+        throw err;
+    }
+}
 
-        const recipe = await createRecipe(deps.recipes, {
-            householdId: input.householdId,
-            creatorId: input.creatorId,
-            name: recipeName,
-            yieldPortions: jsonld.yieldPortions ?? 1,
-            instructions,
-            sourceUrl: cleaned,
-            prepMinutes: jsonld.prepMinutes,
-            cookMinutes: jsonld.cookMinutes,
-            verification: "unverified",
-        });
+/** Limits shared with the editors, so an imported recipe can always be
+ *  edited and saved as it came in. */
+export const IMPORT_LIMITS = {
+    recipeName: 80,
+    foodName: 120,
+    note: 500,
+    instructions: 20_000,
+    maxYield: 1000,
+    maxMinutes: 10_080,
+} as const;
 
-        const importedAt = new Date().toISOString();
-        await deps.recipes.upsertImport({
-            recipeId: recipe.id,
-            householdId: input.householdId,
-            sourceKind: "website",
-            sourceUrl: cleaned,
-            sourceText: null,
-            sourceTextOrigin: null,
-            transcript: null,
-            credit: null,
-            unresolvedLines: parsed.unresolved,
-            problems: [],
-            importedAt,
-        });
+function clip(text: string, max: number): string {
+    return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
 
-        const ingredients: RecipeIngredient[] = [];
-        for (const [index, row] of resolved.entries()) {
-            const storedQuantity =
-                row.item.quantity == null
-                    ? null
-                    : {
-                          amount: row.item.quantity.amount,
-                          unit: storedFoodUnit(
-                              row.item.quantity.unit,
-                              row.food,
-                          ),
-                      };
-            ingredients.push(
-                await deps.recipes.insertIngredient({
-                    id: crypto.randomUUID(),
-                    householdId: input.householdId,
-                    recipeId: recipe.id,
-                    kind: "food",
-                    displayName: row.food.name,
-                    quantity: storedQuantity,
-                    foodId: row.food.id,
-                    sortOrder: index,
-                    note: row.item.note,
-                }),
-            );
+function hasLetterOrDigit(text: string | null | undefined): boolean {
+    return /[\p{L}\p{N}]/u.test(text ?? "");
+}
+
+function boundedMinutes(value: number | null): number | null {
+    if (value == null || !Number.isFinite(value)) return null;
+    const minutes = Math.round(value);
+    return minutes >= 0 && minutes <= IMPORT_LIMITS.maxMinutes ? minutes : null;
+}
+
+/**
+ * Clamp what a page or caption gave us to what the recipe editors and the
+ * database accept: a yield of 0 or a billion becomes 1, an absurd duration
+ * is dropped, long text is clipped, a line whose name is blank and a line
+ * with a non-positive amount go to unresolved instead of creating a food or
+ * breaking the amount > 0 check. Pure.
+ */
+export function prepareImportedRecipe(input: {
+    name: string | null;
+    fallbackName: string;
+    yieldPortions: number | null;
+    steps: string[];
+    prepMinutes: number | null;
+    cookMinutes: number | null;
+    parsed: ReturnType<typeof parseIngredientLines>;
+}): {
+    name: string;
+    yieldPortions: number;
+    instructions: string | null;
+    prepMinutes: number | null;
+    cookMinutes: number | null;
+    parsed: ReturnType<typeof parseIngredientLines>;
+} {
+    const rawName = input.name?.trim() ?? "";
+    const name = clip(
+        hasLetterOrDigit(rawName) ? rawName : input.fallbackName,
+        IMPORT_LIMITS.recipeName,
+    );
+    const yieldRaw = input.yieldPortions;
+    const yieldPortions =
+        yieldRaw != null &&
+        Number.isFinite(yieldRaw) &&
+        yieldRaw >= 1 &&
+        yieldRaw <= IMPORT_LIMITS.maxYield
+            ? Math.round(yieldRaw)
+            : 1;
+    const joined = input.steps
+        .map((step) => step.trim())
+        .filter((step) => step.length > 0)
+        .join("\n");
+    const instructions = joined
+        ? clip(joined, IMPORT_LIMITS.instructions)
+        : null;
+    const unresolved = [...input.parsed.unresolved];
+    const items: typeof input.parsed.items = [];
+    for (const item of input.parsed.items) {
+        const itemName = item.name.trim();
+        if (
+            !hasLetterOrDigit(itemName) ||
+            (item.quantity != null && !(item.quantity.amount > 0))
+        ) {
+            unresolved.push(item.line);
+            continue;
         }
-
-        const checked = await recheckRecipe(
-            deps.recipes,
-            input.householdId,
-            recipe.id,
-        );
-
-        const status: RecipeImportStatus = checked.verified
-            ? "imported"
-            : "unverified_needs_review";
-
-        return emptyOutcome(status, {
-            recipeId: recipe.id,
-            recipeName: recipe.name,
-            verification: checked.verification,
-            problems: checked.problems,
-            source: sourceFromInfo(sourceInfo, cleaned),
-            unresolvedLines: parsed.unresolved,
+        items.push({
+            ...item,
+            name: clip(itemName, IMPORT_LIMITS.foodName),
+            note:
+                item.note == null ? null : clip(item.note, IMPORT_LIMITS.note),
         });
-    });
+    }
+    return {
+        name,
+        yieldPortions,
+        instructions,
+        prepMinutes: boundedMinutes(input.prepMinutes),
+        cookMinutes: boundedMinutes(input.cookMinutes),
+        parsed: { items, unresolved },
+    };
 }
 
 export type SweepHousehold = {
