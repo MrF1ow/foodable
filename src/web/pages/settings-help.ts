@@ -65,6 +65,8 @@ const GLOSSARY: GlossaryEntry[] = [
     },
 ];
 
+export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
+
 function glossaryHtml(): string {
     return GLOSSARY.map(
         (

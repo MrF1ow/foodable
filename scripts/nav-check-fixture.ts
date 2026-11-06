@@ -517,6 +517,14 @@ function recipeDetailFixture(chrome: unknown) {
     return {
         chrome,
         recipe: RECIPE,
+        notices: [],
+        noticeContext: {
+            from: "/recipes/r1",
+            foods: new Map([
+                ["ing1", { genericFoodId: null }],
+                ["ing2", { genericFoodId: null }],
+            ]),
+        },
         ingredients: [
             ingredient("ing1", "Eggs", 6, "each", "large"),
             ingredient("ing2", "Milk", 200, "ml", null),

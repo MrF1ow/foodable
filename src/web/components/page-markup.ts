@@ -131,13 +131,13 @@ export function renderRecipeIngredientRow(opts: {
     deleteModalId: string;
     editFill?: ModalFill;
     deleteFill?: ModalFill;
-    pickUsualHref?: string | null;
+    usualProductActionHtml?: string;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
         : "";
-    const pickUsual = opts.pickUsualHref
-        ? `<p class="recipe-ingredient-usual"><a href="${escapeHtml(opts.pickUsualHref)}">Pick usual product</a></p>`
+    const pickUsual = opts.usualProductActionHtml
+        ? `<p class="recipe-ingredient-usual">${opts.usualProductActionHtml}</p>`
         : "";
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);

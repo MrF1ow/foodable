@@ -1,4 +1,7 @@
+import { formatMissingNutrientList, noticeSentence } from "../copy/notices.js";
 import type { FoodResult } from "../foods.js";
+import type { Notice, NoticeCode, NoticeRelated } from "./notices.js";
+import { NOTICE_SEVERITY } from "./notices.js";
 import {
     effectiveFoodsByIds,
     familyOf,
@@ -407,24 +410,10 @@ const REQUIRED_MACRO_KEYS: RecipeGapNutrient[] = [
     "fat_g",
 ];
 
-const NUTRIENT_WORD: Record<RecipeGapNutrient, string> = {
-    calories: "calories",
-    protein_g: "protein",
-    carbs_g: "carbs",
-    fat_g: "fat",
-};
-
 function missingRequiredNutrients(
     nutrition: IngredientNutrition,
 ): RecipeGapNutrient[] {
     return REQUIRED_MACRO_KEYS.filter((key) => nutrition[key] == null);
-}
-
-function formatMissingNutrientList(missing: RecipeGapNutrient[]): string {
-    const words = missing.map((key) => NUTRIENT_WORD[key]);
-    if (words.length === 1) return words[0]!;
-    if (words.length === 2) return `${words[0]} and ${words[1]}`;
-    return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
 function usualProductRef(
@@ -499,6 +488,89 @@ export function recipeIngredientGaps(
     return gaps;
 }
 
+function gapToNotice(recipeId: string, gap: RecipeGap): Notice {
+    const code = `recipe.${gap.reason}` as NoticeCode;
+    const related: NoticeRelated[] = gap.usualProduct
+        ? [
+              {
+                  kind: "food",
+                  id: gap.usualProduct.id,
+                  name: gap.usualProduct.name,
+              },
+          ]
+        : [];
+    const params: Record<string, string | number | string[]> = {
+        name: gap.displayName,
+    };
+    if (gap.foodId != null) {
+        params.foodId = gap.foodId;
+    }
+    if (gap.reason === "partial_nutrition" && gap.missingNutrients.length > 0) {
+        params.missing = [...gap.missingNutrients];
+    }
+    return {
+        code,
+        severity: NOTICE_SEVERITY[code],
+        subject: {
+            kind: "recipe_ingredient",
+            id: gap.ingredientId,
+            recipeId,
+        },
+        related,
+        params,
+    };
+}
+
+export function recipeIngredientNotices(
+    recipeId: string,
+    ingredient: RecipeIngredient,
+    food: Food | undefined,
+): Notice[] {
+    return recipeIngredientGaps(ingredient, food).map((g) =>
+        gapToNotice(recipeId, g),
+    );
+}
+
+export function recipeNotices(
+    recipeId: string,
+    ingredients: readonly RecipeIngredient[],
+    foodsById: ReadonlyMap<string, Food>,
+): Notice[] {
+    const out: Notice[] = [];
+    for (const ingredient of ingredients) {
+        const food = ingredient.foodId
+            ? foodsById.get(ingredient.foodId)
+            : undefined;
+        out.push(...recipeIngredientNotices(recipeId, ingredient, food));
+    }
+    return out;
+}
+
+export function gapFromNotice(notice: Notice): RecipeGap {
+    const reason = notice.code.replace("recipe.", "") as RecipeGapReason;
+    const usual =
+        notice.related[0] != null
+            ? {
+                  id: notice.related[0]!.id,
+                  name: notice.related[0]!.name,
+              }
+            : null;
+    const subj = notice.subject;
+    const ingredientId = subj.kind === "recipe_ingredient" ? subj.id : "";
+    const foodIdParam = notice.params.foodId;
+    return {
+        ingredientId,
+        displayName: String(notice.params.name),
+        foodId: typeof foodIdParam === "string" ? foodIdParam : null,
+        reason,
+        missingNutrients: Array.isArray(notice.params.missing)
+            ? (notice.params.missing as RecipeGapNutrient[])
+            : [],
+        usualProduct: usual,
+        message: noticeSentence(notice),
+    };
+}
+
 function scaleNutrient(value: number | null, factor: number): number | null {
     if (value == null) return null;
     return roundAmount(value * factor);
@@ -532,9 +604,13 @@ export function macrosForPerson(
         const catalog = ingredient.foodId
             ? foodsById.get(ingredient.foodId)
             : undefined;
-        const ingredientGaps = recipeIngredientGaps(ingredient, catalog);
-        gaps.push(...ingredientGaps);
-        if (ingredientGaps.length > 0) continue;
+        const notices = recipeIngredientNotices(
+            ingredient.recipeId,
+            ingredient,
+            catalog,
+        );
+        gaps.push(...notices.map(gapFromNotice));
+        if (notices.length > 0) continue;
         const nutrition = nutritionFromCatalogFood(catalog!)!;
         const eaten = amountForPortion(
             ingredient.quantity.amount,

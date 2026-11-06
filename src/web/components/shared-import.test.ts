@@ -128,6 +128,8 @@ test("fridge page and grocery page import the same quantity-field and food-picke
             prepMinutes: null,
             cookMinutes: null,
         },
+        notices: [],
+        noticeContext: { from: "/recipes/r1", foods: new Map() },
         ingredients: [],
         members: FIXTURE_MEMBERS.map((member) => ({
             userId: member.userId,

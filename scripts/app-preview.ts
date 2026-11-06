@@ -398,6 +398,28 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 instructions:
                     "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
             },
+            notices: [
+                {
+                    code: "recipe.no_nutrition",
+                    severity: "warn",
+                    subject: {
+                        kind: "recipe_ingredient",
+                        id: "ing0",
+                        recipeId: "r1",
+                    },
+                    related: [],
+                    params: { name: "Buttermilk", foodId: "f-buttermilk" },
+                },
+            ],
+            noticeContext: {
+                from: "/recipes/r1",
+                foods: new Map(
+                    catalog.map((f) => [
+                        f.id,
+                        { genericFoodId: f.genericFoodId },
+                    ]),
+                ),
+            },
             ingredients: [
                 {
                     id: "ing1",
@@ -420,8 +442,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     sortOrder: 0,
                     perPortionAmount: 20,
                     personAmount: 20,
-                    pickUsualHref:
-                        "/household/usual-products/f-buttermilk?from=%2Frecipes%2Fr1",
                 },
                 {
                     id: "ing2",

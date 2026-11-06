@@ -4,24 +4,31 @@ import { renderRecipeDetailPage, type RecipeDetailView } from "./recipes.js";
 
 const VIEWER = "11111111-1111-4111-8111-111111111111";
 
+function emptyNoticeCtx(recipeId: string): RecipeDetailView["noticeContext"] {
+    return { from: `/recipes/${recipeId}`, foods: new Map() };
+}
+
 function detail(recipe: Partial<Recipe>): RecipeDetailView {
+    const mergedRecipe = {
+        id: "r1",
+        householdId: "hh-1",
+        creatorId: VIEWER,
+        name: "Pasta",
+        yieldPortions: 2,
+        instructions: null,
+        sourceUrl: null,
+        tags: [],
+        notes: null,
+        prepMinutes: null,
+        cookMinutes: null,
+        ...recipe,
+    };
     return {
         chrome: { theme: "light" },
-        recipe: {
-            id: "r1",
-            householdId: "hh-1",
-            creatorId: VIEWER,
-            name: "Pasta",
-            yieldPortions: 2,
-            instructions: null,
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            ...recipe,
-        },
+        recipe: mergedRecipe,
         ingredients: [],
+        notices: [],
+        noticeContext: emptyNoticeCtx(mergedRecipe.id),
         members: [{ userId: VIEWER, displayName: "Alice" }],
         stores: [],
         viewerId: VIEWER,
@@ -44,8 +51,24 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
 }
 
 test("incomplete macros render reasons in recipe-macros-reasons", () => {
+    const sentence =
+        "Half and half: no nutrition — add it, or pick a usual product";
+    const notices = [
+        {
+            code: "recipe.no_nutrition" as const,
+            severity: "warn" as const,
+            subject: {
+                kind: "recipe_ingredient" as const,
+                id: "ing1",
+                recipeId: "r1",
+            },
+            related: [],
+            params: { name: "Half and half", foodId: "f-half" },
+        },
+    ];
     const html = renderRecipeDetailPage({
         ...detail({}),
+        notices,
         macros: {
             calories: null,
             protein_g: null,
@@ -55,9 +78,7 @@ test("incomplete macros render reasons in recipe-macros-reasons", () => {
             sugar_g: null,
             alcohol_g: null,
             incomplete: true,
-            incompleteReasons: [
-                "Half and half: no nutrition — add it, or pick a usual product",
-            ],
+            incompleteReasons: [sentence],
             gaps: [],
         },
         macrosPerPortion: {
@@ -69,15 +90,65 @@ test("incomplete macros render reasons in recipe-macros-reasons", () => {
             sugar_g: null,
             alcohol_g: null,
             incomplete: true,
-            incompleteReasons: [
-                "Half and half: no nutrition — add it, or pick a usual product",
-            ],
+            incompleteReasons: [sentence],
             gaps: [],
         },
     });
     expect(html).toContain("recipe-macros-reasons");
+    expect(html).toContain(sentence);
+});
+
+test("recipe.no_nutrition renders usual-product link from notices", () => {
+    const notices = [
+        {
+            code: "recipe.no_nutrition" as const,
+            severity: "warn" as const,
+            subject: {
+                kind: "recipe_ingredient" as const,
+                id: "ing-buttermilk",
+                recipeId: "r1",
+            },
+            related: [],
+            params: { name: "Buttermilk", foodId: "f-buttermilk" },
+        },
+    ];
+    const foods = new Map([["f-buttermilk", { genericFoodId: null }]]);
+    const html = renderRecipeDetailPage({
+        ...detail({}),
+        notices,
+        noticeContext: { from: "/recipes/r1", foods },
+        ingredients: [
+            {
+                id: "ing-buttermilk",
+                recipeId: "r1",
+                householdId: "hh-1",
+                kind: "food" as const,
+                displayName: "Buttermilk",
+                quantity: { amount: 200, unit: "ml" },
+                foodId: "f-buttermilk",
+                sortOrder: 0,
+                note: null,
+                perPortionAmount: 20,
+                personAmount: 20,
+            },
+        ],
+        macros: {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: true,
+            incompleteReasons: [
+                "Buttermilk: no nutrition — add it, or pick a usual product",
+            ],
+            gaps: [],
+        },
+    });
     expect(html).toContain(
-        "Half and half: no nutrition — add it, or pick a usual product",
+        '<p class="recipe-ingredient-usual"><a href="/household/usual-products/f-buttermilk?from=%2Frecipes%2Fr1">Pick usual product</a></p>',
     );
 });
 
