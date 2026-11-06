@@ -30,6 +30,7 @@ import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
 import { recipeFetchMemory } from "../db/fetch-memory.js";
+import { parseRefusalCursor } from "../domain/fetch-memory.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import { renderFridgePage } from "./pages/fridge.js";
@@ -719,17 +720,7 @@ export async function renderHouseholdSettingsRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const rawAfter = opts.refusalsAfter?.trim() ?? "";
-    let refusalsAfter: { refusedAt: string; host: string } | undefined;
-    if (rawAfter) {
-        const p = rawAfter.indexOf("|");
-        if (p > 0) {
-            refusalsAfter = {
-                refusedAt: rawAfter.slice(0, p),
-                host: rawAfter.slice(p + 1),
-            };
-        }
-    }
+    const refusalsAfter = parseRefusalCursor(opts.refusalsAfter);
     const [config, members, location, stores, socialReaderStatus] =
         await Promise.all([
             getHouseholdConfig(householdId),
@@ -738,16 +729,12 @@ export async function renderHouseholdSettingsRoute(
             liveSettingsStore().listStores(householdId),
             liveSocialReaderStatusStore().get(householdId),
         ]);
-    let refusalsBatch: import("../domain/fetch-memory.js").HostRefusalRow[] =
-        [];
-    if (process.env.DATABASE_URL?.trim()) {
-        const memory = recipeFetchMemory();
-        refusalsBatch = await memory.listRefusals(householdId, {
-            limit: 21,
-            after: refusalsAfter,
-            now: new Date(),
-        });
-    }
+    const memory = recipeFetchMemory();
+    const refusalsBatch = await memory.listRefusals(householdId, {
+        limit: 21,
+        after: refusalsAfter ?? undefined,
+        now: new Date(),
+    });
     const settings = liveSettingsStore();
     const rules = liveRulesStore();
     const storeViews = await Promise.all(

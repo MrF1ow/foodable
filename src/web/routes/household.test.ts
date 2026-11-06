@@ -35,6 +35,8 @@ import {
 import { setSocialReaderEnabled } from "../../household.js";
 import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
 import * as actualDbSocialReaders from "../../db/social-readers.js";
+import * as actualDbFetchMemory from "../../db/fetch-memory.js";
+import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -50,6 +52,7 @@ const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
 const realFoods = { ...actualFoods };
 const realDbSocialReaders = { ...actualDbSocialReaders };
+const realDbFetchMemory = { ...actualDbFetchMemory };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const HH = "hh-1";
@@ -182,6 +185,10 @@ mock.module("../../db/social-readers.js", () => ({
     ...realDbSocialReaders,
     liveSocialReaderStatusStore: () => db.socialReaderStatusStore,
 }));
+mock.module("../../db/fetch-memory.js", () => ({
+    ...realDbFetchMemory,
+    recipeFetchMemory: () => createMemoryFetchMemoryStore(),
+}));
 mock.module("../../db/profiles.js", () => ({
     ...realDbProfiles,
     getProfile: async () => db.profile,
@@ -201,6 +208,7 @@ afterAll(() => {
     mock.module("../../db/rules.js", () => realDbRules);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
+    mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("../../db/profiles.js", () => realDbProfiles);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
     mock.module("../../foods.js", () => realFoods);

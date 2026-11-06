@@ -16,8 +16,10 @@ import {
 import {
     deadLinkHash,
     normalizeMemoryHost,
+    type DeadLinkRow,
     type DeadLinkStatus,
     type FetchMemoryStore,
+    type HostRefusalRow,
     type RefusalStatus,
 } from "./fetch-memory.js";
 import { readRecipeJsonLd } from "./recipe-jsonld.js";
@@ -970,57 +972,63 @@ export async function importRecipeFromUrl(
     const credit = normalizeImportCredit(input.credit);
     const textOrigin: RecipeTextOrigin = input.textOrigin ?? "pasted";
     const sourceOutcome = sourceFromInfo(sourceInfo, cleaned);
+    const websiteOnlyImport =
+        !isSocialSource(sourceInfo.kind) && !pasteOnlyHost;
 
     if (sourceText) {
-        if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
-            return importFromParsedCaption(deps, {
-                householdId: input.householdId,
-                creatorId: input.creatorId,
-                cleaned,
-                sourceInfo,
-                sourceText,
-                sourceTextOrigin: textOrigin,
-                credit,
-            });
-        }
+        const deferWebsiteTextForRetry =
+            Boolean(input.retry) && websiteOnlyImport;
+        if (!deferWebsiteTextForRetry) {
+            if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
+                return importFromParsedCaption(deps, {
+                    householdId: input.householdId,
+                    creatorId: input.creatorId,
+                    cleaned,
+                    sourceInfo,
+                    sourceText,
+                    sourceTextOrigin: textOrigin,
+                    credit,
+                });
+            }
 
-        const parsedCaption = parseRecipeText(sourceText, {
-            fallbackName: sourceInfo.label,
-        });
-        if (!parsedCaption.hasRecipe) {
-            return emptyOutcome("no_recipe_in_text", {
-                source: sourceOutcome,
+            const parsedCaption = parseRecipeText(sourceText, {
+                fallbackName: sourceInfo.label,
             });
+            if (!parsedCaption.hasRecipe) {
+                return emptyOutcome("no_recipe_in_text", {
+                    source: sourceOutcome,
+                });
+            }
+            const preparedFromText = prepareImportedRecipe({
+                name: parsedCaption.name,
+                fallbackName: sourceInfo.label,
+                yieldPortions: parsedCaption.yieldPortions,
+                steps: parsedCaption.steps,
+                prepMinutes: null,
+                cookMinutes: null,
+                parsed: {
+                    items: parsedCaption.ingredients,
+                    unresolved: parsedCaption.unresolved,
+                },
+            });
+            return saveImportedRecipe(
+                deps,
+                {
+                    householdId: input.householdId,
+                    creatorId: input.creatorId,
+                },
+                preparedFromText,
+                {
+                    sourceKind: "website",
+                    sourceUrl: cleaned,
+                    sourceText,
+                    sourceTextOrigin: textOrigin,
+                    transcript: null,
+                    credit,
+                },
+                sourceOutcome,
+            );
         }
-        const preparedFromText = prepareImportedRecipe({
-            name: parsedCaption.name,
-            fallbackName: sourceInfo.label,
-            yieldPortions: parsedCaption.yieldPortions,
-            steps: parsedCaption.steps,
-            prepMinutes: null,
-            cookMinutes: null,
-            parsed: {
-                items: parsedCaption.ingredients,
-                unresolved: parsedCaption.unresolved,
-            },
-        });
-        return saveImportedRecipe(
-            deps,
-            {
-                householdId: input.householdId,
-                creatorId: input.creatorId,
-            },
-            preparedFromText,
-            {
-                sourceKind: "website",
-                sourceUrl: cleaned,
-                sourceText,
-                sourceTextOrigin: textOrigin,
-                transcript: null,
-                credit,
-            },
-            sourceOutcome,
-        );
     }
 
     if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
@@ -1047,18 +1055,17 @@ export async function importRecipeFromUrl(
     const memory = deps.memory;
     const memoryHost = normalizeMemoryHost(new URL(cleaned).hostname);
     const urlHash = deadLinkHash(cleaned);
-    if (memory) {
-        if (input.retry) {
-            await safeFetchMemory("clear on retry", async () => {
-                await memory.clearRefusal(input.householdId, memoryHost);
-                await memory.clearDeadLink(input.householdId, urlHash);
+
+    async function importWebsiteFromFetch(): Promise<RecipeImportOutcome> {
+        if (memory && !input.retry) {
+            let refusal: HostRefusalRow | null | undefined;
+            await safeFetchMemory("get refusal", async () => {
+                refusal = await memory.getRefusal(
+                    input.householdId,
+                    memoryHost,
+                    nowDate,
+                );
             });
-        } else {
-            const refusal = await memory.getRefusal(
-                input.householdId,
-                memoryHost,
-                nowDate,
-            );
             if (refusal) {
                 return emptyOutcome("site_refused", {
                     source: sourceFromInfo(sourceInfo, cleaned),
@@ -1066,11 +1073,14 @@ export async function importRecipeFromUrl(
                     rememberedUntil: refusal.expiresAt,
                 });
             }
-            const dead = await memory.getDeadLink(
-                input.householdId,
-                urlHash,
-                nowDate,
-            );
+            let dead: DeadLinkRow | null | undefined;
+            await safeFetchMemory("get dead link", async () => {
+                dead = await memory.getDeadLink(
+                    input.householdId,
+                    urlHash,
+                    nowDate,
+                );
+            });
             if (dead) {
                 return emptyOutcome("not_found", {
                     source: sourceFromInfo(sourceInfo, cleaned),
@@ -1079,93 +1089,149 @@ export async function importRecipeFromUrl(
                 });
             }
         }
-    }
 
-    const allowed = await deps.fetcher.robotsAllows(cleaned);
-    if (!allowed) {
-        return emptyOutcome("robots_disallowed", {
-            source: sourceFromInfo(sourceInfo, cleaned),
+        const allowed = await deps.fetcher.robotsAllows(cleaned);
+        if (!allowed) {
+            return emptyOutcome("robots_disallowed", {
+                source: sourceFromInfo(sourceInfo, cleaned),
+            });
+        }
+
+        const fetched = await deps.fetcher.fetchPage(cleaned, {
+            accept: ["text/html", "application/xhtml+xml"],
         });
-    }
-
-    const fetched = await deps.fetcher.fetchPage(cleaned, {
-        accept: ["text/html", "application/xhtml+xml"],
-    });
-    if (!fetched.ok) {
-        const startHost = memoryHost;
-        if (memory && fetched.reason === "site_refused") {
-            const st = fetched.status;
-            if (st === 401 || st === 403 || st === 429) {
-                const finalHost =
-                    fetched.host ??
-                    normalizeMemoryHost(new URL(cleaned).hostname);
-                await safeFetchMemory("record refusal", async () => {
-                    const refusalStatus = st as RefusalStatus;
-                    await memory.recordRefusal(
-                        input.householdId,
-                        finalHost,
-                        refusalStatus,
-                        nowDate,
-                    );
-                    if (finalHost !== startHost) {
+        if (!fetched.ok) {
+            const startHost = memoryHost;
+            if (memory && fetched.reason === "site_refused") {
+                const st = fetched.status;
+                if (st === 401 || st === 403 || st === 429) {
+                    const finalHost =
+                        fetched.host ??
+                        normalizeMemoryHost(new URL(cleaned).hostname);
+                    await safeFetchMemory("record refusal", async () => {
+                        const refusalStatus = st as RefusalStatus;
                         await memory.recordRefusal(
                             input.householdId,
-                            startHost,
+                            finalHost,
                             refusalStatus,
                             nowDate,
                         );
-                    }
-                });
+                        if (finalHost !== startHost) {
+                            await memory.recordRefusal(
+                                input.householdId,
+                                startHost,
+                                refusalStatus,
+                                nowDate,
+                            );
+                        }
+                    });
+                }
             }
-        }
-        if (memory && fetched.reason === "not_found") {
-            const st = fetched.status;
-            if (st === 404 || st === 410) {
-                await safeFetchMemory("record dead link", async () => {
-                    await memory.recordDeadLink(
-                        input.householdId,
-                        urlHash,
-                        cleaned,
-                        st as DeadLinkStatus,
-                        nowDate,
-                    );
-                });
+            if (memory && fetched.reason === "not_found") {
+                const st = fetched.status;
+                if (st === 404 || st === 410) {
+                    await safeFetchMemory("record dead link", async () => {
+                        await memory.recordDeadLink(
+                            input.householdId,
+                            urlHash,
+                            cleaned,
+                            st as DeadLinkStatus,
+                            nowDate,
+                        );
+                    });
+                }
             }
+            return emptyOutcome(outcomeFromFetchFailure(fetched.reason), {
+                source: sourceFromInfo(sourceInfo, cleaned),
+            });
         }
-        return emptyOutcome(outcomeFromFetchFailure(fetched.reason), {
-            source: sourceFromInfo(sourceInfo, cleaned),
+
+        const jsonld = readRecipeJsonLd(fetched.body);
+        if (!jsonld) {
+            return emptyOutcome("no_recipe_on_page", {
+                source: sourceFromInfo(sourceInfo, cleaned),
+            });
+        }
+
+        const prepared = prepareImportedRecipe({
+            name: jsonld.name,
+            fallbackName: sourceInfo.label,
+            yieldPortions: jsonld.yieldPortions,
+            steps: jsonld.instructions,
+            prepMinutes: jsonld.prepMinutes,
+            cookMinutes: jsonld.cookMinutes,
+            parsed: parseIngredientLines(jsonld.ingredients),
+        });
+
+        return saveImportedRecipe(
+            deps,
+            {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+            },
+            prepared,
+            {
+                sourceKind: "website",
+                sourceUrl: cleaned,
+                sourceText: null,
+                sourceTextOrigin: null,
+                transcript: null,
+                credit,
+            },
+            sourceOutcome,
+        );
+    }
+
+    if (memory && input.retry) {
+        await safeFetchMemory("clear on retry", async () => {
+            await memory.clearRefusal(input.householdId, memoryHost);
+            await memory.clearDeadLink(input.householdId, urlHash);
         });
     }
 
-    const jsonld = readRecipeJsonLd(fetched.body);
-    if (!jsonld) {
-        return emptyOutcome("no_recipe_on_page", {
-            source: sourceFromInfo(sourceInfo, cleaned),
-        });
+    const fetchOutcome = await importWebsiteFromFetch();
+    if (
+        !sourceText ||
+        !input.retry ||
+        fetchOutcome.status === "imported" ||
+        fetchOutcome.status === "unverified_needs_review" ||
+        fetchOutcome.status === "duplicate"
+    ) {
+        return fetchOutcome;
     }
 
-    const prepared = prepareImportedRecipe({
-        name: jsonld.name,
+    const parsedCaption = parseRecipeText(sourceText, {
         fallbackName: sourceInfo.label,
-        yieldPortions: jsonld.yieldPortions,
-        steps: jsonld.instructions,
-        prepMinutes: jsonld.prepMinutes,
-        cookMinutes: jsonld.cookMinutes,
-        parsed: parseIngredientLines(jsonld.ingredients),
     });
-
+    if (!parsedCaption.hasRecipe) {
+        return emptyOutcome("no_recipe_in_text", {
+            source: sourceOutcome,
+        });
+    }
+    const preparedFromText = prepareImportedRecipe({
+        name: parsedCaption.name,
+        fallbackName: sourceInfo.label,
+        yieldPortions: parsedCaption.yieldPortions,
+        steps: parsedCaption.steps,
+        prepMinutes: null,
+        cookMinutes: null,
+        parsed: {
+            items: parsedCaption.ingredients,
+            unresolved: parsedCaption.unresolved,
+        },
+    });
     return saveImportedRecipe(
         deps,
         {
             householdId: input.householdId,
             creatorId: input.creatorId,
         },
-        prepared,
+        preparedFromText,
         {
             sourceKind: "website",
             sourceUrl: cleaned,
-            sourceText: null,
-            sourceTextOrigin: null,
+            sourceText,
+            sourceTextOrigin: textOrigin,
             transcript: null,
             credit,
         },

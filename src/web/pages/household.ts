@@ -174,8 +174,6 @@ function socialReaderRows(
                     actions = modalTrigger({
                         target: modalId,
                         label: socialReaderTurnOnLabel(reader),
-                        // Opting into something against a platform's terms is
-                        // never the page's main action.
                         className: "btn-sm",
                     });
                 }

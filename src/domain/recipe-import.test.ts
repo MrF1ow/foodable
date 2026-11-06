@@ -1712,6 +1712,89 @@ describe("importRecipeFromUrl fetch memory (websites)", () => {
         expect(result.status).toBe("site_refused");
     });
 
+    test("memory read throws do not block import", async () => {
+        const memory = {
+            ...createMemoryFetchMemoryStore(),
+            async getRefusal() {
+                throw new Error("read down");
+            },
+            async getDeadLink() {
+                throw new Error("read down");
+            },
+        };
+        const fetcher = fakeFetcher({
+            fetch: () => ({
+                ok: true,
+                body: loadFixture("array-top-level"),
+            }),
+        });
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://readthrow.example/r",
+            },
+        );
+        expect(result.status).toBe("imported");
+        expect(fetcher.calls.robots).toBe(1);
+        expect(fetcher.calls.fetch).toBe(1);
+    });
+
+    test("retry with pasted text clears memory and fetches before text", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        let fetchCalls = 0;
+        const fetcher = fakeFetcher({
+            fetch: () => {
+                fetchCalls += 1;
+                if (fetchCalls === 1) {
+                    return { ok: false, reason: "site_refused" };
+                }
+                return { ok: false, reason: "not_found" };
+            },
+        });
+        await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/a",
+            },
+        );
+        expect(fetchCalls).toBe(1);
+        const blocked = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/b",
+            },
+        );
+        expect(blocked.fromMemory).toBe(true);
+        const caption = loadCaption("clean-headers");
+        const retry = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/b",
+                text: caption,
+                retry: true,
+            },
+        );
+        expect(retry.fromMemory).toBe(false);
+        expect(fetchCalls).toBe(2);
+        expect(retry.status).toBe("imported");
+    });
+
     test("social links never touch memory", async () => {
         const memory = createMemoryFetchMemoryStore();
         await importRecipeFromUrl(
