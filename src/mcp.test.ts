@@ -97,6 +97,7 @@ import {
 import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
 import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
+import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
     importRecipeFromText,
@@ -305,6 +306,7 @@ const db = {
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
+    fetchMemoryStore: createMemoryFetchMemoryStore(),
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
 };
 
@@ -642,6 +644,7 @@ mock.module("./recipe-url-fetcher.js", () => ({
         }
         return db.recipeImportFetcher;
     },
+    recipeFetchMemory: () => db.fetchMemoryStore,
 }));
 
 afterAll(() => {
@@ -710,6 +713,7 @@ beforeEach(() => {
     db.foodSearchHits = [];
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
+    db.fetchMemoryStore = createMemoryFetchMemoryStore();
 });
 
 interface ToolResult {
@@ -5079,6 +5083,63 @@ describe("phone-app domain MCP tools", () => {
                 imported.structuredContent,
             );
             expect(imported.structuredContent?.status).toBe("imported");
+            expect(imported.structuredContent?.from_memory).toBe(false);
+            expect(imported.structuredContent?.remembered_until).toBeNull();
+
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage() {
+                    return {
+                        ok: false as const,
+                        reason: "site_refused" as const,
+                        status: 403,
+                        detail: "Forbidden",
+                        url: "https://mem.example.com/recipe",
+                        host: "mem.example.com",
+                    };
+                },
+            };
+            const refusedFirst = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/recipe",
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                refusedFirst.structuredContent,
+            );
+            expect(refusedFirst.structuredContent?.from_memory).toBe(false);
+            const refusedMem = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/other",
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                refusedMem.structuredContent,
+            );
+            expect(refusedMem.structuredContent?.from_memory).toBe(true);
+            expect(
+                refusedMem.structuredContent?.remembered_until,
+            ).not.toBeNull();
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage() {
+                    return {
+                        ok: true as const,
+                        url: "https://mem.example.com/other",
+                        status: 200,
+                        contentType: "text/html",
+                        body: yoast,
+                    };
+                },
+            };
+            const retried = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/other",
+                retry: true,
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                retried.structuredContent,
+            );
+            expect(retried.structuredContent?.from_memory).toBe(false);
 
             const paste = await call("import_recipe_from_url", {
                 url: "https://www.instagram.com/p/abc/",
@@ -5149,7 +5210,7 @@ describe("phone-app domain MCP tools", () => {
             (item) => item.name === "import_recipe_from_url",
         );
         expect(tool?.params.map((row) => row.name)).toEqual(
-            expect.arrayContaining(["url", "text", "credit"]),
+            expect.arrayContaining(["url", "text", "credit", "retry"]),
         );
     });
 

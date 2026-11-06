@@ -87,6 +87,14 @@ import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import {
+    normalizeMemoryHost,
+    type FetchMemoryStore,
+} from "../../domain/fetch-memory.js";
+import { recipeFetchMemory } from "../../db/fetch-memory.js";
+import { truncateToastParam } from "../truncate-toast-param.js";
+
+// TOAST_KEYS: "household.fetch-refusal.cleared"
 
 export function legacyHouseholdPath(path: string): string | null {
     const q = path.indexOf("?");
@@ -140,9 +148,33 @@ async function householdFormError(
 }
 
 householdRoutes.get("/household", requireSiteUser, async (c) => {
-    const page = await renderHouseholdSettingsRoute(c.get("userId"));
+    const page = await renderHouseholdSettingsRoute(c.get("userId"), {
+        refusalsAfter: c.req.query("refusals_after") ?? undefined,
+    });
     return c.html(page.html, page.status);
 });
+
+householdRoutes.post(
+    "/household/fetch-refusals/clear",
+    requireManager,
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const hostRaw = formText(body, "host").trim();
+        const host = normalizeMemoryHost(hostRaw);
+        if (!host) {
+            return c.text("Bad Request", 400);
+        }
+        const memory: FetchMemoryStore = recipeFetchMemory();
+        await memory.clearRefusal(member.householdId, host);
+        return redirectWithToast(
+            c,
+            "/household",
+            "household.fetch-refusal.cleared",
+            { host: truncateToastParam(host) },
+        );
+    },
+);
 
 householdRoutes.get("/household/items", requireSiteUser, async (c) => {
     const page = await renderSettingsFoodsPage(c.get("userId"), {

@@ -50,6 +50,10 @@ export type FetchOutcome =
           reason: FetchFailure;
           status: number | null;
           detail: string;
+          /** Final URL of the failing hop (when known). */
+          url?: string;
+          /** Normalized hostname of `url` for memory keys (`normalizeMemoryHost` in domain). */
+          host?: string;
       };
 
 export type SafeFetcher = ReturnType<typeof createSafeFetcher>;
@@ -321,6 +325,14 @@ export function sameSite(a: string, b: string): boolean {
     const x = strip(a);
     const y = strip(b);
     return x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`);
+}
+
+/** Lowercase, no leading www., no trailing dot — matches domain fetch memory keys. */
+function memoryFetchHost(hostname: string): string {
+    let h = hostname.trim().toLowerCase();
+    if (h.endsWith(".")) h = h.slice(0, -1);
+    if (h.startsWith("www.")) h = h.slice(4);
+    return h;
 }
 
 async function resolveHost(
@@ -655,6 +667,8 @@ export function createSafeFetcher(deps?: {
                         reason: classified,
                         status,
                         detail: response.statusText || String(status),
+                        url: current.href,
+                        host: memoryFetchHost(current.hostname),
                     };
                 }
 
@@ -955,6 +969,8 @@ export function createSafeFetcher(deps?: {
                         reason: classified,
                         status,
                         detail: response.statusText || String(status),
+                        url: current.href,
+                        host: memoryFetchHost(current.hostname),
                     };
                 }
 

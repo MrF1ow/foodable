@@ -10,9 +10,13 @@ import {
 } from "./middleware.js";
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
-import { startUnverifiedRecipeCleanup } from "./domain/recipe-import.js";
+import {
+    startFetchMemorySweep,
+    startUnverifiedRecipeCleanup,
+} from "./domain/recipe-import.js";
 import { listHouseholdsForRecipeSweep } from "./db/household.js";
 import { liveRecipesStore } from "./db/recipes.js";
+import { recipeFetchMemory } from "./db/fetch-memory.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
 import { isNutritionCard } from "./domain/layout.js";
@@ -453,6 +457,7 @@ if (import.meta.main) {
         () => listHouseholdsForRecipeSweep(),
         liveRecipesStore(),
     );
+    startFetchMemorySweep(recipeFetchMemory());
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));

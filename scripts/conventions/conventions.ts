@@ -128,6 +128,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/ingredient-lines.ts": "recipes",
     "src/domain/not-measured.ts": "recipes",
     "src/recipe-url-fetcher.ts": "recipes",
+    "src/domain/fetch-memory.ts": "recipes",
+    "src/db/fetch-memory.ts": "recipes",
     "src/domain/social-readers.ts": "recipes",
     "src/db/social-readers.ts": "recipes",
     "src/copy/social-readers.ts": "recipes",

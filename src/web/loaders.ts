@@ -28,6 +28,7 @@ import { liveFoodsStore } from "../db/foods.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
+import { recipeFetchMemory } from "../db/fetch-memory.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import { renderFridgePage } from "./pages/fridge.js";
@@ -645,12 +646,24 @@ export async function renderHouseholdSettingsRoute(
         error?: string;
         issuedToken?: string;
         openModalId?: string;
+        refusalsAfter?: string | null;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
+    const rawAfter = opts.refusalsAfter?.trim() ?? "";
+    let refusalsAfter: { refusedAt: string; host: string } | undefined;
+    if (rawAfter) {
+        const p = rawAfter.indexOf("|");
+        if (p > 0) {
+            refusalsAfter = {
+                refusedAt: rawAfter.slice(0, p),
+                host: rawAfter.slice(p + 1),
+            };
+        }
+    }
     const [config, members, location, stores, socialReaderStatus] =
         await Promise.all([
             getHouseholdConfig(householdId),
@@ -659,6 +672,16 @@ export async function renderHouseholdSettingsRoute(
             liveSettingsStore().listStores(householdId),
             liveSocialReaderStatusStore().get(householdId),
         ]);
+    let refusalsBatch: import("../domain/fetch-memory.js").HostRefusalRow[] =
+        [];
+    if (process.env.DATABASE_URL?.trim()) {
+        const memory = recipeFetchMemory();
+        refusalsBatch = await memory.listRefusals(householdId, {
+            limit: 21,
+            after: refusalsAfter,
+            now: new Date(),
+        });
+    }
     const settings = liveSettingsStore();
     const rules = liveRulesStore();
     const storeViews = await Promise.all(
@@ -676,6 +699,14 @@ export async function renderHouseholdSettingsRoute(
             dislikes: await rules.listDislikes(householdId, member.userId),
         })),
     );
+    const fetchRefusals = refusalsBatch.slice(0, 20);
+    const fetchRefusalsShowMore =
+        refusalsBatch.length > 20
+            ? `/household?refusals_after=${encodeURIComponent(
+                  `${fetchRefusals.at(-1)!.refusedAt}|${fetchRefusals.at(-1)!.host}`,
+              )}`
+            : null;
+
     return {
         status: 200,
         html: renderHouseholdSettingsPage({
@@ -696,6 +727,8 @@ export async function renderHouseholdSettingsRoute(
             socialReaders: config.preferences.socialReaders,
             socialReaderStatus,
             timezone: profile?.timezone ?? "UTC",
+            fetchRefusals,
+            fetchRefusalsShowMore,
         }),
     };
 }
@@ -720,6 +753,8 @@ export async function renderRecipesListPage(
         importSourceLabel?: string;
         importTextOrigin?: "shared" | "pasted";
         importTextOnly?: boolean;
+        importShowRetry?: boolean;
+        importRetryDisabled?: boolean;
         shareArrived?: import("../domain/share.js").ReadShareResult;
         shareArrivedOpen?: boolean;
     } = {},
@@ -826,6 +861,8 @@ export async function renderRecipesListPage(
             importSourceLabel: opts.importSourceLabel,
             importTextOrigin: opts.importTextOrigin,
             importTextOnly: opts.importTextOnly,
+            importShowRetry: opts.importShowRetry,
+            importRetryDisabled: opts.importRetryDisabled,
             shareArrived: opts.shareArrived,
             shareArrivedOpen: opts.shareArrivedOpen,
         }),

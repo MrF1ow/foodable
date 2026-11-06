@@ -32,6 +32,7 @@ import {
 } from "../../household.js";
 import type { SocialReaderStatusRow } from "../../domain/social-readers.js";
 import type { ReaderFailure } from "../../domain/social-readers.js";
+import type { HostRefusalRow } from "../../domain/fetch-memory.js";
 import { sourceIcon } from "../components/source-icon.js";
 import {
     readerFailureSentence,
@@ -77,6 +78,8 @@ export type HouseholdSettingsView = {
     socialReaders?: SocialReadersPreferences;
     socialReaderStatus?: SocialReaderStatusRow[];
     timezone?: string;
+    fetchRefusals?: HostRefusalRow[];
+    fetchRefusalsShowMore?: string | null;
 };
 
 export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
@@ -187,6 +190,39 @@ function socialReaderRows(
 
 function socialReaderRiskBlock(): string {
     return `<p class="hint">${escapeHtml(SOCIAL_READER_RISK_INTRO)} <a href="${SOCIAL_READER_RESEARCH_URL}" target="_blank" rel="noopener noreferrer">Terms research</a>.</p>`;
+}
+
+function fetchRefusalListBlock(
+    view: HouseholdSettingsView,
+    timezone: string,
+): string {
+    const rows = view.fetchRefusals ?? [];
+    const showMore = view.fetchRefusalsShowMore;
+    if (rows.length === 0) {
+        return emptyState(
+            "No site has refused Foodable.",
+            "fetch-refusals-empty",
+        );
+    }
+    const items = rows
+        .map((r) => {
+            const refused = formatReaderInstant(r.refusedAt, timezone);
+            const until = formatReaderInstant(r.expiresAt, timezone);
+            const meta = `refused ${refused} (${r.status}) · until ${until}`;
+            const actions = view.canManage
+                ? `<div class="row-actions"><form method="post" action="/household/fetch-refusals/clear" class="inline-form">
+<input type="hidden" name="host" value="${escapeHtml(r.host)}" />
+<button type="submit" class="btn-sm">Try again</button>
+</form></div>`
+                : "";
+            return `<li class="row"><div class="row-title">${escapeHtml(r.host)}</div><span class="row-meta">${escapeHtml(meta)}</span>${actions}</li>`;
+        })
+        .join("\n");
+    const more =
+        showMore != null
+            ? `<p class="muted"><a href="${escapeHtml(showMore)}">Show more</a></p>`
+            : "";
+    return `<ul class="list">${items}</ul>${more}`;
 }
 
 function socialReaderEnableModal(
@@ -813,6 +849,10 @@ ${socialReaderRiskBlock()}
                 settingsView.isOwner,
             )}</ul>
 ${settingsView.isOwner ? "" : `<p class="muted">${escapeHtml(SOCIAL_READER_OWNER_ONLY)}</p>`}
+</div>
+<div class="psec">
+<h3 class="psec-title">Sites that refused Foodable</h3>
+${fetchRefusalListBlock(settingsView, settingsView.timezone!)}
 </div>`,
         })}
         ${panel({
