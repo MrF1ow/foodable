@@ -3,11 +3,15 @@ import type { FetchFailure } from "../fetch-safe.js";
 import type { SafeFetcher } from "../fetch-safe.js";
 import { findOrCreateManualFood, type FoodsStore } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
+import { parseIngredientLines } from "./ingredient-lines.js";
 import {
     cleanRecipeLink,
     recipeSource,
     validateRecipeLink,
 } from "./recipe-link.js";
+import { readRecipeJsonLd } from "./recipe-jsonld.js";
+export { NOT_MEASURED_PHRASES, isNotMeasuredNote } from "./not-measured.js";
+import { isNotMeasuredNote } from "./not-measured.js";
 import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
 import { createRecipe, RecipeInputError, recipeSteps } from "./recipes.js";
 
@@ -63,41 +67,6 @@ export class RecipeUnverifiedError extends Error {
         );
         this.name = "RecipeUnverifiedError";
     }
-}
-
-/**
- * Notes that say an ingredient is deliberately not measured. Only these count
- * as the plan's "explicit not measured"; a prep note such as "boneless" on an
- * ingredient with no amount does not, so the check still asks for an amount.
- */
-export const NOT_MEASURED_PHRASES: readonly string[] = [
-    "to taste",
-    "as needed",
-    "as required",
-    "as desired",
-    "for garnish",
-    "to garnish",
-    "for serving",
-    "to serve",
-    "optional",
-    "pinch",
-    "a pinch",
-    "dash",
-    "a dash",
-    "handful",
-    "a handful",
-    "some",
-    "not measured",
-];
-
-export function isNotMeasuredNote(note: string | null | undefined): boolean {
-    const text = note?.trim().toLowerCase();
-    if (!text) return false;
-    return NOT_MEASURED_PHRASES.some((phrase) =>
-        new RegExp(`(^|[^a-z])${phrase.replace(/ /g, "\\s+")}([^a-z]|$)`).test(
-            text,
-        ),
-    );
 }
 
 function ingredientAmountOk(ingredient: RecipeIngredient): boolean {
@@ -442,13 +411,29 @@ export function importOutcomeToastKey(outcome: RecipeImportOutcome): ToastKey {
             ? "recipes.import.unverified_needs_review_one"
             : "recipes.import.unverified_needs_review";
     }
-    if (
-        outcome.status === "paste_needed" &&
-        outcome.source?.kind === "website"
-    ) {
-        return "recipes.import.paste_needed_site";
+    if (outcome.status === "paste_needed") {
+        if (outcome.readerFailure) {
+            return "recipes.import.paste_needed_reader";
+        }
+        if (outcome.source?.kind === "website") {
+            return "recipes.import.paste_needed_site";
+        }
     }
     return `recipes.import.${outcome.status}` as ToastKey;
+}
+
+export function importRecipeFromUrlAnalyticsOutcome(
+    status: RecipeImportStatus | undefined,
+): { success: true } | { success: false; errorCategory: "recipe_import" } {
+    const ok =
+        status === "imported" ||
+        status === "unverified_needs_review" ||
+        status === "duplicate" ||
+        status === "paste_needed" ||
+        status === "no_recipe_in_text";
+    return ok
+        ? { success: true }
+        : { success: false, errorCategory: "recipe_import" };
 }
 
 export function importOutcomeMessage(outcome: RecipeImportOutcome): string {
@@ -548,14 +533,14 @@ export async function importRecipeFromUrl(
         });
     }
 
-    const allowed = await deps.fetcher.robotsAllows(validated.url);
+    const allowed = await deps.fetcher.robotsAllows(cleaned);
     if (!allowed) {
         return emptyOutcome("robots_disallowed", {
             source: sourceFromInfo(sourceInfo, cleaned),
         });
     }
 
-    const fetched = await deps.fetcher.fetchPage(validated.url, {
+    const fetched = await deps.fetcher.fetchPage(cleaned, {
         accept: ["text/html", "application/xhtml+xml"],
     });
     if (!fetched.ok) {
@@ -564,7 +549,6 @@ export async function importRecipeFromUrl(
         });
     }
 
-    const { readRecipeJsonLd } = await import("./recipe-jsonld.js");
     const jsonld = readRecipeJsonLd(fetched.body);
     if (!jsonld) {
         return emptyOutcome("no_recipe_on_page", {
@@ -572,7 +556,6 @@ export async function importRecipeFromUrl(
         });
     }
 
-    const { parseIngredientLines } = await import("./ingredient-lines.js");
     const parsed = parseIngredientLines(jsonld.ingredients);
     const instructions =
         jsonld.instructions.length > 0 ? jsonld.instructions.join("\n") : null;

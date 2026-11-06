@@ -46,6 +46,7 @@ import type {
 import {
     importOutcomeMessage,
     importRecipeFromUrl,
+    importRecipeFromUrlAnalyticsOutcome,
 } from "../../domain/recipe-import.js";
 import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
@@ -1547,16 +1548,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 };
                             }
                         ).structuredContent?.status;
-                        const ok =
-                            status === "imported" ||
-                            status === "unverified_needs_review" ||
-                            status === "duplicate";
-                        return ok
-                            ? { success: true }
-                            : {
-                                  success: false,
-                                  errorCategory: "recipe_import",
-                              };
+                        return importRecipeFromUrlAnalyticsOutcome(status);
                     },
                 },
             ),

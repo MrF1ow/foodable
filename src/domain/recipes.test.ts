@@ -208,6 +208,33 @@ test("household owner can delete a member-created recipe", async () => {
     expect(await listRecipes(store, HH)).toEqual([]);
 });
 
+test("memory deleteRecipe removes recipe import row", async () => {
+    const store = createMemoryRecipesStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Imported",
+        yieldPortions: 2,
+        sourceUrl: "https://example.com/x",
+    });
+    await store.upsertImport({
+        recipeId: recipe.id,
+        householdId: HH,
+        sourceKind: "website",
+        sourceUrl: "https://example.com/x",
+        sourceText: null,
+        sourceTextOrigin: null,
+        transcript: null,
+        credit: null,
+        unresolvedLines: [],
+        problems: [],
+        importedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(await store.getImport(HH, recipe.id)).not.toBeNull();
+    await store.deleteRecipe(HH, recipe.id);
+    expect(await store.getImport(HH, recipe.id)).toBeNull();
+});
+
 test("manual ingredients without nutrition mark macros incomplete", async () => {
     const store = createMemoryRecipesStore();
     const recipe = await createRecipe(store, {

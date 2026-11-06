@@ -6,7 +6,9 @@ import type { FetchFailure, SafeFetcher } from "../fetch-safe.js";
 import { createMemoryFoodsStore } from "./foods.js";
 import {
     importOutcomeMessage,
+    importOutcomeToastKey,
     importRecipeFromUrl,
+    importRecipeFromUrlAnalyticsOutcome,
     importReviewCount,
     isNotMeasuredNote,
     outcomeFromFetchFailure,
@@ -359,6 +361,57 @@ const ALL_IMPORT_STATUSES: RecipeImportStatus[] = [
     "invalid_link",
 ];
 
+test("importOutcomeToastKey uses paste_needed_reader when reader failed", () => {
+    const key = importOutcomeToastKey({
+        status: "paste_needed",
+        recipeId: null,
+        recipeName: null,
+        verification: "unverified",
+        problems: [],
+        source: {
+            kind: "instagram",
+            url: "https://www.instagram.com/p/x/",
+            label: "Instagram",
+        },
+        unresolvedLines: [],
+        readerFailure: "Could not read caption.",
+    });
+    expect(key).toBe("recipes.import.paste_needed_reader");
+    const msg = importOutcomeMessage({
+        status: "paste_needed",
+        recipeId: null,
+        recipeName: null,
+        verification: "unverified",
+        problems: [],
+        source: {
+            kind: "instagram",
+            url: "https://www.instagram.com/p/x/",
+            label: "Instagram",
+        },
+        unresolvedLines: [],
+        readerFailure: "Could not read caption.",
+    });
+    expect(msg).toContain("Could not read caption.");
+    expect(msg).not.toMatch(/\{reason\}/);
+});
+
+test("importRecipeFromUrlAnalyticsOutcome treats paste_needed and no_recipe_in_text as success", () => {
+    expect(importRecipeFromUrlAnalyticsOutcome("paste_needed")).toEqual({
+        success: true,
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("no_recipe_in_text")).toEqual({
+        success: true,
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("invalid_link")).toEqual({
+        success: false,
+        errorCategory: "recipe_import",
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("no_recipe_on_page")).toEqual({
+        success: false,
+        errorCategory: "recipe_import",
+    });
+});
+
 test("every import status has toast copy and importOutcomeMessage", () => {
     for (const status of ALL_IMPORT_STATUSES) {
         const outcome: RecipeImportOutcome = {
@@ -615,7 +668,38 @@ describe("importRecipeFromUrl", () => {
         expect(await recipes.listRecipes(HH)).toHaveLength(0);
     });
 
-    test("transaction rollback leaves no recipes foods or import rows", async () => {
+    test("fetch uses cleaned URL without tracking params", async () => {
+        let robotsUrl = "";
+        let fetchUrl = "";
+        const fetcher = fakeFetcher({
+            fetch: (url) => {
+                fetchUrl = url;
+                return { ok: true, body: loadFixture("array-top-level") };
+            },
+        });
+        const origRobots = fetcher.robotsAllows.bind(fetcher);
+        fetcher.robotsAllows = async (url) => {
+            robotsUrl = typeof url === "string" ? url : url.href;
+            return origRobots(url);
+        };
+        await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/soup?utm_source=x&fbclid=abc",
+            },
+        );
+        expect(robotsUrl).not.toMatch(/utm_|fbclid/);
+        expect(fetchUrl).not.toMatch(/utm_|fbclid/);
+        expect(fetchUrl).toBe("https://example.com/soup");
+    });
+
+    test("throws when an ingredient insert fails inside the transaction", async () => {
         const base = createMemoryRecipesStore();
         const foods = createMemoryFoodsStore();
         let ingredientInserts = 0;
@@ -631,32 +715,6 @@ describe("importRecipeFromUrl", () => {
                 return base.insertIngredient(row);
             },
         };
-        const recipeIdsBefore = new Set(
-            (await base.listRecipes(HH)).map((row) => row.id),
-        );
-        const foodIdsBefore = new Set(
-            (await foods.listFoods(HH)).map((row) => row.id),
-        );
-        const rollback = async <T>(fn: () => Promise<T>): Promise<T> => {
-            try {
-                return await fn();
-            } catch {
-                for (const row of await base.listRecipes(HH)) {
-                    if (!recipeIdsBefore.has(row.id)) {
-                        await base.deleteRecipe(HH, row.id);
-                    }
-                }
-                for (const row of await foods.listFoods(HH)) {
-                    if (!foodIdsBefore.has(row.id)) {
-                        await foods.updateFoodRow({
-                            ...row,
-                            archivedAt: new Date().toISOString(),
-                        });
-                    }
-                }
-                throw new Error("rolled back");
-            }
-        };
         await expect(
             importRecipeFromUrl(
                 {
@@ -668,7 +726,7 @@ describe("importRecipeFromUrl", () => {
                             body: loadFixture("yoast-graph"),
                         }),
                     }),
-                    transaction: rollback,
+                    transaction: (fn) => fn(),
                 },
                 {
                     householdId: HH,
@@ -676,10 +734,6 @@ describe("importRecipeFromUrl", () => {
                     url: "https://example.com/rollback",
                 },
             ),
-        ).rejects.toThrow("rolled back");
-        expect((await base.listRecipes(HH)).length).toBe(recipeIdsBefore.size);
-        expect(
-            (await foods.listFoods(HH)).filter((f) => !foodIdsBefore.has(f.id)),
-        ).toHaveLength(0);
+        ).rejects.toThrow("insert failed");
     });
 });

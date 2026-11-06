@@ -799,6 +799,7 @@ export function createMemoryRecipesStore(): RecipesStore {
             );
             portions.length = 0;
             portions.push(...keepPortions);
+            imports.delete(id);
             return removed;
         },
         async listIngredients(householdId, recipeId) {

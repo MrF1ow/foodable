@@ -506,7 +506,7 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
         view.importRow ?? null,
     );
     const sourceLine = displaySource
-        ? `<p class="recipe-source-line muted">${sourceIcon(displaySource.kind, { label: displaySource.label })} <a href="${escapeHtml(displaySource.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(displaySource.label)}</a>${view.importRow?.credit ? ` · by ${escapeHtml(view.importRow.credit)}` : ""}</p>`
+        ? `<p class="recipe-source-line muted"><a href="${escapeHtml(displaySource.url)}" target="_blank" rel="noopener noreferrer">${sourceIcon(displaySource.kind, { label: displaySource.label, decorative: true })} ${escapeHtml(displaySource.label)}</a>${view.importRow?.credit ? ` · by ${escapeHtml(view.importRow.credit)}` : ""}</p>`
         : "";
     const error = pageLevelErrorBanner(view, renderedModalIds);
     const allergen = noticeList(view.allergenNotices ?? [], {
