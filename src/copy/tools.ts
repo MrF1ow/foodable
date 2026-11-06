@@ -711,6 +711,13 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "import_recipe_from_url",
+        category: "recipes",
+        badges: ["import"],
+        params: [{ name: "url", required: true }],
+        hasPhotoHint: false,
+    },
+    {
         name: "get_household_rules",
         category: "rules",
         badges: ["view"],
@@ -850,6 +857,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "reorder_recipe_ingredients",
     "import_recipe_from_text",
     "verify_recipe",
+    "import_recipe_from_url",
     "get_household_rules",
     "set_household_rules",
     "search_food",

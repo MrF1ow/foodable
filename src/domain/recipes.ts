@@ -180,6 +180,11 @@ export type RecipesStore = {
         problems: RecipeProblem[],
     ): Promise<void>;
     deleteStaleUnverified(householdId: string, before: Date): Promise<number>;
+    findRecipeBySourceUrl(
+        householdId: string,
+        urls: string[],
+    ): Promise<Recipe | null>;
+    listImports(householdId: string): Promise<RecipeImport[]>;
 };
 
 export type RecipePatch = {
@@ -976,6 +981,31 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     problems: problems.map((p) => ({ ...p })),
                 });
             }
+        },
+        async findRecipeBySourceUrl(householdId, urls) {
+            const keys = new Set(
+                urls.map((u) => u.trim()).filter((u) => u.length > 0),
+            );
+            if (keys.size === 0) return null;
+            const hit = recipes.find(
+                (row) =>
+                    row.householdId === householdId &&
+                    row.sourceUrl != null &&
+                    keys.has(row.sourceUrl),
+            );
+            return hit ? cloneRecipe(hit) : null;
+        },
+        async listImports(householdId) {
+            const out: RecipeImport[] = [];
+            for (const row of imports.values()) {
+                if (row.householdId !== householdId) continue;
+                out.push({
+                    ...row,
+                    unresolvedLines: [...row.unresolvedLines],
+                    problems: row.problems.map((p) => ({ ...p })),
+                });
+            }
+            return out;
         },
         async deleteStaleUnverified(householdId, before) {
             const cutoff = before.toISOString();

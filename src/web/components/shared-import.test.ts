@@ -173,7 +173,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(uiSrc).toContain('class="${className}"');
     expect(helperSrc).toContain('class="grocery-line');
     expect(helperSrc).toContain('class="fridge-item"');
-    expect((uiSrc.match(/class="error-banner"/g) ?? []).length).toBe(1);
+    expect((uiSrc.match(/class="error-banner"/g) ?? []).length).toBe(2);
     expect(helperSrc).not.toContain('class="error-banner"');
     expect(settingsSrc).toContain("errorBanner");
     expect(settingsSrc).not.toContain('class="error-banner"');

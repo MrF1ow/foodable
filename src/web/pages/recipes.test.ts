@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
 import {
+    IMPORT_RECIPE_MODAL_ID,
     recipesListHref,
     renderRecipeDetailPage,
     renderRecipesPage,
@@ -311,10 +312,91 @@ test("unverified recipe detail shows problems panel and check again", () => {
     expect(html).toContain('action="/recipes/r1/verify"');
 });
 
-test("each unresolved import line can be marked handled", () => {
+test("import from link modal field and busy submit attributes", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+    });
+    expect(html).toContain('commandfor="recipe-import-url"');
+    expect(html).toContain("Import from link");
+    expect(html).toContain('id="import-url"');
+    expect(html).toContain("data-busy-form");
+    expect(html).toContain('data-busy-label="Importing…"');
+    expect(html).toContain(`id="${IMPORT_RECIPE_MODAL_ID}"`);
+});
+
+test("import modal keeps url and shows error on 422 re-render", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importUrl: "https://example.com/x",
+        importError: "That doesn't look like a web link.",
+    });
+    expect(html).toMatch(
+        new RegExp(
+            `id="${IMPORT_RECIPE_MODAL_ID}"[^>]*data-modal-open-on-load`,
+        ),
+    );
+    expect(html).toContain('value="https://example.com/x"');
+    expect(html).toContain("That doesn't look like a web link.");
+});
+
+test("duplicate import shows open link in modal", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importDuplicateRecipeId: "r-dup",
+    });
+    expect(html).toContain("You already imported this.");
+    expect(html).toContain('href="/recipes/r-dup"');
+});
+
+test("recipe list shows source icon when import row exists", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [
+            {
+                id: "r-web",
+                householdId: "hh-1",
+                creatorId: VIEWER,
+                name: "Web soup",
+                yieldPortions: 4,
+                instructions: null,
+                sourceUrl: "https://example.com/soup",
+                tags: [],
+                notes: null,
+                prepMinutes: null,
+                cookMinutes: null,
+                verification: "verified",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        ],
+        members: [],
+        viewerId: VIEWER,
+        importByRecipeId: {
+            "r-web": {
+                recipeId: "r-web",
+                sourceKind: "website",
+                sourceUrl: "https://example.com/soup",
+            },
+        },
+    });
+    expect(html).toContain("recipe-source-icon");
+});
+
+test("recipe detail links source with credit", () => {
     const html = renderRecipeDetailPage({
-        ...detail({ verification: "unverified", name: "Import" }),
-        problems: [],
+        ...detail({
+            sourceUrl: "https://example.com/soup",
+        }),
         importRow: {
             recipeId: "r1",
             householdId: "hh-1",
@@ -323,17 +405,15 @@ test("each unresolved import line can be marked handled", () => {
             sourceText: null,
             sourceTextOrigin: null,
             transcript: null,
-            credit: null,
-            unresolvedLines: ['1 x 400g "tin" tomatoes'],
+            credit: "Chef Pat",
+            unresolvedLines: [],
             problems: [],
             importedAt: "2026-01-01T00:00:00.000Z",
         },
     });
-    expect(html).toContain('action="/recipes/r1/unresolved"');
-    expect(html).toContain(
-        '<input type="hidden" name="line" value="1 x 400g &quot;tin&quot; tomatoes" />',
-    );
-    expect(html).toContain(">Handled</button>");
+    expect(html).toContain("recipe-source-line");
+    expect(html).toContain('href="https://example.com/soup"');
+    expect(html).toContain("by Chef Pat");
 });
 
 test("unmeasured recipe ingredient renders to taste", () => {
@@ -357,4 +437,29 @@ test("unmeasured recipe ingredient renders to taste", () => {
     });
     expect(html).toContain("Total to taste");
     expect(html).toContain('placeholder="to taste"');
+});
+
+test("each unresolved import line can be marked handled", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({ verification: "unverified", name: "Import" }),
+        problems: [],
+        importRow: {
+            recipeId: "r1",
+            householdId: "hh-1",
+            sourceKind: "website",
+            sourceUrl: "https://example.com/soup",
+            sourceText: null,
+            sourceTextOrigin: null,
+            transcript: null,
+            credit: null,
+            unresolvedLines: ['1 x 400g "tin" tomatoes'],
+            problems: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    expect(html).toContain('action="/recipes/r1/unresolved"');
+    expect(html).toContain(
+        '<input type="hidden" name="line" value="1 x 400g &quot;tin&quot; tomatoes" />',
+    );
+    expect(html).toContain(">Handled</button>");
 });

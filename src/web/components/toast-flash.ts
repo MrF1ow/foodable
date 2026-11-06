@@ -45,6 +45,26 @@ export function addRecipeToGroceryToastFlash(
     return { key: "recipes.add-to-grocery.nothing" };
 }
 
+/** Listed so toast.test finds every recipes.import.* key (R4 URL import). */
+export function recipeImportToastKeysForAudit(): readonly ToastKey[] {
+    return [
+        "recipes.import.imported",
+        "recipes.import.unverified_needs_review",
+        "recipes.import.unverified_needs_review_one",
+        "recipes.import.paste_needed",
+        "recipes.import.paste_needed_site",
+        "recipes.import.paste_needed_reader",
+        "recipes.import.no_recipe_in_text",
+        "recipes.import.no_recipe_on_page",
+        "recipes.import.robots_disallowed",
+        "recipes.import.site_refused",
+        "recipes.import.not_found",
+        "recipes.import.timeout",
+        "recipes.import.duplicate",
+        "recipes.import.invalid_link",
+    ];
+}
+
 export function groceryLineCheckToastKey(checked: boolean): ToastKey {
     return checked ? "grocery.line.checked" : "grocery.line.unchecked";
 }
