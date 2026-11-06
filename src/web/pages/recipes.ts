@@ -774,13 +774,25 @@ ${modalTrigger({
             : `<ul class="list">${problems
                   .map((p) => `<li>${escapeHtml(p.message)}</li>`)
                   .join("")}</ul>`;
+    const textSummary =
+        view.importRow?.sourceTextOrigin === "read"
+            ? "Caption"
+            : view.importRow?.sourceTextOrigin === "shared"
+              ? "Shared text"
+              : "Pasted text";
     const pastedText =
-        view.importRow?.sourceText != null
+        (view.importRow?.sourceText != null
             ? disclosure({
-                  summary: "Pasted text",
+                  summary: textSummary,
                   body: `<pre class="recipe-import-text">${escapeHtml(view.importRow.sourceText)}</pre>`,
               })
-            : "";
+            : "") +
+        (view.importRow?.transcript
+            ? disclosure({
+                  summary: "Spoken transcript",
+                  body: `<pre class="recipe-import-text">${escapeHtml(view.importRow.transcript)}</pre>`,
+              })
+            : "");
     const unresolved =
         view.importRow && view.importRow.unresolvedLines.length > 0
             ? `<ul class="list">${view.importRow.unresolvedLines

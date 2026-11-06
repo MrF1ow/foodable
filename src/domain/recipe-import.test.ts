@@ -27,7 +27,10 @@ import {
     type RecipeIngredient,
 } from "./recipes.js";
 import { createMemorySocialReaderStatusStore } from "./social-readers.js";
-import { readerFailureSentence } from "../copy/social-readers.js";
+import {
+    readerFailureSentence,
+    readerNoRecipeSentence,
+} from "../copy/social-readers.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "fixtures/recipe-pages");
 const CAPTION_DIR = join(import.meta.dir, "fixtures/captions");
@@ -1297,4 +1300,56 @@ test("a page with zero yield and a nameless line still imports as an outcome", a
     const recipe = await recipes.getRecipe(HH, out.recipeId!);
     expect(recipe?.yieldPortions).toBe(1);
     expect(recipe?.prepMinutes).toBeNull();
+});
+
+test("a read caption and transcript with no recipe fall through to paste", async () => {
+    const page = `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(
+        {
+            __DEFAULT_SCOPE__: {
+                "webapp.video-detail": {
+                    itemInfo: {
+                        itemStruct: {
+                            desc: "link in bio",
+                            video: {
+                                subtitleInfos: [
+                                    {
+                                        LanguageCodeName: "eng-US",
+                                        Url: "https://v16-webapp.tiktokcdn.com/a.vtt",
+                                        Format: "webvtt",
+                                        Source: "ASR",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    )}</script>`;
+    const vtt =
+        "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nhey guys welcome back today we make pasta";
+    const fetcher = fakeFetcher({
+        fetch: (url) => ({ ok: true, body: url.endsWith(".vtt") ? vtt : page }),
+    });
+    const recipes = createMemoryRecipesStore();
+    const status = createMemorySocialReaderStatusStore();
+    const result = await importRecipeFromUrl(
+        {
+            recipes,
+            foods: createMemoryFoodsStore(),
+            fetcher,
+            readers: { tiktok: true, facebook: false },
+            readerStatus: status,
+        },
+        {
+            householdId: HH,
+            creatorId: USER,
+            url: "https://www.tiktok.com/@chef/video/9",
+        },
+    );
+    expect(result.status).toBe("paste_needed");
+    expect(result.readerFailure).toBe(readerNoRecipeSentence("tiktok"));
+    expect(await recipes.listRecipes(HH)).toHaveLength(0);
+    const row = (await status.get(HH)).find((r) => r.reader === "tiktok");
+    expect(row?.lastSuccessAt).not.toBeNull();
 });

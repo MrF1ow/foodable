@@ -15,7 +15,10 @@ import {
 } from "./recipe-link.js";
 import { readRecipeJsonLd } from "./recipe-jsonld.js";
 import { parseRecipeText } from "./recipe-text.js";
-import { readerFailureSentence } from "../copy/social-readers.js";
+import {
+    readerFailureSentence,
+    readerNoRecipeSentence,
+} from "../copy/social-readers.js";
 import {
     readFacebook,
     readTikTok,
@@ -671,7 +674,6 @@ async function importFromParsedCaption(
         sourceTextOrigin: RecipeTextOrigin;
         transcript?: string | null;
         credit: string | null;
-        allowTranscriptOnly?: boolean;
     },
 ): Promise<RecipeImportOutcome> {
     const fallbackName = `${input.sourceInfo.label} recipe`;
@@ -680,10 +682,7 @@ async function importFromParsedCaption(
         input.transcript ?? null,
         fallbackName,
     );
-    if (
-        !parsedCaption.hasRecipe &&
-        !(input.allowTranscriptOnly && input.transcript?.trim())
-    ) {
+    if (!parsedCaption.hasRecipe) {
         return emptyOutcome("no_recipe_in_text", {
             source: sourceFromInfo(input.sourceInfo, input.cleaned),
         });
@@ -790,6 +789,16 @@ async function trySocialReader(
 
     await deps.readerStatus?.recordSuccess(input.householdId, readerId, now);
 
+    // The read worked. If neither the caption nor the subtitles hold a
+    // recipe, saving an empty unverified recipe helps nobody: offer the paste
+    // step instead (the recipe is usually in the photos).
+    if (!parseCaptionForImport(caption, transcript, "recipe").hasRecipe) {
+        return {
+            kind: "paste",
+            readerFailure: readerNoRecipeSentence(readerId),
+        };
+    }
+
     const outcome = await importFromParsedCaption(deps, {
         householdId: input.householdId,
         creatorId: input.creatorId,
@@ -799,7 +808,6 @@ async function trySocialReader(
         sourceTextOrigin: "read",
         transcript,
         credit: input.credit,
-        allowTranscriptOnly: true,
     });
     return { kind: "imported", outcome };
 }

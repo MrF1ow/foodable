@@ -29,6 +29,14 @@ const FACEBOOK_FAILURE: Record<ReaderFailure, string> = {
     network: "Couldn't reach Facebook.",
 };
 
+/** The reader worked, but neither the caption nor the subtitles hold a
+ *  recipe (it's in the photos, or a link in bio). */
+export function readerNoRecipeSentence(reader: SocialReaderId): string {
+    return reader === "tiktok"
+        ? "The TikTok caption doesn't include the recipe."
+        : "The Facebook caption doesn't include the recipe.";
+}
+
 export function readerFailureSentence(
     reader: SocialReaderId,
     reason: ReaderFailure,
