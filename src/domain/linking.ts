@@ -1,4 +1,5 @@
 import {
+    familyIdOf,
     fromGrams,
     toGrams,
     type FoodQuantityFactors,
@@ -46,21 +47,40 @@ function foodFor(
     return foodsById.get(need.foodId);
 }
 
+function mergeFactors(
+    row: FoodQuantityFactors | undefined,
+    need: FoodQuantityFactors | undefined,
+): FoodQuantityFactors {
+    return {
+        gramsPerEach: row?.gramsPerEach ?? need?.gramsPerEach ?? null,
+        gramsPerMl: row?.gramsPerMl ?? need?.gramsPerMl ?? null,
+    };
+}
+
 function amountInUnit(
     q: LinkedQuantity,
     to: string,
-    food: FoodQuantityFactors | undefined,
+    rowFood: FoodQuantityFactors | undefined,
+    needFood: FoodQuantityFactors | undefined,
 ): number | null {
     const sameDimension = convertToUnit(q, to);
     if (sameDimension != null) return sameDimension;
-    if (!food) return null;
+    const food = mergeFactors(rowFood, needFood);
     const grams = toGrams(q, food);
     if (grams == null) return null;
-    return fromGrams(grams, to, food);
+    return fromGrams(grams, to, needFood);
 }
 
-function sameFood(a: LinkedNeed, b: LinkedNeed): boolean {
-    return Boolean(a.foodId) && a.foodId === b.foodId;
+export function sameFood(
+    a: LinkedNeed,
+    b: LinkedNeed,
+    foodsById: ReadonlyMap<
+        string,
+        { genericFoodId?: string | null }
+    > = new Map(),
+): boolean {
+    if (!a.foodId || !b.foodId) return false;
+    return familyIdOf(a.foodId, foodsById) === familyIdOf(b.foodId, foodsById);
 }
 
 export function alreadyHaveTag(
@@ -68,14 +88,20 @@ export function alreadyHaveTag(
     stock: LinkedNeed[],
     foodsById: ReadonlyMap<string, FoodQuantityFactors> = new Map(),
 ): AlreadyHaveTag | null {
-    const matches = stock.filter((row) => sameFood(need, row));
+    const matches = stock.filter((row) => sameFood(need, row, foodsById));
     if (matches.length === 0) return null;
     const targetUnit = need.quantity.unit;
-    const food = foodFor(need, foodsById);
+    const needFood = foodFor(need, foodsById);
     let have = 0;
     let converted = 0;
     for (const row of matches) {
-        const amount = amountInUnit(row.quantity, targetUnit, food);
+        const rowFood = row.foodId ? foodsById.get(row.foodId) : undefined;
+        const amount = amountInUnit(
+            row.quantity,
+            targetUnit,
+            rowFood,
+            needFood,
+        );
         if (amount == null) continue;
         have += amount;
         converted += 1;

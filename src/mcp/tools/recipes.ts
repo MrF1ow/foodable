@@ -11,7 +11,7 @@ import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
 import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
-import { foodsByIds } from "../../domain/foods.js";
+import { effectiveFoodsByIds } from "../../domain/foods.js";
 import { listFridge } from "../../domain/fridge.js";
 import { householdConfigToWire } from "../../household.js";
 import {
@@ -125,8 +125,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             liveFridgeStore(),
                             householdId,
                         );
-                        const foods =
+                        const allFoods =
                             await liveFoodsStore().listFoods(householdId);
+                        const foodsById = await effectiveFoodsByIds(
+                            liveFoodsStore(),
+                            householdId,
+                            allFoods.map((food) => food.id),
+                        );
                         let safeFor = null;
                         if (args.safe_for) {
                             const memberId = await requireHouseholdMemberId(
@@ -142,7 +147,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         recipes = await listRecipesFiltered(
                             liveRecipesStore(),
                             householdId,
-                            new Map(foods.map((food) => [food.id, food])),
+                            foodsById,
                             fridge.items.map((item) => ({
                                 quantity: item.quantity,
                                 foodId: item.foodId,
@@ -237,7 +242,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         args.id,
                         memberId,
                     );
-                    const catalog = await foodsByIds(
+                    const catalog = await effectiveFoodsByIds(
                         liveFoodsStore(),
                         actor.householdId,
                         view.ingredients.map((row) => row.foodId),
@@ -558,7 +563,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         liveFridgeStore(),
                         householdId,
                     );
-                    const foods = await foodsByIds(
+                    const foods = await effectiveFoodsByIds(
                         liveFoodsStore(),
                         householdId,
                         [
@@ -585,6 +590,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         portionCounts,
                         totalPortions: args.total_portions,
                         foodsById: foods,
+                        foods: liveFoodsStore(),
                     });
                     const remainder = result.plan.map((line) => ({
                         display_name: line.displayName,

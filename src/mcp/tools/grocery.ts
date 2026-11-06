@@ -9,7 +9,7 @@ import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import { alreadyHaveTag } from "../../domain/linking.js";
 import { listFridge } from "../../domain/fridge.js";
-import { foodsByIds } from "../../domain/foods.js";
+import { effectiveFoodsByIds } from "../../domain/foods.js";
 import {
     addGroceryFoodByBarcode,
     addGroceryFoodById,
@@ -85,7 +85,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         liveFridgeStore(),
                         householdId,
                     );
-                    const foods = await foodsByIds(
+                    const foods = await effectiveFoodsByIds(
                         liveFoodsStore(),
                         householdId,
                         [

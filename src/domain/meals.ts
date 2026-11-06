@@ -1,7 +1,7 @@
 import {
+    effectiveFoodsByIds,
     findFoodById,
     findOrCreateManualFood,
-    foodsByIds,
     FoodsInputError,
     type Food,
     type FoodsStore,
@@ -376,7 +376,7 @@ export async function resolveAndBuildMeal(opts: {
         resolved.push({ ...spec, foodId: food.id, name: food.name });
     }
 
-    const foodsById = await foodsByIds(opts.foods, opts.householdId, [
+    const foodsById = await effectiveFoodsByIds(opts.foods, opts.householdId, [
         ...foodIds,
     ]);
     const recipesById = new Map<string, RecipeMealSource>();
@@ -392,9 +392,11 @@ export async function resolveAndBuildMeal(opts: {
             if (ingredient.foodId) foodIds.add(ingredient.foodId);
         }
     }
-    const foodsForRecipes = await foodsByIds(opts.foods, opts.householdId, [
-        ...foodIds,
-    ]);
+    const foodsForRecipes = await effectiveFoodsByIds(
+        opts.foods,
+        opts.householdId,
+        [...foodIds],
+    );
     for (const [id, food] of foodsForRecipes) foodsById.set(id, food);
 
     return {

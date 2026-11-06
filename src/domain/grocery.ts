@@ -1,5 +1,6 @@
 import type { FoodResult } from "../foods.js";
 import {
+    familyOf,
     findFoodById,
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
@@ -366,6 +367,14 @@ function aisleForName(name: string): (typeof SECTION_AISLES)[number] | null {
  * aisle its name suggests. Returns null for "Other". Hidden sections and the
  * Other section are never suggested.
  */
+function familyFromMap(
+    foodId: string | null,
+    familyById: ReadonlyMap<string, string> | undefined,
+): string | null {
+    if (!foodId) return null;
+    return familyById?.get(foodId) ?? foodId;
+}
+
 export function suggestGrocerySection(input: {
     sections: GrocerySection[];
     lines: GroceryLine[];
@@ -373,13 +382,15 @@ export function suggestGrocerySection(input: {
     kind: GroceryKind;
     foodId: string | null;
     displayName: string;
+    familyById?: ReadonlyMap<string, string>;
 }): GrocerySection | null {
     const visible = input.sections.filter((row) => !row.hidden && !row.isOther);
     if (visible.length === 0) return null;
     const name = normalizeFoodName(input.displayName);
+    const inputFamily = familyFromMap(input.foodId, input.familyById);
     const sameFood = input.lines.filter((line) =>
         input.foodId
-            ? line.foodId === input.foodId
+            ? familyFromMap(line.foodId, input.familyById) === inputFamily
             : normalizeFoodName(line.displayName) === name,
     );
     for (const line of sameFood.toReversed()) {
@@ -424,6 +435,7 @@ export async function placeGroceryLine(
         foodId: string | null;
         displayName: string;
     },
+    foods?: FoodsStore,
 ): Promise<string> {
     if (input.sectionId) {
         return resolveGrocerySectionId(
@@ -438,6 +450,11 @@ export async function placeGroceryLine(
             stores.map((store) => settings.listSections(store.id)),
         )
     ).flat();
+    let familyById: Map<string, string> | undefined;
+    if (foods) {
+        const listed = await foods.listFoods(input.householdId);
+        familyById = new Map(listed.map((row) => [row.id, familyOf(row)]));
+    }
     const suggested = suggestGrocerySection({
         sections: allSections.filter((row) => row.storeId === input.storeId),
         allSections,
@@ -445,6 +462,7 @@ export async function placeGroceryLine(
         kind: input.kind,
         foodId: input.foodId,
         displayName: input.displayName,
+        familyById,
     });
     return suggested?.id ?? resolveGrocerySectionId(settings, input.storeId);
 }
@@ -485,6 +503,7 @@ function wrapFoodsError(err: unknown): never {
 async function insertFromFood(
     grocery: GroceryListStore,
     settings: SettingsStore,
+    foods: FoodsStore,
     input: {
         householdId: string;
         storeId: string;
@@ -494,14 +513,19 @@ async function insertFromFood(
         food: Awaited<ReturnType<typeof findFoodById>>;
     },
 ): Promise<GroceryLine> {
-    const sectionId = await placeGroceryLine(grocery, settings, {
-        householdId: input.householdId,
-        storeId: input.storeId,
-        sectionId: input.sectionId,
-        kind: input.food.kind,
-        foodId: input.food.id,
-        displayName: input.food.name,
-    });
+    const sectionId = await placeGroceryLine(
+        grocery,
+        settings,
+        {
+            householdId: input.householdId,
+            storeId: input.storeId,
+            sectionId: input.sectionId,
+            kind: input.food.kind,
+            foodId: input.food.id,
+            displayName: input.food.name,
+        },
+        foods,
+    );
     return grocery.insertLine({
         id: crypto.randomUUID(),
         householdId: input.householdId,
@@ -536,7 +560,7 @@ export async function addGroceryFoodById(
         if (food.kind !== "food") {
             throw new GroceryInputError("That catalog item is a supply.");
         }
-        return insertFromFood(grocery, settings, {
+        return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
             storeId: input.storeId,
             sectionId: input.sectionId,
@@ -575,7 +599,7 @@ export async function addGroceryFoodByBarcode(
             input.barcode,
             opts.lookup,
         );
-        return insertFromFood(grocery, settings, {
+        return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
             storeId: input.storeId,
             sectionId: input.sectionId,
@@ -611,7 +635,7 @@ export async function addGroceryManualFood(
             "food",
             input.name,
         );
-        return insertFromFood(grocery, settings, {
+        return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
             storeId: input.storeId,
             sectionId: input.sectionId,
@@ -655,7 +679,7 @@ export async function addGrocerySupply(
         if (food.kind !== "supply") {
             throw new GroceryInputError("That catalog item is a food.");
         }
-        return insertFromFood(grocery, settings, {
+        return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
             storeId: input.storeId,
             sectionId: input.sectionId,
