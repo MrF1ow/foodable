@@ -22,8 +22,14 @@ import {
     renderRecipesPage,
 } from "../src/web/pages/recipes.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
-import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
-import { renderUsualProductsListPage } from "../src/web/pages/usual-products.js";
+import {
+    renderFoodsSettingsPage,
+    FOOD_EDIT_MODAL_ID,
+} from "../src/web/pages/foods.js";
+import {
+    renderUsualProductsListPage,
+    renderUsualProductsPickerPage,
+} from "../src/web/pages/usual-products.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import {
@@ -38,7 +44,11 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import { matchFoodsByWords, usualProductRows } from "../src/domain/foods.js";
+import {
+    effectiveFood,
+    matchFoodsByWords,
+    usualProductRows,
+} from "../src/domain/foods.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -51,6 +61,10 @@ const ME = {
     displayName: "Ethan",
 };
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+
+const PREVIEW_STORES = [
+    { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
+];
 
 // The widget templates carry a SAMPLE payload for standalone preview; reuse it
 // so the nutrition page shows real cards.
@@ -290,7 +304,7 @@ function food(
     return {
         id,
         householdId: H,
-        kind: "food",
+        kind: "food" as const,
         name,
         normalizedName: name.toLowerCase(),
         brand: null,
@@ -310,6 +324,8 @@ function food(
         offSourceId: null,
         genericFoodId: null,
         usualProductId: null,
+        usualStoreId: null,
+        usualAmount: null,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",
@@ -330,6 +346,8 @@ function previewFoodCatalog() {
         food("f-kirkland", "Kirkland Large Eggs", 140, {
             genericFoodId: "f-eggs",
             brand: "Kirkland",
+            usualStoreId: "s-costco",
+            usualAmount: { amount: 24, unit: "each" },
         }),
         food("f-gv", "Great Value Eggs", 130, { genericFoodId: "f-eggs" }),
         food("f-buttermilk", "Buttermilk", null),
@@ -347,6 +365,11 @@ function previewFoodCatalog() {
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const chrome = viewerChromeFromProfile({ theme });
     const { catalog, usual } = previewFoodCatalog();
+    const catalogById = new Map(catalog.map((row) => [row.id, row]));
+    const eggsPlain = catalog.find((row) => row.id === "f-eggs")!;
+    const eggProducts = catalog
+        .filter((row) => row.genericFoodId === "f-eggs")
+        .sort((a, b) => a.name.localeCompare(b.name));
     const nutrition = await renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -540,6 +563,22 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         foods: renderFoodsSettingsPage({
             chrome,
             foods: catalog.map((row) => ({ ...row, aliases: [] })),
+            stores: PREVIEW_STORES,
+        } as never),
+        "foods-edit": renderFoodsSettingsPage({
+            chrome,
+            foods: catalog.map((row) => ({ ...row, aliases: [] })),
+            stores: PREVIEW_STORES,
+            openModalId: `${FOOD_EDIT_MODAL_ID}-f-kirkland`,
+        } as never),
+        "usual-products-picker": renderUsualProductsPickerPage({
+            chrome,
+            food: eggsPlain,
+            products: eggProducts,
+            usualProductId: eggsPlain.usualProductId,
+            effective: effectiveFood(eggsPlain, catalogById),
+            stores: PREVIEW_STORES,
+            from: "/household/usual-products",
         } as never),
         "usual-products": renderUsualProductsListPage({
             chrome,
@@ -617,7 +656,8 @@ async function nutritionWithModal(
 const names: string[] = [];
 const modalShotPages: string[] = [];
 for (const theme of ["light", "dark"] as const) {
-    for (const [name, html] of Object.entries(await pages(theme))) {
+    const p = await pages(theme);
+    for (const [name, html] of Object.entries(p)) {
         const file = `${name}-${theme}`;
         await Bun.write(`${OUT}/${file}.html`, html);
         names.push(file);
@@ -634,6 +674,10 @@ for (const theme of ["light", "dark"] as const) {
         );
         modalShotPages.push(file);
     }
+    modalShotPages.push(
+        `foods-edit-${theme}`,
+        `usual-products-picker-${theme}`,
+    );
 }
 
 const server = Bun.serve({

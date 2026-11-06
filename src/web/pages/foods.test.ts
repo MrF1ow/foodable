@@ -29,6 +29,7 @@ test("items nests products with Usual pill", () => {
     });
     const html = renderFoodsSettingsPage({
         chrome: { theme: "light" },
+        stores: [],
         foods: [{ ...plain, usualProductId: "k1" }, kirkland],
     });
     expect(html).toContain('class="food-products list"');
@@ -41,6 +42,7 @@ test("standalone row shows Belongs to action", () => {
     const plain = food("p1", "Eggs");
     const html = renderFoodsSettingsPage({
         chrome: { theme: "light" },
+        stores: [],
         foods: [plain, solo],
     });
     expect(html).toContain("Belongs to…");

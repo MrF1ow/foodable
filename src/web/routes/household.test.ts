@@ -612,6 +612,64 @@ describe("household usual products and items routes", () => {
         expect(html).toContain('name="usual_product_id"');
     });
 
+    test("POST usual-products saves usual store and amount on product", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const r = await post(
+            `/household/usual-products/${eggs.id}`,
+            `product_food_id=${kirkland.id}&usual_amount=18&usual_unit=each&usual_store_id=${costco.id}`,
+        );
+        expect(r.status).toBe(303);
+        const prod = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(prod?.usualStoreId).toBe(costco.id);
+        expect(prod?.usualAmount).toEqual({ amount: 18, unit: "each" });
+    });
+
+    test("POST items edit saves usual purchase fields", async () => {
+        const { eggs } = await seedEggsCatalog();
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const r = await post(
+            `/household/items/${eggs.id}`,
+            [
+                "name=Eggs",
+                "brand=",
+                "aliases=",
+                "default_unit=each",
+                "grams_per_each=50",
+                "grams_per_ml=",
+                "calories=",
+                "usual_amount=6",
+                "usual_unit=each",
+                `usual_store_id=${costco.id}`,
+            ].join("&"),
+        );
+        expect(r.status).toBe(303);
+        const row = await db.foodsStore.getFood(HH, eggs.id);
+        expect(row?.usualStoreId).toBe(costco.id);
+        expect(row?.usualAmount).toEqual({ amount: 6, unit: "each" });
+    });
+
+    test("POST items edit bad usual unit returns 400 without writing", async () => {
+        const { eggs } = await seedEggsCatalog();
+        const before = await db.foodsStore.getFood(HH, eggs.id);
+        const r = await post(
+            `/household/items/${eggs.id}`,
+            [
+                "name=Eggs",
+                "brand=",
+                "aliases=",
+                "default_unit=each",
+                "grams_per_each=50",
+                "grams_per_ml=",
+                "calories=",
+                "usual_amount=1",
+                "usual_unit=nope",
+            ].join("&"),
+        );
+        expect(r.status).toBe(400);
+        expect(await db.foodsStore.getFood(HH, eggs.id)).toEqual(before);
+    });
+
     test("POST link error from recipe reopens link prompt", async () => {
         await seedEggsCatalog();
         const solo = await db.foodsStore.insertFood(

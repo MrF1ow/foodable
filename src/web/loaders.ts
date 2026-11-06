@@ -45,6 +45,7 @@ import type { LinkProductPromptView } from "./components/link-product-prompt.js"
 import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
 import {
+    effectiveFood,
     effectiveFoodsByIds,
     matchFoodsByWords,
     suggestFoodFor,
@@ -528,11 +529,14 @@ export async function renderSettingsFoodsPage(
               opts.error,
           )
         : null;
+    const settings = liveSettingsStore();
+    const stores = await settings.listStores(householdId);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
             chrome: viewerChromeFromProfile(profile),
             foods: withAliases,
+            stores,
             error: opts.error,
             openModalId: opts.openModalId,
             linkProductPrompt,
@@ -599,6 +603,10 @@ export async function renderUsualProductsPickerPage(
         .filter((row) => row.genericFoodId === foodId && !row.archivedAt)
         .sort((a, b) => a.name.localeCompare(b.name));
     const from = safeReturnPath(opts.from, "/household/usual-products");
+    const listed = foods;
+    const catalog = new Map(listed.map((row) => [row.id, row]));
+    const eff = effectiveFood(food, catalog);
+    const stores = await liveSettingsStore().listStores(householdId);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
@@ -606,6 +614,8 @@ export async function renderUsualProductsPickerPage(
             food,
             products,
             usualProductId: food.usualProductId,
+            effective: eff,
+            stores,
             from,
             error: opts.error,
         }),

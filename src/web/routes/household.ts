@@ -55,6 +55,7 @@ import {
     findOrCreateFoodByBarcode,
     FoodsInputError,
     linkProduct,
+    parseUsualPurchase,
     setUsualProduct,
     updateFood,
 } from "../../domain/foods.js";
@@ -197,12 +198,32 @@ householdRoutes.post(
         const from = formText(body, "from");
         const productRaw = formText(body, "product_food_id");
         const productId = productRaw.trim() === "" ? null : productRaw.trim();
+        const usualAmountRaw = formText(body, "usual_amount").trim();
+        const usualUnitRaw = formText(body, "usual_unit").trim();
+        const usualStoreRaw = formText(body, "usual_store_id").trim();
+        const purchase = {
+            usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
+            usualAmount:
+                usualAmountRaw === "" && usualUnitRaw === ""
+                    ? null
+                    : {
+                          amount:
+                              usualAmountRaw === ""
+                                  ? null
+                                  : Number(usualAmountRaw),
+                          unit: usualUnitRaw === "" ? null : usualUnitRaw,
+                      },
+        };
         try {
             await setUsualProduct(
                 liveFoodsStore(),
                 member.householdId,
                 foodId,
                 productId,
+                {
+                    purchase,
+                    stores: liveSettingsStore(),
+                },
             );
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
@@ -241,7 +262,15 @@ householdRoutes.post(
             if (!picked) {
                 throw new FoodsInputError("Pick a food or scan a barcode.");
             }
-            await setUsualProduct(store, member.householdId, foodId, picked.id);
+            await setUsualProduct(
+                store,
+                member.householdId,
+                foodId,
+                picked.id,
+                {
+                    stores: liveSettingsStore(),
+                },
+            );
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
             return c.html(page.html, page.status);
@@ -357,6 +386,7 @@ householdRoutes.post("/household/items/:id/link", requireMember, async (c) => {
                 member.householdId,
                 plainId,
                 productId,
+                { stores: liveSettingsStore() },
             );
         }
     } catch (err) {
@@ -898,8 +928,42 @@ householdRoutes.post("/household/items/:id", requireMember, async (c) => {
         allergens: formAllergens(body),
         archived: formText(asText, "archived") === "1",
     };
+    const settings = liveSettingsStore();
     try {
-        await buildFoodUpdate(store, member.householdId, foodId, patch);
+        if (
+            "usual_amount" in asText ||
+            "usual_unit" in asText ||
+            "usual_store_id" in asText
+        ) {
+            const usualAmountRaw = formText(asText, "usual_amount").trim();
+            const usualUnitRaw = formText(asText, "usual_unit").trim();
+            const usualStoreRaw = formText(asText, "usual_store_id").trim();
+            await parseUsualPurchase(
+                member.householdId,
+                {
+                    usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
+                    usualAmount: {
+                        amount:
+                            usualAmountRaw === ""
+                                ? null
+                                : Number(usualAmountRaw),
+                        unit: usualUnitRaw === "" ? null : usualUnitRaw,
+                    },
+                },
+                settings,
+            );
+            Object.assign(patch, {
+                usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
+                usualAmount: {
+                    amount:
+                        usualAmountRaw === "" ? null : Number(usualAmountRaw),
+                    unit: usualUnitRaw === "" ? null : usualUnitRaw,
+                },
+            });
+        }
+        await buildFoodUpdate(store, member.householdId, foodId, patch, {
+            stores: settings,
+        });
         if ("generic_food_id" in asText) {
             const raw = formText(asText, "generic_food_id");
             await linkProduct(
@@ -916,9 +980,12 @@ householdRoutes.post("/household/items/:id", requireMember, async (c) => {
                 member.householdId,
                 foodId,
                 raw.trim() === "" ? null : raw.trim(),
+                { stores: settings },
             );
         }
-        await updateFood(store, member.householdId, foodId, patch);
+        await updateFood(store, member.householdId, foodId, patch, {
+            stores: settings,
+        });
     } catch (err) {
         const page = await foodsFormError(userId, err, `food-edit-${foodId}`);
         return c.html(page.html, page.status);

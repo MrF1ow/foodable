@@ -1,5 +1,12 @@
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
-import type { Food, UsualProductRow } from "../../domain/foods.js";
+import { FOOD_QUANTITY_UNITS } from "../../domain/quantity.js";
+import type { GroceryStore } from "../../domain/settings.js";
+import type {
+    Food,
+    EffectiveFood,
+    UsualProductRow,
+} from "../../domain/foods.js";
+import { quantityUnitOptionLabel } from "../display-quantity.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
@@ -42,6 +49,9 @@ export type UsualProductsPickerView = {
     food: Food;
     products: Food[];
     usualProductId: string | null;
+    /** Effective catalog row for prefill (usual product + fallback). */
+    effective: EffectiveFood;
+    stores: GroceryStore[];
     from: string;
     error?: string;
 };
@@ -181,6 +191,38 @@ export function renderUsualProductsPickerPage(
         productOption(p, p.id === usualId),
     );
     const noneChecked = usualId == null ? " checked" : "";
+    const usual = view.effective;
+    const amountVal =
+        usual.usualAmount != null ? String(usual.usualAmount.amount) : "";
+    const unitOpts = [
+        `<option value="">—</option>`,
+        ...FOOD_QUANTITY_UNITS.map((unit) => {
+            const label = quantityUnitOptionLabel(unit);
+            const sel = usual.usualAmount?.unit === unit ? " selected" : "";
+            return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
+        }),
+    ].join("");
+    const storeOpts = [
+        `<option value="">—</option>`,
+        ...view.stores.map((s) => {
+            const sel = usual.usualStoreId === s.id ? " selected" : "";
+            return `<option value="${escapeHtml(s.id)}"${sel}>${escapeHtml(s.name)}</option>`;
+        }),
+    ].join("");
+    const usualBuyBlock = `
+${field({
+    id: "usual-buy-amount",
+    label: "Usually buy",
+    control: `<div class="field-grid">
+<label>Amount<input id="usual-buy-amount" name="usual_amount" type="number" min="0" step="any" value="${escapeHtml(amountVal)}" /></label>
+<label>Unit<select id="usual-buy-unit" name="usual_unit">${unitOpts}</select></label>
+</div>`,
+})}
+${field({
+    id: "usual-buy-store",
+    label: "at",
+    control: `<select id="usual-buy-store" name="usual_store_id">${storeOpts}</select>`,
+})}`;
     const existingProducts =
         view.products.length === 0
             ? `<p class="muted">No products for this food yet. Search, scan or add one below.</p>`
@@ -190,6 +232,7 @@ export function renderUsualProductsPickerPage(
 <label class="choice-row"><input type="radio" name="product_food_id" value=""${noneChecked} /> None</label>
 ${productRadios.join("")}
 </div>
+${usualBuyBlock}
 <button type="submit" class="btn-primary">Set usual</button>
 </form>`;
     const picker = renderFoodPicker({
