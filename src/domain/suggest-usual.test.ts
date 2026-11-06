@@ -69,41 +69,36 @@ test("suggestFoodFor token matching", async () => {
     expect(suggestFoodFor("Farm Large Eggs", live)?.id).toBe(largeEggs.id);
 });
 
-test("usualProductRows needs-usual and listing", async () => {
+test("usualProductRows lists only foods with products", async () => {
     const store = createMemoryFoodsStore();
     const eggs = await plain(store, "Eggs");
-    const milk = await plain(store, "Milk", { calories: 50 });
+    await plain(store, "Milk", { calories: 50 });
     const kirkland = await product(store, eggs.id, "Kirkland Large Eggs");
     await product(store, eggs.id, "Great Value Eggs");
+    await plain(store, "Cilantro");
+
+    // A household starts empty: plain foods without products are only
+    // choices to add, whatever recipes or grocery lines use them.
+    const before = usualProductRows({ foods: await store.listFoods(HH) });
+    expect(before.rows.map((r) => r.food.name)).toEqual(["Eggs"]);
+    expect(before.rows[0]?.usual).toBeNull();
+    expect(before.rows[0]?.products.map((p) => p.name)).toEqual([
+        "Great Value Eggs",
+        "Kirkland Large Eggs",
+    ]);
+    expect(before.addable.map((f) => f.name)).toEqual(["Cilantro", "Milk"]);
+
     await store.updateFoodRow({
         ...(await store.getFood(HH, eggs.id))!,
         usualProductId: kirkland.id,
     });
-    await plain(store, "Cilantro");
+    const after = usualProductRows({ foods: await store.listFoods(HH) });
+    expect(after.rows[0]?.usual?.name).toBe("Kirkland Large Eggs");
 
-    const foods = await store.listFoods(HH);
-    const recipeFoodIds = new Set([eggs.id, milk.id]);
-    const groceryFoodIds = new Set<string>();
-
-    const view = usualProductRows({ foods, recipeFoodIds, groceryFoodIds });
-    expect(view.needsUsual.map((f) => f.name)).toEqual([]);
-    expect(view.rows.map((r) => r.food.name)).toEqual(["Eggs", "Milk"]);
-    const eggsRow = view.rows.find((r) => r.food.id === eggs.id)!;
-    expect(eggsRow.usual?.name).toBe("Kirkland Large Eggs");
-    expect(eggsRow.products).toHaveLength(2);
-    expect(view.rows.some((r) => r.food.name === "Cilantro")).toBe(false);
-
-    await store.updateFoodRow({
-        ...(await store.getFood(HH, eggs.id))!,
-        usualProductId: null,
+    const empty = usualProductRows({
+        foods: (await store.listFoods(HH)).filter((f) => !f.genericFoodId),
     });
-    const cleared = usualProductRows({
-        foods: await store.listFoods(HH),
-        recipeFoodIds,
-        groceryFoodIds,
-    });
-    expect(cleared.needsUsual.map((f) => f.name)).toEqual(["Eggs"]);
-    expect(cleared.rows.find((r) => r.food.id === eggs.id)?.usual).toBeNull();
+    expect(empty.rows).toEqual([]);
 });
 
 test("findOrCreateManualFood still works for suggest fixtures", async () => {

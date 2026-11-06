@@ -277,6 +277,27 @@ describe("household usual products and items routes", () => {
         });
     }
 
+    test("GET list starts empty, then Add usual product opens the picker", async () => {
+        const get = (path: string) =>
+            app().request(`http://x${path}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            });
+        const cilantro = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Cilantro" }),
+        );
+        const list = await get("/household/usual-products");
+        expect(list.status).toBe(200);
+        const html = await list.text();
+        expect(html).toContain("No usual products yet.");
+        expect(html).not.toContain("Needs a usual product");
+        expect(html).toContain(`value="${cilantro.id}"`);
+        const add = await get(`/household/usual-products?food=${cilantro.id}`);
+        expect(add.status).toBe(302);
+        expect(add.headers.get("location")).toBe(
+            `/household/usual-products/${cilantro.id}`,
+        );
+    });
+
     test("POST set usual redirects and updates state", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const r = await post(

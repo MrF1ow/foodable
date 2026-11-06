@@ -1030,11 +1030,17 @@ export type UsualProductRow = {
     usual: Food | null;
 };
 
-export function usualProductRows(input: {
-    foods: readonly Food[];
-    recipeFoodIds: ReadonlySet<string>;
-    groceryFoodIds: ReadonlySet<string>;
-}): { needsUsual: Food[]; rows: UsualProductRow[] } {
+/**
+ * The Usual products page: every live plain food that has at least one live
+ * product, sorted by name, with its usual product when one is set. A
+ * household starts with an empty list and adds to it; nothing is listed just
+ * because a recipe or grocery line uses it. `addable` is every other live
+ * plain food, the choices behind "Add usual product".
+ */
+export function usualProductRows(input: { foods: readonly Food[] }): {
+    rows: UsualProductRow[];
+    addable: Food[];
+} {
     const live = input.foods.filter((row) => !row.archivedAt);
     const plainFoods = live.filter((row) => !row.genericFoodId);
     const productsByPlain = new Map<string, Food[]>();
@@ -1044,34 +1050,24 @@ export function usualProductRows(input: {
         list.push(row);
         productsByPlain.set(row.genericFoodId, list);
     }
+    const byName = (a: Food, b: Food) => a.name.localeCompare(b.name);
     const rows: UsualProductRow[] = [];
+    const addable: Food[] = [];
     for (const food of plainFoods) {
-        const products = (productsByPlain.get(food.id) ?? []).sort((a, b) =>
-            a.name.localeCompare(b.name),
-        );
-        const used =
-            input.recipeFoodIds.has(food.id) ||
-            input.groceryFoodIds.has(food.id);
-        if (products.length === 0 && !used) continue;
+        const products = (productsByPlain.get(food.id) ?? []).sort(byName);
+        if (products.length === 0) {
+            addable.push(food);
+            continue;
+        }
         const usual =
             food.usualProductId != null
                 ? (products.find((p) => p.id === food.usualProductId) ?? null)
                 : null;
         rows.push({ food, products, usual });
     }
-    rows.sort((a, b) => a.food.name.localeCompare(b.food.name));
-    const needsUsual = plainFoods
-        .filter((food) => {
-            if (!input.recipeFoodIds.has(food.id)) return false;
-            if (!foodHasNoNutrition(food)) return false;
-            const products = productsByPlain.get(food.id) ?? [];
-            const validUsual =
-                food.usualProductId != null &&
-                products.some((p) => p.id === food.usualProductId);
-            return !validUsual;
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-    return { needsUsual, rows };
+    rows.sort((a, b) => byName(a.food, b.food));
+    addable.sort(byName);
+    return { rows, addable };
 }
 
 export function linkProductPromptPath(

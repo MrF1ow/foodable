@@ -8,6 +8,8 @@ import {
     emptyState,
     errorBanner,
     field,
+    modal,
+    modalTrigger,
     pageHeader,
     pageLevelErrorBanner,
     panel,
@@ -17,10 +19,13 @@ import {
     usualProductsPickerHref,
 } from "../usual-products-path.js";
 
+export const USUAL_PRODUCT_ADD_MODAL_ID = "usual-product-add";
+
 export type UsualProductsListView = {
     chrome: ViewerChrome;
-    needsUsual: Food[];
     rows: UsualProductRow[];
+    /** Plain foods with no products yet: the "Add usual product" choices. */
+    addable: Food[];
     from?: string;
     error?: string;
     openFoodId?: string;
@@ -84,22 +89,6 @@ export function renderUsualProductsListPage(
     view: UsualProductsListView,
 ): string {
     const listFrom = safeReturnPath(view.from, "/household/usual-products");
-    const needsRows = view.needsUsual
-        .map(
-            (food) => `<li><div class="row">
-<p class="row-title">${escapeHtml(food.name)}</p>
-<p class="row-meta">No nutrition</p>
-<div class="row-actions"><a class="btn-sm" href="${escapeHtml(usualProductsPickerHref(food.id, listFrom))}">Pick</a></div>
-</div></li>`,
-        )
-        .join("");
-    const needsPanel =
-        view.needsUsual.length === 0
-            ? ""
-            : panel({
-                  title: "Needs a usual product",
-                  body: `<ul class="list">${needsRows}</ul>`,
-              });
     const mainRows = view.rows
         .map((row) => {
             const usualMeta = row.usual
@@ -114,16 +103,40 @@ export function renderUsualProductsListPage(
         .join("");
     const mainPanel =
         view.rows.length === 0
-            ? emptyState("No foods with products yet.")
+            ? emptyState("No usual products yet.")
             : panel({
                   body: `<ul class="list">${mainRows}</ul>`,
               });
+    const addOptions = view.addable
+        .map(
+            (food) =>
+                `<option value="${escapeHtml(food.id)}">${escapeHtml(food.name)}</option>`,
+        )
+        .join("");
+    const addModal =
+        view.addable.length === 0
+            ? ""
+            : modal({
+                  id: USUAL_PRODUCT_ADD_MODAL_ID,
+                  title: "Add usual product",
+                  body: `<form method="get" action="/household/usual-products" class="usual-product-add">
+${field({ id: "usual-product-add-food", label: "Food", control: `<select id="usual-product-add-food" name="food" required>${addOptions}</select>` })}
+<button type="submit" class="btn-primary">Choose product</button>
+</form>`,
+              });
+    const addTrigger =
+        view.addable.length === 0
+            ? undefined
+            : modalTrigger({
+                  target: USUAL_PRODUCT_ADD_MODAL_ID,
+                  label: "Add usual product",
+              });
     const body = `
-        ${pageHeader({ title: "Usual products" })}
+        ${pageHeader({ title: "Usual products", actions: addTrigger })}
         ${pageLevelErrorBanner(view, view.openFoodId ? [`picker-${view.openFoodId}`] : [])}
         ${renderHouseholdNav("usual-products")}
-        ${needsPanel}
         ${mainPanel}
+        ${addModal}
     `;
     return renderAppShell({
         title: "Usual products",

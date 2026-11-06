@@ -490,35 +490,6 @@ function linkProductPromptFromFoods(
     };
 }
 
-async function foodUsageSets(householdId: string): Promise<{
-    recipeFoodIds: Set<string>;
-    groceryFoodIds: Set<string>;
-}> {
-    const recipesStore = liveRecipesStore();
-    const recipes = await recipesStore.listRecipes(householdId);
-    const recipeFoodIds = new Set<string>();
-    for (const recipe of recipes) {
-        const ingredients = await recipesStore.listIngredients(
-            householdId,
-            recipe.id,
-        );
-        for (const row of ingredients) {
-            if (row.foodId) recipeFoodIds.add(row.foodId);
-        }
-    }
-    const snapshot = await listGrocery(
-        liveGroceryStore(),
-        liveSettingsStore(),
-        householdId,
-    );
-    const groceryFoodIds = new Set(
-        snapshot.lines
-            .map((line) => line.foodId)
-            .filter((id): id is string => Boolean(id)),
-    );
-    return { recipeFoodIds, groceryFoodIds };
-}
-
 export async function renderSettingsFoodsPage(
     viewerUserId: string,
     opts: {
@@ -570,18 +541,13 @@ export async function renderUsualProductsListPage(
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
     const foods = await liveFoodsStore().listFoods(householdId);
-    const usage = await foodUsageSets(householdId);
-    const { needsUsual, rows } = usualProductRows({
-        foods,
-        recipeFoodIds: usage.recipeFoodIds,
-        groceryFoodIds: usage.groceryFoodIds,
-    });
+    const { rows, addable } = usualProductRows({ foods });
     return {
         status: 200,
         html: renderUsualProductsListHtml({
             chrome: viewerChromeFromProfile(profile),
-            needsUsual,
             rows,
+            addable,
             from: opts.from,
             error: opts.error,
         }),
