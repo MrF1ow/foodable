@@ -2,6 +2,8 @@ import { cleanRecipeLink, validateRecipeLink } from "./recipe-link.js";
 
 const SHARE_FIELD_CAP = 20_000;
 const TITLE_AS_TEXT_MIN = 80;
+/** Max bytes for post-login `/share?…` return paths (server-side OAuth session). */
+export const SHARE_RETURN_PATH_MAX = 64 * 1024;
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>"')\]}]+/gi;
 
@@ -72,15 +74,60 @@ function bareUrlText(text: string, linkMatch: string): string | null {
     return rest.length === 0 ? null : text;
 }
 
-/** Same-origin return paths after site login for the share target. */
-export function isSafeShareReturnPath(path: string): boolean {
-    if (path.length === 0 || path.length > 2048) return false;
-    if (!path.startsWith("/") || path.startsWith("//")) return false;
-    if (path.includes("\\")) return false;
-    if (/[\u0000-\u001f\u007f]/.test(path)) return false;
-    const q = path.indexOf("?");
-    const pathname = q >= 0 ? path.slice(0, q) : path;
-    return pathname === "/share" || pathname.startsWith("/share/");
+function hasControlChars(s: string): boolean {
+    return /[\u0000-\u001f\u007f]/.test(s);
+}
+
+function pathHasDotSegment(pathname: string): boolean {
+    for (const seg of pathname.split("/")) {
+        if (seg === "") continue;
+        if (seg === "." || seg === "..") return true;
+        try {
+            const dec = decodeURIComponent(seg);
+            if (dec === "." || dec === "..") return true;
+        } catch {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Same-origin return paths after site login for the share target.
+ * Returns normalized `pathname + search`, or null when rejected.
+ */
+export function isSafeShareReturnPath(path: string): string | null {
+    if (path.length === 0 || path.length > SHARE_RETURN_PATH_MAX) return null;
+    if (!path.startsWith("/")) return null;
+    if (path.startsWith("//")) return null;
+    if (path.includes("\\")) return null;
+    if (hasControlChars(path)) return null;
+
+    let decoded: string;
+    try {
+        decoded = decodeURIComponent(path);
+    } catch {
+        return null;
+    }
+    if (hasControlChars(decoded)) return null;
+
+    const rawPath = path.split("?")[0] ?? "";
+    if (pathHasDotSegment(rawPath)) return null;
+
+    let url: URL;
+    try {
+        url = new URL(path, "https://placeholder.invalid");
+    } catch {
+        return null;
+    }
+    if (url.origin !== "https://placeholder.invalid") return null;
+    if (pathHasDotSegment(url.pathname)) return null;
+
+    if (url.pathname !== "/share" && url.pathname !== "/share/probe") {
+        return null;
+    }
+
+    return url.pathname + url.search;
 }
 
 export function readShare(input: {

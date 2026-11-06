@@ -559,9 +559,14 @@ test("siteLoginReturnPath keeps /share query and refuses external next", () => {
         "http://localhost/login-next?next=" +
             encodeURIComponent("https://evil.com/share"),
     );
-    return Promise.all([share, badNext]).then(async ([s, n]) => {
+    const traversal = app.request(
+        "http://localhost/login-next?next=" +
+            encodeURIComponent("/share/../logout"),
+    );
+    return Promise.all([share, badNext, traversal]).then(async ([s, n, t]) => {
         expect(await s.text()).toBe("/share?text=hello&url=");
         expect(await n.text()).toBe("/");
+        expect(await t.text()).toBe("/");
     });
 });
 

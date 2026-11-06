@@ -76,6 +76,12 @@ import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 
 export const recipesRoutes = new Hono();
 
+function importOriginPrefill(origin: "shared" | "pasted") {
+    return origin === "shared"
+        ? ({ importTextOrigin: "shared" as const } as const)
+        : {};
+}
+
 async function recipeImportDeps(householdId: string) {
     const config = await getHouseholdConfig(householdId);
     return {
@@ -193,6 +199,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                     importWebsiteError: "That doesn't look like a web link.",
                     importSourceKind: "pinterest",
                     importSourceLabel: "Pinterest",
+                    ...importOriginPrefill(textOrigin),
                 });
                 return c.html(page.html, 422);
             }
@@ -214,6 +221,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 importPasteStep: true,
                 importSourceKind: "pinterest",
                 importSourceLabel: "Pinterest",
+                ...importOriginPrefill(textOrigin),
             });
             return c.html(page.html, 422);
         }
@@ -264,7 +272,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             importPasteStep: true,
             importPasteText: text,
             importTextOnly: true,
-            importTextOrigin: textOrigin === "shared" ? "shared" : undefined,
+            ...importOriginPrefill(textOrigin),
             importSourceKind: "text",
             importSourceLabel: "Recipe text",
         });
@@ -322,6 +330,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                         : undefined,
                 importSourceKind: "pinterest",
                 importSourceLabel: "Pinterest",
+                ...importOriginPrefill(textOrigin),
             });
             return c.html(page.html, 422);
         }
@@ -367,6 +376,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         importCredit: pasteRender ? credit : undefined,
         importSourceKind: outcome.source?.kind,
         importSourceLabel: outcome.source?.label,
+        ...importOriginPrefill(textOrigin),
     });
     return c.html(page.html, 422);
 });
