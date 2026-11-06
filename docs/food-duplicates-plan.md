@@ -109,15 +109,15 @@ Barcodes and products are covered by usual products. The name paths gain one ste
 One place for every likely duplicate the household has not decided on, whatever created it. Each pair is a `food.possible_duplicate` notice ([notices-plan.md](./notices-plan.md)), so its badge, sentence, action and MCP shape come from the shared registry and renderers rather than markup of its own.
 
 - **What is listed:** `possibleDuplicates(foods, aliases, dismissed)` (pure) pairs every two live, same-kind plain foods that `similarFoods` rules 1 and 2 would suggest for each other: same words up to plurals, or one name containing every word of the other. Rule 3, the broad word match, is left out because it is too noisy for a list. Pairs the merge job would merge on its own never wait here; they are merged. Products and scanned cartons are not listed: they are filed with Belongs to…, as in usual products.
-- **Computed, not stored:** the list is worked out from the catalog each time, so it can't go stale. Only the household's "Keep separate" answers are stored, in a new table `food_duplicate_dismissals` (`household_id`, `food_a_id`, `food_b_id` with `food_a_id < food_b_id`, `dismissed_by`, `created_at`; RLS and grants like every new table). A pair is never listed again once dismissed, and comes back only if one of the foods is merged into something else.
+- **Computed, not stored:** the list is worked out from the catalog each time, so it can't go stale. Only the household's "Keep separate" answers are stored, as dismissals of the `food.possible_duplicate` notice in the shared `notice_dismissals` table ([notices-plan.md](./notices-plan.md)), with the other food as the related half of the pair. A pair is never listed again once dismissed, and comes back only if one of the foods is merged into something else.
 - **Where:**
     - **Household › Possible duplicates,** a sub-nav entry that appears only when the list is not empty, with the count as a badge.
-    - **A dot on the Household tab** while there are any.
+    - **The household's Needs attention count and a dot on the Household tab** while there are any (both from [notices-plan.md](./notices-plan.md)).
     - **Where the food appears:** a recipe ingredient or grocery line for one of the foods shows a small "Possible duplicate of _Eggs_" link to the pair.
 - **Each row:** "chicken egg · Eggs", with **Merge…** and **Keep separate**.
     - Merge opens a confirm dialog showing which name is kept (the merge job's keep rule decides the default) and any field the two disagree on, such as calories. The person picks the value to keep, and the dialog runs `mergeFoods`.
     - Keep separate stores the dismissal.
-- **MCP:** two new tools, `list_possible_duplicates` and `keep_foods_separate { food_id, other_food_id }`, take the count from 69 to 71. A merge goes through the existing `merge_foods`. `SERVER_INSTRUCTIONS`: after an unattended run, mention any new possible duplicates, and never merge or dismiss one without asking.
+- **MCP:** no tools of its own. The shared `list_notices { code: "food.possible_duplicate" }` lists the pairs, `dismiss_notice` keeps a pair separate, and `merge_foods` merges one. `SERVER_INSTRUCTIONS`: after an unattended run, mention any new possible duplicates, and never merge or dismiss one without asking.
 
 ## Later: the catalog page
 
@@ -134,13 +134,13 @@ Until then, Household › Items stays as it is.
 ### Web
 
 - "Did you mean" on the three add forms.
-- Household › Possible duplicates (shown only when there are any), the Household tab dot, and the "Possible duplicate of…" links on recipe ingredients and grocery lines.
+- Household › Possible duplicates (shown only when there are any), counted in Needs attention and the Household tab dot, and the "Possible duplicate of…" links on recipe ingredients and grocery lines.
 - Household › Members: "Treat singular and plural as the same food" (off by default, owners and admins).
 - Settings › Help: the "Food vs household item" entry gains one line on "Did you mean", and a new "Possible duplicates" entry explains Merge and Keep separate.
 
 ### MCP
 
-The tool count goes from 69 to 71 (`list_possible_duplicates`, `keep_foods_separate`), so `src/mcp/tools-list.snapshot.json` and `TOOLS` change in that PR. `status: "similar_foods"` is an added outcome on six tools, and `new_food` and `on_similar` are added optional inputs. `merge_foods` gains the field fill and allergen union.
+The tool count does not change in this plan: Possible duplicates uses the shared `list_notices` and `dismiss_notice` from [notices-plan.md](./notices-plan.md). `status: "similar_foods"` is an added outcome on six tools, and `new_food` and `on_similar` are added optional inputs. `merge_foods` gains the field fill and allergen union.
 
 ## Tests
 
@@ -180,8 +180,8 @@ Plus:
 - `mcp.test.ts` for `status: "similar_foods"` and `new_food`;
 - a contract test for the repoint of `stock_movements` and `meal_items`;
 - route tests for Merge (including a field conflict) and Keep separate;
-- `mcp.test.ts` for `list_possible_duplicates` and `keep_foods_separate`, and the 71-tool snapshot;
-- `db:dryrun` for the `households.plurals_same_food` column and the `food_duplicate_dismissals` table.
+- `mcp.test.ts` for `list_notices` filtered to `food.possible_duplicate` and `dismiss_notice` on a pair;
+- `db:dryrun` for the `households.plurals_same_food` column.
 
 ## Pull requests
 
@@ -190,13 +190,12 @@ Plus:
     - `duplicatePairs`;
     - `scripts/merge-duplicate-foods.ts`.
       The production dry run is reviewed before anyone runs `--apply`.
-3. **Notices foundation:** PRs 1–3 of [notices-plan.md](./notices-plan.md).
+3. **Notices foundation:** PRs 1–4 of [notices-plan.md](./notices-plan.md).
 4. **Possible duplicates:**
-    - the `food_duplicate_dismissals` migration;
     - `possibleDuplicates`;
     - the Household section, tab dot and "Possible duplicate of…" links;
     - Merge… and Keep separate;
-    - `list_possible_duplicates` and `keep_foods_separate`.
+    - the `food.possible_duplicate` registry entry (badge, sentence, "Keep separate").
 5. **"Did you mean" in the domain and MCP:**
     - `similarFoods`;
     - `SimilarFoodsError`;
@@ -211,5 +210,4 @@ Then the catalog page is evaluated (see "Later").
 
 ## Open questions
 
-- **Keep separate, forever?** A dismissed pair never comes back unless a food is merged. Should a dismissal expire, or be undoable from the food? This may become the shared dismissal for every `info` notice (an open question in [notices-plan.md](./notices-plan.md)).
-- **The badge:** a dot on the Household tab, or a number? A number may nag when a household has a long list on day one, before the merge job runs.
+- **Keep separate, forever?** A dismissed pair never comes back unless a food is merged. Should a dismissal expire, or be undoable from the food? Undo lives in "Show dismissed" ([notices-plan.md](./notices-plan.md)).

@@ -117,15 +117,34 @@ Each source of notices becomes a pure function that returns `Notice[]`. The doma
 - `noticeBadge(notice)`: a pill coloured by severity with the existing shared pill classes: `pill-bad` for block, `pill-warn` for warn, `pill-dim` for info. No new colours;
 - `noticeList(notices)`: the sentence and action for each notice, replacing `ul.recipe-macros-reasons` and the allergen paragraphs.
 
-Every page that shows a notice uses these two functions, so a notice looks the same wherever it appears. The Household tab dot counts `info` and `warn` notices of the codes that ask for a household decision (today, `food.possible_duplicate`).
+Every page that shows a notice uses these two functions, so a notice looks the same wherever it appears. The household-wide count and the tab dots are described under "Needs attention" below.
 
 ### MCP
 
 One shared `NOTICE_SCHEMA` in `src/mcp/shared.ts`: `code`, `severity`, `subject`, `related`, `message` (the registry sentence) and `action` (its label).
 
-- Tools that return a thing also return its `notices`: `get_recipe`, `list_grocery_lines`, `get_fridge`, `get_food`, and `list_possible_duplicates` (food-duplicates plan).
+- Tools that return a thing also return its `notices`: `get_recipe`, `list_grocery_lines`, `get_fridge` and `get_food`. `list_notices` returns them for the whole household (see "Needs attention").
 - The old fields (`macros_per_portion.gaps`, `warning`) stay beside it for one release, filled from the same notices, then go.
 - The agent reads the same sentences as the app.
+
+## Dismissing a notice
+
+Some notices are suggestions a person may disagree with ("chicken egg might be Eggs": no, keep them separate). The answer must be remembered, or the same suggestion comes back forever. Rather than one table per kind of suggestion, there is one:
+
+- **`notice_dismissals`** (`household_id`, `code`, `subject_kind`, `subject_id`, `related_key`, `dismissed_by`, `created_at`, unique on the first five). `related_key` holds the other half of a pair (for a duplicate, the other food's id, the pair ordered so either side finds it) and is empty for single-subject notices. It is a new table, with RLS and grants like every new table.
+- **Only `info` notices can be dismissed.** A `warn` or `block` notice, such as an allergen or incomplete macros, goes away only when its cause is fixed.
+- **The registry says which codes allow it** (`dismissible: true`) and what the button says ("Keep separate" for a duplicate, "Dismiss" otherwise).
+- **A dismissal lasts** until its subject or related thing goes away, for instance when a food is merged into another. Each thing's notice list has "Show dismissed", where a dismissal can be undone.
+- Producers stay pure: `noticesFor` filters out dismissed notices after the producers run, so no producer has to know about dismissals.
+
+## Needs attention
+
+One count, across the whole household, of open `warn` and `info` notices. It is the same number everywhere it appears.
+
+- **A count in the top bar** next to the Settings gear, shown only when it is above zero. It opens **Needs attention**, one page listing every open notice grouped by the thing it is about, newest first, with each notice's action and, for `info`, its dismiss button.
+- **Tabs get a dot** when they hold open notices of their own: Fridge for expiry, Recipes for incomplete macros, Household for possible duplicates.
+- `block` notices are not counted. They appear at the moment of the action they block, such as adding an allergen to the grocery list, not as backlog.
+- **MCP:** `list_notices { code?, severity?, subject_kind? }` returns the same list. `dismiss_notice { code, subject, related_id? }` dismisses an `info` notice; the agent asks first. Together they take the tool count from 69 to 71, and they serve every notice, so features like Possible duplicates need no tools of their own.
 
 ## Tests
 
@@ -135,15 +154,22 @@ One shared `NOTICE_SCHEMA` in `src/mcp/shared.ts`: `code`, `severity`, `subject`
 - `noticesFor` merges producers, and orders notices block, then warn, then info.
 - Web: `noticeBadge` and `noticeList` markup per severity, and that pages use them rather than hand-built markup. A test fails on a hand-written `recipe-macros-reasons` list or `allergen-warning` paragraph outside `notices.ts`, the way `field.test.ts` guards labels.
 - MCP: `NOTICE_SCHEMA` validates the notices on each tool that returns them.
+- Dismissals: an `info` notice dismissed for one subject is gone for it and still shown for others; a `warn` notice can't be dismissed; a pair dismissal is found from either side; undoing brings it back; a dismissal whose subject was merged away no longer applies.
+- Needs attention: the count equals the page's list, excludes `block` and dismissed notices, and matches `list_notices`; each tab's dot follows its own codes.
 
 ## Pull requests
 
 1. **Model, registry, renderers,** with the recipe gaps moved onto them. That's the first producer, and it proves the shape against the newest code.
 2. **Expiry and allergens** move onto notices, and the old pill and paragraph markup is deleted.
 3. **MCP `notices`** on the tools above, with the old fields kept for one release.
-4. Then the food-duplicates plan's Possible duplicates step adds `food.possible_duplicate` as a producer, with nothing new to render.
+4. **Dismissals and Needs attention:**
+    - the `notice_dismissals` migration;
+    - "Show dismissed";
+    - the top-bar count, the page and the tab dots;
+    - `list_notices` and `dismiss_notice` (69 → 71 tools).
+5. Then the food-duplicates plan's Possible duplicates step adds `food.possible_duplicate` as a producer, with nothing new to render, store or expose.
 
 ## Open questions
 
-- **Dismissing a notice:** Possible duplicates needs "Keep separate". Should every `info` notice be dismissible through one shared table, rather than one per code?
-- **Counts:** should the Household tab dot become a general "needs attention" count across every `warn` notice, or stay limited to decisions only the household can make?
+- **Expiring dismissals:** should a dismissal ever lapse on its own, for example "Expiring soon" coming back if the item is still there a week later?
+- **The first day:** a household's first Needs attention count may be large (every incomplete recipe at once). Should the top-bar count start at warn notices from the last 30 days, with the full list on the page?
