@@ -201,5 +201,6 @@ None of this is in the pull requests above. They are built so it fits later.
 
 ## Open questions
 
-- **Expiring dismissals:** should a dismissal ever lapse on its own, for example "Expiring soon" coming back if the item is still there a week later?
-- **The first day:** a household's first Needs attention count may be large (every incomplete recipe at once). Should the top-bar count start at warn notices from the last 30 days, with the full list on the page?
+- **The first day's count:** when notices ship, a household starts with every existing problem at once, every incomplete recipe and expired item, so the top-bar count could open at a large number. Should it show the real number (merges and fixes bring it down quickly), or count only recent warnings at first, with everything still on the page?
+
+Settled: a dismissal never lapses on its own. "Expiring soon" is better answered by acting on it, and the opt-in restock in [restock-plan.md](./restock-plan.md) adds expiring food to the grocery list on a chosen day. Dismissing an item's `fridge.expiring` notice there means "don't restock this one".
