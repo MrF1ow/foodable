@@ -417,9 +417,11 @@ recipesRoutes.post(
                 recipeId,
                 c.req.param("ingredientId"),
                 {
-                    amount: formRecipeIngredientAmount(body, "amount"),
+                    amount: formRecipeIngredientAmount(body, "ing_amount"),
+                    unit: formText(body, "ing_unit"),
                     note: formText(body, "note"),
                 },
+                liveFoodsStore(),
             );
         } catch (err) {
             const page = await recipeFormError(userId, recipeId, err, {

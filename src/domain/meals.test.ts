@@ -230,6 +230,12 @@ test("recipe portion with unmeasured ingredient marks nutrition unknown", async 
         fatG: 1,
     });
     const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    await updateFood(foods, HH, salt.id, {
+        calories: 9999,
+        proteinG: 999,
+        carbsG: 999,
+        fatG: 999,
+    });
     const recipe = await createRecipe(recipes, {
         householdId: HH,
         creatorId: "alice",
@@ -266,6 +272,9 @@ test("recipe portion with unmeasured ingredient marks nutrition unknown", async 
     });
     expect(result.built.items[0]!.unknown).toBe(true);
     expect(result.built.totals.calories).toBe(364);
+    expect(result.built.totals.protein_g).toBe(10);
+    expect(result.built.totals.carbs_g).toBe(76);
+    expect(result.built.totals.fat_g).toBe(1);
 });
 
 test("unknown food or recipe ids fail closed", () => {
