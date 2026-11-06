@@ -1,3 +1,4 @@
+import { hostMatches } from "./recipe-link.js";
 import type { FetchFailure } from "../fetch-safe.js";
 import type { SafeFetcher } from "../fetch-safe.js";
 import { decodeRecipeHtmlEntities } from "./recipe-jsonld.js";
@@ -206,10 +207,12 @@ export function webVttToText(vtt: string): string {
         );
         if (timingIdx === -1) continue;
         const textLines = lines.slice(timingIdx + 1).filter((l) => l.trim());
-        let text = textLines
-            .join(" ")
-            .replace(/<[^>]+>/g, "")
-            .replace(/<\d{2}:\d{2}[^>]*>/g, "");
+        let text = textLines.join(" ");
+        // Strip tags until none are left, so a nested "<<c>script>" cannot
+        // reassemble a tag; the result is plain text, escaped on render.
+        for (let pass = 0; pass < 5 && /<[^<>]*>/.test(text); pass++) {
+            text = text.replace(/<[^<>]*>/g, "");
+        }
         text = decodeRecipeHtmlEntities(text).trim();
         if (text) cues.push(text);
     }
@@ -245,7 +248,7 @@ export function facebookOembedEndpoint(
     if (host === "fb.me" || host.endsWith(".fb.me")) {
         return { ok: true, endpoint: "oembed_video" };
     }
-    if (!host.includes("facebook.com") && !host.includes("fb.com")) {
+    if (!hostMatches(host, "facebook.com") && !hostMatches(host, "fb.com")) {
         return { ok: false, reason: "unsupported_link" };
     }
     if (path.includes("/groups/")) {

@@ -8,6 +8,12 @@ import {
     isPublicAddress,
 } from "./fetch-safe.js";
 
+/** Host check for fake fetchers: the exact host or a subdomain of it. */
+function onHost(href: string, domain: string): boolean {
+    const host = new URL(href).hostname;
+    return host === domain || host.endsWith(`.${domain}`);
+}
+
 const PUBLIC = "93.184.216.34";
 
 function okResponse(
@@ -616,7 +622,7 @@ test("a robots.txt redirect to another site is never followed", async () => {
     expect(
         await fetcher.robotsAllows("https://www.tiktok.com/@a/video/1"),
     ).toBe(false);
-    expect(requested.some((href) => href.includes("facebook.com"))).toBe(false);
+    expect(requested.some((href) => onHost(href, "facebook.com"))).toBe(false);
 });
 
 test("a robots.txt redirect to the www twin is followed", async () => {

@@ -17,6 +17,12 @@ import {
     webVttToText,
 } from "./social-readers.js";
 
+/** Host check for fake fetchers: the exact host or a subdomain of it. */
+function onHost(href: string, domain: string): boolean {
+    const host = new URL(href).hostname;
+    return host === domain || host.endsWith(`.${domain}`);
+}
+
 const FIX = join(import.meta.dir, "fixtures/social");
 function load(name: string): string {
     return readFileSync(join(FIX, name), "utf8");
@@ -240,7 +246,7 @@ function trackingFetcher(
                     };
                 }
             }
-            if (href.includes("graph.facebook.com")) {
+            if (onHost(href, "graph.facebook.com")) {
                 expect(opts?.checkRobots).toBe(false);
                 expect(href).not.toContain("access_token");
                 expect(href).not.toContain("app_id");
@@ -269,7 +275,7 @@ function trackingFetcher(
 
 test("readTikTok fetches page and subtitle with robots on", async () => {
     const fetcher = trackingFetcher((url) => {
-        if (url.includes("tiktokcdn.com"))
+        if (onHost(url, "tiktokcdn.com"))
             return {
                 ok: true,
                 body: load("tiktok.vtt"),
@@ -291,7 +297,7 @@ test("readTikTok fetches page and subtitle with robots on", async () => {
 
 test("readTikTok subtitle failure keeps caption", async () => {
     const fetcher = trackingFetcher((url) => {
-        if (url.includes("tiktokcdn.com")) {
+        if (onHost(url, "tiktokcdn.com")) {
             return { ok: false, reason: "network_error" };
         }
         return { ok: true, body: load("tiktok-video.html") };
@@ -328,7 +334,7 @@ test("readFacebook refuses graph redirect to facebook.com", async () => {
         fetch: async (url) => {
             fetchCount += 1;
             const href = String(url);
-            if (href.includes("graph.facebook.com")) {
+            if (onHost(href, "graph.facebook.com")) {
                 return new Response("", {
                     status: 302,
                     headers: {
@@ -354,7 +360,7 @@ test("readTikTok skips subtitle fetch on disallowed host", async () => {
     );
     let instagramBodyRequested = false;
     const fetcher = trackingFetcher((url) => {
-        if (url.includes("instagram.com")) {
+        if (onHost(url, "instagram.com")) {
             instagramBodyRequested = true;
         }
         return { ok: true, body: html };
@@ -410,4 +416,19 @@ describe("reader text keeps its line breaks", () => {
             "Sunday stew:\n1 lb beef\n3 carrots\n\nSimmer 2 hours.",
         );
     });
+});
+
+test("a look-alike host is not Facebook", () => {
+    expect(facebookOembedEndpoint("https://evilfacebook.com/videos/1")).toEqual(
+        { ok: false, reason: "unsupported_link" },
+    );
+    expect(
+        facebookOembedEndpoint("https://facebook.com.evil.io/posts/1"),
+    ).toEqual({ ok: false, reason: "unsupported_link" });
+});
+
+test("subtitle tags cannot reassemble across a strip", () => {
+    const vtt =
+        "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n<<c>script>alert(1)<</c>/script> 2 cups flour";
+    expect(webVttToText(vtt)).not.toContain("<script");
 });
