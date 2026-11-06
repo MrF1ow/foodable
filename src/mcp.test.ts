@@ -6195,6 +6195,57 @@ describe("authenticated dashboard HTTP", () => {
         };
     });
 
+    test("GET /share opens the import modal prefilled from share params", async () => {
+        const r = await siteApp.request(
+            "http://x/share?text=https%3A%2F%2Fvm.tiktok.com%2FZM123%2F",
+            { headers: { cookie: cookieFor(alice) } },
+        );
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain('id="recipe-import-url"');
+        expect(html).toContain("data-modal-open-on-load");
+        expect(html).toContain("vm.tiktok.com/ZM123");
+        expect(html).toContain("What arrived");
+        expect(html).not.toContain('name="text_origin"');
+    });
+
+    test("GET /share with link and caption opens paste step with text_origin", async () => {
+        const qs = new URLSearchParams({
+            url: "https://www.instagram.com/p/abc/",
+            text: "Garlic noodles\n1 lb pasta\nhttps://www.instagram.com/p/abc/",
+        });
+        const r = await siteApp.request(`http://x/share?${qs}`, {
+            headers: { cookie: cookieFor(alice) },
+        });
+        const html = await r.text();
+        expect(html).toContain('name="text_origin" value="shared"');
+        expect(html).toContain("Paste the caption");
+    });
+
+    test("GET /share does not create recipes", async () => {
+        const before = (await db.recipesStore.listRecipes("hh-1")).length;
+        const r = await siteApp.request(
+            "http://x/share?text=" +
+                encodeURIComponent(
+                    "Weeknight pasta\n\n1 lb spaghetti\n2 cloves garlic",
+                ),
+            { headers: { cookie: cookieFor(alice) } },
+        );
+        expect(r.status).toBe(200);
+        const after = (await db.recipesStore.listRecipes("hh-1")).length;
+        expect(after).toBe(before);
+    });
+
+    test("GET /share/probe escapes raw text", async () => {
+        const r = await siteApp.request(
+            "http://x/share/probe?text=%3Cscript%3Ealert(1)%3C/script%3E",
+            { headers: { cookie: cookieFor(alice) } },
+        );
+        const html = await r.text();
+        expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+        expect(html).not.toMatch(/<script>alert\(1\)<\/script>/);
+    });
+
     test("a site cookie renders the viewer's dashboard widgets", async () => {
         const r = await siteApp.request("http://x/", {
             headers: { cookie: cookieFor(alice) },

@@ -238,6 +238,7 @@ describe("runtime surfaces that stay", () => {
         const body = await (await app.request("http://x/")).text();
         expect(body).toContain('href="/brand/icon.svg" type="image/svg+xml"');
         expect(body).toContain('rel="apple-touch-icon"');
+        expect(body).toContain('rel="manifest" href="/manifest.webmanifest"');
         expect(body).toContain('class="auth-mark" src="/brand/mark.svg"');
         expect(body).not.toContain("🍏");
     });
@@ -266,6 +267,7 @@ describe("runtime surfaces that stay", () => {
             "/settings",
             "/household",
             "/household/items",
+            "/share?text=hello",
         ]) {
             const r = await app.request(`http://x${path}`);
             expect(r.status).toBe(200);
@@ -317,6 +319,34 @@ describe("runtime surfaces that stay", () => {
         expect(html).not.toContain("/fonts/");
     });
 
+    test("PWA manifest, service worker and icons are served", async () => {
+        const manifest = await app.request("http://x/manifest.webmanifest");
+        expect(manifest.status).toBe(200);
+        expect(manifest.headers.get("content-type") ?? "").toContain(
+            "application/manifest+json",
+        );
+        const json = (await manifest.json()) as { share_target?: unknown };
+        expect(json.share_target).toMatchObject({ action: "/share" });
+
+        const sw = await app.request("http://x/sw.js");
+        expect(sw.status).toBe(200);
+        expect(sw.headers.get("content-type") ?? "").toContain(
+            "text/javascript",
+        );
+        expect(sw.headers.get("service-worker-allowed")).toBe("/");
+        expect(sw.headers.get("cache-control")).toBe("no-cache");
+
+        for (const path of [
+            "/icon-192.png",
+            "/icon-512.png",
+            "/icon-maskable-512.png",
+        ]) {
+            const r = await app.request(`http://x${path}`);
+            expect(r.status, path).toBe(200);
+            expect(r.headers.get("content-type")).toBe("image/png");
+        }
+    });
+
     test("CSP has no third-party hosts", async () => {
         const r = await app.request("http://x/health");
         expect(r.headers.get("content-security-policy") ?? "").not.toContain(
@@ -336,6 +366,12 @@ describe("runtime surfaces that stay", () => {
         );
         expect(r.headers.get("content-security-policy") ?? "").toContain(
             "script-src 'self' 'unsafe-inline'",
+        );
+        expect(r.headers.get("content-security-policy") ?? "").toContain(
+            "worker-src 'self'",
+        );
+        expect(r.headers.get("content-security-policy") ?? "").toContain(
+            "manifest-src 'self'",
         );
     });
 });

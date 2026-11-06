@@ -93,6 +93,7 @@ ${themeColorMeta(theme, themeChrome)}
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
 <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.webmanifest" />
 <link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
 <script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }

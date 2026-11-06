@@ -4,6 +4,7 @@
  *   public/brand/*.svg         the mark, the light/dark tiles, the favicon
  *   public/favicon.ico         16/32/48px light tile, for browsers without SVG favicons
  *   public/apple-touch-icon.png 180px square light tile (iOS rounds it itself)
+ *   public/icon-192.png, public/icon-512.png, public/icon-maskable-512.png (PWA)
  *
  * Re-run after editing src/brand.ts:
  *   bun run scripts/gen-icons.ts
@@ -16,7 +17,7 @@ import { $ } from "bun";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BRAND_SVGS, TILE, tileSvg } from "../src/brand.js";
+import { BRAND_SVGS, TILE, maskableTileSvg, tileSvg } from "../src/brand.js";
 
 for (const [name, render] of Object.entries(BRAND_SVGS)) {
     await Bun.write(`public/brand/${name}`, render());
@@ -39,10 +40,24 @@ try {
     // iOS shows transparency as black, so the touch icon is opaque and square.
     await $`rsvg-convert -w 180 -h 180 ${square} -o ${join(tmp, "touch.png")}`;
     await $`magick ${join(tmp, "touch.png")} -background ${TILE.light.tile} -alpha remove -alpha off -strip public/apple-touch-icon.png`;
+
+    const pwaSquare = join(tmp, "pwa-square.svg");
+    const pwaMaskable = join(tmp, "pwa-maskable.svg");
+    await Bun.write(pwaSquare, tileSvg("light", { square: true }));
+    await Bun.write(pwaMaskable, maskableTileSvg());
+    for (const [size, out] of [
+        [192, "public/icon-192.png"],
+        [512, "public/icon-512.png"],
+    ] as const) {
+        await $`rsvg-convert -w ${size} -h ${size} ${pwaSquare} -o ${out}`;
+        await $`magick ${out} -background ${TILE.light.tile} -alpha remove -alpha off -strip ${out}`;
+    }
+    await $`rsvg-convert -w 512 -h 512 ${pwaMaskable} -o public/icon-maskable-512.png`;
+    await $`magick public/icon-maskable-512.png -background ${TILE.light.tile} -alpha remove -alpha off -strip public/icon-maskable-512.png`;
 } finally {
     await rm(tmp, { recursive: true, force: true });
 }
 
 console.log(
-    "Wrote public/brand/*.svg, public/favicon.ico, public/apple-touch-icon.png",
+    "Wrote public/brand/*.svg, public/favicon.ico, public/apple-touch-icon.png, public/icon-*.png",
 );

@@ -136,6 +136,11 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/routes/recipes.ts": "recipes",
     "src/web/truncate-toast-param.ts": "recipes",
     "src/web/pages/recipes.ts": "recipes",
+    "src/web/routes/share.ts": "recipes",
+    "src/web/share-import-prefill.ts": "recipes",
+    "src/web/manifest.ts": "web",
+    "src/web/components/share-arrived.ts": "web",
+    "src/domain/share.ts": "recipes",
     "src/domain/foods.ts": "foods",
     "src/domain/food-merge-job.ts": "foods",
     "src/domain/food-identity.ts": "foods",
@@ -221,6 +226,9 @@ const LOW_REPO_EXACT = new Set([
     "tsconfig.json",
     "public/favicon.ico",
     "public/apple-touch-icon.png",
+    "public/icon-192.png",
+    "public/icon-512.png",
+    "public/icon-maskable-512.png",
     "public/robots.txt",
 ]);
 

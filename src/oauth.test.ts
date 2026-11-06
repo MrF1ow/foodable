@@ -34,6 +34,7 @@ const {
     resolveApproveUser,
     classifySignInFailure,
     logRejectedRedirect,
+    siteLoginReturnPath,
 } = await import("./oauth.js");
 const { _resetBuckets } = await import("./rate-limit.js");
 
@@ -547,6 +548,21 @@ test("/token authorization_code requires redirect_uri and code_verifier", async 
 
     const noVerifier = await form({ redirect_uri: ALLOWED_REDIRECT });
     expect(noVerifier.status).toBe(400);
+});
+
+test("siteLoginReturnPath keeps /share query and refuses external next", () => {
+    const app = new Hono();
+    app.get("/share", (c) => c.text(siteLoginReturnPath(c)));
+    app.get("/login-next", (c) => c.text(siteLoginReturnPath(c)));
+    const share = app.request("http://localhost/share?text=hello&url=");
+    const badNext = app.request(
+        "http://localhost/login-next?next=" +
+            encodeURIComponent("https://evil.com/share"),
+    );
+    return Promise.all([share, badNext]).then(async ([s, n]) => {
+        expect(await s.text()).toBe("/share?text=hello&url=");
+        expect(await n.text()).toBe("/");
+    });
 });
 
 test("beginSiteLogin still renders login without MCP connect hint", async () => {

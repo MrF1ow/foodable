@@ -37,6 +37,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         "./src/web/client/arrange.js",
         "./src/web/client/copy-prompt.js",
         "./src/web/client/busy-submit.js",
+        "./src/web/client/sw-register.js",
     ]);
     const js = await getAppJs();
     expect(js).toContain("Turbo");
