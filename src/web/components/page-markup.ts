@@ -142,9 +142,9 @@ export function renderRecipeIngredientRow(opts: {
     totalLabel: string;
     perPortionLabel: string;
     personPortionLabel?: string | null;
-    perPortionAmount: number;
-    personAmount: number;
-    totalAmount: number;
+    perPortionAmount: number | null;
+    personAmount: number | null;
+    totalAmount: number | null;
     note?: string | null;
     editModalId: string;
     deleteModalId: string;
@@ -169,7 +169,7 @@ export function renderRecipeIngredientRow(opts: {
     if (opts.personPortionLabel) {
         meta += ` · Your portion ${escapeHtml(opts.personPortionLabel)}`;
     }
-    return `<li class="recipe-ingredient" data-ingredient-id="${id}" data-per-portion="${escapeHtml(String(opts.perPortionAmount))}" data-person-amount="${escapeHtml(String(opts.personAmount))}">
+    return `<li class="recipe-ingredient" data-ingredient-id="${id}" data-per-portion="${escapeHtml(opts.perPortionAmount == null ? "" : String(opts.perPortionAmount))}" data-person-amount="${escapeHtml(opts.personAmount == null ? "" : String(opts.personAmount))}">
 <div class="list-row recipe-ingredient-row">
 <div class="list-row-main">
 <p class="recipe-ingredient-name row-title">${name}</p>

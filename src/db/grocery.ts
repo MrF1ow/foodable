@@ -17,7 +17,7 @@ import {
 
 const GROCERY_LINES = "grocery_lines";
 const GROCERY_LINE_COLS =
-    "id, household_id, store_id, section_id, kind, display_name, amount, unit, food_id, checked, source, source_fridge_item_id";
+    "id, household_id, store_id, section_id, kind, display_name, amount, unit, food_id, checked, source, source_fridge_item_id, note";
 
 async function selectLines(
     tx: Tx,

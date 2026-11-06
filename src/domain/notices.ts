@@ -13,6 +13,7 @@ export type NoticeCode =
     | "grocery.allergen"
     | "recipe.allergen"
     | "recipe.no_food"
+    | "recipe.no_amount"
     | "recipe.no_nutrition"
     | "recipe.partial_nutrition"
     | "recipe.unknown_unit"
@@ -25,6 +26,7 @@ export const NOTICE_CODES: readonly NoticeCode[] = [
     "grocery.allergen",
     "recipe.allergen",
     "recipe.no_food",
+    "recipe.no_amount",
     "recipe.no_nutrition",
     "recipe.partial_nutrition",
     "recipe.unknown_unit",
@@ -38,6 +40,8 @@ export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
     "grocery.allergen": "block",
     "recipe.allergen": "block",
     "recipe.no_food": "warn",
+    // An unmeasured ingredient ("salt, to taste") is expected, not a fault.
+    "recipe.no_amount": "info",
     "recipe.no_nutrition": "warn",
     "recipe.partial_nutrition": "warn",
     "recipe.unknown_unit": "warn",

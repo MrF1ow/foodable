@@ -61,6 +61,7 @@ export type GroceryLine = {
     checked: boolean;
     source: GroceryLineSource;
     sourceFridgeItemId: string | null;
+    note: string | null;
 };
 
 export type GrocerySnapshot = {
@@ -715,6 +716,7 @@ async function insertFromFood(
         checked: false,
         source: input.source,
         sourceFridgeItemId: input.sourceFridgeItemId,
+        note: null,
     });
 }
 
@@ -1538,6 +1540,7 @@ export function groceryLineFromRow(row: {
     food_id?: unknown;
     source?: unknown;
     source_fridge_item_id?: unknown;
+    note?: unknown;
 }): GroceryLine {
     const kind = row.kind === "supply" ? "supply" : "food";
     return {
@@ -1562,6 +1565,7 @@ export function groceryLineFromRow(row: {
             row.source_fridge_item_id === ""
                 ? null
                 : String(row.source_fridge_item_id),
+        note: row.note == null || row.note === "" ? null : String(row.note),
     };
 }
 
@@ -1579,5 +1583,6 @@ export function groceryLineToRow(row: GroceryLine) {
         checked: row.checked,
         source: row.source,
         source_fridge_item_id: row.sourceFridgeItemId,
+        note: row.note,
     };
 }

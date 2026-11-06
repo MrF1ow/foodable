@@ -1,5 +1,10 @@
 import { test, expect } from "bun:test";
-import { addLocation, createMemoryFridgeStore, listFridge } from "./fridge.js";
+import {
+    addFoodById,
+    addLocation,
+    createMemoryFridgeStore,
+    listFridge,
+} from "./fridge.js";
 import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
@@ -165,6 +170,51 @@ test("cook deducts oldest-expiry first and reports a shortfall", async () => {
             eggsFood,
         ),
     ).toBe(true);
+});
+
+test("cookRecipe skips unmeasured ingredients and lists them", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: "Soup",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const loc = await addLocation(fridge, HH, "Pantry");
+    await addFoodById(fridge, foods, {
+        householdId: HH,
+        locationId: loc.id,
+        foodId: salt.id,
+        amount: 100,
+        unit: "g",
+    });
+    const cooked = await cookRecipe(recipes, fridge, stock, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        totalPortions: 1,
+    });
+    expect(cooked.unmeasured).toEqual([
+        { foodId: salt.id, displayName: salt.name },
+    ]);
+    const item = (await listFridge(fridge, HH)).items.find(
+        (row) => row.foodId === salt.id,
+    );
+    expect(item?.quantity.amount).toBe(100);
 });
 
 test("ledger sum equals current state across purchases and cooks", async () => {

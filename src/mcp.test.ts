@@ -42,6 +42,7 @@ import * as actualDbRules from "./db/rules.js";
 import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
+import * as actualDbSql from "./db/sql.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
@@ -63,6 +64,7 @@ const realDbRules = { ...actualDbRules };
 const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
+const realDbSql = { ...actualDbSql };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
@@ -615,6 +617,11 @@ mock.module("./food-search.js", () => ({
     },
 }));
 
+mock.module("./db/sql.js", () => ({
+    ...actualDbSql,
+    run: async <T>(fn: (tx: unknown) => Promise<T>) => fn({}),
+}));
+
 afterAll(() => {
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
@@ -631,6 +638,7 @@ afterAll(() => {
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
     mock.module("./db/exports.js", () => realExports);
+    mock.module("./db/sql.js", () => realDbSql);
 });
 
 beforeEach(() => {
@@ -5104,6 +5112,73 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("unmeasured ingredient validates on recipe and grocery tool outputs", async () => {
+        await withUser(alice, async (call) => {
+            const salt = await call("upsert_food", {
+                name: "Salt",
+                default_unit: "g",
+            });
+            const saltId = salt.structuredContent?.id as string;
+            const recipe = await call("create_recipe", {
+                name: "Scrambled eggs",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: saltId,
+            });
+            const got = await call("get_recipe", { id: recipeId });
+            expect(got.isError).toBeFalsy();
+            const ingredients = got.structuredContent?.ingredients as Array<{
+                amount: number | null;
+                unit: string | null;
+                per_portion_amount: number | null;
+            }>;
+            expect(ingredients[0]?.amount).toBeNull();
+            expect(ingredients[0]?.unit).toBeNull();
+            expect(ingredients[0]?.per_portion_amount).toBeNull();
+            expect(textOf(got)).toContain("to taste");
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            const added = await call("add_recipe_to_grocery", {
+                recipe_id: recipeId,
+                store_id: store.id,
+                member_ids: [alice],
+            });
+            expect(added.isError).toBeFalsy();
+            const remainder = added.structuredContent?.remainder as Array<{
+                unmeasured: boolean;
+                note: string | null;
+            }>;
+            expect(remainder.some((row) => row.unmeasured)).toBe(true);
+            const listed = await call("list_grocery_lines");
+            const lines = (
+                listed.structuredContent?.stores as Array<{
+                    sections: Array<{
+                        lines: Array<{ note: string | null }>;
+                    }>;
+                }>
+            ).flatMap((s) => s.sections.flatMap((sec) => sec.lines));
+            expect(lines.some((row) => row.note === "to taste")).toBe(true);
+            const cooked = await call("cook_recipe", {
+                recipe_id: recipeId,
+                portions_by_member: [{ user_id: alice, portions: 1 }],
+                deduct_stock: true,
+                log_meals: false,
+            });
+            expect(cooked.isError).toBeFalsy();
+            const unmeasured = cooked.structuredContent?.unmeasured as Array<{
+                display_name: string;
+            }>;
+            expect(unmeasured[0]?.display_name).toBe("Salt");
+            expect(textOf(cooked)).toContain("Not deducted (no amount)");
+        });
+    });
+
     test("import_recipe_from_text find-or-creates foods and reports gaps", async () => {
         await withUser(alice, async (call) => {
             const imported = await call("import_recipe_from_text", {
@@ -5416,6 +5491,7 @@ describe("phone-app domain MCP tools", () => {
                 checked: false,
                 source: "manual",
                 sourceFridgeItemId: null,
+                note: null,
             });
             const relisted = await call("get_fridge");
             const relistedItems = (

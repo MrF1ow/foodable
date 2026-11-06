@@ -47,6 +47,7 @@ const groceryLineSchema = z.object({
     checked: z.boolean(),
     source: z.enum(GROCERY_LINE_SOURCES),
     source_fridge_item_id: z.string().nullable(),
+    note: z.string().nullable(),
     already_have: z.string().nullable(),
     product: z
         .object({
@@ -151,6 +152,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             checked: line.checked,
                             source: line.source,
                             source_fridge_item_id: line.sourceFridgeItemId,
+                            note: line.note,
                             already_have:
                                 tag == null
                                     ? null

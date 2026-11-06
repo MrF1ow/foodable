@@ -219,6 +219,55 @@ test("itemListDigest is stable and changes when the item list changes", () => {
     expect(a).not.toBe(c);
 });
 
+test("recipe portion with unmeasured ingredient marks nutrition unknown", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const flour = await findOrCreateManualFood(foods, HH, "food", "Flour");
+    await updateFood(foods, HH, flour.id, {
+        calories: 364,
+        proteinG: 10,
+        carbsG: 76,
+        fatG: 1,
+    });
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "alice",
+        name: "Bread",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "i-flour",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Flour",
+        quantity: { amount: 100, unit: "g" },
+        foodId: flour.id,
+        sortOrder: 0,
+        note: null,
+    });
+    await recipes.insertIngredient({
+        id: "i-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 1,
+        note: "to taste",
+    });
+    const result = await resolveAndBuildMeal({
+        householdId: HH,
+        foods,
+        recipes,
+        items: [{ recipeId: recipe.id, portions: 1 }],
+    });
+    expect(result.built.items[0]!.unknown).toBe(true);
+    expect(result.built.totals.calories).toBe(364);
+});
+
 test("unknown food or recipe ids fail closed", () => {
     expect(() =>
         buildMealFromItems(

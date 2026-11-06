@@ -68,7 +68,7 @@ export type RecipeIngredient = {
     recipeId: string;
     kind: "food";
     displayName: string;
-    quantity: { amount: number; unit: string };
+    quantity: { amount: number; unit: string } | null;
     foodId: string | null;
     sortOrder: number;
     note: string | null;
@@ -82,8 +82,8 @@ export type RecipePortion = {
 };
 
 export type RecipeIngredientView = RecipeIngredient & {
-    perPortionAmount: number;
-    personAmount: number;
+    perPortionAmount: number | null;
+    personAmount: number | null;
 };
 
 export type RecipeView = Recipe & {
@@ -95,6 +95,7 @@ export type RecipeGapReason =
     | "no_food"
     | "no_nutrition"
     | "partial_nutrition"
+    | "no_amount"
     | "unknown_unit"
     | "missing_grams_per_each"
     | "missing_grams_per_ml";
@@ -164,7 +165,8 @@ export type RecipePatch = {
 };
 
 export type RecipeIngredientPatch = {
-    amount?: number;
+    /** null clears amount and unit (to taste). */
+    amount?: number | null;
     unit?: string;
     note?: string | null;
 };
@@ -180,14 +182,15 @@ export type RecipeListFilter = {
 
 export type RecipeImportIngredient = {
     name: string;
-    amount: number;
+    amount?: number | null;
     unit?: string;
     note?: string | null;
     foodId?: string;
     barcode?: string;
 };
 
-export type IngredientGapKind = "nutrition" | "grams_per_each" | "grams_per_ml";
+export type IngredientGapKind =
+    "nutrition" | "amount" | "grams_per_each" | "grams_per_ml";
 
 export type IngredientGap = {
     ingredientId: string;
@@ -223,6 +226,18 @@ function parseAmount(amount: number): number {
         throw new RecipeInputError("Enter an amount greater than zero.");
     }
     return amount;
+}
+
+function quantityForNewIngredient(
+    amount: number | null | undefined,
+    unit: string | undefined,
+    food: Food,
+): RecipeIngredient["quantity"] {
+    if (amount == null) return null;
+    return {
+        amount: parseAmount(amount),
+        unit: storedFoodUnit(unit, food),
+    };
 }
 
 function parseYield(yieldPortions: number): number {
@@ -343,7 +358,7 @@ function cloneRecipe(row: Recipe): Recipe {
 function cloneIngredient(row: RecipeIngredient): RecipeIngredient {
     return {
         ...row,
-        quantity: { ...row.quantity },
+        quantity: row.quantity ? { ...row.quantity } : null,
     };
 }
 
@@ -451,6 +466,18 @@ export function recipeIngredientGaps(
     ingredient: RecipeIngredient,
     food: Food | undefined,
 ): RecipeGap[] {
+    if (ingredient.quantity == null) {
+        const note = ingredient.note?.trim();
+        const taste = note || "to taste";
+        return [
+            {
+                ...gapBase(ingredient, food),
+                reason: "no_amount",
+                missingNutrients: [...REQUIRED_MACRO_KEYS],
+                message: `${ingredient.displayName} has no amount (${taste}), so it isn't counted.`,
+            },
+        ];
+    }
     if (!ingredient.foodId || !food) {
         return [
             {
@@ -536,9 +563,13 @@ export function recipeIngredientNotices(
     ingredient: RecipeIngredient,
     food: Food | undefined,
 ): Notice[] {
-    return recipeIngredientGaps(ingredient, food).map((g) =>
-        gapToNotice(recipeId, g),
-    );
+    return recipeIngredientGaps(ingredient, food).map((g) => {
+        const notice = gapToNotice(recipeId, g);
+        if (g.reason === "no_amount") {
+            notice.params.taste = ingredient.note?.trim() || "to taste";
+        }
+        return notice;
+    });
 }
 
 export function recipeNotices(
@@ -621,6 +652,7 @@ export function macrosForPerson(
         );
         gaps.push(...notices.map(gapFromNotice));
         if (notices.length > 0) continue;
+        if (ingredient.quantity == null) continue;
         const nutrition = nutritionFromCatalogFood(catalog!)!;
         const eaten = amountForPortion(
             ingredient.quantity.amount,
@@ -973,21 +1005,36 @@ export async function updateRecipeIngredient(
         recipeId,
         ingredientId,
     );
-    const amount =
-        patch.amount === undefined
-            ? ingredient.quantity.amount
-            : parseAmount(patch.amount);
-    const unit =
-        patch.unit === undefined
-            ? ingredient.quantity.unit
-            : parseUnit(patch.unit);
     const note =
         patch.note === undefined
             ? ingredient.note
             : parseOptionalText(patch.note, "Ingredient note", 500);
+    let quantity: RecipeIngredient["quantity"];
+    if (patch.amount === null) {
+        quantity = null;
+    } else if (patch.amount === undefined) {
+        if (ingredient.quantity == null) {
+            quantity = null;
+        } else {
+            quantity = {
+                amount: ingredient.quantity.amount,
+                unit:
+                    patch.unit === undefined
+                        ? ingredient.quantity.unit
+                        : parseUnit(patch.unit),
+            };
+        }
+    } else {
+        const amount = parseAmount(patch.amount);
+        const unit =
+            patch.unit === undefined
+                ? (ingredient.quantity?.unit ?? parseUnit(undefined))
+                : parseUnit(patch.unit);
+        quantity = { amount, unit };
+    }
     const saved = await store.updateIngredient({
         ...ingredient,
-        quantity: { amount, unit },
+        quantity,
         note,
     });
     if (!saved) throw new RecipeInputError("Unknown ingredient.");
@@ -1062,7 +1109,7 @@ export async function addRecipeIngredientById(
         householdId: string;
         recipeId: string;
         foodId: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
     },
 ): Promise<RecipeIngredient> {
@@ -1071,7 +1118,6 @@ export async function addRecipeIngredientById(
         input.householdId,
         input.recipeId,
     );
-    const amount = parseAmount(input.amount);
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findFoodById(foods, input.householdId, input.foodId);
@@ -1084,7 +1130,7 @@ export async function addRecipeIngredientById(
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: { amount, unit: storedFoodUnit(input.unit, food) },
+            quantity: quantityForNewIngredient(input.amount, input.unit, food),
             foodId: food.id,
             sortOrder: existing.length,
             note: null,
@@ -1101,7 +1147,7 @@ export async function addRecipeIngredientByBarcode(
         householdId: string;
         recipeId: string;
         barcode: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
     },
     opts: {
@@ -1113,7 +1159,6 @@ export async function addRecipeIngredientByBarcode(
         input.householdId,
         input.recipeId,
     );
-    const amount = parseAmount(input.amount);
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findOrCreateFoodByBarcode(
@@ -1128,7 +1173,7 @@ export async function addRecipeIngredientByBarcode(
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: { amount, unit: storedFoodUnit(input.unit, food) },
+            quantity: quantityForNewIngredient(input.amount, input.unit, food),
             foodId: food.id,
             sortOrder: existing.length,
             note: null,
@@ -1145,7 +1190,7 @@ export async function addRecipeManualIngredient(
         householdId: string;
         recipeId: string;
         name: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
     },
 ): Promise<RecipeIngredient> {
@@ -1154,7 +1199,6 @@ export async function addRecipeManualIngredient(
         input.householdId,
         input.recipeId,
     );
-    const amount = parseAmount(input.amount);
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findOrCreateManualFood(
@@ -1169,7 +1213,7 @@ export async function addRecipeManualIngredient(
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: { amount, unit: storedFoodUnit(input.unit, food) },
+            quantity: quantityForNewIngredient(input.amount, input.unit, food),
             foodId: food.id,
             sortOrder: existing.length,
             note: null,
@@ -1215,15 +1259,21 @@ export async function getRecipeView(
         portionCount,
         ingredients: ingredients.map((ingredient) => ({
             ...ingredient,
-            perPortionAmount: perPortionAmount(
-                ingredient.quantity.amount,
-                recipe.yieldPortions,
-            ),
-            personAmount: amountForPortion(
-                ingredient.quantity.amount,
-                recipe.yieldPortions,
-                portionCount,
-            ),
+            perPortionAmount:
+                ingredient.quantity == null
+                    ? null
+                    : perPortionAmount(
+                          ingredient.quantity.amount,
+                          recipe.yieldPortions,
+                      ),
+            personAmount:
+                ingredient.quantity == null
+                    ? null
+                    : amountForPortion(
+                          ingredient.quantity.amount,
+                          recipe.yieldPortions,
+                          portionCount,
+                      ),
         })),
     };
 }
@@ -1332,9 +1382,68 @@ export async function addRecipeToGrocery(opts: {
             [...foodsById.values()].map((row) => [row.id, familyOf(row)]),
         );
     }
+    function listHasFoodFamily(foodId: string | null): boolean {
+        if (!foodId) return false;
+        const family = familyIdOf(foodId, foodsById);
+        return existingLines.some((row) => {
+            if (!row.foodId) return false;
+            return familyIdOf(row.foodId, foodsById) === family;
+        });
+    }
+
     const added: GroceryLine[] = [];
     const skipped: RecipeGroceryRemainderLine[] = [];
     for (const line of plan) {
+        if (line.unmeasured) {
+            if (line.skipped || listHasFoodFamily(line.foodId ?? null)) {
+                skipped.push(line);
+                continue;
+            }
+            const lineFamily = line.foodId
+                ? familyIdOf(line.foodId, foodsById)
+                : null;
+            const ingredient = ingredients.find(
+                (row) =>
+                    (lineFamily &&
+                        row.foodId &&
+                        familyIdOf(row.foodId, foodsById) === lineFamily) ||
+                    row.displayName === line.displayName,
+            );
+            const kind = ingredient?.kind ?? "food";
+            const foodId = line.foodId ?? ingredient?.foodId ?? null;
+            if (!foodId) {
+                skipped.push(line);
+                continue;
+            }
+            const food = foodsById.get(foodId);
+            const placeholderUnit = food?.defaultUnit || "g";
+            const section = suggestGrocerySection({
+                sections: storeSections,
+                allSections,
+                lines: existingLines,
+                kind,
+                foodId,
+                displayName: line.displayName,
+                familyById,
+            });
+            const inserted = await opts.grocery.insertLine({
+                id: crypto.randomUUID(),
+                householdId: opts.householdId,
+                storeId: opts.storeId,
+                sectionId: section?.id ?? otherSectionId,
+                kind,
+                displayName: line.displayName,
+                quantity: { amount: 1, unit: placeholderUnit },
+                foodId,
+                checked: false,
+                note: "to taste",
+                source: "recipe",
+                sourceFridgeItemId: null,
+            });
+            existingLines.push(inserted);
+            added.push(inserted);
+            continue;
+        }
         if (line.skipped || line.remainder == null) {
             skipped.push(line);
             continue;
@@ -1372,6 +1481,7 @@ export async function addRecipeToGrocery(opts: {
             checked: false,
             source: "recipe",
             sourceFridgeItemId: null,
+            note: null,
         });
         added.push(inserted);
     }
@@ -1399,6 +1509,9 @@ export function ingredientGaps(
                 if (!missing.includes("grams_per_ml")) {
                     missing.push("grams_per_ml");
                 }
+                break;
+            case "no_amount":
+                if (!missing.includes("amount")) missing.push("amount");
                 break;
             default:
                 break;
@@ -1521,6 +1634,34 @@ export async function listRecipesFiltered(
     return matched;
 }
 
+type ImportLineResolved = {
+    index: number;
+    line: RecipeImportIngredient;
+    food: Food;
+    quantity: RecipeIngredient["quantity"];
+    note: string | null;
+};
+
+function validateImportLine(line: RecipeImportIngredient): {
+    quantity: RecipeIngredient["quantity"];
+    note: string | null;
+} {
+    const name = line.name?.trim() ?? "";
+    if (!name) {
+        throw new RecipeInputError("Each ingredient needs a name.");
+    }
+    const quantity =
+        line.amount == null
+            ? null
+            : {
+                  amount: parseAmount(line.amount),
+                  unit: parseUnit(line.unit),
+              };
+    let note = parseOptionalText(line.note, "Ingredient note", 500);
+    if (quantity == null && !note) note = "to taste";
+    return { quantity, note };
+}
+
 export async function importRecipeFromText(
     store: RecipesStore,
     foods: FoodsStore,
@@ -1528,6 +1669,7 @@ export async function importRecipeFromText(
         householdId: string;
         creatorId: string;
         text: string;
+        instructions?: string | null;
         sourceUrl?: string | null;
         name?: string;
         yieldPortions?: number;
@@ -1539,38 +1681,30 @@ export async function importRecipeFromText(
     },
     opts: {
         lookup: (barcode: string) => Promise<FoodResult | null>;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
     },
 ): Promise<{
     recipe: Recipe;
     ingredients: RecipeIngredient[];
     gaps: IngredientGap[];
 }> {
-    const instructions = parseOptionalText(input.text, "Recipe text", 20_000);
+    const rawText = parseOptionalText(input.text, "Recipe text", 20_000);
+    if (!rawText) throw new RecipeInputError("Enter recipe text.");
     const extractedName = input.name?.trim() ?? "";
     const nameFromText =
-        instructions
-            ?.split(/\r?\n/)
+        rawText
+            .split(/\r?\n/)
             .map((line) => line.trim())
             .find((line) => line.length > 0) ?? "";
     const name = extractedName || nameFromText;
     if (!name) throw new RecipeInputError("Enter a recipe name.");
-    const recipe = await createRecipe(store, {
-        householdId: input.householdId,
-        creatorId: input.creatorId,
-        name,
-        yieldPortions: input.yieldPortions ?? 1,
-        instructions: input.text,
-        sourceUrl: input.sourceUrl,
-        tags: input.tags,
-        notes: input.notes,
-        prepMinutes: input.prepMinutes,
-        cookMinutes: input.cookMinutes,
-    });
-    const imported: RecipeIngredient[] = [];
-    for (const [index, line] of (input.ingredients ?? []).entries()) {
-        const amount = parseAmount(line.amount);
-        const unit = parseUnit(line.unit);
-        const note = parseOptionalText(line.note, "Ingredient note", 500);
+
+    const lines = input.ingredients ?? [];
+    const validated = lines.map((line) => validateImportLine(line));
+
+    const barcodeResolved: ImportLineResolved[] = [];
+    for (const [index, line] of lines.entries()) {
+        const { quantity, note } = validated[index]!;
         let food: Food;
         try {
             if (line.foodId) {
@@ -1602,35 +1736,72 @@ export async function importRecipeFromText(
         } catch (err) {
             wrapFoodsError(err);
         }
-        imported.push(
-            await store.insertIngredient({
-                id: crypto.randomUUID(),
-                householdId: input.householdId,
-                recipeId: recipe.id,
-                kind: "food",
-                displayName: food.name,
-                quantity: { amount, unit },
-                foodId: food.id,
-                sortOrder: index,
-                note,
-            }),
-        );
+        const storedQuantity =
+            quantity == null
+                ? null
+                : {
+                      amount: quantity.amount,
+                      unit: storedFoodUnit(line.unit, food),
+                  };
+        barcodeResolved.push({
+            index,
+            line,
+            food,
+            quantity: storedQuantity,
+            note,
+        });
     }
-    const catalog = await effectiveFoodsByIds(
-        foods,
-        input.householdId,
-        imported.map((row) => row.foodId),
-    );
-    const gaps: IngredientGap[] = imported.map((ingredient) => ({
-        ingredientId: ingredient.id,
-        foodId: ingredient.foodId,
-        displayName: ingredient.displayName,
-        missing: ingredientGaps(
-            ingredient,
-            ingredient.foodId ? catalog.get(ingredient.foodId) : undefined,
-        ),
-    }));
-    return { recipe, ingredients: imported, gaps };
+
+    const runTx = opts.transaction ?? ((fn) => fn());
+    return runTx(async () => {
+        const instructionBody =
+            input.instructions !== undefined
+                ? parseOptionalText(input.instructions, "Instructions", 20_000)
+                : input.text;
+        const recipe = await createRecipe(store, {
+            householdId: input.householdId,
+            creatorId: input.creatorId,
+            name,
+            yieldPortions: input.yieldPortions ?? 1,
+            instructions: instructionBody,
+            sourceUrl: input.sourceUrl,
+            tags: input.tags,
+            notes: input.notes,
+            prepMinutes: input.prepMinutes,
+            cookMinutes: input.cookMinutes,
+        });
+        const imported: RecipeIngredient[] = [];
+        for (const row of barcodeResolved) {
+            imported.push(
+                await store.insertIngredient({
+                    id: crypto.randomUUID(),
+                    householdId: input.householdId,
+                    recipeId: recipe.id,
+                    kind: "food",
+                    displayName: row.food.name,
+                    quantity: row.quantity,
+                    foodId: row.food.id,
+                    sortOrder: row.index,
+                    note: row.note,
+                }),
+            );
+        }
+        const catalog = await effectiveFoodsByIds(
+            foods,
+            input.householdId,
+            imported.map((ingredient) => ingredient.foodId),
+        );
+        const gaps: IngredientGap[] = imported.map((ingredient) => ({
+            ingredientId: ingredient.id,
+            foodId: ingredient.foodId,
+            displayName: ingredient.displayName,
+            missing: ingredientGaps(
+                ingredient,
+                ingredient.foodId ? catalog.get(ingredient.foodId) : undefined,
+            ),
+        }));
+        return { recipe, ingredients: imported, gaps };
+    });
 }
 
 export function recipeDislikeNote(
@@ -1722,10 +1893,13 @@ export function recipeIngredientFromRow(row: {
         recipeId: String(row.recipe_id),
         kind: "food",
         displayName: String(row.display_name),
-        quantity: {
-            amount: Number(row.amount),
-            unit: String(row.unit),
-        },
+        quantity:
+            row.amount == null || row.unit == null || row.unit === ""
+                ? null
+                : {
+                      amount: Number(row.amount),
+                      unit: String(row.unit),
+                  },
         foodId:
             row.food_id == null || row.food_id === ""
                 ? null
@@ -1742,8 +1916,8 @@ export function recipeIngredientToRow(row: RecipeIngredient) {
         recipe_id: row.recipeId,
         kind: row.kind,
         display_name: row.displayName,
-        amount: row.quantity.amount,
-        unit: row.quantity.unit,
+        amount: row.quantity?.amount ?? null,
+        unit: row.quantity?.unit ?? null,
         food_id: row.foodId,
         sort_order: row.sortOrder,
         note: row.note,

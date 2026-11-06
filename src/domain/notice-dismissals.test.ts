@@ -389,6 +389,7 @@ describe("dismissal cleanup on writers (memory)", () => {
             checked: false,
             source: "manual",
             sourceFridgeItemId: null,
+            note: null,
         });
         await grocery.insertLine({
             id: otherId,
@@ -402,6 +403,7 @@ describe("dismissal cleanup on writers (memory)", () => {
             checked: true,
             source: "manual",
             sourceFridgeItemId: null,
+            note: null,
         });
         await seedSubjectDismissals(dismissals, "grocery_line", lineId);
         await grocery.deleteLine(HH, lineId);
@@ -420,6 +422,7 @@ describe("dismissal cleanup on writers (memory)", () => {
             checked: true,
             source: "manual",
             sourceFridgeItemId: null,
+            note: null,
         });
         await dismissals.insert({
             householdId: HH,

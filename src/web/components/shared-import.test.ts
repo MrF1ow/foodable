@@ -277,6 +277,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
                                 checked: false,
                                 source: "manual",
                                 sourceFridgeItemId: null,
+                                note: null,
                                 alreadyHave: null,
                             },
                         ],
@@ -522,6 +523,7 @@ test("member multi-select, already-have, and store sections still render", () =>
                                 checked: false,
                                 source: "manual",
                                 sourceFridgeItemId: null,
+                                note: null,
                                 alreadyHave: {
                                     cover: "partial",
                                     have: { amount: 24, unit: "oz" },
