@@ -1312,6 +1312,11 @@ html.fx .app-main > :nth-child(4) {
 html.fx .app-main > :nth-child(5) {
     animation-delay: 0.16s;
 }
+
+.app-main .food-products {
+    margin: 0.35rem 0 0.5rem 1rem;
+    padding-left: 0;
+}
 html.fx .app-main > :nth-child(n + 6) {
     animation-delay: 0.2s;
 }

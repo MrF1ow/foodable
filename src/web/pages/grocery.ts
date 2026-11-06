@@ -10,6 +10,11 @@ import { renderFoodPicker } from "../components/food-picker.js";
 import { renderGroceryLineRow } from "../components/page-markup.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
+    renderLinkProductPrompt,
+    type LinkProductPromptView,
+    LINK_PRODUCT_MODAL_ID,
+} from "../components/link-product-prompt.js";
+import {
     confirmModal,
     emptyState,
     errorBanner,
@@ -24,6 +29,10 @@ import {
 export type GroceryLineView = GroceryLine & {
     alreadyHave: AlreadyHaveTag | null;
     lastLocationId?: string | null;
+    usualProductName?: string | null;
+    usualPickerHref?: string | null;
+    putAwayProducts?: Array<{ id: string; label: string }> | null;
+    putAwayProductId?: string | null;
 };
 
 export type GrocerySectionView = GrocerySection & {
@@ -51,6 +60,7 @@ export type GroceryPageView = {
     allergenRetry?: GroceryAllergenRetry;
     unknownAllergen?: boolean;
     openModalId?: string;
+    linkProductPrompt?: LinkProductPromptView | null;
 };
 
 const ADD_STORE_MODAL_ID = "grocery-add-store";
@@ -204,12 +214,30 @@ function lineRow(
                 return `<option value="${escapeHtml(loc.id)}"${sel}>${escapeHtml(loc.name)}</option>`;
             })
             .join("");
+        const productSelect =
+            line.putAwayProducts && line.putAwayProducts.length > 0
+                ? `<label class="visually-hidden" for="put-away-product-${escapeHtml(line.id)}">Product</label>
+<select id="put-away-product-${escapeHtml(line.id)}" name="product_food_id">${line.putAwayProducts
+                      .map((product) => {
+                          const sel =
+                              product.id === line.putAwayProductId
+                                  ? " selected"
+                                  : "";
+                          return `<option value="${escapeHtml(product.id)}"${sel}>${escapeHtml(product.label)}</option>`;
+                      })
+                      .join("")}</select>`
+                : "";
         putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
+${productSelect}
 <button type="submit" class="btn-sm btn-primary">Put away</button>
 </form>`;
     }
+    const usualAction =
+        line.usualPickerHref && line.foodId
+            ? `<a class="btn-sm" href="${escapeHtml(line.usualPickerHref)}">Usual product</a>`
+            : "";
     return renderGroceryLineRow({
         id: line.id,
         kind: line.kind,
@@ -218,6 +246,8 @@ function lineRow(
         quantityLabel: quantityLabel(line),
         alreadyHaveHtml: alreadyHaveHtml(line.alreadyHave),
         putAwayHtml,
+        usualProductName: line.usualProductName,
+        extraActionsHtml: usualAction,
     });
 }
 
@@ -366,6 +396,10 @@ ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id=
             }),
         );
     }
+    const linkPrompt = renderLinkProductPrompt(view.linkProductPrompt ?? null);
+    if (view.linkProductPrompt?.openOnLoad) {
+        modalIds.push(LINK_PRODUCT_MODAL_ID);
+    }
 
     const body = `
         ${pageHeader({
@@ -380,6 +414,7 @@ ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id=
         ${stores}
         ${pageModals.join("")}
         ${sharedAddFoodModal(view)}
+        ${linkPrompt}
     `;
     return renderAppShell({
         title: "Groceries",

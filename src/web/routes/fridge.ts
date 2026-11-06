@@ -26,6 +26,10 @@ import {
 import { findFoodById } from "../../domain/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import {
+    findOrCreateFoodByBarcodeResult,
+    linkProductPromptPath,
+} from "../../domain/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveStockStore } from "../../db/stock.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
@@ -67,7 +71,12 @@ async function fridgeFormError(
 }
 
 fridgeRoutes.get("/fridge", requireSiteUser, async (c) => {
-    const page = await renderFridgeInventoryPage(c.get("userId"));
+    const page = await renderFridgeInventoryPage(
+        c.get("userId"),
+        undefined,
+        undefined,
+        c.req.query("link_product"),
+    );
     return c.html(page.html, page.status);
 });
 
@@ -134,18 +143,27 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
                         unit: formText(body, "qty_unit"),
                     })
                   : formText(body, "barcode")
-                    ? await prepareAddFoodByBarcode(
-                          store,
-                          foods,
-                          {
-                              householdId: member.householdId,
-                              locationId,
-                              barcode: formText(body, "barcode"),
-                              amount,
-                              unit: formText(body, "qty_unit"),
-                          },
-                          { lookup: fridgeBarcodeLookup },
-                      )
+                    ? await (async () => {
+                          const { food, created } =
+                              await findOrCreateFoodByBarcodeResult(
+                                  foods,
+                                  member.householdId,
+                                  formText(body, "barcode"),
+                                  fridgeBarcodeLookup,
+                              );
+                          const prepared = await prepareAddFoodById(
+                              store,
+                              foods,
+                              {
+                                  householdId: member.householdId,
+                                  locationId,
+                                  foodId: food.id,
+                                  amount,
+                                  unit: formText(body, "qty_unit"),
+                              },
+                          );
+                          return { ...prepared, barcodeCreated: created };
+                      })()
                     : await prepareAddManualFood(store, foods, {
                           householdId: member.householdId,
                           locationId,
@@ -161,6 +179,20 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             locationId: prepared.locationId,
             actorUserId: userId,
         });
+        const created =
+            "barcodeCreated" in prepared && prepared.barcodeCreated === true;
+        if (created) {
+            const catalog = await foods.listFoods(member.householdId);
+            const prompt = linkProductPromptPath(
+                prepared.food,
+                catalog,
+                "/fridge",
+            );
+            if (prompt) {
+                // toast: none (link-product prompt on destination)
+                return c.redirect(prompt, 303);
+            }
+        }
     } catch (err) {
         const openModalId =
             kind === "supply"

@@ -14,6 +14,10 @@ import {
 } from "../components/page-markup.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
+    renderLinkProductPrompt,
+    type LinkProductPromptView,
+} from "../components/link-product-prompt.js";
+import {
     confirmModal,
     disclosure,
     emptyState,
@@ -46,10 +50,14 @@ export type RecipesPageView = {
     openModalId?: string;
 };
 
+export type RecipeIngredientRow = RecipeIngredientView & {
+    pickUsualHref?: string | null;
+};
+
 export type RecipeDetailView = {
     chrome: ViewerChrome;
     recipe: Recipe;
-    ingredients: RecipeIngredientView[];
+    ingredients: RecipeIngredientRow[];
     members: RecipeMember[];
     stores: RecipeStoreOption[];
     viewerId: string;
@@ -62,6 +70,7 @@ export type RecipeDetailView = {
     isOwner: boolean;
     error?: string;
     openModalId?: string;
+    linkProductPrompt?: LinkProductPromptView | null;
 };
 
 const NEW_RECIPE_MODAL_ID = "recipe-new";
@@ -236,7 +245,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
 
 function ingredientRow(
     view: RecipeDetailView,
-    ingredient: RecipeIngredientView,
+    ingredient: RecipeIngredientRow,
 ): string {
     const unit = ingredient.quantity.unit;
     const showPersonPortion =
@@ -259,6 +268,7 @@ function ingredientRow(
         deleteModalId: RECIPE_DELETE_INGREDIENT_ID,
         editFill: ingredientFill(view, ingredient, "edit"),
         deleteFill: ingredientFill(view, ingredient, "delete"),
+        pickUsualHref: ingredient.pickUsualHref,
     });
 }
 
@@ -595,6 +605,7 @@ ${cookHead}
         })}
         ${pageModals}
         ${ingredientModals}
+        ${renderLinkProductPrompt(view.linkProductPrompt ?? null)}
     `;
     return renderAppShell({
         title: view.recipe.name,

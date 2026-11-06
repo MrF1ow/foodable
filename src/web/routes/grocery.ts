@@ -11,7 +11,6 @@ import {
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { normalizeBarcode } from "../../foods.js";
 import {
-    addGroceryFoodByBarcode,
     addGroceryFoodById,
     addGroceryManualFood,
     addGrocerySupply,
@@ -27,7 +26,12 @@ import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
-import { effectiveFoodsByIds, findFoodById } from "../../domain/foods.js";
+import {
+    effectiveFoodsByIds,
+    findFoodById,
+    findOrCreateFoodByBarcodeResult,
+    linkProductPromptPath,
+} from "../../domain/foods.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 
@@ -79,7 +83,9 @@ async function groceryFormError(
 }
 
 groceryRoutes.get("/grocery", requireSiteUser, async (c) => {
-    const page = await renderGroceryListPage(c.get("userId"));
+    const page = await renderGroceryListPage(c.get("userId"), {
+        linkProductId: c.req.query("link_product"),
+    });
     return c.html(page.html, page.status);
 });
 
@@ -176,20 +182,32 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     unit: formText(body, "qty_unit"),
                 });
             } else if (formText(body, "barcode")) {
-                await addGroceryFoodByBarcode(
-                    grocery,
-                    settings,
+                const { food, created } = await findOrCreateFoodByBarcodeResult(
                     foods,
-                    {
-                        householdId: member.householdId,
-                        storeId,
-                        sectionId,
-                        barcode: formText(body, "barcode"),
-                        amount,
-                        unit: formText(body, "qty_unit"),
-                    },
-                    { lookup: fridgeBarcodeLookup },
+                    member.householdId,
+                    formText(body, "barcode"),
+                    fridgeBarcodeLookup,
                 );
+                await addGroceryFoodById(grocery, settings, foods, {
+                    householdId: member.householdId,
+                    storeId,
+                    sectionId,
+                    foodId: food.id,
+                    amount,
+                    unit: formText(body, "qty_unit"),
+                });
+                if (created) {
+                    const catalog = await foods.listFoods(member.householdId);
+                    const prompt = linkProductPromptPath(
+                        food,
+                        catalog,
+                        "/grocery",
+                    );
+                    if (prompt) {
+                        // toast: none (link-product prompt on destination)
+                        return c.redirect(prompt, 303);
+                    }
+                }
             } else {
                 await addGroceryManualFood(grocery, settings, foods, {
                     householdId: member.householdId,
@@ -256,6 +274,11 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
     const member = siteMember(c);
     const body = await c.req.parseBody();
     try {
+        const productRaw = formText(body, "product_food_id");
+        const productFoodIds =
+            productRaw.trim() === ""
+                ? undefined
+                : { [c.req.param("id")]: productRaw.trim() };
         await putAwayGroceryLines(
             liveGroceryStore(),
             liveFridgeStore(),
@@ -266,6 +289,7 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
                 lineIds: [c.req.param("id")],
                 locationId: formText(body, "location_id") || undefined,
                 actorUserId: userId,
+                productFoodIds,
             },
         );
     } catch (err) {

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { FoodsStore, MemoryFoodsStore } from "../../domain/foods.js";
+import {
+    updateFood,
+    type FoodsStore,
+    type MemoryFoodsStore,
+} from "../../domain/foods.js";
 import { sampleFood, type StoreContractCtx } from "./helpers.js";
 
 // A row elsewhere that names `foodId` (a dislike on the live side, the memory
@@ -321,6 +325,38 @@ export function runFoodsStoreContract(
             expect(
                 (await store.getFood(c.householdId, product.id))?.genericFoodId,
             ).toBeNull();
+        });
+
+        test("updateFood with two live foods sharing a name", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const plain = sampleFood(c.householdId, {
+                name: "Duck eggs",
+                normalizedName: "duck eggs",
+            });
+            const branded = sampleFood(c.householdId, {
+                name: "Duck eggs",
+                normalizedName: "duck eggs",
+                brand: "Kirkland",
+            });
+            await store.insertFood(plain);
+            await store.insertFood(branded);
+            await updateFood(store, c.householdId, plain.id, { calories: 143 });
+            await updateFood(store, c.householdId, branded.id, {
+                calories: 140,
+            });
+            await expect(
+                updateFood(store, c.householdId, plain.id, {
+                    brand: "Kirkland",
+                }),
+            ).rejects.toThrow("That food already exists.");
+            expect(
+                (await store.getFood(c.householdId, plain.id))?.brand,
+            ).toBeNull();
+            await updateFood(store, c.householdId, plain.id, {
+                archived: true,
+            });
         });
 
         test("household scoping on listFoods", async () => {

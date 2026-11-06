@@ -34,6 +34,8 @@ export function renderGroceryLineRow(opts: {
     quantityLabel: string;
     alreadyHaveHtml: string;
     putAwayHtml?: string;
+    usualProductName?: string | null;
+    extraActionsHtml?: string;
 }): string {
     const checked = opts.checked ? "true" : "false";
     const next = opts.checked ? "0" : "1";
@@ -51,8 +53,9 @@ export function renderGroceryLineRow(opts: {
 </form>
 <div class="list-row-main">
 <p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
+${opts.usualProductName ? `<p class="grocery-line-usual muted">${escapeHtml(opts.usualProductName)}</p>` : ""}
 <p class="grocery-line-meta row-meta">${meta}</p>
-${opts.putAwayHtml ? `<div class="grocery-line-put-away">${opts.putAwayHtml}</div>` : ""}
+${opts.extraActionsHtml || opts.putAwayHtml ? `<div class="grocery-line-put-away row-actions">${opts.extraActionsHtml ?? ""}${opts.putAwayHtml ?? ""}</div>` : ""}
 </div>
 </div>
 </li>`;
@@ -128,9 +131,13 @@ export function renderRecipeIngredientRow(opts: {
     deleteModalId: string;
     editFill?: ModalFill;
     deleteFill?: ModalFill;
+    pickUsualHref?: string | null;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
+        : "";
+    const pickUsual = opts.pickUsualHref
+        ? `<p class="recipe-ingredient-usual"><a href="${escapeHtml(opts.pickUsualHref)}">Pick usual product</a></p>`
         : "";
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);
@@ -170,6 +177,7 @@ ${modalTrigger({
 })}
 </div>
 </div>
+${pickUsual}
 ${note}
 </li>`;
 }

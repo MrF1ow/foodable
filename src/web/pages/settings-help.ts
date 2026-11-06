@@ -44,6 +44,11 @@ const GLOSSARY: GlossaryEntry[] = [
         body: "After you check off a grocery line, Put away moves that amount into the location you pick. If that food is already there with the same expiry, the amounts combine; otherwise it's added as a new item. The line then leaves the grocery list.",
     },
     {
+        id: "usual-products",
+        title: "Usual products",
+        body: "A plain food like Eggs can have products — the brands you buy, like Kirkland Large Eggs — and one usual product. Recipes, grocery lines and new meals use the usual product's nutrition, so switching brands updates every recipe at once. Meals you already logged keep their numbers. Pick or change it under Household › Usual products.",
+    },
+    {
         id: "fridge-row-actions",
         title: "Fridge row icons",
         body: "The pencil edits quantity, location and expiry. The trash opens a confirm to remove the item without logging anything.",

@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import {
+    buildFoodUpdate,
     createMemoryFoodsStore,
     createProduct,
     effectiveFood,
@@ -521,4 +522,96 @@ test("mergeFoods rejects nesting two deep", async () => {
         /two deep/i,
     );
     expect(JSON.stringify(await store.listFoods(HH))).toBe(snapshot);
+});
+
+test("invalid food patch does not commit usual product first", async () => {
+    const store = createMemoryFoodsStore();
+    const eggs = await plainEggs(store);
+    const kirkland = await insertProduct(store, eggs, {
+        name: "Kirkland Large Eggs",
+        normalizedName: "kirkland large eggs",
+        brand: "Kirkland",
+    });
+    const patch = { gramsPerEach: 0 };
+    await expect(buildFoodUpdate(store, HH, eggs.id, patch)).rejects.toThrow(
+        /grams per item/i,
+    );
+    await expect(
+        (async () => {
+            await buildFoodUpdate(store, HH, eggs.id, patch);
+            await setUsualProduct(store, HH, eggs.id, kirkland.id);
+            await updateFood(store, HH, eggs.id, patch);
+        })(),
+    ).rejects.toThrow(/grams per item/i);
+    const plain = (await store.getFood(HH, eggs.id))!;
+    expect(plain.usualProductId).toBeNull();
+});
+
+test("invalid food patch does not commit belongs-to first", async () => {
+    const store = createMemoryFoodsStore();
+    const eggs = await plainEggs(store);
+    const solo = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Large Eggs",
+            brand: "Kirkland",
+        }),
+    );
+    const patch = { gramsPerEach: 0 };
+    await expect(
+        (async () => {
+            await buildFoodUpdate(store, HH, solo.id, patch);
+            await linkProduct(store, HH, solo.id, eggs.id);
+            await updateFood(store, HH, solo.id, patch);
+        })(),
+    ).rejects.toThrow(/grams per item/i);
+    const product = (await store.getFood(HH, solo.id))!;
+    expect(product.genericFoodId).toBeNull();
+});
+
+test("invalid food patch does not commit usual product first", async () => {
+    const store = createMemoryFoodsStore();
+    const eggs = await plainEggs(store);
+    const kirkland = await insertProduct(store, eggs, {
+        name: "Kirkland Large Eggs",
+        normalizedName: "kirkland large eggs",
+        brand: "Kirkland",
+    });
+    const patch = { gramsPerEach: 0 };
+    await expect(buildFoodUpdate(store, HH, eggs.id, patch)).rejects.toThrow(
+        /grams per item/i,
+    );
+    await expect(
+        (async () => {
+            await buildFoodUpdate(store, HH, eggs.id, patch);
+            await setUsualProduct(store, HH, eggs.id, kirkland.id);
+            await updateFood(store, HH, eggs.id, patch);
+        })(),
+    ).rejects.toThrow(/grams per item/i);
+    const plain = (await store.getFood(HH, eggs.id))!;
+    expect(plain.usualProductId).toBeNull();
+});
+
+test("invalid food patch does not commit belongs-to first", async () => {
+    const store = createMemoryFoodsStore();
+    const eggs = await plainEggs(store);
+    const solo = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Large Eggs",
+            brand: "Kirkland",
+        }),
+    );
+    const patch = { gramsPerEach: 0 };
+    await expect(
+        (async () => {
+            await buildFoodUpdate(store, HH, solo.id, patch);
+            await linkProduct(store, HH, solo.id, eggs.id);
+            await updateFood(store, HH, solo.id, patch);
+        })(),
+    ).rejects.toThrow(/grams per item/i);
+    const product = (await store.getFood(HH, solo.id))!;
+    expect(product.genericFoodId).toBeNull();
 });
