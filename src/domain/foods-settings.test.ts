@@ -30,6 +30,8 @@ const food = {
     offSourceId: null,
     genericFoodId: null,
     usualProductId: null,
+    usualStoreId: null,
+    usualAmount: null,
     createdBy: null,
     archivedAt: null,
     createdAt: "2026-01-01T00:00:00Z",
@@ -40,6 +42,7 @@ const food = {
 test("foods settings use modals for edit and merge", () => {
     const html = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: [food, { ...food, id: "f2", name: "Milk" }],
     });
     expect(html).not.toContain('<details class="more">');
@@ -60,10 +63,12 @@ test("foods settings use modals for edit and merge", () => {
 test("food edit dialog count does not grow with the catalog", () => {
     const few = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: [food, { ...food, id: "f2", name: "Milk" }],
     });
     const many = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: Array.from({ length: 40 }, (_, i) => ({
             ...food,
             id: `f${i}`,
@@ -92,6 +97,7 @@ function expectErrorOnceInModal(
 test("foods server error reopens edit and merge modals", () => {
     const editHtml = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: [food],
         error: "Enter a name.",
         openModalId: "food-edit-f1",
@@ -109,6 +115,7 @@ test("foods server error reopens edit and merge modals", () => {
     expectErrorOnceInModal(editHtml, FOOD_EDIT_MODAL_ID, "Enter a name.");
     const mergeHtml = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: [food, { ...food, id: "f2", name: "Milk" }],
         error: "Pick two different foods.",
         openModalId: FOODS_MERGE_MODAL_ID,
@@ -141,6 +148,7 @@ test("food edit error reopen prefills usual product slot", () => {
     };
     const html = renderFoodsSettingsPage({
         chrome,
+        stores: [],
         foods: [plain, kirkland],
         error: "Grams per item and grams per millilitre must be greater than zero.",
         openModalId: "food-edit-p1",

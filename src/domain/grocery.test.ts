@@ -6,9 +6,10 @@ import {
     createMemoryFridgeStore,
     listFridge,
 } from "./fridge.js";
-import { createMemoryFoodsStore } from "./foods.js";
+import { createMemoryFoodsStore, newFood } from "./foods.js";
 import {
     addGroceryFoodByBarcode,
+    addGroceryFoodById,
     addGroceryManualFood,
     addGrocerySupply,
     checkGroceryLine,
@@ -16,7 +17,11 @@ import {
     createMemoryGroceryStore,
     groceryAllergenWarning,
     listGrocery,
+    pickGroceryAmount,
+    pickGroceryStore,
     resolveGrocerySectionId,
+    type GroceryAmountPickReason,
+    type GroceryStorePickReason,
 } from "./grocery.js";
 import { alreadyHaveTag } from "./linking.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
@@ -54,6 +59,154 @@ async function seedStore() {
     const other = sections.find((row) => row.isOther)!;
     return { settings, store, dairy, other };
 }
+
+test("pickGroceryStore precedence: chosen, usual, list, default", () => {
+    const stores = [
+        { id: "a", householdId: HH, name: "A", sortOrder: 0 },
+        { id: "b", householdId: HH, name: "B", sortOrder: 1 },
+    ];
+    expect(
+        pickGroceryStore({
+            chosenStoreId: "b",
+            usualStoreId: "a",
+            stores,
+            lines: [],
+            foodId: null,
+        }),
+    ).toEqual({ storeId: "b", reason: "chosen" });
+    expect(
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: "b",
+            stores,
+            lines: [],
+            foodId: null,
+        }),
+    ).toEqual({ storeId: "b", reason: "usual" });
+    expect(
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: "costco",
+            stores,
+            lines: [
+                {
+                    id: "l1",
+                    householdId: HH,
+                    storeId: "a",
+                    sectionId: "s",
+                    kind: "food",
+                    displayName: "Milk",
+                    quantity: { amount: 1, unit: "L" },
+                    foodId: "food-plain",
+                    checked: false,
+                },
+            ],
+            foodId: "food-plain",
+        }),
+    ).toEqual({ storeId: "a", reason: "list" });
+    expect(
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: null,
+            stores,
+            lines: [],
+            foodId: null,
+        }),
+    ).toEqual({ storeId: "a", reason: "default" });
+});
+
+test("pickGroceryAmount: chosen vs usual vs default 1 defaultUnit", () => {
+    const food = { defaultUnit: "g" };
+    expect(
+        pickGroceryAmount({
+            amount: 3,
+            unit: "lb",
+            usual: { amount: 12, unit: "each" },
+            food,
+        }),
+    ).toEqual({
+        quantity: { amount: 3, unit: "lb" },
+        reason: "chosen",
+    });
+    expect(
+        pickGroceryAmount({
+            usual: { amount: 6, unit: "each" },
+            food,
+        }),
+    ).toEqual({
+        quantity: { amount: 6, unit: "each" },
+        reason: "usual",
+    });
+    expect(
+        pickGroceryAmount({
+            usual: { amount: 6, unit: "each" },
+            unit: "each",
+            food,
+        }),
+    ).toEqual({
+        quantity: { amount: 6, unit: "each" },
+        reason: "usual",
+    });
+    expect(
+        pickGroceryAmount({
+            usual: { amount: 6, unit: "each" },
+            unit: "g",
+            food,
+        }),
+    ).toEqual({
+        quantity: { amount: 1, unit: "g" },
+        reason: "default",
+    });
+});
+
+test("addGroceryFoodById auto-picks usual store and amount via effectiveFood", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings } = await seedStore();
+    const second = await createGroceryStore(settings, HH, "Costco");
+    const secondSections = await settings.listSections(second.id);
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggs",
+            usualStoreId: second.id,
+            usualAmount: { amount: 12, unit: "each" },
+        }),
+    );
+    const product = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Eggs",
+            genericFoodId: plain.id,
+        }),
+    );
+    await foods.updateFoodRow({ ...plain, usualProductId: product.id });
+    let picked: {
+        storeReason: GroceryStorePickReason;
+        amountReason: GroceryAmountPickReason;
+    } | null = null;
+    const line = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        foodId: plain.id,
+        onPicked: (p) => {
+            picked = {
+                storeReason: p.storeReason,
+                amountReason: p.amountReason,
+            };
+        },
+    });
+    expect(line.storeId).toBe(second.id);
+    expect(line.quantity).toEqual({ amount: 12, unit: "each" });
+    expect(picked).not.toBeNull();
+    expect(picked!).toEqual({
+        storeReason: "usual",
+        amountReason: "usual",
+    });
+    expect(line.sectionId).toBeTruthy();
+    expect(secondSections.some((s) => s.id === line.sectionId)).toBe(true);
+});
 
 test("add grocery line then lists it under the chosen section", async () => {
     const grocery = createMemoryGroceryStore();

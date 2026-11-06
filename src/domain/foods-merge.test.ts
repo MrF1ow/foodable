@@ -357,6 +357,8 @@ function sampleRow(over: Partial<Food>): Food {
         offSourceId: null,
         genericFoodId: null,
         usualProductId: null,
+        usualStoreId: null,
+        usualAmount: null,
         createdBy: null,
         archivedAt: null,
         createdAt: now,

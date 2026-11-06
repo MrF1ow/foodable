@@ -717,6 +717,38 @@ export function runFoodsStoreContract(
             ).toBeNull();
         });
 
+        test("usual_store_id, usual_amount, usual_unit round trip", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const food = sampleFood(c.householdId, {
+                name: "Milk",
+                normalizedName: "milk",
+                usualStoreId: c.storeId,
+                usualAmount: { amount: 2000, unit: "ml" },
+            });
+            await store.insertFood(food);
+            const read = await store.getFood(c.householdId, food.id);
+            expect(read?.usualStoreId).toBe(c.storeId);
+            expect(read?.usualAmount).toEqual({ amount: 2000, unit: "ml" });
+
+            const cleared = await store.updateFoodRow({
+                ...read!,
+                usualStoreId: null,
+                usualAmount: null,
+            });
+            expect(cleared?.usualStoreId).toBeNull();
+            expect(cleared?.usualAmount).toBeNull();
+
+            const restored = await store.updateFoodRow({
+                ...cleared!,
+                usualStoreId: c.storeId,
+                usualAmount: { amount: 500, unit: "ml" },
+            });
+            expect(restored?.usualStoreId).toBe(c.storeId);
+            expect(restored?.usualAmount).toEqual({ amount: 500, unit: "ml" });
+        });
+
         test("updateFood with two live foods sharing a name", async () => {
             await reset();
             const c = ctx();

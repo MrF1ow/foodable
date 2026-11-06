@@ -1,10 +1,13 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
+import { isQuantityUnit } from "./quantity.js";
 
 export type FoodKind = "food" | "supply";
 
 export type NutritionSource =
     "openfoodfacts" | "manual" | "estimate" | "recipe";
+
+export type UsualAmount = { amount: number; unit: string };
 
 export type Food = {
     id: string;
@@ -29,6 +32,8 @@ export type Food = {
     offSourceId: string | null;
     genericFoodId: string | null;
     usualProductId: string | null;
+    usualStoreId: string | null;
+    usualAmount: UsualAmount | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
@@ -53,6 +58,8 @@ export type FoodPatch = {
     allergens?: string[];
     aliases?: string[];
     archived?: boolean;
+    usualStoreId?: string | null;
+    usualAmount?: { amount: number | null; unit: string | null } | null;
 };
 
 export type FoodsStore = {
@@ -111,6 +118,93 @@ export class FoodsInputError extends Error {
         super(message);
         this.name = "FoodsInputError";
     }
+}
+
+export type UsualStoreLookup = {
+    listStores(householdId: string): Promise<{ id: string }[]>;
+};
+
+export type UsualPurchasePatch = {
+    usualStoreId?: string | null;
+    usualAmount?: { amount: number | null; unit: string | null } | null;
+};
+
+function blankUsualAmountInput(
+    row: { amount: number | null; unit: string | null } | null | undefined,
+): boolean {
+    if (row == null) return true;
+    const a =
+        row.amount == null
+            ? ""
+            : typeof row.amount === "number"
+              ? String(row.amount)
+              : "";
+    const u = row.unit?.trim() ?? "";
+    return a.trim() === "" && u === "";
+}
+
+export async function parseUsualPurchase(
+    householdId: string,
+    patch: UsualPurchasePatch,
+    stores: UsualStoreLookup | undefined,
+): Promise<{ usualStoreId?: string | null; usualAmount?: UsualAmount | null }> {
+    const out: {
+        usualStoreId?: string | null;
+        usualAmount?: UsualAmount | null;
+    } = {};
+    if (patch.usualStoreId !== undefined) {
+        const raw = patch.usualStoreId;
+        if (raw === null || (typeof raw === "string" && raw.trim() === "")) {
+            out.usualStoreId = null;
+        } else {
+            const id = String(raw).trim();
+            if (!stores) {
+                throw new FoodsInputError("Unknown store.");
+            }
+            const listed = await stores.listStores(householdId);
+            const ids = new Set(listed.map((s) => s.id));
+            if (!ids.has(id)) {
+                throw new FoodsInputError("Unknown store.");
+            }
+            out.usualStoreId = id;
+        }
+    }
+    if (patch.usualAmount !== undefined) {
+        if (
+            patch.usualAmount == null ||
+            blankUsualAmountInput(patch.usualAmount)
+        ) {
+            out.usualAmount = null;
+        } else {
+            const row = patch.usualAmount;
+            const amt = row.amount;
+            const unitRaw = row.unit?.trim() ?? "";
+            const hasAmt = amt != null && String(amt).trim() !== "";
+            const hasUnit = unitRaw !== "";
+            if (hasAmt !== hasUnit) {
+                throw new FoodsInputError(
+                    "Enter a usual amount with its unit.",
+                );
+            }
+            if (!hasAmt) {
+                out.usualAmount = null;
+            } else {
+                const n = typeof amt === "number" ? amt : Number(amt);
+                if (!Number.isFinite(n) || n <= 0) {
+                    throw new FoodsInputError(
+                        "The usual amount must be greater than zero.",
+                    );
+                }
+                if (!isQuantityUnit(unitRaw)) {
+                    throw new FoodsInputError(
+                        "Pick a known unit for the usual amount.",
+                    );
+                }
+                out.usualAmount = { amount: n, unit: unitRaw };
+            }
+        }
+    }
+    return out;
 }
 
 const OFF_ALLERGEN_MAP: Record<string, NamedAllergen> = {
@@ -267,6 +361,13 @@ function copyFood(row: Food): Food {
     return {
         ...row,
         allergens: [...row.allergens],
+        usualAmount:
+            row.usualAmount == null
+                ? null
+                : {
+                      amount: row.usualAmount.amount,
+                      unit: row.usualAmount.unit,
+                  },
     };
 }
 
@@ -604,6 +705,9 @@ export function newFood(input: {
     allergens?: string[];
     offSourceId?: string | null;
     genericFoodId?: string | null;
+    usualProductId?: string | null;
+    usualStoreId?: string | null;
+    usualAmount?: UsualAmount | null;
     createdBy?: string | null;
 }): Food {
     const name = input.name.trim();
@@ -630,7 +734,10 @@ export function newFood(input: {
         allergens: [...(input.allergens ?? [])],
         offSourceId: input.offSourceId ?? null,
         genericFoodId: input.genericFoodId ?? null,
-        usualProductId: null,
+        usualProductId: input.usualProductId ?? null,
+        usualStoreId: input.usualStoreId ?? null,
+        usualAmount:
+            input.usualAmount == null ? null : { ...input.usualAmount },
         createdBy: input.createdBy ?? null,
         archivedAt: null,
         createdAt: stamp,
@@ -1076,6 +1183,8 @@ export type MergedFoodFieldPick = Pick<
     | "gramsPerMl"
     | "defaultUnit"
     | "allergens"
+    | "usualStoreId"
+    | "usualAmount"
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
@@ -1093,6 +1202,13 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
             ? keep.defaultUnit
             : drop.defaultUnit,
         allergens: mergeAllergens(keep.allergens, drop.allergens),
+        usualStoreId: keep.usualStoreId ?? drop.usualStoreId,
+        usualAmount:
+            keep.usualAmount != null
+                ? { ...keep.usualAmount }
+                : drop.usualAmount != null
+                  ? { ...drop.usualAmount }
+                  : null,
     };
 }
 
@@ -1119,12 +1235,21 @@ export function effectiveFood(
     };
     const nutritionFrom = usualHasAnyNutrient(u) ? u : food;
     const block = nutritionBlockFrom(nutritionFrom);
+    const usualStoreId = u.usualStoreId ?? food.usualStoreId;
+    const usualAmount =
+        u.usualAmount != null
+            ? { ...u.usualAmount }
+            : food.usualAmount != null
+              ? { ...food.usualAmount }
+              : null;
     return {
         ...base,
         ...block,
         gramsPerEach: u.gramsPerEach ?? food.gramsPerEach,
         gramsPerMl: u.gramsPerMl ?? food.gramsPerMl,
         allergens: mergeAllergens(food.allergens, u.allergens),
+        usualStoreId,
+        usualAmount,
         product,
     };
 }
@@ -1470,19 +1595,54 @@ export async function linkProduct(
     return saveFood(store, { ...product, genericFoodId: foodId });
 }
 
+export async function setUsualPurchase(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    patch: UsualPurchasePatch,
+    opts: { stores: UsualStoreLookup },
+): Promise<Food> {
+    const parsed = await parseUsualPurchase(householdId, patch, opts.stores);
+    const current = await findFoodById(store, householdId, foodId);
+    let next = { ...current };
+    if (parsed.usualStoreId !== undefined) {
+        next = { ...next, usualStoreId: parsed.usualStoreId };
+    }
+    if (parsed.usualAmount !== undefined) {
+        next = {
+            ...next,
+            usualAmount:
+                parsed.usualAmount == null ? null : { ...parsed.usualAmount },
+        };
+    }
+    return saveFood(store, next);
+}
+
 export async function setUsualProduct(
     store: FoodsStore,
     householdId: string,
     foodId: string,
     productId: string | null,
+    opts?: { purchase?: UsualPurchasePatch; stores?: UsualStoreLookup },
 ): Promise<Food> {
+    if (opts?.purchase != null) {
+        await parseUsualPurchase(householdId, opts.purchase, opts.stores);
+    }
     const food = await requireLiveFood(store, householdId, foodId);
     if (food.genericFoodId) {
         throw new FoodsInputError("That food is a product of another food.");
     }
     if (productId === null) {
-        if (!food.usualProductId) return food;
-        return saveFood(store, { ...food, usualProductId: null });
+        if (!food.usualProductId && opts?.purchase == null) return food;
+        if (food.usualProductId) {
+            await saveFood(store, { ...food, usualProductId: null });
+        }
+        if (opts?.purchase != null) {
+            await setUsualPurchase(store, householdId, foodId, opts.purchase, {
+                stores: opts.stores!,
+            });
+        }
+        return requireLiveFood(store, householdId, foodId);
     }
     if (productId === foodId) {
         throw new FoodsInputError("Pick two different foods.");
@@ -1490,7 +1650,19 @@ export async function setUsualProduct(
     const product = await requireLiveFood(store, householdId, productId);
     assertSameKindLiveNotSelf(food, product, foodId, productId);
     if (product.genericFoodId === foodId) {
-        return saveFood(store, { ...food, usualProductId: productId });
+        await saveFood(store, { ...food, usualProductId: productId });
+        if (opts?.purchase != null) {
+            await setUsualPurchase(
+                store,
+                householdId,
+                productId,
+                opts.purchase,
+                {
+                    stores: opts.stores!,
+                },
+            );
+        }
+        return requireLiveFood(store, householdId, foodId);
     }
     if (product.genericFoodId && product.genericFoodId !== foodId) {
         throw new FoodsInputError(
@@ -1499,7 +1671,13 @@ export async function setUsualProduct(
     }
     await linkProduct(store, householdId, productId, foodId);
     const refreshed = await requireLiveFood(store, householdId, foodId);
-    return saveFood(store, { ...refreshed, usualProductId: productId });
+    await saveFood(store, { ...refreshed, usualProductId: productId });
+    if (opts?.purchase != null) {
+        await setUsualPurchase(store, householdId, productId, opts.purchase, {
+            stores: opts.stores!,
+        });
+    }
+    return requireLiveFood(store, householdId, foodId);
 }
 
 export async function createProduct(
@@ -1614,6 +1792,7 @@ export async function buildFoodUpdate(
     householdId: string,
     foodId: string,
     patch: FoodPatch,
+    opts?: { stores?: UsualStoreLookup },
 ): Promise<Food> {
     const current = await findFoodById(store, householdId, foodId);
     const name = patch.name != null ? patch.name.trim() : current.name;
@@ -1667,6 +1846,17 @@ export async function buildFoodUpdate(
             }
         }
     }
+    const usualPatch: UsualPurchasePatch = {};
+    if (patch.usualStoreId !== undefined) {
+        usualPatch.usualStoreId = patch.usualStoreId;
+    }
+    if (patch.usualAmount !== undefined) {
+        usualPatch.usualAmount = patch.usualAmount;
+    }
+    const parsedUsual =
+        Object.keys(usualPatch).length > 0
+            ? await parseUsualPurchase(householdId, usualPatch, opts?.stores)
+            : {};
     return {
         ...current,
         name,
@@ -1722,6 +1912,18 @@ export async function buildFoodUpdate(
         genericFoodId: archiving || unarchiving ? null : current.genericFoodId,
         usualProductId:
             archiving || unarchiving ? null : current.usualProductId,
+        usualStoreId:
+            parsedUsual.usualStoreId !== undefined
+                ? parsedUsual.usualStoreId
+                : current.usualStoreId,
+        usualAmount:
+            parsedUsual.usualAmount !== undefined
+                ? parsedUsual.usualAmount == null
+                    ? null
+                    : { ...parsedUsual.usualAmount }
+                : current.usualAmount == null
+                  ? null
+                  : { ...current.usualAmount },
         updatedAt: nowIso(),
     };
 }
@@ -1731,10 +1933,11 @@ export async function updateFood(
     householdId: string,
     foodId: string,
     patch: FoodPatch,
+    opts?: { stores?: UsualStoreLookup },
 ): Promise<Food> {
     const current = await findFoodById(store, householdId, foodId);
     const archiving = patch.archived === true && current.archivedAt == null;
-    const next = await buildFoodUpdate(store, householdId, foodId, patch);
+    const next = await buildFoodUpdate(store, householdId, foodId, patch, opts);
     if (archiving) {
         await applyArchiveLinkCleanup(store, householdId, current);
     }
@@ -1802,6 +2005,11 @@ export async function mergeFoods(
         ...mergedFields,
         genericFoodId: mergedGenericId,
         usualProductId: mergedUsualId,
+        usualStoreId: mergedFields.usualStoreId,
+        usualAmount:
+            mergedFields.usualAmount == null
+                ? null
+                : { ...mergedFields.usualAmount },
         updatedAt: nowIso(),
     };
     const dropBarcodes = await store.deleteBarcodesForFood(householdId, dropId);
@@ -1938,7 +2146,10 @@ function allergenArraysEqual(a: string[], b: string[]): boolean {
 }
 
 const FIELDS_FILLED_KEY_ORDER: (
-    keyof MergedFoodFieldPick | "usualProductId"
+    | keyof MergedFoodFieldPick
+    | "usualProductId"
+    | "usualStoreId"
+    | "usualAmount"
 )[] = [
     "calories",
     "proteinG",
@@ -1953,6 +2164,8 @@ const FIELDS_FILLED_KEY_ORDER: (
     "gramsPerMl",
     "defaultUnit",
     "allergens",
+    "usualStoreId",
+    "usualAmount",
     "usualProductId",
 ];
 
@@ -1966,6 +2179,19 @@ function fieldsFilledKeys(
         if (key === "usualProductId") {
             if (!state.usualProductId && drop.usualProductId) {
                 filled.push("usualProductId");
+            }
+            continue;
+        }
+        if (key === "usualAmount") {
+            const before = state.usualAmount;
+            const after = merged.usualAmount;
+            if (before == null && after == null) continue;
+            if (before == null || after == null) {
+                filled.push("usualAmount");
+                continue;
+            }
+            if (before.amount !== after.amount || before.unit !== after.unit) {
+                filled.push("usualAmount");
             }
             continue;
         }
@@ -2381,6 +2607,9 @@ export function foodFromRow(row: {
     off_source_id: unknown;
     generic_food_id: unknown;
     usual_product_id: unknown;
+    usual_store_id: unknown;
+    usual_amount: unknown;
+    usual_unit: unknown;
     created_by: unknown;
     archived_at: unknown;
     created_at: unknown;
@@ -2394,6 +2623,23 @@ export function foodFromRow(row: {
         source === "estimate" ||
         source === "recipe"
             ? source
+            : null;
+    const usualAmt =
+        row.usual_amount != null &&
+        row.usual_unit != null &&
+        String(row.usual_unit).trim() !== ""
+            ? Number(row.usual_amount)
+            : null;
+    const usualUnit =
+        usualAmt != null && Number.isFinite(usualAmt) && usualAmt > 0
+            ? String(row.usual_unit).trim()
+            : null;
+    const usualAmount: UsualAmount | null =
+        usualAmt != null &&
+        usualUnit != null &&
+        Number.isFinite(usualAmt) &&
+        usualAmt > 0
+            ? { amount: usualAmt, unit: usualUnit }
             : null;
     return {
         id: String(row.id),
@@ -2430,6 +2676,11 @@ export function foodFromRow(row: {
             typeof row.usual_product_id === "string" && row.usual_product_id
                 ? row.usual_product_id
                 : null,
+        usualStoreId:
+            typeof row.usual_store_id === "string" && row.usual_store_id
+                ? row.usual_store_id
+                : null,
+        usualAmount,
         createdBy:
             typeof row.created_by === "string" && row.created_by
                 ? row.created_by
@@ -2467,6 +2718,9 @@ export function foodToRow(row: Food) {
         off_source_id: row.offSourceId,
         generic_food_id: row.genericFoodId,
         usual_product_id: row.usualProductId,
+        usual_store_id: row.usualStoreId,
+        usual_amount: row.usualAmount?.amount ?? null,
+        usual_unit: row.usualAmount?.unit ?? null,
         created_by: row.createdBy,
         archived_at: row.archivedAt,
         created_at: row.createdAt,

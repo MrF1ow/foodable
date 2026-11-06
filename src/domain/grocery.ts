@@ -1,5 +1,6 @@
 import type { FoodResult } from "../foods.js";
 import {
+    effectiveFoodsByIds,
     familyOf,
     findFoodById,
     findOrCreateFoodByBarcode,
@@ -7,6 +8,7 @@ import {
     FoodsInputError,
     normalizeFoodName,
     type FoodsStore,
+    type UsualAmount,
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
 import type {
@@ -26,6 +28,9 @@ import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
 export type GroceryKind = "food" | "supply";
 
 export type GroceryQuantity = { amount: number; unit: string };
+
+export type GroceryStorePickReason = "chosen" | "usual" | "list" | "default";
+export type GroceryAmountPickReason = "chosen" | "usual" | "default";
 
 export type GroceryLine = {
     id: string;
@@ -471,6 +476,76 @@ export async function placeGroceryLine(
     return suggested?.id ?? resolveGrocerySectionId(settings, input.storeId);
 }
 
+export function pickGroceryStore(input: {
+    chosenStoreId?: string | null;
+    usualStoreId: string | null;
+    stores: GroceryStore[];
+    lines: GroceryLine[];
+    foodId: string | null;
+    familyById?: ReadonlyMap<string, string>;
+}): { storeId: string; reason: GroceryStorePickReason } {
+    const chosen = input.chosenStoreId?.trim();
+    if (chosen) {
+        return { storeId: chosen, reason: "chosen" };
+    }
+    const idSet = new Set(input.stores.map((s) => s.id));
+    const usual = input.usualStoreId;
+    if (usual && idSet.has(usual)) {
+        return { storeId: usual, reason: "usual" };
+    }
+    if (input.foodId) {
+        const fam = familyFromMap(input.foodId, input.familyById);
+        for (let i = input.lines.length - 1; i >= 0; i--) {
+            const line = input.lines[i]!;
+            if (!line.foodId) continue;
+            if (familyFromMap(line.foodId, input.familyById) !== fam) continue;
+            if (idSet.has(line.storeId)) {
+                return { storeId: line.storeId, reason: "list" };
+            }
+        }
+    }
+    if (input.stores.length === 0) {
+        throw new GroceryInputError("Add a store first.");
+    }
+    return { storeId: input.stores[0]!.id, reason: "default" };
+}
+
+export function pickGroceryAmount(input: {
+    amount?: number | null;
+    unit?: string;
+    usual: UsualAmount | null;
+    food: { defaultUnit: string };
+}): { quantity: GroceryQuantity; reason: GroceryAmountPickReason } {
+    const hasChosen =
+        input.amount != null &&
+        input.amount !== undefined &&
+        !(typeof input.amount === "number" && !Number.isFinite(input.amount));
+    if (hasChosen) {
+        return {
+            quantity: {
+                amount: parseAmount(input.amount as number),
+                unit: storedFoodUnit(input.unit, input.food),
+            },
+            reason: "chosen",
+        };
+    }
+    const usual = input.usual;
+    const givenUnit = input.unit?.trim() ?? "";
+    if (usual != null && (!givenUnit || givenUnit === usual.unit)) {
+        return {
+            quantity: { amount: usual.amount, unit: usual.unit },
+            reason: "usual",
+        };
+    }
+    return {
+        quantity: {
+            amount: 1,
+            unit: storedFoodUnit(input.unit, input.food),
+        },
+        reason: "default",
+    };
+}
+
 async function requireStore(
     settings: SettingsStore,
     householdId: string,
@@ -543,33 +618,110 @@ async function insertFromFood(
     });
 }
 
+type GroceryPickCallback = (pick: {
+    storeId: string;
+    storeReason: GroceryStorePickReason;
+    quantity: GroceryQuantity;
+    amountReason: GroceryAmountPickReason;
+}) => void;
+
 export async function addGroceryFoodById(
     grocery: GroceryListStore,
     settings: SettingsStore,
     foods: FoodsStore,
     input: {
         householdId: string;
-        storeId: string;
+        storeId?: string;
         sectionId?: string;
         foodId: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
+        onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    await requireStore(settings, input.householdId, input.storeId);
-    await resolveGrocerySectionId(settings, input.storeId, input.sectionId);
-    const amount = parseAmount(input.amount);
+    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const hasExplicitAmount =
+        input.amount !== undefined && input.amount !== null;
+
+    if (explicitStore) {
+        await requireStore(settings, input.householdId, explicitStore);
+        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    }
+
     try {
         const food = await findFoodById(foods, input.householdId, input.foodId);
         if (food.kind !== "food") {
             throw new GroceryInputError("That catalog item is a supply.");
         }
+
+        let storeId: string;
+        let storeReason: GroceryStorePickReason;
+        let quantity: GroceryQuantity;
+        let amountReason: GroceryAmountPickReason;
+
+        if (explicitStore && hasExplicitAmount) {
+            storeId = explicitStore;
+            storeReason = "chosen";
+            const picked = pickGroceryAmount({
+                amount: input.amount,
+                unit: input.unit,
+                usual: null,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        } else {
+            const stores = await settings.listStores(input.householdId);
+            const lines = await grocery.listLines(input.householdId);
+            const listed = await foods.listFoods(input.householdId);
+            const familyById = new Map(
+                listed.map((row) => [row.id, familyOf(row)]),
+            );
+            const effMap = await effectiveFoodsByIds(foods, input.householdId, [
+                food.id,
+            ]);
+            const eff = effMap.get(food.id)!;
+
+            if (explicitStore) {
+                storeId = explicitStore;
+                storeReason = "chosen";
+            } else {
+                const p = pickGroceryStore({
+                    chosenStoreId: null,
+                    usualStoreId: eff.usualStoreId,
+                    stores,
+                    lines,
+                    foodId: food.id,
+                    familyById,
+                });
+                storeId = p.storeId;
+                storeReason = p.reason;
+                await requireStore(settings, input.householdId, storeId);
+            }
+            await resolveGrocerySectionId(settings, storeId, input.sectionId);
+            const picked = pickGroceryAmount({
+                amount: hasExplicitAmount ? input.amount : undefined,
+                unit: input.unit,
+                usual: eff.usualAmount,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        }
+
+        input.onPicked?.({
+            storeId,
+            storeReason,
+            quantity,
+            amountReason,
+        });
+
         return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
-            storeId: input.storeId,
+            storeId,
             sectionId: input.sectionId,
-            amount,
-            unit: storedFoodUnit(input.unit, food),
+            amount: quantity.amount,
+            unit: quantity.unit,
             food,
         });
     } catch (err) {
@@ -583,19 +735,26 @@ export async function addGroceryFoodByBarcode(
     foods: FoodsStore,
     input: {
         householdId: string;
-        storeId: string;
+        storeId?: string;
         sectionId?: string;
         barcode: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
+        onPicked?: GroceryPickCallback;
     },
     opts: {
         lookup: (barcode: string) => Promise<FoodResult | null>;
     },
 ): Promise<GroceryLine> {
-    await requireStore(settings, input.householdId, input.storeId);
-    await resolveGrocerySectionId(settings, input.storeId, input.sectionId);
-    const amount = parseAmount(input.amount);
+    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const hasExplicitAmount =
+        input.amount !== undefined && input.amount !== null;
+
+    if (explicitStore) {
+        await requireStore(settings, input.householdId, explicitStore);
+        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    }
+
     try {
         const food = await findOrCreateFoodByBarcode(
             foods,
@@ -603,12 +762,75 @@ export async function addGroceryFoodByBarcode(
             input.barcode,
             opts.lookup,
         );
+
+        let storeId: string;
+        let storeReason: GroceryStorePickReason;
+        let quantity: GroceryQuantity;
+        let amountReason: GroceryAmountPickReason;
+
+        if (explicitStore && hasExplicitAmount) {
+            storeId = explicitStore;
+            storeReason = "chosen";
+            const picked = pickGroceryAmount({
+                amount: input.amount,
+                unit: input.unit,
+                usual: null,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        } else {
+            const stores = await settings.listStores(input.householdId);
+            const lines = await grocery.listLines(input.householdId);
+            const listed = await foods.listFoods(input.householdId);
+            const familyById = new Map(
+                listed.map((row) => [row.id, familyOf(row)]),
+            );
+            const effMap = await effectiveFoodsByIds(foods, input.householdId, [
+                food.id,
+            ]);
+            const eff = effMap.get(food.id)!;
+
+            if (explicitStore) {
+                storeId = explicitStore;
+                storeReason = "chosen";
+            } else {
+                const p = pickGroceryStore({
+                    chosenStoreId: null,
+                    usualStoreId: eff.usualStoreId,
+                    stores,
+                    lines,
+                    foodId: food.id,
+                    familyById,
+                });
+                storeId = p.storeId;
+                storeReason = p.reason;
+                await requireStore(settings, input.householdId, storeId);
+            }
+            await resolveGrocerySectionId(settings, storeId, input.sectionId);
+            const picked = pickGroceryAmount({
+                amount: hasExplicitAmount ? input.amount : undefined,
+                unit: input.unit,
+                usual: eff.usualAmount,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        }
+
+        input.onPicked?.({
+            storeId,
+            storeReason,
+            quantity,
+            amountReason,
+        });
+
         return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
-            storeId: input.storeId,
+            storeId,
             sectionId: input.sectionId,
-            amount,
-            unit: storedFoodUnit(input.unit, food),
+            amount: quantity.amount,
+            unit: quantity.unit,
             food,
         });
     } catch (err) {
@@ -622,16 +844,23 @@ export async function addGroceryManualFood(
     foods: FoodsStore,
     input: {
         householdId: string;
-        storeId: string;
+        storeId?: string;
         sectionId?: string;
         name: string;
-        amount: number;
+        amount?: number | null;
         unit?: string;
+        onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    await requireStore(settings, input.householdId, input.storeId);
-    await resolveGrocerySectionId(settings, input.storeId, input.sectionId);
-    const amount = parseAmount(input.amount);
+    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const hasExplicitAmount =
+        input.amount !== undefined && input.amount !== null;
+
+    if (explicitStore) {
+        await requireStore(settings, input.householdId, explicitStore);
+        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    }
+
     try {
         const food = await findOrCreateManualFood(
             foods,
@@ -639,12 +868,75 @@ export async function addGroceryManualFood(
             "food",
             input.name,
         );
+
+        let storeId: string;
+        let storeReason: GroceryStorePickReason;
+        let quantity: GroceryQuantity;
+        let amountReason: GroceryAmountPickReason;
+
+        if (explicitStore && hasExplicitAmount) {
+            storeId = explicitStore;
+            storeReason = "chosen";
+            const picked = pickGroceryAmount({
+                amount: input.amount,
+                unit: input.unit,
+                usual: null,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        } else {
+            const stores = await settings.listStores(input.householdId);
+            const lines = await grocery.listLines(input.householdId);
+            const listed = await foods.listFoods(input.householdId);
+            const familyById = new Map(
+                listed.map((row) => [row.id, familyOf(row)]),
+            );
+            const effMap = await effectiveFoodsByIds(foods, input.householdId, [
+                food.id,
+            ]);
+            const eff = effMap.get(food.id)!;
+
+            if (explicitStore) {
+                storeId = explicitStore;
+                storeReason = "chosen";
+            } else {
+                const p = pickGroceryStore({
+                    chosenStoreId: null,
+                    usualStoreId: eff.usualStoreId,
+                    stores,
+                    lines,
+                    foodId: food.id,
+                    familyById,
+                });
+                storeId = p.storeId;
+                storeReason = p.reason;
+                await requireStore(settings, input.householdId, storeId);
+            }
+            await resolveGrocerySectionId(settings, storeId, input.sectionId);
+            const picked = pickGroceryAmount({
+                amount: hasExplicitAmount ? input.amount : undefined,
+                unit: input.unit,
+                usual: eff.usualAmount,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        }
+
+        input.onPicked?.({
+            storeId,
+            storeReason,
+            quantity,
+            amountReason,
+        });
+
         return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
-            storeId: input.storeId,
+            storeId,
             sectionId: input.sectionId,
-            amount,
-            unit: storedFoodUnit(input.unit, food),
+            amount: quantity.amount,
+            unit: quantity.unit,
             food,
         });
     } catch (err) {
@@ -658,19 +950,28 @@ export async function addGrocerySupply(
     foods: FoodsStore,
     input: {
         householdId: string;
-        storeId: string;
+        storeId?: string;
         sectionId?: string;
         name: string;
-        amount: number;
-        unit: string;
+        amount?: number | null;
+        unit?: string;
         foodId?: string;
+        onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    await requireStore(settings, input.householdId, input.storeId);
-    await resolveGrocerySectionId(settings, input.storeId, input.sectionId);
-    const unit = input.unit.trim();
-    if (!unit) throw new GroceryInputError("Enter a unit.");
-    const amount = parseAmount(input.amount);
+    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const hasExplicitAmount =
+        input.amount !== undefined && input.amount !== null;
+    if (hasExplicitAmount) {
+        const u = input.unit?.trim() ?? "";
+        if (!u) throw new GroceryInputError("Enter a unit.");
+    }
+
+    if (explicitStore) {
+        await requireStore(settings, input.householdId, explicitStore);
+        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    }
+
     try {
         const food = input.foodId
             ? await findFoodById(foods, input.householdId, input.foodId)
@@ -683,12 +984,75 @@ export async function addGrocerySupply(
         if (food.kind !== "supply") {
             throw new GroceryInputError("That catalog item is a food.");
         }
+
+        let storeId: string;
+        let storeReason: GroceryStorePickReason;
+        let quantity: GroceryQuantity;
+        let amountReason: GroceryAmountPickReason;
+
+        if (explicitStore && hasExplicitAmount) {
+            storeId = explicitStore;
+            storeReason = "chosen";
+            const picked = pickGroceryAmount({
+                amount: input.amount,
+                unit: input.unit,
+                usual: null,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        } else {
+            const stores = await settings.listStores(input.householdId);
+            const lines = await grocery.listLines(input.householdId);
+            const listed = await foods.listFoods(input.householdId);
+            const familyById = new Map(
+                listed.map((row) => [row.id, familyOf(row)]),
+            );
+            const effMap = await effectiveFoodsByIds(foods, input.householdId, [
+                food.id,
+            ]);
+            const eff = effMap.get(food.id)!;
+
+            if (explicitStore) {
+                storeId = explicitStore;
+                storeReason = "chosen";
+            } else {
+                const p = pickGroceryStore({
+                    chosenStoreId: null,
+                    usualStoreId: eff.usualStoreId,
+                    stores,
+                    lines,
+                    foodId: food.id,
+                    familyById,
+                });
+                storeId = p.storeId;
+                storeReason = p.reason;
+                await requireStore(settings, input.householdId, storeId);
+            }
+            await resolveGrocerySectionId(settings, storeId, input.sectionId);
+            const picked = pickGroceryAmount({
+                amount: hasExplicitAmount ? input.amount : undefined,
+                unit: input.unit,
+                usual: eff.usualAmount,
+                food,
+            });
+            quantity = picked.quantity;
+            amountReason = picked.reason;
+        }
+
+        input.onPicked?.({
+            storeId,
+            storeReason,
+            quantity,
+            amountReason,
+        });
+
         return insertFromFood(grocery, settings, foods, {
             householdId: input.householdId,
-            storeId: input.storeId,
+            storeId,
             sectionId: input.sectionId,
-            amount,
-            unit,
+            amount: quantity.amount,
+            unit: quantity.unit,
             food,
         });
     } catch (err) {
