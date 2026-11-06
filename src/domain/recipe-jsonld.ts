@@ -357,7 +357,8 @@ function parseJsonLdBlock(raw: string): unknown {
     let text = raw.trim();
     if (text.endsWith(";")) text = text.slice(0, -1).trim();
     if (text.startsWith("<!--")) {
-        text = text.replace(/^<!--\s*/, "").replace(/\s*-->$/, "");
+        // HTML also ends a comment with "--!>".
+        text = text.replace(/^<!--\s*/, "").replace(/\s*--!?>$/, "");
     }
     return JSON.parse(text);
 }
