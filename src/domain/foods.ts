@@ -279,9 +279,24 @@ function foodKey(row: {
     return `${row.householdId}\0${row.kind}\0${row.normalizedName}\0${row.brand ?? ""}`;
 }
 
+export type MemoryFoodRefRow = {
+    foodId: string;
+    householdId?: string;
+    [key: string]: unknown;
+};
+
+export type MemoryFoodRefHolder = {
+    repointFood(householdId: string, fromId: string, toId: string): void;
+};
+
 export type MemoryFoodsStore = FoodsStore & {
-    refs: { foodId: string }[];
-    trackRef(foodId: string): { foodId: string };
+    refs: MemoryFoodRefRow[];
+    trackRef(
+        foodId: string,
+        householdId?: string,
+        extra?: Record<string, unknown>,
+    ): MemoryFoodRefRow;
+    linkRefs(holder: MemoryFoodRefHolder): void;
 };
 
 export function createMemoryFoodsStore(): MemoryFoodsStore {
@@ -290,14 +305,22 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
         [];
     const aliases: { householdId: string; alias: string; foodId: string }[] =
         [];
-    const refs: { foodId: string }[] = [];
+    const refs: MemoryFoodRefRow[] = [];
+    const refHolders: MemoryFoodRefHolder[] = [];
 
     const store: MemoryFoodsStore = {
         refs,
-        trackRef(foodId) {
-            const row = { foodId };
+        trackRef(foodId, householdId, extra) {
+            const row: MemoryFoodRefRow = {
+                foodId,
+                ...(extra ?? {}),
+            };
+            if (householdId !== undefined) row.householdId = householdId;
             refs.push(row);
             return row;
+        },
+        linkRefs(holder) {
+            refHolders.push(holder);
         },
         async listFoods(householdId) {
             return foods
@@ -512,9 +535,19 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             return ids;
         },
-        async repointFoodRefs(_householdId, fromId, toId) {
+        async repointFoodRefs(householdId, fromId, toId) {
             for (const row of refs) {
-                if (row.foodId === fromId) row.foodId = toId;
+                if (row.foodId !== fromId) continue;
+                if (
+                    row.householdId !== undefined &&
+                    row.householdId !== householdId
+                ) {
+                    continue;
+                }
+                row.foodId = toId;
+            }
+            for (const holder of refHolders) {
+                holder.repointFood(householdId, fromId, toId);
             }
         },
     };
@@ -980,7 +1013,7 @@ function usualHasAnyNutrient(food: Food): boolean {
     return NUTRITION_BLOCK_KEYS.some((key) => food[key] != null);
 }
 
-function mergeAllergens(plain: string[], usual: string[]): string[] {
+export function mergeAllergens(plain: string[], usual: string[]): string[] {
     const out = [...plain];
     const seen = new Set(plain);
     for (const code of usual) {
@@ -1005,6 +1038,35 @@ function nutritionBlockFrom(
         alcoholG: source.alcoholG,
         caffeineMg: source.caffeineMg,
         nutritionSource: source.nutritionSource,
+    };
+}
+
+/** Unknown fields on `keep` are filled from `drop` for merge; see `mergeFoods`. */
+export type MergedFoodFieldPick = Pick<
+    Food,
+    | (typeof NUTRITION_BLOCK_KEYS)[number]
+    | "nutritionSource"
+    | "gramsPerEach"
+    | "gramsPerMl"
+    | "defaultUnit"
+    | "allergens"
+>;
+
+export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
+    const nutritionBlock = usualHasAnyNutrient(keep)
+        ? nutritionBlockFrom(keep)
+        : usualHasAnyNutrient(drop)
+          ? nutritionBlockFrom(drop)
+          : nutritionBlockFrom(keep);
+
+    return {
+        ...nutritionBlock,
+        gramsPerEach: keep.gramsPerEach ?? drop.gramsPerEach,
+        gramsPerMl: keep.gramsPerMl ?? drop.gramsPerMl,
+        defaultUnit: keep.defaultUnit.trim()
+            ? keep.defaultUnit
+            : drop.defaultUnit,
+        allergens: mergeAllergens(keep.allergens, drop.allergens),
     };
 }
 
@@ -1708,6 +1770,14 @@ export async function mergeFoods(
             "Merging those would nest products two deep.",
         );
     }
+    const mergedFields = mergedFoodFields(keep, drop);
+    const keepNext: Food = {
+        ...keep,
+        ...mergedFields,
+        genericFoodId: mergedGenericId,
+        usualProductId: mergedUsualId,
+        updatedAt: nowIso(),
+    };
     const dropBarcodes = await store.deleteBarcodesForFood(householdId, dropId);
     for (const barcode of dropBarcodes) {
         const taken = await store.getBarcodeFoodId(householdId, barcode);
@@ -1723,12 +1793,6 @@ export async function mergeFoods(
         if (!taken) await store.setAlias(householdId, alias, keepId);
     }
     await store.repointFoodRefs(householdId, dropId, keepId);
-    const keepNext: Food = {
-        ...keep,
-        genericFoodId: mergedGenericId,
-        usualProductId: mergedUsualId,
-        updatedAt: nowIso(),
-    };
     await store.updateFoodRow(keepNext);
     for (const product of dropProducts) {
         await store.updateFoodRow({

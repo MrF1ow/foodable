@@ -47,7 +47,7 @@ import {
 import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
-import { liveFoodsStore } from "../../db/foods.js";
+import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import {
     buildFoodUpdate,
     createProduct,
@@ -55,7 +55,6 @@ import {
     findOrCreateFoodByBarcode,
     FoodsInputError,
     linkProduct,
-    mergeFoods,
     setUsualProduct,
     updateFood,
 } from "../../domain/foods.js";
@@ -858,11 +857,11 @@ householdRoutes.post("/household/items/merge", requireMember, async (c) => {
     const member = siteMember(c);
     const body = await c.req.parseBody();
     try {
-        await mergeFoods(
-            liveFoodsStore(),
+        await mergeLiveFoods(
             member.householdId,
             formText(body, "keep_id"),
             formText(body, "drop_id"),
+            liveFoodsStore(),
         );
     } catch (err) {
         const page = await foodsFormError(userId, err, FOODS_MERGE_MODAL_ID);

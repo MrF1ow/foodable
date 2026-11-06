@@ -6,6 +6,7 @@ import {
     FoodsInputError,
     type Food,
     type FoodsStore,
+    type MemoryFoodRefHolder,
 } from "./foods.js";
 import {
     fromGrams,
@@ -59,6 +60,9 @@ export type StockStore = {
         foodId?: string,
     ): Promise<StockMovement[]>;
 };
+
+/** Memory stock ledger plus merge hook so `MemoryFoodsStore.repointFoodRefs` can retarget movements. */
+export type MemoryStockStore = StockStore & MemoryFoodRefHolder;
 
 export type StockShortfall = {
     foodId: string;
@@ -116,9 +120,16 @@ function wrapFoodsError(err: unknown): never {
     throw err;
 }
 
-export function createMemoryStockStore(): StockStore {
+export function createMemoryStockStore(): MemoryStockStore {
     const movements: StockMovement[] = [];
     return {
+        repointFood(householdId, fromId, toId) {
+            for (const row of movements) {
+                if (row.householdId === householdId && row.foodId === fromId) {
+                    row.foodId = toId;
+                }
+            }
+        },
         async insertMovement(row) {
             const saved = { ...row };
             movements.push(saved);

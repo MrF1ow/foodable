@@ -8,7 +8,7 @@ import {
     type FoodResult,
 } from "../../foods.js";
 import { searchFoodsByName } from "../../food-search.js";
-import { liveFoodsStore } from "../../db/foods.js";
+import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import {
     assertBarcodeFree,
     assertFoodPatchValid,
@@ -19,7 +19,6 @@ import {
     findFoodById,
     FoodsInputError,
     linkProduct,
-    mergeFoods,
     findUpsertFoodByName,
     newFood,
     type FoodPatch,
@@ -705,11 +704,11 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const householdId = await callerHouseholdId();
                     const store = liveFoodsStore();
-                    const saved = await mergeFoods(
-                        store,
+                    const saved = await mergeLiveFoods(
                         householdId,
                         args.keep_id,
                         args.drop_id,
+                        store,
                     );
                     const [aliases, barcodes] = await Promise.all([
                         store.listAliases(householdId, saved.id),

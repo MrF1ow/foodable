@@ -1,4 +1,10 @@
-import { foodFromRow, foodToRow, type FoodsStore } from "../domain/foods.js";
+import {
+    foodFromRow,
+    foodToRow,
+    mergeFoods,
+    type Food,
+    type FoodsStore,
+} from "../domain/foods.js";
 import {
     definedColumns,
     insertReturning,
@@ -21,6 +27,8 @@ const REF_TABLES = [
     "grocery_lines",
     "recipe_ingredients",
     "member_dislikes",
+    "stock_movements",
+    "meal_items",
 ] as const;
 
 function patchKeys(keys: string[]): [string, ...string[]] {
@@ -439,4 +447,21 @@ export function liveFoodsStore(): FoodsStore {
         },
     };
     return store;
+}
+
+/**
+ * `mergeFoods` against Postgres as one transaction. The merge is a series of
+ * store calls (barcodes, aliases, references, the kept row, products, then
+ * archiving the dropped row); each opens its own `run`, which joins this
+ * outer one, so a failure at any step rolls the whole merge back instead of
+ * leaving barcodes deleted or references moved onto a food whose duplicate
+ * is still live. `store` is only overridden by tests.
+ */
+export function mergeLiveFoods(
+    householdId: string,
+    keepId: string,
+    dropId: string,
+    store: FoodsStore = liveFoodsStore(),
+): Promise<Food> {
+    return run(() => mergeFoods(store, householdId, keepId, dropId));
 }
