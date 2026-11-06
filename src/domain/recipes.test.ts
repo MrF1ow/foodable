@@ -18,9 +18,11 @@ import {
     importRecipeFromText,
     listRecipes,
     listRecipesFiltered,
+    gapFromNotice,
     macrosForPerson,
     perPortionAmount,
     recipeIngredientGaps,
+    recipeNotices,
     RecipeForbiddenError,
     RecipeInputError,
     recipeSteps,
@@ -30,6 +32,7 @@ import {
     setPersonPortion,
     updateRecipe,
     updateRecipeIngredient,
+    type RecipeIngredient,
 } from "./recipes.js";
 import {
     createMemoryFoodsStore,
@@ -50,6 +53,16 @@ import type { FoodResult } from "../foods.js";
 const HH = "hh-1";
 const ALICE = "alice";
 const BOB = "bob";
+
+function emptyRecipeNotices(recipeId: string) {
+    return {
+        notices: [],
+        noticeContext: {
+            from: `/recipes/${recipeId}`,
+            foods: new Map(),
+        },
+    };
+}
 
 function food(
     over: Partial<FoodResult> & Pick<FoodResult, "name" | "barcode">,
@@ -445,6 +458,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
+        ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
             householdId: HH,
@@ -557,6 +571,7 @@ test("recipe pages use modals for create and detail actions", async () => {
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
+        ...emptyRecipeNotices("r1"),
         recipe,
         ingredients: [
             {
@@ -635,6 +650,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
 
     const detail = renderRecipeDetailPage({
         chrome: { theme: "light" },
+        ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
             householdId: "hh-1",
@@ -700,6 +716,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
 
     const editIng = renderRecipeDetailPage({
         chrome: { theme: "light" },
+        ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
             householdId: "hh-1",
@@ -762,6 +779,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
 test("recipe detail shows a page banner when openModalId does not match a dialog", () => {
     const html = renderRecipeDetailPage({
         chrome: { theme: "light" },
+        ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
             householdId: "hh-1",
@@ -1036,6 +1054,210 @@ function sampleIngredient(
         note: null,
     };
 }
+
+test("recipeNotices and gapFromNotice align with recipeIngredientGaps", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await findOrCreateManualFood(
+        foods,
+        HH,
+        "food",
+        "Half and half",
+    );
+    await updateFood(foods, HH, plain.id, { gramsPerMl: 1 });
+    const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const eff = catalog.get(plain.id)!;
+    const ing = sampleIngredient({
+        displayName: "Half and half",
+        foodId: plain.id,
+        amount: 60,
+        unit: "ml",
+    });
+
+    const rId = "r-gap-test";
+    expect(recipeNotices(rId, [{ ...ing, foodId: null }], catalog)).toEqual([
+        expect.objectContaining({
+            code: "recipe.no_food",
+            subject: { kind: "recipe_ingredient", id: ing.id, recipeId: rId },
+            related: [],
+            params: { name: ing.displayName },
+        }),
+    ]);
+
+    const noFoodGaps = recipeIngredientGaps(
+        { ...ing, foodId: null },
+        undefined,
+    );
+    expect(
+        gapFromNotice(
+            recipeNotices(rId, [{ ...ing, foodId: null }], catalog)[0]!,
+        ),
+    ).toEqual(noFoodGaps[0]!);
+
+    const effNotices = recipeNotices(rId, [ing], catalog);
+    expect(effNotices.map((n) => n.code)).toEqual(["recipe.no_nutrition"]);
+    expect(effNotices[0]).toMatchObject({
+        subject: { kind: "recipe_ingredient", id: ing.id, recipeId: rId },
+        related: [],
+        params: { name: ing.displayName, foodId: plain.id },
+    });
+    expect(gapFromNotice(effNotices[0]!)).toEqual(
+        recipeIngredientGaps(ing, eff)[0]!,
+    );
+
+    const product = await createProduct(foods, HH, plain.id, {
+        name: "Store Half and Half",
+        defaultUnit: "ml",
+        nutritionSource: "manual",
+    });
+    await setUsualProduct(foods, HH, plain.id, product.id);
+    const withUsual = (await effectiveFoodsByIds(foods, HH, [plain.id])).get(
+        plain.id,
+    )!;
+    const usualN = recipeNotices(
+        rId,
+        [ing],
+        await effectiveFoodsByIds(foods, HH, [plain.id]),
+    )[0]!;
+    expect(usualN).toMatchObject({
+        code: "recipe.no_nutrition",
+        related: [
+            { kind: "food", id: product.id, name: "Store Half and Half" },
+        ],
+    });
+    expect(gapFromNotice(usualN)).toEqual(
+        recipeIngredientGaps(ing, withUsual)[0]!,
+    );
+
+    await updateFood(foods, HH, product.id, {
+        calories: 100,
+        proteinG: 2,
+        carbsG: 3,
+        fatG: 4,
+        nutritionSource: "manual",
+    });
+    const completeCatalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    expect(recipeNotices(rId, [ing], completeCatalog)).toEqual([]);
+
+    const partial = await findOrCreateManualFood(foods, HH, "food", "Yogurt");
+    await updateFood(foods, HH, partial.id, {
+        calories: 80,
+        proteinG: null,
+        carbsG: 6,
+        fatG: null,
+        nutritionSource: "manual",
+    });
+    const partialIng = sampleIngredient({
+        displayName: "Yogurt",
+        foodId: partial.id,
+        unit: "g",
+    });
+    const partialCat = await effectiveFoodsByIds(foods, HH, [partial.id]);
+    const pNotices = recipeNotices(rId, [partialIng], partialCat);
+    expect(pNotices[0]).toMatchObject({
+        code: "recipe.partial_nutrition",
+        params: {
+            name: "Yogurt",
+            foodId: partial.id,
+            missing: ["protein_g", "fat_g"],
+        },
+    });
+    expect(gapFromNotice(pNotices[0]!)).toEqual(
+        recipeIngredientGaps(partialIng, partialCat.get(partial.id)!)[0]!,
+    );
+
+    const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+    const eggIng = sampleIngredient({
+        displayName: "Eggs",
+        foodId: eggs.id,
+        amount: 2,
+        unit: "each",
+    });
+    const eggCat = await effectiveFoodsByIds(foods, HH, [eggs.id]);
+    const eggFood = eggCat.get(eggs.id)!;
+    const eggNotes = recipeNotices(rId, [eggIng], eggCat);
+    expect(eggNotes.map((n) => n.code)).toEqual([
+        "recipe.no_nutrition",
+        "recipe.missing_grams_per_each",
+    ]);
+    expect(gapFromNotice(eggNotes[0]!)).toEqual(
+        recipeIngredientGaps(eggIng, eggFood)[0]!,
+    );
+    expect(gapFromNotice(eggNotes[1]!)).toEqual(
+        recipeIngredientGaps(eggIng, eggFood)[1]!,
+    );
+
+    const badUnit = sampleIngredient({
+        displayName: "Spice",
+        foodId: plain.id,
+        unit: "pinch",
+    });
+    const spiceNotices = recipeNotices(rId, [badUnit], catalog);
+    expect(spiceNotices.some((n) => n.code === "recipe.unknown_unit")).toBe(
+        true,
+    );
+    const unknown = spiceNotices.find((n) => n.code === "recipe.unknown_unit")!;
+    expect(gapFromNotice(unknown)).toEqual(
+        recipeIngredientGaps(badUnit, eff).find(
+            (g) => g.reason === "unknown_unit",
+        )!,
+    );
+});
+
+test("macrosForPerson gaps mirror recipeNotices mapped through gapFromNotice", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await findOrCreateManualFood(
+        foods,
+        HH,
+        "food",
+        "Half and half",
+    );
+    await updateFood(foods, HH, plain.id, { gramsPerMl: 1 });
+    const ing = sampleIngredient({
+        displayName: "Half and half",
+        foodId: plain.id,
+        amount: 60,
+        unit: "ml",
+    });
+
+    const yogurt = await findOrCreateManualFood(foods, HH, "food", "Yogurt");
+    await updateFood(foods, HH, yogurt.id, {
+        calories: 80,
+        proteinG: null,
+        carbsG: 6,
+        fatG: null,
+        nutritionSource: "manual",
+    });
+    const yogurtIng = sampleIngredient({
+        displayName: "Yogurt",
+        foodId: yogurt.id,
+        unit: "g",
+    });
+
+    const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+    const eggIng = sampleIngredient({
+        displayName: "Eggs",
+        foodId: eggs.id,
+        amount: 2,
+        unit: "each",
+    });
+
+    const combos: RecipeIngredient[][] = [
+        [{ ...ing, foodId: null }],
+        [ing],
+        [yogurtIng],
+        [eggIng],
+    ];
+    for (const list of combos) {
+        const ids = list
+            .map((i) => i.foodId)
+            .filter((id): id is string => id != null);
+        const cat = await effectiveFoodsByIds(foods, HH, ids);
+        const macros = macrosForPerson(list, 1, 1, cat);
+        const fromNotices = recipeNotices("r1", list, cat).map(gapFromNotice);
+        expect(macros.incomplete).toBe(macros.gaps.length > 0);
+        expect(macros.gaps).toEqual(fromNotices);
+    }
+});
 
 test("recipeIngredientGaps reports every reason in order", async () => {
     const foods = createMemoryFoodsStore();

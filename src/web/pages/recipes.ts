@@ -5,6 +5,7 @@ import {
     type RecipeIngredientView,
     type RecipeMacros,
 } from "../../domain/recipes.js";
+import type { Notice } from "../../domain/notices.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderMemberMultiSelect } from "../components/member-multi-select.js";
@@ -30,6 +31,11 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
+import {
+    noticeAction,
+    noticeList,
+    type NoticeRouteContext,
+} from "../components/notices.js";
 
 export type RecipeMember = { userId: string; displayName: string };
 export type RecipeStoreOption = { id: string; name: string };
@@ -50,14 +56,14 @@ export type RecipesPageView = {
     openModalId?: string;
 };
 
-export type RecipeIngredientRow = RecipeIngredientView & {
-    pickUsualHref?: string | null;
-};
+export type RecipeIngredientRow = RecipeIngredientView;
 
 export type RecipeDetailView = {
     chrome: ViewerChrome;
     recipe: Recipe;
     ingredients: RecipeIngredientRow[];
+    notices: Notice[];
+    noticeContext: NoticeRouteContext;
     members: RecipeMember[];
     stores: RecipeStoreOption[];
     viewerId: string;
@@ -251,6 +257,15 @@ function ingredientRow(
     const showPersonPortion =
         view.portionCount !== 1 ||
         ingredient.personAmount !== ingredient.perPortionAmount;
+    const noNutrition = view.notices.find(
+        (n) =>
+            n.code === "recipe.no_nutrition" &&
+            n.subject.kind === "recipe_ingredient" &&
+            n.subject.id === ingredient.id,
+    );
+    const usualProductActionHtml = noNutrition
+        ? noticeAction(noNutrition, view.noticeContext)
+        : "";
     return renderRecipeIngredientRow({
         id: ingredient.id,
         recipeId: view.recipe.id,
@@ -268,7 +283,7 @@ function ingredientRow(
         deleteModalId: RECIPE_DELETE_INGREDIENT_ID,
         editFill: ingredientFill(view, ingredient, "edit"),
         deleteFill: ingredientFill(view, ingredient, "delete"),
-        pickUsualHref: ingredient.pickUsualHref,
+        usualProductActionHtml,
     });
 }
 
@@ -321,15 +336,16 @@ ${field({ id: "recipe-ingredient-amount", label: "Amount", control: `<input id="
 }
 
 function macrosBlock(
+    view: RecipeDetailView,
     macros: RecipeMacros,
     scope: "portion" | "person",
 ): string {
     const label = scope === "portion" ? "Per portion" : "This portion";
     const reasons =
         macros.incompleteReasons.length > 0
-            ? `<ul class="recipe-macros-reasons">${macros.incompleteReasons
-                  .map((reason) => `<li>${escapeHtml(reason)}</li>`)
-                  .join("")}</ul>`
+            ? noticeList(view.notices, {
+                  className: "recipe-macros-reasons",
+              })
             : "";
     if (macros.incomplete && macros.calories == null) {
         return `<p class="recipe-macros" data-scope="${scope}" data-incomplete="true">${escapeHtml(label)}: Macros incomplete</p>${reasons}`;
@@ -402,7 +418,7 @@ ${field({ id: "recipe-total-portions", label: "Total portions", control: `<input
 </form>`;
     const recipeIdEsc = escapeHtml(recipeId);
     const personMacros =
-        view.portionCount === 1 ? "" : macrosBlock(view.macros, "person");
+        view.portionCount === 1 ? "" : macrosBlock(view, view.macros, "person");
     const perPortion = view.macrosPerPortion ?? view.macros;
     const tagsValue = escapeHtml(view.recipe.tags.join(", "));
 
@@ -570,7 +586,7 @@ ${modalTrigger({
                 <button type="submit">View</button>
             </form>
             ${portion}
-            ${macrosBlock(perPortion, "portion")}
+            ${macrosBlock(view, perPortion, "portion")}
             ${personMacros}`,
         })}
         <section class="panel">

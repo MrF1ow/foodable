@@ -46,7 +46,6 @@ import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
 import {
     effectiveFoodsByIds,
-    foodHasNoNutrition,
     matchFoodsByWords,
     suggestFoodFor,
     usualProductRows,
@@ -67,6 +66,7 @@ import {
     macrosForPerson,
     RecipeInputError,
     recipeDislikeNote,
+    recipeNotices,
 } from "../domain/recipes.js";
 import { orderCards } from "../domain/layout.js";
 import {
@@ -819,29 +819,28 @@ export async function renderRecipeDetailRoute(
               opts.error,
           )
         : null;
+    const foodsByIdForNoticeCtx = new Map(
+        allFoods.map((f) => [f.id, { genericFoodId: f.genericFoodId }]),
+    );
+    const notices = recipeNotices(recipeId, view.ingredients, catalog);
     const ingredientRows = view.ingredients.map((row) => {
         const effective = row.foodId ? catalog.get(row.foodId) : null;
         let displayName = row.displayName;
         if (effective?.product) {
             displayName = `${row.displayName} · ${effective.product.name}`;
         }
-        const pickUsualHref =
-            effective && row.foodId && foodHasNoNutrition(effective)
-                ? usualProductsPickerHref(
-                      plainFoodIdForUsualPicker(
-                          row.foodId,
-                          allFoods.find((f) => f.id === row.foodId),
-                      ),
-                      `/recipes/${recipeId}`,
-                  )
-                : null;
-        return { ...row, displayName, pickUsualHref };
+        return { ...row, displayName };
     });
     return {
         status: 200,
         html: renderRecipeDetailPage({
             chrome: viewerChromeFromProfile(profile),
             recipe: view,
+            notices,
+            noticeContext: {
+                from: `/recipes/${recipeId}`,
+                foods: foodsByIdForNoticeCtx,
+            },
             ingredients: ingredientRows,
             members: members.map((member) => ({
                 userId: member.userId,
