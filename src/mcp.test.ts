@@ -5286,6 +5286,8 @@ describe("phone-app domain MCP tools", () => {
             const detail = await call("get_recipe", { id: recipeId });
             expect(detail.isError).toBeFalsy();
             expect(detail.structuredContent?.verification).toBe("unverified");
+            expect(textOf(detail)).toContain("Verification: unverified");
+            expect(textOf(detail)).toContain("Source text:\nPasted body");
             const imp = detail.structuredContent?.import as {
                 source_text: string | null;
             } | null;

@@ -1872,7 +1872,9 @@ test("importRecipeFromText optional amount instructions and rollback", async () 
         { lookup },
     );
     expect(imported.ingredients[0]?.quantity).toBeNull();
-    expect(imported.ingredients[0]?.note).toBe("to taste");
+    // No invented note: an import only counts as not measured when it says so.
+    expect(imported.ingredients[0]?.note).toBeNull();
+    expect(imported.recipe.verification).toBe("unverified");
     expect(imported.recipe.instructions).toBe("Step 1: mix\nStep 2: bake");
     const legacy = await importRecipeFromText(
         recipes,

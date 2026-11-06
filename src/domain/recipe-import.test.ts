@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
 import {
+    isNotMeasuredNote,
+    recheckRecipe,
     recipeImportFromRow,
     recipeImportToRow,
     sweepUnverifiedRecipes,
@@ -180,4 +182,37 @@ test("sweepUnverifiedRecipes respects expiry", async () => {
             now: new Date(),
         }),
     ).toBe(0);
+});
+
+test("only a not-measured phrase counts as an explicit missing amount", () => {
+    expect(isNotMeasuredNote("to taste")).toBe(true);
+    expect(isNotMeasuredNote("Salt and pepper, to  taste")).toBe(true);
+    expect(isNotMeasuredNote("for garnish")).toBe(true);
+    expect(isNotMeasuredNote("boneless")).toBe(false);
+    expect(isNotMeasuredNote("awesome")).toBe(false);
+    expect(isNotMeasuredNote("")).toBe(false);
+    expect(isNotMeasuredNote(null)).toBe(false);
+    const prep = verifyRecipe(
+        baseRecipe(),
+        [ingredient({ quantity: null, note: "boneless" })],
+        null,
+    );
+    expect(prep.verified).toBe(false);
+    expect(prep.problems.map((row) => row.code)).toEqual([
+        "ingredient_no_amount",
+    ]);
+});
+
+test("recheckRecipe never demotes a hand-made recipe", async () => {
+    const store = createMemoryRecipesStore();
+    const recipe = await store.insertRecipe(
+        baseRecipe({ instructions: null, verification: "verified" }),
+    );
+    const result = await recheckRecipe(store, HH, recipe.id);
+    expect(result.verified).toBe(false);
+    expect(result.verification).toBe("verified");
+    expect(result.problems.map((row) => row.code)).toContain("no_ingredients");
+    expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
+        "verified",
+    );
 });
