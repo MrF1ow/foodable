@@ -209,3 +209,76 @@ test("does not invent quantities", () => {
     );
     expect(salt?.quantity ?? null).toBe(null);
 });
+
+describe("parseRecipeText review round 2", () => {
+    const parse = (text: string) =>
+        parseRecipeText(text, { fallbackName: "Instagram recipe" });
+    const names = (text: string) => parse(text).ingredients.map((i) => i.name);
+
+    test("a boast line inside a list neither counts nor breaks the run", () => {
+        expect(
+            names(
+                "Cookies\n2 cups flour\n1 cup sugar\nI've made this 100 times\n2 eggs\n1 tsp vanilla\n1. Mix",
+            ),
+        ).toEqual(["flour", "sugar", "eggs", "vanilla"]);
+    });
+
+    test("real lines that mention ready, minutes or hours are kept", () => {
+        expect(
+            names(
+                "Tart\nIngredients:\nReady-made pastry, 1 sheet\n2 tbsp jam\nMethod:\nBake",
+            ),
+        ).toEqual(["Ready-made pastry", "jam"]);
+    });
+
+    test("short titles starting with This or I are kept", () => {
+        expect(
+            parse("This garlic pasta\nIngredients:\n200g pasta\nMethod:\nCook")
+                .name,
+        ).toBe("This garlic pasta");
+        expect(
+            parse("I love this cake\nIngredients:\n2 eggs\nMethod:\nMix").name,
+        ).toBe("I love this cake");
+    });
+
+    test("yield accepts yields and filler words", () => {
+        expect(parse("Yields 4\n1 cup flour\n1. Mix").yieldPortions).toBe(4);
+        expect(parse("Makes about 12\n1 cup flour\n1. Mix").yieldPortions).toBe(
+            12,
+        );
+        expect(parse("Serves up to 6\n1 cup flour\n1. Mix").yieldPortions).toBe(
+            6,
+        );
+        expect(names("Yields 4\n1 cup flour\n1. Mix")).toEqual(["flour"]);
+    });
+
+    test("singular Note/Tip end the steps, and a later numbered step resumes", () => {
+        expect(
+            parse(
+                "Soup\nIngredients:\n1 cup stock\nMethod:\n1. Mix\nTips:\nUse fresh\n2. Bake\nNote: keeps 3 days",
+            ).steps,
+        ).toEqual(["Mix", "Bake"]);
+    });
+
+    test("a header sharing its line with the first ingredient is split", () => {
+        const noodles = parse(
+            "Noodles\n200g noodles\nMake the sauce: 2 tbsp soy sauce\n1. Cook",
+        );
+        expect(noodles.ingredients.map((i) => [i.name, i.section])).toEqual([
+            ["noodles", null],
+            ["soy sauce", "Make the sauce"],
+        ]);
+        expect(noodles.steps).toEqual(["Cook"]);
+        const need = parse("You'll need 2 eggs\n1. Mix");
+        expect(need.ingredients.map((i) => i.name)).toEqual(["eggs"]);
+        expect(need.steps).toEqual(["Mix"]);
+    });
+
+    test("a numbered ingredient list stays ingredients", () => {
+        const bread = parse(
+            "Bread\nIngredients:\n1. 2 cups flour\n2. 1 tsp salt\nMethod:\n1. Mix",
+        );
+        expect(bread.ingredients.map((i) => i.name)).toEqual(["flour", "salt"]);
+        expect(bread.steps).toEqual(["Mix"]);
+    });
+});

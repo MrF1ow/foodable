@@ -19,15 +19,22 @@ const INGREDIENT_HEADER_RE =
 const STEP_HEADER_RE =
     /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:directions|instructions|method|steps|how to make(?: it)?|preparation)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
 const POST_STEP_HEADER_RE =
-    /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:notes|tips|storage|nutrition)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
+    /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:notes?|tips?|storage|nutrition)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
+/** "Note: keeps 3 days" — a notes line with its text on the same line. */
+const INLINE_NOTE_RE = /^(?:notes?|tips?)\s*:\s*\S/i;
 
-const YIELD_LINE_START_RE = /^(?:serves|servings?|yield|makes)\b/i;
-const DURATION_PHRASE_RE =
-    /\b(?:ready in|prep(?:aration)? time|cook(?:ing)? time|total time)\b/i;
-const META_QUANTITY_UNIT_RE =
-    /\b\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|hours?|hrs?|times|days|people|portions)\b/i;
-const PROSE_LEAD_RE =
-    /^(?:i(?:'ve|\s)?|we(?:'ve|\s)?|you(?:'ve|\s)?|this|made|ready)\b/i;
+// Meta lines are matched as whole lines from their start, so an ingredient
+// that merely mentions a time ("chicken thighs, rested 2 hours", "1 minute
+// steak, 200g") or a word like "ready" is never thrown away.
+const YIELD_LINE_START_RE = /^(?:serves|servings?|yields?|makes)\b/i;
+const DURATION_LINE_RE =
+    /^(?:ready in|takes|prep(?:aration)?(?: time)?|cook(?:ing)? time|bake time|total(?: time)?)\b\s*:?\s*(?:about|around|under|just)?\s*\d/i;
+const BOAST_LINE_RE =
+    /^(?:i|i've|i have|we|we've|we have)\s+(?:made|cooked|baked|tried|eaten)\b.*\b\d+\s*(?:times|x)\b/i;
+const YIELD_FILLER = "(?:about|around|approx(?:imately)?|roughly|up to)\\s+";
+/** "Make the sauce: 2 tbsp soy sauce" — a short header and its first line. */
+const SAME_LINE_HEADER_RE =
+    /^((?:for|make|to make)\s+(?:the\s+)?[^:]{1,40}):\s*(\S.*)$/i;
 
 const PICTograph_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu;
 
@@ -89,7 +96,10 @@ function isPostStepHeader(line: string): boolean {
 function parseYieldPortionsFromLine(line: string): number | null {
     const trimmed = line.trim();
     const match = trimmed.match(
-        /^(?:serves|servings?|yield|makes)\s*:?\s*(\d+(?:\.\d+)?)/i,
+        new RegExp(
+            `^(?:serves|servings?|yields?|makes)\\s*:?\\s*(?:${YIELD_FILLER})?(\\d+(?:\\.\\d+)?)`,
+            "i",
+        ),
     );
     if (!match) return null;
     const n = Number(match[1]);
@@ -100,9 +110,8 @@ function isYieldDurationOrProseMetaLine(line: string): boolean {
     const trimmed = stripTrailingTags(stripBullet(line)).trim();
     if (!trimmed) return false;
     if (YIELD_LINE_START_RE.test(trimmed)) return true;
-    if (DURATION_PHRASE_RE.test(trimmed)) return true;
-    if (META_QUANTITY_UNIT_RE.test(trimmed)) return true;
-    if (PROSE_LEAD_RE.test(trimmed)) return true;
+    if (DURATION_LINE_RE.test(trimmed)) return true;
+    if (BOAST_LINE_RE.test(trimmed)) return true;
     return false;
 }
 
@@ -147,7 +156,7 @@ function lineHasStrictIngredientSignal(line: string): boolean {
 }
 
 function isIngredientBlockSubheader(line: string): boolean {
-    return /^for (?:the )?.+:\s*$/i.test(line.trim());
+    return /^(?:for|make|to make) (?:the )?[^:]{1,40}:\s*$/i.test(line.trim());
 }
 
 function isProseLine(line: string): boolean {
@@ -192,6 +201,11 @@ function longestIngredientRun(lines: string[]): {
     for (let i = 0; i <= lines.length; i += 1) {
         const line = i < lines.length ? lines[i]! : "";
         const trimmed = stripTrailingTags(stripBullet(line));
+        // A yield, time or boast line inside a list neither counts nor
+        // breaks the run.
+        if (i < lines.length && isYieldDurationOrProseMetaLine(trimmed)) {
+            continue;
+        }
         const qualifies =
             i < lines.length &&
             !isHashtagMentionOnlyLine(line) &&
@@ -232,7 +246,7 @@ function parseStructured(lines: string[]): {
             mode = "steps";
             continue;
         }
-        if (isPostStepHeader(line)) {
+        if (isPostStepHeader(line) || INLINE_NOTE_RE.test(line)) {
             mode = "after_steps";
             continue;
         }
@@ -245,6 +259,11 @@ function parseStructured(lines: string[]): {
         }
 
         if (mode === "after_steps") {
+            // Notes end at the next numbered step ("1. Mix / Tips: / 2. Bake").
+            if (isNumberedStepLine(line)) {
+                mode = "steps";
+                stepLines.push(stripStepPrefix(line));
+            }
             continue;
         }
 
@@ -263,6 +282,19 @@ function parseStructured(lines: string[]): {
             continue;
         }
         if (mode === "ingredients") {
+            // A numbered line ends the ingredient list: steps without a header.
+            if (
+                isNumberedStepLine(line) &&
+                !lineHasStrictIngredientSignal(stripStepPrefix(line))
+            ) {
+                mode = "steps";
+                stepLines.push(stripStepPrefix(line));
+                continue;
+            }
+            if (isNumberedStepLine(line)) {
+                ingredientLines.push(stripStepPrefix(line));
+                continue;
+            }
             if (!isYieldDurationOrProseMetaLine(line)) {
                 ingredientLines.push(raw);
             }
@@ -318,7 +350,9 @@ function parseHeuristic(lines: string[]): {
         if (!line || isHashtagMentionOnlyLine(raw)) continue;
 
         if (i >= run.start && i < run.end) {
-            ingredientLines.push(raw);
+            if (!isYieldDurationOrProseMetaLine(line)) {
+                ingredientLines.push(raw);
+            }
             continue;
         }
         if (i < run.start) {
@@ -337,6 +371,26 @@ function parseHeuristic(lines: string[]): {
     return { nameCandidates, ingredientLines, stepLines };
 }
 
+/**
+ * Split a header that shares its line with the first ingredient:
+ * "Make the sauce: 2 tbsp soy sauce" → "Make the sauce:" + "2 tbsp soy sauce",
+ * "You'll need 2 eggs" → "Ingredients:" + "2 eggs".
+ */
+function splitSameLineHeader(raw: string): string[] {
+    const line = stripTrailingTags(stripBullet(raw)).trim();
+    const need = line.match(
+        /^(?:you(?:'|’)ll need|you will need|what you(?:'|’)ll need|what you need)\s*:?\s+(.*\d.*)$/i,
+    );
+    if (need?.[1] && lineHasStrictIngredientSignal(need[1])) {
+        return ["Ingredients:", need[1]];
+    }
+    const header = line.match(SAME_LINE_HEADER_RE);
+    if (header?.[1] && header[2] && lineHasStrictIngredientSignal(header[2])) {
+        return [`${header[1]}:`, header[2]];
+    }
+    return [raw];
+}
+
 export function parseRecipeText(
     text: string,
     opts: { fallbackName?: string } = {},
@@ -346,7 +400,7 @@ export function parseRecipeText(
     const lines: string[] = [];
     for (const raw of rawLines) {
         if (isHashtagMentionOnlyLine(raw)) continue;
-        lines.push(raw);
+        lines.push(...splitSameLineHeader(raw));
     }
 
     const structured = hasStructuredHeaders(lines);

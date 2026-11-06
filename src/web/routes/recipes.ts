@@ -199,22 +199,67 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         }
     }
 
-    const outcome = await importRecipeFromUrl(
-        {
-            recipes: liveRecipesStore(),
-            foods: liveFoodsStore(),
-            fetcher: recipeImportFetcher(),
-            transaction: (fn) => run(async () => fn()),
-        },
-        {
-            householdId: member.householdId,
-            creatorId: userId,
-            url: importUrl,
-            text: websiteUrl ? undefined : text,
-            credit: credit.trim() || undefined,
-            textOrigin: "pasted",
-        },
-    );
+    const importDeps = {
+        recipes: liveRecipesStore(),
+        foods: liveFoodsStore(),
+        fetcher: recipeImportFetcher(),
+        transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
+    };
+    let outcome = await importRecipeFromUrl(importDeps, {
+        householdId: member.householdId,
+        creatorId: userId,
+        url: importUrl,
+        text: websiteUrl ? undefined : text,
+        credit: credit.trim() || undefined,
+        textOrigin: "pasted",
+    });
+    const onPinStep =
+        pasteStep &&
+        websiteUrl !== "" &&
+        pinValidated.ok &&
+        recipeSource(pinValidated.url).kind === "pinterest";
+    if (
+        onPinStep &&
+        outcome.status !== "imported" &&
+        outcome.status !== "unverified_needs_review" &&
+        outcome.status !== "duplicate"
+    ) {
+        // The recipe website could not be read. Fall back to the caption the
+        // person pasted on the same step, under the pin's link; otherwise stay
+        // on the Pinterest step with their text and creator kept.
+        const websiteError = importOutcomeMessage(outcome);
+        if (text.trim() !== "") {
+            outcome = await importRecipeFromUrl(importDeps, {
+                householdId: member.householdId,
+                creatorId: userId,
+                url: cleanedPinUrl,
+                text,
+                credit: credit.trim() || undefined,
+                textOrigin: "pasted",
+            });
+        }
+        if (
+            outcome.status !== "imported" &&
+            outcome.status !== "unverified_needs_review" &&
+            outcome.status !== "duplicate"
+        ) {
+            const page = await renderRecipesListPage(userId, {
+                openModalId: IMPORT_RECIPE_MODAL_ID,
+                importUrl: cleanedPinUrl,
+                importPasteStep: true,
+                importPasteText: text,
+                importCredit: credit,
+                importWebsiteError: websiteError,
+                importError:
+                    text.trim() !== ""
+                        ? importOutcomeMessage(outcome)
+                        : undefined,
+                importSourceKind: "pinterest",
+                importSourceLabel: "Pinterest",
+            });
+            return c.html(page.html, 422);
+        }
+    }
     if (
         outcome.status === "imported" ||
         outcome.status === "unverified_needs_review"
