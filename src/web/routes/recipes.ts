@@ -53,6 +53,7 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
     importOutcomeToastKey,
@@ -164,8 +165,8 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 ? ("recipes.import.imported" as const)
                 : importOutcomeToastKey(outcome);
         const params: Record<string, string> = {
-            name: outcome.recipeName ?? "Recipe",
-            site: outcome.source?.label ?? "the web",
+            name: truncateToastParam(outcome.recipeName ?? "Recipe"),
+            site: truncateToastParam(outcome.source?.label ?? "the web"),
         };
         if (outcome.status === "unverified_needs_review") {
             params.count = importReviewCount(outcome.problems);

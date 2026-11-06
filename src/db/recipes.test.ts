@@ -190,4 +190,100 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
         const imp = await recipes.getImport(householdId, recipeId);
         expect(imp?.sourceKind).toBe("website");
     });
+
+    test("importRecipeFromUrl rolls back recipe ingredients import row and new foods on failure", async () => {
+        const { sql } = getCtx();
+        const yoast = readFileSync(
+            join(
+                import.meta.dir,
+                "../domain/fixtures/recipe-pages/yoast-graph.html",
+            ),
+            "utf8",
+        );
+        const fetcher: SafeFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true,
+                    url: "https://example.com/rollback-db",
+                    status: 200,
+                    contentType: "text/html",
+                    body: yoast,
+                };
+            },
+        };
+        const baseRecipes = liveRecipesStore();
+        let ingredientInserts = 0;
+        const recipes = {
+            ...baseRecipes,
+            async insertIngredient(
+                row: Parameters<typeof baseRecipes.insertIngredient>[0],
+            ) {
+                ingredientInserts += 1;
+                if (ingredientInserts === 3) {
+                    throw new Error("insert failed");
+                }
+                return baseRecipes.insertIngredient(row);
+            },
+        };
+        const foods = liveFoodsStore();
+        const foodCountBefore = (
+            (await sql`
+            select count(*)::int as c from foods where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        const recipeCountBefore = (
+            (await sql`
+            select count(*)::int as c from recipes where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        const importCountBefore = (
+            (await sql`
+            select count(*)::int as c from recipe_imports where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        await expect(
+            run(async () =>
+                importRecipeFromUrl(
+                    {
+                        recipes,
+                        foods,
+                        fetcher,
+                        transaction: (fn) => run(async () => fn()),
+                    },
+                    {
+                        householdId,
+                        creatorId: userId,
+                        url: "https://example.com/rollback-db",
+                    },
+                ),
+            ),
+        ).rejects.toThrow("insert failed");
+        const foodCountAfter = (
+            (await sql`
+            select count(*)::int as c from foods where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        const recipeCountAfter = (
+            (await sql`
+            select count(*)::int as c from recipes where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        const importCountAfter = (
+            (await sql`
+            select count(*)::int as c from recipe_imports where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        const ingredientCountAfter = (
+            (await sql`
+            select count(*)::int as c from recipe_ingredients where household_id = ${householdId}
+        `) as { c: number }[]
+        )[0]!.c;
+        expect(foodCountAfter).toBe(foodCountBefore);
+        expect(recipeCountAfter).toBe(recipeCountBefore);
+        expect(importCountAfter).toBe(importCountBefore);
+        expect(ingredientCountAfter).toBe(0);
+    });
 });
