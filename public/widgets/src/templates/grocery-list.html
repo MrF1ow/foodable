@@ -193,7 +193,10 @@
                                             { name: line.display_name },
                                         );
                                         const box = `<input class="chk" type="checkbox" data-id="${esc(line.id)}" ${checked ? "checked" : ""} ${canCheck ? "" : "disabled"} aria-label="${esc(aria)}" />`;
-                                        return `<div class="line${checked ? " done" : ""}">${box}<span class="name">${esc(line.display_name)}</span><span class="qty">${esc(line.amount)} ${esc(line.unit)}</span>${tag}</div>`;
+                                        const qtyLabel = line.note
+                                            ? esc(line.note)
+                                            : `${esc(line.amount)} ${esc(line.unit)}`;
+                                        return `<div class="line${checked ? " done" : ""}">${box}<span class="name">${esc(line.display_name)}</span><span class="qty">${qtyLabel}</span>${tag}</div>`;
                                     })
                                     .join("");
                                 return `<div class="section">${esc(section.name)}</div>${rows}`;

@@ -100,6 +100,7 @@ export function sampleGroceryLine(
         quantity: { amount: 1, unit: "L" },
         foodId: ctx.foodId,
         checked: false,
+        note: null,
         ...overrides,
     };
 }

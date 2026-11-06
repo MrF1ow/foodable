@@ -43,6 +43,7 @@ export function renderQuantityField(opts: QuantityFieldOptions): string {
             ? ""
             : String(opts.amount);
     const req = opts.required ? " required" : "";
+    const placeholder = opts.required ? "" : ' placeholder="to taste"';
     const options = units
         .map((unit) => {
             const sel = unit === selected ? " selected" : "";
@@ -56,7 +57,7 @@ export function renderQuantityField(opts: QuantityFieldOptions): string {
 ${field({
     id: amountId,
     label: "Amount",
-    control: `<input id="${escapeHtml(amountId)}" name="${escapeHtml(prefix)}_amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHtml(amountValue)}"${req} />`,
+    control: `<input id="${escapeHtml(amountId)}" name="${escapeHtml(prefix)}_amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHtml(amountValue)}"${placeholder}${req} />`,
 })}
 ${field({
     id: unitId,

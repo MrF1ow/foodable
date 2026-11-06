@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
 
-import { formAmount, formText } from "../form.js";
+import { formAmount, formOptionalNumber, formText } from "../form.js";
 import {
     requireMember,
     requireManager,
@@ -280,6 +280,8 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
             productRaw.trim() === ""
                 ? undefined
                 : { [c.req.param("id")]: productRaw.trim() };
+        const lineId = c.req.param("id");
+        const putAwayAmount = formOptionalNumber(body, "put_away_amount");
         await putAwayGroceryLines(
             liveGroceryStore(),
             liveFridgeStore(),
@@ -287,10 +289,14 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
             liveFoodsStore(),
             {
                 householdId: member.householdId,
-                lineIds: [c.req.param("id")],
+                lineIds: [lineId],
                 locationId: formText(body, "location_id") || undefined,
                 actorUserId: userId,
                 productFoodIds,
+                amountsByLineId:
+                    putAwayAmount != null
+                        ? { [lineId]: putAwayAmount }
+                        : undefined,
             },
         );
     } catch (err) {

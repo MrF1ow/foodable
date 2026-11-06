@@ -41,6 +41,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         amount: z.number(),
         unit: z.string(),
         checked: z.boolean(),
+        note: z.string().nullable(),
         already_have: z.string().nullable(),
         product: z
             .object({
@@ -127,6 +128,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             amount: line.quantity.amount,
                             unit: line.quantity.unit,
                             checked: line.checked,
+                            note: line.note,
                             already_have:
                                 tag == null
                                     ? null

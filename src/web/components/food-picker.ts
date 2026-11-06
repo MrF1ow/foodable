@@ -48,6 +48,8 @@ export type FoodPickerOptions = {
     /** Extra HTML inserted inside each POST form (after hidden fields). */
     formExtras?: string;
     includeQuantity?: boolean;
+    /** When true, amount may be left blank (to taste). */
+    optionalQuantity?: boolean;
     includeManual?: boolean;
 };
 
@@ -56,6 +58,7 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
     const action = opts.action ?? "#";
     const method = opts.method ?? "get";
     const includeManual = opts.includeManual !== false;
+    const amountRequired = method === "post" && !opts.optionalQuantity;
     const extras =
         hiddenInputs(opts.hiddenFields ?? {}) + (opts.formExtras ?? "");
     const qty = opts.includeQuantity
@@ -63,7 +66,7 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
               kind: "food",
               idPrefix: `${id}-qty`,
               namePrefix: "qty",
-              required: method === "post",
+              required: amountRequired,
           })
         : "";
     const barcodePanel = `${id}-barcode-panel`;
@@ -73,7 +76,7 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
         kind: "food",
         idPrefix: `${id}-manual-qty`,
         namePrefix: method === "post" ? "qty" : `${id.replace(/-/g, "_")}_qty`,
-        required: method === "post",
+        required: amountRequired,
     });
     const barcodeSubmit = method === "post" ? "Add food" : "Look up";
     const searchQty =
@@ -82,7 +85,7 @@ export function renderFoodPicker(opts: FoodPickerOptions = {}): string {
                   kind: "food",
                   idPrefix: `${id}-search-qty`,
                   namePrefix: "qty",
-                  required: true,
+                  required: amountRequired,
               })
             : "";
     const searchFields = `${field({ id: `${id}-search`, label: "Search", control: `<input id="${escapeHtml(id)}-search" type="search" data-search-input autocomplete="off" />` })}

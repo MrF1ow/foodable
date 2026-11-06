@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { renderRecipeDetailRoute, renderRecipesListPage } from "../loaders.js";
 
-import { formAmount, formOptionalNumber, formText } from "../form.js";
+import {
+    formAmount,
+    formOptionalNumber,
+    formRecipeIngredientAmount,
+    formText,
+} from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { listFridge } from "../../domain/fridge.js";
@@ -252,6 +257,7 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
             deductStock,
             logMeals,
             cooked.shortfalls.length,
+            cooked.unmeasured.map((row) => row.displayName),
         );
         if (!flash) {
             // toast: none (no-op)
@@ -411,7 +417,7 @@ recipesRoutes.post(
                 recipeId,
                 c.req.param("ingredientId"),
                 {
-                    amount: formAmount(body, "amount"),
+                    amount: formRecipeIngredientAmount(body, "amount"),
                     note: formText(body, "note"),
                 },
             );
@@ -452,7 +458,7 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
     const member = siteMember(c);
     const recipeId = c.req.param("id");
     const body = await c.req.parseBody();
-    const amount = formAmount(body, "qty_amount");
+    const amount = formRecipeIngredientAmount(body, "qty_amount");
     try {
         if (formText(body, "food_id")) {
             await addRecipeIngredientById(

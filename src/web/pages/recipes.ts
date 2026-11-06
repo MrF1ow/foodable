@@ -99,6 +99,14 @@ function quantityLabel(amount: number, unit: string): string {
     return formatQuantityDisplayParts(amount, unit);
 }
 
+function ingredientAmountLabel(
+    quantity: RecipeIngredientView["quantity"],
+    note: string | null,
+): string {
+    if (quantity == null) return note?.trim() || "to taste";
+    return quantityLabel(quantity.amount, quantity.unit);
+}
+
 function editRecipeModalId(recipeId: string): string {
     return `recipe-edit-${recipeId}`;
 }
@@ -156,7 +164,10 @@ function ingredientFill(
         title: `Edit ${ingredient.displayName}`,
         fields: {
             note: ingredient.note ?? "",
-            amount: ingredient.quantity.amount,
+            amount:
+                ingredient.quantity == null
+                    ? ""
+                    : String(ingredient.quantity.amount),
         },
     };
 }
@@ -253,10 +264,10 @@ function ingredientRow(
     view: RecipeDetailView,
     ingredient: RecipeIngredientRow,
 ): string {
-    const unit = ingredient.quantity.unit;
     const showPersonPortion =
-        view.portionCount !== 1 ||
-        ingredient.personAmount !== ingredient.perPortionAmount;
+        ingredient.quantity != null &&
+        (view.portionCount !== 1 ||
+            ingredient.personAmount !== ingredient.perPortionAmount);
     const noNutrition = view.notices.find(
         (n) =>
             n.code === "recipe.no_nutrition" &&
@@ -270,14 +281,25 @@ function ingredientRow(
         id: ingredient.id,
         recipeId: view.recipe.id,
         displayName: ingredient.displayName,
-        totalLabel: quantityLabel(ingredient.quantity.amount, unit),
-        perPortionLabel: quantityLabel(ingredient.perPortionAmount, unit),
+        totalLabel: ingredientAmountLabel(ingredient.quantity, ingredient.note),
+        perPortionLabel:
+            ingredient.quantity == null
+                ? ingredientAmountLabel(null, ingredient.note)
+                : quantityLabel(
+                      ingredient.perPortionAmount!,
+                      ingredient.quantity.unit,
+                  ),
         personPortionLabel: showPersonPortion
-            ? quantityLabel(ingredient.personAmount, unit)
+            ? ingredient.personAmount == null
+                ? ingredientAmountLabel(null, ingredient.note)
+                : quantityLabel(
+                      ingredient.personAmount,
+                      ingredient.quantity!.unit,
+                  )
             : null,
         perPortionAmount: ingredient.perPortionAmount,
         personAmount: ingredient.personAmount,
-        totalAmount: ingredient.quantity.amount,
+        totalAmount: ingredient.quantity?.amount ?? null,
         note: ingredient.note,
         editModalId: RECIPE_EDIT_INGREDIENT_ID,
         deleteModalId: RECIPE_DELETE_INGREDIENT_ID,
@@ -309,7 +331,7 @@ function sharedIngredientModals(view: RecipeDetailView): string {
             submitDisabled: editItem == null,
             body: `${editOpen ? modalFormError(view, `${EDIT_INGREDIENT_PREFIX}${editItem?.id}`) : ""}<form class="recipe-ingredient-edit" method="post" action="${editItem ? `/recipes/${recipeId}/ingredients/${editId}` : ""}">
 ${field({ id: "recipe-ingredient-note", label: "Note", control: `<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />` })}
-${field({ id: "recipe-ingredient-amount", label: "Amount", control: `<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" required value="${editItem ? escapeHtml(String(editItem.quantity.amount)) : ""}" />` })}
+${field({ id: "recipe-ingredient-amount", label: "Amount", control: `<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" placeholder="to taste" value="${editItem && editItem.quantity != null ? escapeHtml(String(editItem.quantity.amount)) : ""}" />` })}
 <button type="submit" class="btn-primary">Save ingredient</button>
 </form>`,
         }) +
@@ -494,6 +516,7 @@ ${field({ id: "recipe-total-portions", label: "Total portions", control: `<input
                 action: `/recipes/${recipeId}/ingredients`,
                 method: "post",
                 includeQuantity: true,
+                optionalQuantity: true,
             })}`,
         }) +
         modal({

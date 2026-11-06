@@ -843,6 +843,8 @@ export async function putAwayGroceryLines(
         actorUserId?: string | null;
         expiresOn?: string | null;
         productFoodIds?: Record<string, string | null>;
+        /** Overrides line quantity when putting away (e.g. to-taste lines). */
+        amountsByLineId?: Record<string, number>;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
@@ -904,10 +906,11 @@ export async function putAwayGroceryLines(
                 recentLocationForFood(fridgeItems, line.foodId!) ??
                 (await lastUsedLocationId(fridge, input.householdId, chosenId));
         }
+        const delta = input.amountsByLineId?.[line.id] ?? line.quantity.amount;
         const applied = await applyMovement(fridge, stock, foods, {
             householdId: input.householdId,
             foodId: chosenId,
-            delta: line.quantity.amount,
+            delta,
             unit: line.quantity.unit,
             reason: "purchase",
             locationId,
@@ -929,6 +932,7 @@ export async function putAwayGroceryLines(
 export type CookRecipeResult = {
     totalPortions: number;
     shortfalls: StockShortfall[];
+    unmeasured: { foodId: string | null; displayName: string }[];
 };
 
 export async function cookRecipe(
@@ -955,11 +959,19 @@ export async function cookRecipe(
         recipe.id,
     );
     const shortfalls: StockShortfall[] = [];
+    const unmeasured: CookRecipeResult["unmeasured"] = [];
     if (input.deductStock === false) {
-        return { totalPortions, shortfalls };
+        return { totalPortions, shortfalls, unmeasured };
     }
     const scale = totalPortions / recipe.yieldPortions;
     for (const ingredient of ingredients) {
+        if (ingredient.quantity == null) {
+            unmeasured.push({
+                foodId: ingredient.foodId,
+                displayName: ingredient.displayName,
+            });
+            continue;
+        }
         if (!ingredient.foodId) {
             shortfalls.push({
                 foodId: "",
@@ -982,7 +994,7 @@ export async function cookRecipe(
         });
         if (applied.shortfall) shortfalls.push(applied.shortfall);
     }
-    return { totalPortions, shortfalls };
+    return { totalPortions, shortfalls, unmeasured };
 }
 
 /** Meal logging after an eat movement applies only to catalog foods, not supplies. */

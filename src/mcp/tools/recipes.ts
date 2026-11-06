@@ -9,6 +9,7 @@ import { liveRecipesStore } from "../../db/recipes.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
+import { run } from "../../db/sql.js";
 import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import { effectiveFoodsByIds } from "../../domain/foods.js";
@@ -60,10 +61,22 @@ const RECIPE_GAP_REASON = z.enum([
     "no_food",
     "no_nutrition",
     "partial_nutrition",
+    "no_amount",
     "unknown_unit",
     "missing_grams_per_each",
     "missing_grams_per_ml",
 ]);
+
+function recipeIngredientAmountText(ingredient: {
+    quantity: { amount: number; unit: string } | null;
+    note: string | null;
+    displayName: string;
+}): string {
+    if (ingredient.quantity == null) {
+        return ingredient.note?.trim() || "to taste";
+    }
+    return `${ingredient.quantity.amount} ${ingredient.quantity.unit}`;
+}
 
 const MACROS_ITEM = z.object({
     calories: z.number().nullable(),
@@ -265,12 +278,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     z.object({
                         id: z.string(),
                         display_name: z.string(),
-                        amount: z.number(),
-                        unit: z.string(),
+                        amount: z.number().nullable(),
+                        unit: z.string().nullable(),
                         note: z.string().nullable(),
                         food_id: z.string().nullable(),
-                        per_portion_amount: z.number(),
-                        person_amount: z.number(),
+                        per_portion_amount: z.number().nullable(),
+                        person_amount: z.number().nullable(),
                         product: z
                             .object({
                                 food_id: z.string(),
@@ -319,8 +332,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             return {
                                 id: ingredient.id,
                                 display_name: ingredient.displayName,
-                                amount: ingredient.quantity.amount,
-                                unit: ingredient.quantity.unit,
+                                amount: ingredient.quantity?.amount ?? null,
+                                unit: ingredient.quantity?.unit ?? null,
                                 note: ingredient.note,
                                 food_id: ingredient.foodId,
                                 per_portion_amount: ingredient.perPortionAmount,
@@ -339,10 +352,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text",
                                 text: `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${wiredMacros.incompleteReasons.length > 0 ? ` (${wiredMacros.incompleteReasons.join("; ")})` : ""}\n${payload.ingredients
-                                    .map(
-                                        (ingredient) =>
-                                            `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,
-                                    )
+                                    .map((ingredient) => {
+                                        const amt =
+                                            ingredient.person_amount != null &&
+                                            ingredient.unit
+                                                ? `${ingredient.person_amount} ${ingredient.unit}`
+                                                : ingredient.note?.trim() ||
+                                                  "to taste";
+                                        return `${ingredient.display_name} ${amt}${ingredient.note && ingredient.person_amount != null ? ` (${ingredient.note})` : ""}`;
+                                    })
                                     .join("\n")}${
                                     payload.steps.length > 0
                                         ? `\nMethod:\n${payload.steps
@@ -425,7 +443,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Recipe Ingredient",
             description:
-                "Add a food ingredient to a recipe. Pass a barcode or a manual name. Amounts are grams.",
+                "Add a food ingredient to a recipe. Pass a barcode or a manual name. Leave amount out for to-taste / never-measured ingredients; never send 0.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -434,7 +452,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             },
             inputSchema: z.object({
                 recipe_id: z.string(),
-                amount: z.coerce.number(),
+                amount: z.coerce.number().nullable().optional(),
                 name: z.string().optional(),
                 barcode: z.string().optional(),
                 food_id: z.string().optional(),
@@ -480,7 +498,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Added ${ingredient.displayName} ${ingredient.quantity.amount} ${ingredient.quantity.unit}`,
+                                text: `Added ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}`,
                             },
                         ],
                     };
@@ -598,8 +616,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     z.object({
                         display_name: z.string(),
                         skipped: z.boolean(),
-                        need: QUANTITY_ITEM,
+                        unmeasured: z.boolean(),
+                        need: QUANTITY_ITEM.nullable(),
                         remainder: QUANTITY_ITEM.nullable(),
+                        note: z.string().nullable(),
                     }),
                 ),
             }),
@@ -657,23 +677,38 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         foodsById: foods,
                         foods: liveFoodsStore(),
                     });
-                    const remainder = result.plan.map((line) => ({
-                        display_name: line.displayName,
-                        skipped: line.skipped,
-                        need: line.need,
-                        remainder: line.remainder,
-                    }));
+                    const addedByName = new Map(
+                        result.added.map((line) => [line.displayName, line]),
+                    );
+                    const remainder = result.plan.map((line) => {
+                        const inserted = addedByName.get(line.displayName);
+                        return {
+                            display_name: line.displayName,
+                            skipped: line.skipped,
+                            unmeasured: line.unmeasured,
+                            need: line.need,
+                            remainder: line.remainder,
+                            note: inserted?.note ?? null,
+                        };
+                    });
                     return {
                         content: [
                             {
                                 type: "text",
                                 text: [
                                     `For ${result.totalPortions} portion${result.totalPortions === 1 ? "" : "s"}:`,
-                                    ...remainder.map((line) =>
-                                        line.skipped || line.remainder == null
-                                            ? `${line.display_name} skipped`
-                                            : `${line.display_name} remainder ${line.remainder.amount} ${line.remainder.unit}`,
-                                    ),
+                                    ...remainder.map((line) => {
+                                        if (line.unmeasured && line.note) {
+                                            return `${line.display_name} · ${line.note}${line.skipped ? " (skipped)" : ""}`;
+                                        }
+                                        if (
+                                            line.skipped ||
+                                            line.remainder == null
+                                        ) {
+                                            return `${line.display_name} skipped`;
+                                        }
+                                        return `${line.display_name} remainder ${line.remainder.amount} ${line.remainder.unit}`;
+                                    }),
                                 ].join("\n"),
                             },
                         ],
@@ -727,6 +762,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     }),
                 ),
                 meal_ids: z.array(z.string()),
+                unmeasured: z.array(
+                    z.object({
+                        food_id: z.string().nullable(),
+                        display_name: z.string(),
+                    }),
+                ),
             }),
         },
         async (args) =>
@@ -806,6 +847,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 unit: row.unit,
                             })),
                             meal_ids: mealIds,
+                            unmeasured: cooked.unmeasured.map((row) => ({
+                                food_id: row.foodId,
+                                display_name: row.displayName,
+                            })),
                         };
                         const shortfallText =
                             cooked.shortfalls.length === 0
@@ -816,11 +861,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                               `${row.displayName} ${row.amount} ${row.unit}`,
                                       )
                                       .join("; ")}.`;
+                        const unmeasuredText =
+                            cooked.unmeasured.length === 0
+                                ? ""
+                                : ` Not deducted (no amount): ${cooked.unmeasured
+                                      .map((row) => row.displayName)
+                                      .join(", ")}.`;
                         return {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Cooked ${cooked.totalPortions} portion${cooked.totalPortions === 1 ? "" : "s"}.${shortfallText}${
+                                    text: `Cooked ${cooked.totalPortions} portion${cooked.totalPortions === 1 ? "" : "s"}.${shortfallText}${unmeasuredText}${
                                         mealIds.length > 0
                                             ? ` Logged ${mealIds.length} meal${mealIds.length === 1 ? "" : "s"}.`
                                             : ""
@@ -908,7 +959,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Update Recipe Ingredient",
             description:
-                "Update a recipe ingredient amount, unit, or note (for example diced or room temp).",
+                "Update a recipe ingredient amount, unit, or note (for example diced or room temp). Leave amount null for to-taste / never-measured ingredients; never send 0.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -918,7 +969,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 recipe_id: z.string(),
                 ingredient_id: z.string(),
-                amount: z.coerce.number().optional(),
+                amount: z.coerce.number().nullable().optional(),
                 unit: z.string().optional(),
                 note: z.string().nullable().optional(),
             }),
@@ -943,7 +994,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Updated ${ingredient.displayName} ${ingredient.quantity.amount} ${ingredient.quantity.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,
+                                text: `Updated ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}${ingredient.note && ingredient.quantity != null ? ` (${ingredient.note})` : ""}`,
                             },
                         ],
                     };
@@ -1045,7 +1096,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                "Create a recipe from structured fields the agent extracted from recipe text. Pass the original text plus extracted name, yield, ingredients, tags, and times. The server find-or-creates catalog foods for each ingredient and returns which still lack nutrition or unit factors. Use get_household_config recipe_search_places to know where this household looks up recipes. Do not store the recipe as a food.",
+                "Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients; pass instructions for the method steps when you have them (otherwise text is stored as instructions for older callers). Optional ingredient amount means to taste. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1054,6 +1105,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             },
             inputSchema: z.object({
                 text: z.string(),
+                instructions: z.string().max(20_000).optional(),
                 source_url: z.string().optional(),
                 name: z.string().optional(),
                 yield_portions: z.coerce.number().optional(),
@@ -1061,7 +1113,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     .array(
                         z.object({
                             name: z.string(),
-                            amount: z.coerce.number(),
+                            amount: z.coerce.number().nullable().optional(),
                             unit: z.string().optional(),
                             note: z.string().optional(),
                             food_id: z.string().optional(),
@@ -1081,12 +1133,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         id: z.string(),
                         food_id: z.string().nullable(),
                         display_name: z.string(),
-                        amount: z.number(),
-                        unit: z.string(),
+                        amount: z.number().nullable(),
+                        unit: z.string().nullable(),
                         note: z.string().nullable(),
                         missing: z.array(
                             z.enum([
                                 "nutrition",
+                                "amount",
                                 "grams_per_each",
                                 "grams_per_ml",
                             ]),
@@ -1114,6 +1167,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             householdId: actor.householdId,
                             creatorId: actor.userId,
                             text: args.text,
+                            instructions: args.instructions,
                             sourceUrl: args.source_url,
                             name: args.name,
                             yieldPortions: args.yield_portions,
@@ -1130,7 +1184,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             prepMinutes: args.prep_minutes,
                             cookMinutes: args.cook_minutes,
                         },
-                        { lookup: lookupBarcode },
+                        {
+                            lookup: lookupBarcode,
+                            transaction: (fn) => run(async () => fn()),
+                        },
                     );
                     const places = householdConfigToWire(
                         await getHouseholdConfig(actor.householdId),
@@ -1141,8 +1198,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             id: ingredient.id,
                             food_id: ingredient.foodId,
                             display_name: ingredient.displayName,
-                            amount: ingredient.quantity.amount,
-                            unit: ingredient.quantity.unit,
+                            amount: ingredient.quantity?.amount ?? null,
+                            unit: ingredient.quantity?.unit ?? null,
                             note: ingredient.note,
                             missing:
                                 result.gaps.find(
@@ -1161,7 +1218,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 text: `Imported ${result.recipe.name} ${result.recipe.id}\n${payload.ingredients
                                     .map(
                                         (row) =>
-                                            `${row.display_name} ${row.amount} ${row.unit}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
+                                            `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
                                     )
                                     .join("\n")}${gapLines.length ? "" : ""}${
                                     places.length

@@ -40,8 +40,10 @@ test("a grocery row round-trips through food_id alone", () => {
         unit: "g",
         checked: false,
         food_id: FOOD_ID,
+        note: null,
     });
     expect(line.foodId).toBe(FOOD_ID);
+    expect(line.note).toBeNull();
     const row = groceryLineToRow(line);
     expect(row.food_id).toBe(FOOD_ID);
     expect(row).not.toHaveProperty("identity");

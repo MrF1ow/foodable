@@ -75,6 +75,9 @@ const GROCERY_FOOD_PICKER_ID = "grocery-food-picker";
 const GROCERY_SECTION_SELECT_ID = "grocery-add-section";
 
 function quantityLabel(line: GroceryLine): string {
+    if (line.note?.trim()) {
+        return line.note.trim();
+    }
     return formatQuantityDisplayParts(line.quantity.amount, line.quantity.unit);
 }
 
@@ -230,10 +233,19 @@ function lineRow(
                       })
                       .join("")}</select>`
                 : "";
+        const noteHint = line.note?.trim()
+            ? `<p class="muted grocery-put-away-note">${escapeHtml(line.note.trim())} — enter the amount you bought</p>`
+            : "";
+        const amountField = line.note?.trim()
+            ? `<label class="visually-hidden" for="put-away-amt-${escapeHtml(line.id)}">Amount</label>
+<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" value="${escapeHtml(String(line.quantity.amount))}" />`
+            : "";
         putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
 ${productSelect}
+${amountField}
+${noteHint}
 <button type="submit" class="btn-sm btn-primary">Put away</button>
 </form>`;
     }
