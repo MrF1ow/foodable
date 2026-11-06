@@ -12,15 +12,16 @@ After this:
 
 - **Certain duplicates are merged by the backend.** Two rows that differ only by punctuation or case are one food, and a reviewed one-off job merges the ones that already exist. #164 already stops new ones.
 - **Likely duplicates are caught when they are created.** A new name that is probably an existing food ("chicken egg" for Eggs, "scallion" for Scallions) gets a "Did you mean Eggs?" question at that moment, in the app and through the agent.
-- **Nothing uncertain is merged without a person.** Synonyms and plurals are suggested, never applied.
-- **Items leaves the main navigation.** A food is edited where you meet it: a recipe ingredient, a grocery line, a fridge row, the usual-product picker.
+- **Anything that slips through waits in one place.** When no one is there to answer, such as an agent importing recipes on a schedule, the food is created and the pair shows up under **Possible duplicates**, with a count badge, for the household to Merge or Keep separate.
+- **Nothing uncertain is merged without a person.** Synonyms are suggested, never applied. Plurals are treated as one food only in households that switch it on.
+- **The catalog page is decided last.** Whether Items stays, moves or goes is evaluated once the foods and merging are in good shape (see "Later").
 
 ## Why duplicates happen
 
 | Cause                     | Example                                                             | Handled by                                                                                  |
 | ------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Punctuation or case       | "All purpose flour" / "all-purpose flour"                           | #164 stops new ones; the merge job below fixes old ones                                     |
-| Plural                    | "Egg" / "Eggs"                                                      | "Did you mean" at entry                                                                     |
+| Plural                    | "Egg" / "Eggs"                                                      | "Did you mean" at entry, or automatic in households that opt in                             |
 | Word order or extra words | "Chicken egg" / "Eggs", "Flour, all-purpose" / "All-purpose flour"  | "Did you mean" at entry                                                                     |
 | Synonym                   | "Cilantro" / "Coriander", "Scallions" / "Green onions"              | Aliases, once a person merges them (merge keeps the dropped name as an alias)               |
 | A scanned product         | "Cage Free Grade A Large Eggs" beside "Eggs"                        | Not a duplicate: the post-scan prompt and Belongs to… file it as a product (usual products) |
@@ -39,6 +40,14 @@ Even under that rule, a pair is merged only when the two rows do not disagree:
 - **Products:** two plain foods that both have products, or both have a usual product, are skipped and reported. `mergeFoods` already refuses the nesting cases.
 
 Which row is kept: the one with more references (fridge items, grocery lines, recipe ingredients, meal items, stock movements), then the older one. The dropped name becomes an alias of the kept row, as `mergeFoods` already does.
+
+### Plurals are opt-in
+
+"Egg" and "Eggs" are usually one food, but the difference people hear is often about amount ("an egg" is one, "eggs" is several), and amounts belong to the quantity, not the name. Elsewhere a plural is a different food ("Green" / "Greens", "Date" / "Dates"). So plurals are a household choice:
+
+- **Off (the default):** singular and plural stay distinct names. A new plural of an existing food is only suggested, by "Did you mean" and Possible duplicates.
+- **On:** a household setting, "Treat singular and plural as the same food", on Household › Members beside the household name (owners and admins). Name resolution then compares names with each word singularised (`looseFoodKey` plus `singularizeNameToken`, a sibling `pluralFreeFoodKey`), so "egg" finds Eggs without asking. The merge job also includes plural pairs, under the same agree-or-skip rules.
+- Stored as one boolean column on `households` (`plurals_same_food boolean not null default false`), so an additive migration with no backfill.
 
 ### What is only ever suggested
 
@@ -93,37 +102,45 @@ Barcodes and products are covered by usual products. The name paths gain one ste
     - The agent asks the person, then calls again with the chosen `food_id`, or with `new_food: true`.
     - `SERVER_INSTRUCTIONS` gains one sentence: never pick between similar foods on the household's behalf.
 - **Recipe import** asks once for the whole recipe, not once per ingredient: the import returns every ingredient that has candidates in one list.
+- **When no one can answer:** each of those tools also takes `on_similar: "ask" | "create"` (default `"ask"`). A scheduled or unattended agent passes `"create"`. The foods are created, and the pairs appear under Possible duplicates rather than blocking the run. The scheduled-import prompt planned in [recipe-import-plan.md](./recipe-import-plan.md) passes it.
 
-### 4. Edit a food where you meet it
+### 4. Possible duplicates
 
-A single food edit page, `/foods/:id`, reached from wherever a food appears:
+One place for every likely duplicate the household has not decided on, whatever created it.
 
-- a recipe ingredient (next to its "no nutrition" reason and "Pick usual product");
-- a grocery line;
-- a fridge row;
-- the usual-product picker.
+- **What is listed:** `possibleDuplicates(foods, aliases, dismissed)` (pure) pairs every two live, same-kind plain foods that `similarFoods` rules 1 and 2 would suggest for each other: same words up to plurals, or one name containing every word of the other. Rule 3, the broad word match, is left out because it is too noisy for a list. Pairs the merge job would merge on its own never wait here; they are merged. Products and scanned cartons are not listed: they are filed with Belongs to…, as in usual products.
+- **Computed, not stored:** the list is worked out from the catalog each time, so it can't go stale. Only the household's "Keep separate" answers are stored, in a new table `food_duplicate_dismissals` (`household_id`, `food_a_id`, `food_b_id` with `food_a_id < food_b_id`, `dismissed_by`, `created_at`; RLS and grants like every new table). A pair is never listed again once dismissed, and comes back only if one of the foods is merged into something else.
+- **Where:**
+    - **Household › Possible duplicates,** a sub-nav entry that appears only when the list is not empty, with the count as a badge.
+    - **A dot on the Household tab** while there are any.
+    - **Where the food appears:** a recipe ingredient or grocery line for one of the foods shows a small "Possible duplicate of _Eggs_" link to the pair.
+- **Each row:** "chicken egg · Eggs", with **Merge…** and **Keep separate**.
+    - Merge opens a confirm dialog showing which name is kept (the merge job's keep rule decides the default) and any field the two disagree on, such as calories. The person picks the value to keep, and the dialog runs `mergeFoods`.
+    - Keep separate stores the dismissal.
+- **MCP:** two new tools, `list_possible_duplicates` and `keep_foods_separate { food_id, other_food_id }`, take the count from 69 to 71. A merge goes through the existing `merge_foods`. `SERVER_INSTRUCTIONS`: after an unattended run, mention any new possible duplicates, and never merge or dismiss one without asking.
 
-It holds what the Items edit modal holds today (name, aliases, unit, grams factors, nutrition, allergens, archive, Belongs to / Usual product) and "Merge into another food…", which uses `matchFoodsByWords` to find the other food. It renders with the bare page shell and a Back link (`from`), like Settings.
+## Later: the catalog page
 
-### 5. Items leaves the main navigation
+Evaluated last, once the steps above are in production. The candidates, kept here so the work is not lost:
 
-- The Household sub-nav becomes **Members · Usual products**.
-- The full catalog moves to **Settings › Foods** (`/settings/foods`, a link from Help as well). It stays for the rare full cleanup, renamed so it is not confused with fridge items.
-- `/household/items` redirects there. This reverses the layout move, which made `/settings/foods` a redirect to `/household/items` (`legacyHouseholdPath`): that legacy rule is removed in the same PR, and a test pins both directions so neither path loops.
-- The scanned-products hint on Usual products and the link prompt point at the food page instead of Items.
+- **A food page,** `/foods/:id`, reached from a recipe ingredient, a grocery line, a fridge row and the usual-product picker. It would hold what the Items edit modal holds today, plus "Merge into another food…".
+- **Items leaves the main navigation,** perhaps for Settings › Foods. That move would reverse the layout move's `/settings/foods` → `/household/items` redirect (`legacyHouseholdPath`), which needs removing in the same PR, with a test that neither path loops.
+- **Or Items goes entirely,** if the food page, Possible duplicates and the agent cover everything.
+
+Until then, Household › Items stays as it is.
 
 ## Surfaces
 
 ### Web
 
 - "Did you mean" on the three add forms.
-- The food page and its entry points.
-- Household sub-nav without Items; Settings › Foods.
-- Settings › Help: the "Food vs household item" entry gains one line on "Did you mean", and a new "Foods" entry explains that a food is edited from where it appears.
+- Household › Possible duplicates (shown only when there are any), the Household tab dot, and the "Possible duplicate of…" links on recipe ingredients and grocery lines.
+- Household › Members: "Treat singular and plural as the same food" (off by default, owners and admins).
+- Settings › Help: the "Food vs household item" entry gains one line on "Did you mean", and a new "Possible duplicates" entry explains Merge and Keep separate.
 
 ### MCP
 
-The tool count stays at 69. `status: "similar_foods"` is an added outcome on six tools, and `new_food` an added optional input. `merge_foods` gains the field fill and allergen union. `src/mcp/tools-list.snapshot.json` does not change.
+The tool count goes from 69 to 71 (`list_possible_duplicates`, `keep_foods_separate`), so `src/mcp/tools-list.snapshot.json` and `TOOLS` change in that PR. `status: "similar_foods"` is an added outcome on six tools, and `new_food` and `on_similar` are added optional inputs. `merge_foods` gains the field fill and allergen union.
 
 ## Tests
 
@@ -150,6 +167,11 @@ Pure, with memory stores:
     - at most three;
     - an exact or alias match never reaches it.
 - `findOrCreateManualFood` with `onSimilar: "ask"` throws with the candidates and writes nothing; with `"create"` it behaves as today.
+- `possibleDuplicates`:
+    - lists "chicken egg" / Eggs and "egg" / "eggs";
+    - leaves out dismissed pairs, products, different kinds, and pairs the merge job would merge itself;
+    - lists a pair again after one food is merged into a third.
+- Plurals setting: off, "egg" does not resolve to Eggs; on, it does, and `duplicatePairs` includes plural pairs under the same rules.
 
 Plus:
 
@@ -157,7 +179,9 @@ Plus:
 - the alias checkbox;
 - `mcp.test.ts` for `status: "similar_foods"` and `new_food`;
 - a contract test for the repoint of `stock_movements` and `meal_items`;
-- `check:nav` for the moved catalog page.
+- route tests for Merge (including a field conflict) and Keep separate;
+- `mcp.test.ts` for `list_possible_duplicates` and `keep_foods_separate`, and the 71-tool snapshot;
+- `db:dryrun` for the `households.plurals_same_food` column and the `food_duplicate_dismissals` table.
 
 ## Pull requests
 
@@ -166,20 +190,25 @@ Plus:
     - `duplicatePairs`;
     - `scripts/merge-duplicate-foods.ts`.
       The production dry run is reviewed before anyone runs `--apply`.
-3. **"Did you mean" in the domain and MCP:**
+3. **Possible duplicates:**
+    - the `food_duplicate_dismissals` migration;
+    - `possibleDuplicates`;
+    - the Household section, tab dot and "Possible duplicate of…" links;
+    - Merge… and Keep separate;
+    - `list_possible_duplicates` and `keep_foods_separate`.
+4. **"Did you mean" in the domain and MCP:**
     - `similarFoods`;
     - `SimilarFoodsError`;
-    - the six tools;
+    - `on_similar` and `new_food` on the six tools;
     - `SERVER_INSTRUCTIONS`.
-4. **"Did you mean" in the web app:** the three add forms and the alias checkbox.
-5. **Food page and navigation:**
-    - `/foods/:id` and its entry points;
-    - Items moves to Settings › Foods;
-    - the redirect;
-    - the Help entries.
+5. **"Did you mean" in the web app:** the three add forms and the alias checkbox.
+6. **Plurals opt-in:** the `households.plurals_same_food` migration, the setting, name resolution, and plural pairs in the merge job.
+
+Possible duplicates comes before "Did you mean" on purpose: it catches every duplicate, whatever created it, so it is useful the day it ships, and "Did you mean" then shrinks what reaches it.
+
+Then the catalog page is evaluated (see "Later").
 
 ## Open questions
 
-- **Recipe import while unattended:** an agent importing recipes on a schedule cannot ask. It should probably create the new foods and leave a "possible duplicates" note on the import, rather than block.
-- **Plurals for foods counted by the piece:** "Egg" / "Eggs" is almost always one food, and "Green" / "Greens" is not. Should plurals of foods whose default unit is `each` merge automatically?
-- **The full catalog page:** is Settings › Foods worth keeping at all once every food has its own page, or is the agent enough for a full cleanup?
+- **Keep separate, forever?** A dismissed pair never comes back unless a food is merged. Should a dismissal expire, or be undoable from the food?
+- **The badge:** a dot on the Household tab, or a number? A number may nag when a household has a long list on day one, before the merge job runs.
