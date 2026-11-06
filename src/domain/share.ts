@@ -103,15 +103,17 @@ export function isSafeShareReturnPath(path: string): string | null {
     if (path.includes("\\")) return null;
     if (hasControlChars(path)) return null;
 
-    let decoded: string;
+    const rawPath = path.split("?")[0] ?? "";
+    // Only the path must be free of encoded controls. A caption is multiline,
+    // so the query carries %0A; URL keeps it percent-encoded in `search`, and
+    // a raw control (which could split a header) was refused above.
+    let decodedPath: string;
     try {
-        decoded = decodeURIComponent(path);
+        decodedPath = decodeURIComponent(rawPath);
     } catch {
         return null;
     }
-    if (hasControlChars(decoded)) return null;
-
-    const rawPath = path.split("?")[0] ?? "";
+    if (hasControlChars(decodedPath)) return null;
     if (pathHasDotSegment(rawPath)) return null;
 
     let url: URL;

@@ -29,6 +29,8 @@ afterAll(() => {
 const {
     OAUTH_PATHS,
     beginSiteLogin,
+    MAX_SITE_LOGIN_SESSIONS,
+    siteLoginSessionCount,
     createOAuthRouter,
     renderLoginPage,
     resolveApproveUser,
@@ -585,4 +587,16 @@ test("beginSiteLogin still renders login without MCP connect hint", async () => 
     expect(html).toContain('<input type="text" id="email" name="email"');
     expect(html).toContain("Email or username");
     expect(html).not.toContain("Signing in to connect");
+});
+
+test("signed-out site logins are capped so long shares can't fill memory", async () => {
+    const app = new Hono();
+    app.get("/share", (c) => beginSiteLogin(c));
+    const caption = "x".repeat(20_000);
+    for (let i = 0; i < MAX_SITE_LOGIN_SESSIONS + 10; i++) {
+        await app.request(`http://localhost/share?text=${caption}${i}`);
+    }
+    expect(siteLoginSessionCount()).toBeLessThanOrEqual(
+        MAX_SITE_LOGIN_SESSIONS,
+    );
 });

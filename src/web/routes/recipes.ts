@@ -365,6 +365,27 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         });
         return c.html(page.html, 409);
     }
+    // Text the person pasted (or shared) is never thrown away: when the link
+    // beside it fails (invalid, 404, timeout), stay on a paste step with it.
+    if (
+        pasteStep &&
+        text.trim() !== "" &&
+        !importOutcomeShowsPasteStep(outcome.status)
+    ) {
+        const page = await renderRecipesListPage(userId, {
+            openModalId: IMPORT_RECIPE_MODAL_ID,
+            importUrl: textOnly ? pinOrPageUrl : cleanedPinUrl,
+            importError: importOutcomeMessage(outcome),
+            importPasteStep: true,
+            importPasteText: text,
+            importCredit: credit,
+            importTextOnly: textOnly || !pinValidated.ok,
+            importSourceKind: textOnly ? "text" : outcome.source?.kind,
+            importSourceLabel: textOnly ? "Recipe text" : outcome.source?.label,
+            ...importOriginPrefill(textOrigin),
+        });
+        return c.html(page.html, 422);
+    }
     const pasteRender = importOutcomeShowsPasteStep(outcome.status);
     const pasteLinkUrl = outcome.source?.url ?? cleanedPinUrl;
     const page = await renderRecipesListPage(userId, {
