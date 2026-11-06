@@ -219,6 +219,8 @@ const RECIPE = {
     notes: null,
     prepMinutes: 10,
     cookMinutes: 20,
+    verification: "verified" as const,
+    updatedAt: "2026-10-01T00:00:00Z",
 };
 
 const RECIPE_TWO = {
@@ -233,6 +235,8 @@ const RECIPE_TWO = {
     notes: null,
     prepMinutes: 5,
     cookMinutes: 10,
+    verification: "verified" as const,
+    updatedAt: "2026-10-01T00:00:00Z",
 };
 
 const MACROS = {

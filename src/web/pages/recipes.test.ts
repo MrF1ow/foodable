@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
-import { renderRecipeDetailPage, type RecipeDetailView } from "./recipes.js";
+import {
+    renderRecipeDetailPage,
+    renderRecipesPage,
+    type RecipeDetailView,
+} from "./recipes.js";
 
 const VIEWER = "11111111-1111-4111-8111-111111111111";
 
@@ -21,6 +25,8 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
         notes: null,
         prepMinutes: null,
         cookMinutes: null,
+        verification: "verified" as const,
+        updatedAt: "2026-01-01T00:00:00.000Z",
         ...recipe,
     };
     return {
@@ -210,6 +216,71 @@ test("a failed steps save reopens the Method modal", () => {
         openModalId: "recipe-method-r1",
     });
     expect(html).toMatch(/id="recipe-method-r1"[^>]*data-modal-open-on-load/);
+});
+
+test("recipes list shows verification filter and unverified badge", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [
+            {
+                id: "r-open",
+                householdId: "hh-1",
+                creatorId: VIEWER,
+                name: "Draft soup",
+                yieldPortions: 2,
+                instructions: null,
+                sourceUrl: null,
+                tags: [],
+                notes: null,
+                prepMinutes: null,
+                cookMinutes: null,
+                verification: "unverified",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        ],
+        members: [{ userId: VIEWER, displayName: "Alice" }],
+        viewerId: VIEWER,
+        filter: {
+            tag: "",
+            canMakeNow: false,
+            safeFor: "",
+            verification: "unverified",
+        },
+    });
+    expect(html).toContain("Unverified");
+    expect(html).toContain("recipe-verification-filter");
+    expect(html).toContain("Draft soup");
+});
+
+test("unverified recipe detail shows problems panel and check again", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({ verification: "unverified", name: "Import" }),
+        problems: [
+            {
+                code: "no_instructions",
+                message: "Add the steps.",
+                ingredientId: null,
+                line: null,
+            },
+        ],
+        importRow: {
+            recipeId: "r1",
+            householdId: "hh-1",
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText: "Raw paste",
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    expect(html).toContain("Unverified");
+    expect(html).toContain("Add the steps.");
+    expect(html).toContain("Pasted text");
+    expect(html).toContain('action="/recipes/r1/verify"');
 });
 
 test("unmeasured recipe ingredient renders to taste", () => {

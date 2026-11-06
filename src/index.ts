@@ -10,6 +10,9 @@ import {
 } from "./middleware.js";
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
+import { startUnverifiedRecipeCleanup } from "./domain/recipe-import.js";
+import { listHouseholdsForRecipeSweep } from "./db/household.js";
+import { liveRecipesStore } from "./db/recipes.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
 import { isNutritionCard } from "./domain/layout.js";
@@ -421,6 +424,10 @@ if (import.meta.main) {
 
     // Periodically delete expired meal-export files from the storage bucket.
     startExportCleanup();
+    startUnverifiedRecipeCleanup(
+        () => listHouseholdsForRecipeSweep(),
+        liveRecipesStore(),
+    );
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));

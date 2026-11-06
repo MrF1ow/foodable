@@ -187,6 +187,7 @@ test("fridge product covers plain food need while another product is usual", asy
     expect(tag).toEqual({ cover: "full" });
     expect(
         recipeCanMakeNow(
+            { verification: "verified" } as import("./recipes.js").Recipe,
             [
                 {
                     id: "i1",
@@ -908,7 +909,9 @@ test("recipe list filters read effective catalog for make-now and allergens", as
         { foodId: plain.id, quantity: { amount: 100, unit: "g" } },
     ];
     const ingredient = (await recipes.listIngredients(HH, recipe.id))[0]!;
-    expect(recipeCanMakeNow([ingredient], stockView, catalog)).toBe(true);
+    expect(recipeCanMakeNow(recipe, [ingredient], stockView, catalog)).toBe(
+        true,
+    );
     expect(
         recipeIsSafeFor([ingredient], catalog, {
             allergens,

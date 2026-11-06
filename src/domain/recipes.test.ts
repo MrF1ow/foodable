@@ -8,6 +8,8 @@ import {
 } from "./fridge.js";
 import { createMemoryGroceryStore, listGrocery } from "./grocery.js";
 import { recipeToGroceryRemainder } from "./linking.js";
+import { RecipeUnverifiedError } from "./recipe-import.js";
+import { cookRecipe, createMemoryStockStore } from "./stock.js";
 import {
     addRecipeIngredientByBarcode,
     addRecipeManualIngredient,
@@ -31,6 +33,8 @@ import {
     resolveTotalPortions,
     removeRecipeIngredient,
     reorderRecipeIngredients,
+    recipeCanMakeNow,
+    recipeMatchesFilter,
     setPersonPortion,
     updateRecipe,
     updateRecipeIngredient,
@@ -460,6 +464,8 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
                 notes: null,
                 prepMinutes: null,
                 cookMinutes: null,
+                verification: "verified",
+                updatedAt: "2026-01-01T00:00:00.000Z",
             },
         ],
         members: [{ userId: ALICE, displayName: "Alice" }],
@@ -486,6 +492,8 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
             notes: "Use the blue pot.",
             prepMinutes: 10,
             cookMinutes: 20,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         },
         ingredients: [
             {
@@ -560,6 +568,8 @@ test("recipe pages use modals for create and detail actions", async () => {
         notes: null,
         prepMinutes: null,
         cookMinutes: null,
+        verification: "verified",
+        updatedAt: "2026-01-01T00:00:00.000Z",
     };
     const list = renderRecipesPage({
         chrome: { theme: "light", attention: { count: 0, tabs: {} } },
@@ -679,6 +689,8 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         },
         ingredients: [
             {
@@ -745,6 +757,8 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         },
         ingredients: [
             {
@@ -808,6 +822,8 @@ test("recipe detail shows a page banner when openModalId does not match a dialog
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         },
         ingredients: [],
         members: [],
@@ -1924,4 +1940,219 @@ test("importRecipeFromText optional amount instructions and rollback", async () 
     expect((await foods.listFoods(HH)).some((f) => f.name === "Ok2")).toBe(
         false,
     );
+});
+
+test("createRecipe defaults to verified", async () => {
+    const store = createMemoryRecipesStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Handmade",
+        yieldPortions: 2,
+    });
+    expect(recipe.verification).toBe("verified");
+});
+
+test("importRecipeFromText verifies a complete recipe on import", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const result = await importRecipeFromText(
+        store,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Raw caption",
+            instructions: "1. Mix\n2. Bake",
+            name: "Complete",
+            ingredients: [{ name: "Flour", amount: 200, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    expect(result.verification).toBe("verified");
+    expect(result.problems).toHaveLength(0);
+    const imp = await store.getImport(HH, result.recipe.id);
+    expect(imp?.sourceKind).toBe("text");
+    expect(imp?.sourceText).toBe("Raw caption");
+});
+
+test("importRecipeFromText stays unverified when instructions are missing", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const result = await importRecipeFromText(
+        store,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Caption only",
+            instructions: "",
+            name: "Incomplete",
+            ingredients: [{ name: "Flour", amount: 200, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    expect(result.verification).toBe("unverified");
+    expect(result.problems.some((p) => p.code === "no_instructions")).toBe(
+        true,
+    );
+});
+
+test("editing an unverified recipe until complete verifies it", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const result = await importRecipeFromText(
+        store,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Paste",
+            instructions: "",
+            name: "Fix me",
+            ingredients: [{ name: "Flour", amount: 100, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    expect(result.recipe.verification).toBe("unverified");
+    await updateRecipe(store, HH, result.recipe.id, {
+        instructions: "1. Stir\n2. Serve",
+    });
+    const saved = await store.getRecipe(HH, result.recipe.id);
+    expect(saved?.verification).toBe("verified");
+});
+
+test("editing a verified recipe keeps it verified", async () => {
+    const store = createMemoryRecipesStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Stable",
+        yieldPortions: 1,
+        instructions: "1. Go",
+    });
+    await updateRecipe(store, HH, recipe.id, { name: "Stable v2" });
+    const saved = await store.getRecipe(HH, recipe.id);
+    expect(saved?.verification).toBe("verified");
+});
+
+test("ingredient edits bump updatedAt on memory store", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Bump",
+        yieldPortions: 1,
+    });
+    const before = recipe.updatedAt;
+    await Bun.sleep(5);
+    await addRecipeManualIngredient(store, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Flour",
+        amount: 10,
+        unit: "g",
+    });
+    const saved = await store.getRecipe(HH, recipe.id);
+    expect(saved!.updatedAt >= before).toBe(true);
+    expect(saved!.updatedAt !== before).toBe(true);
+});
+
+test("addRecipeToGrocery throws RecipeUnverifiedError when unverified", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const imported = await importRecipeFromText(
+        recipes,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "x",
+            instructions: "",
+            name: "Blocked grocery",
+            ingredients: [{ name: "Flour", amount: 1, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    await expect(
+        addRecipeToGrocery({
+            recipes,
+            grocery,
+            settings,
+            foods,
+            householdId: HH,
+            recipeId: imported.recipe.id,
+            storeId: store.id,
+            portionCounts: [1],
+            foodsById: new Map(),
+            fridgeItems: [],
+        }),
+    ).rejects.toBeInstanceOf(RecipeUnverifiedError);
+});
+
+test("cookRecipe throws RecipeUnverifiedError when unverified", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const imported = await importRecipeFromText(
+        recipes,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "x",
+            instructions: "",
+            name: "Blocked cook",
+            ingredients: [{ name: "Flour", amount: 1, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    await expect(
+        cookRecipe(recipes, fridge, stock, foods, {
+            householdId: HH,
+            recipeId: imported.recipe.id,
+            totalPortions: 1,
+            deductStock: false,
+        }),
+    ).rejects.toBeInstanceOf(RecipeUnverifiedError);
+});
+
+test("recipeCanMakeNow and verification filter ignore unverified recipes", async () => {
+    const recipe = {
+        id: "r1",
+        householdId: HH,
+        creatorId: ALICE,
+        name: "X",
+        yieldPortions: 1,
+        instructions: "1. Go",
+        sourceUrl: null,
+        tags: [],
+        notes: null,
+        prepMinutes: null,
+        cookMinutes: null,
+        verification: "unverified" as const,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    expect(recipeCanMakeNow(recipe, [], [], new Map())).toBe(false);
+    const base = {
+        canMakeNow: false,
+        safeFor: null,
+    };
+    expect(
+        recipeMatchesFilter(recipe, [], new Map(), [], {
+            ...base,
+            verification: "verified",
+        }),
+    ).toBe(false);
+    expect(
+        recipeMatchesFilter(recipe, [], new Map(), [], {
+            ...base,
+            verification: "unverified",
+        }),
+    ).toBe(true);
 });

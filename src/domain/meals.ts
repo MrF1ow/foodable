@@ -384,6 +384,24 @@ export async function resolveAndBuildMeal(opts: {
     for (const recipeId of recipeIds) {
         const recipe = await opts.recipes.getRecipe(opts.householdId, recipeId);
         if (!recipe) throw new MealItemsError("Unknown recipe.");
+        if (recipe.verification === "unverified") {
+            const { assertRecipeVerified } = await import("./recipe-import.js");
+            try {
+                await assertRecipeVerified(
+                    opts.recipes,
+                    opts.householdId,
+                    recipeId,
+                );
+            } catch (err) {
+                if (
+                    err instanceof Error &&
+                    err.name === "RecipeUnverifiedError"
+                ) {
+                    throw new MealItemsError(err.message);
+                }
+                throw err;
+            }
+        }
         const ingredients = await opts.recipes.listIngredients(
             opts.householdId,
             recipeId,

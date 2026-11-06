@@ -96,7 +96,10 @@ import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
-import { createMemoryRecipesStore } from "./domain/recipes.js";
+import {
+    createMemoryRecipesStore,
+    importRecipeFromText,
+} from "./domain/recipes.js";
 import {
     createGroceryStore,
     createMemorySettingsStore,
@@ -3370,6 +3373,7 @@ describe("household config tools", () => {
                     constraints: [],
                     budget: null,
                     shopping_cadence: null,
+                    unverified_recipe_expiry_days: null,
                 },
                 timezone: null,
                 effective_timezone: "UTC",
@@ -5178,6 +5182,117 @@ describe("phone-app domain MCP tools", () => {
             }>;
             expect(unmeasured[0]?.display_name).toBe("Salt");
             expect(textOf(cooked)).toContain("Not deducted (no amount)");
+        });
+    });
+
+    test("verify_recipe output validates for verified, unverified, and not_found", async () => {
+        const { VERIFY_RECIPE_OUTPUT_SCHEMA } =
+            await import("./mcp/tools/recipes.js");
+        await withUser(alice, async (call) => {
+            const complete = await call("import_recipe_from_text", {
+                text: "caption",
+                instructions: "1. Mix",
+                name: "Verified soup",
+                ingredients: [{ name: "water", amount: 100, unit: "g" }],
+            });
+            const completeId = (
+                complete.structuredContent?.recipe as { id: string }
+            ).id;
+            const ok = await call("verify_recipe", { recipe_id: completeId });
+            expect(ok.isError).toBeFalsy();
+            VERIFY_RECIPE_OUTPUT_SCHEMA.parse(ok.structuredContent);
+            expect(ok.structuredContent?.status).toBe("verified");
+
+            const incomplete = await call("import_recipe_from_text", {
+                text: "caption",
+                instructions: "",
+                name: "Still open",
+                ingredients: [{ name: "salt", amount: 1, unit: "g" }],
+            });
+            const openId = (
+                incomplete.structuredContent?.recipe as { id: string }
+            ).id;
+            const open = await call("verify_recipe", { recipe_id: openId });
+            VERIFY_RECIPE_OUTPUT_SCHEMA.parse(open.structuredContent);
+            expect(open.structuredContent?.status).toBe("unverified");
+
+            const missing = await call("verify_recipe", {
+                recipe_id: "00000000-0000-4000-8000-000000000099",
+            });
+            VERIFY_RECIPE_OUTPUT_SCHEMA.parse(missing.structuredContent);
+            expect(missing.structuredContent?.status).toBe("not_found");
+        });
+    });
+
+    test("list_recipes filters by verification", async () => {
+        await withUser(alice, async (call) => {
+            await call("import_recipe_from_text", {
+                text: "a",
+                instructions: "",
+                name: "Open recipe",
+                ingredients: [{ name: "flour", amount: 1, unit: "g" }],
+            });
+            const verifiedOnly = await call("list_recipes", {
+                verification: "verified",
+            });
+            expect(textOf(verifiedOnly)).not.toContain("Open recipe");
+            const unverifiedOnly = await call("list_recipes", {
+                verification: "unverified",
+            });
+            expect(textOf(unverifiedOnly)).toContain("Open recipe");
+        });
+    });
+
+    test("unverified recipe refuses cook and add_recipe_to_grocery", async () => {
+        await withUser(alice, async (call) => {
+            const imported = await call("import_recipe_from_text", {
+                text: "x",
+                instructions: "",
+                name: "Blocked",
+                ingredients: [{ name: "rice", amount: 50, unit: "g" }],
+            });
+            const recipeId = (
+                imported.structuredContent?.recipe as { id: string }
+            ).id;
+            const cooked = await call("cook_recipe", {
+                recipe_id: recipeId,
+                total_portions: 1,
+            });
+            expect(cooked.isError).toBeTruthy();
+            expect(textOf(cooked).toLowerCase()).toContain("unverified");
+            const added = await call("add_recipe_to_grocery", {
+                recipe_id: recipeId,
+                store_id: (
+                    await createGroceryStore(db.settingsStore, "hh-1", "Shop")
+                ).id,
+                total_portions: 1,
+            });
+            expect(added.isError).toBeTruthy();
+            expect(textOf(added).toLowerCase()).toContain("unverified");
+        });
+    });
+
+    test("get_recipe returns import metadata and problems for imports", async () => {
+        await withUser(alice, async (call) => {
+            const imported = await call("import_recipe_from_text", {
+                text: "Pasted body",
+                instructions: "",
+                name: "Import meta",
+                ingredients: [{ name: "oats", amount: 40, unit: "g" }],
+            });
+            const recipeId = (
+                imported.structuredContent?.recipe as { id: string }
+            ).id;
+            const detail = await call("get_recipe", { id: recipeId });
+            expect(detail.isError).toBeFalsy();
+            expect(detail.structuredContent?.verification).toBe("unverified");
+            const imp = detail.structuredContent?.import as {
+                source_text: string | null;
+            } | null;
+            expect(imp?.source_text).toBe("Pasted body");
+            expect(
+                (detail.structuredContent?.problems as unknown[])?.length,
+            ).toBeGreaterThan(0);
         });
     });
 
@@ -7195,6 +7310,43 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("household membership");
         expect(html).not.toContain("<h1>Recipes</h1>");
+    });
+
+    test("POST add-to-grocery redirects when recipe is unverified", async () => {
+        const imported = await importRecipeFromText(
+            db.recipesStore,
+            db.foodsStore,
+            {
+                householdId: "hh-1",
+                creatorId: alice,
+                text: "paste",
+                instructions: "",
+                name: "Unverified web",
+                ingredients: [{ name: "Flour", amount: 50, unit: "g" }],
+            },
+            { lookup: async () => null },
+        );
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Shop",
+        );
+        const res = await siteApp.request(
+            `http://x/recipes/${imported.recipe.id}/add-to-grocery`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: `store_id=${store.id}&total_portions=1`,
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/recipes/${imported.recipe.id}`,
+        );
+        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
     });
 
     test("POST /grocery/lines adds a supply and checking it does not insert fridge stock", async () => {

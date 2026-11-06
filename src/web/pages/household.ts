@@ -54,6 +54,7 @@ export type HouseholdSettingsView = {
     error?: string;
     issuedToken?: string;
     openModalId?: string;
+    unverifiedRecipeExpiryDays: number | null;
 };
 
 export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
@@ -594,6 +595,20 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
         ${renderHouseholdNav("members")}
         ${token}
         ${panel({ title: "Household", body: householdCard })}
+        ${panel({
+            title: "Recipe settings",
+            body: view.canManage
+                ? `<form method="post" action="/household/recipe-settings" class="household-recipe-settings">
+${field({
+    id: "unverified_recipe_expiry_days",
+    label: "Delete unverified recipes after (days)",
+    control: `<input id="unverified_recipe_expiry_days" name="unverified_recipe_expiry_days" type="number" min="1" max="3650" inputmode="numeric" value="${view.unverifiedRecipeExpiryDays ?? ""}" />`,
+})}
+<p class="hint">Leave empty to keep them until they're verified or deleted.</p>
+<button type="submit">Save</button>
+</form>`
+                : `<p class="muted">${view.unverifiedRecipeExpiryDays == null ? "Never delete unverified recipes automatically." : `Delete unverified recipes after ${view.unverifiedRecipeExpiryDays} days.`}</p>`,
+        })}
         ${panel({
             title: "Members",
             body: `<ul class="household-members list">${members}</ul>`,

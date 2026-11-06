@@ -11,6 +11,7 @@ import {
     parseHouseholdConfigPatch,
     RESTOCK_ENABLED_ERROR,
     RESTOCK_WEEKDAY_ERROR,
+    parseUnverifiedRecipeExpiryDays,
     type HouseholdConfig,
 } from "./household.js";
 
@@ -28,6 +29,7 @@ const current: HouseholdConfig = {
             time: "07:00",
             lastRunOn: "2026-11-01",
         },
+        unverifiedRecipeExpiryDays: null,
     },
 };
 
@@ -58,6 +60,7 @@ test("preference merge keeps unspecified fields", () => {
             shoppingCadence: "monthly",
             timezone: "Europe/Kyiv",
             restock: current.preferences.restock,
+            unverifiedRecipeExpiryDays: null,
         },
     });
 });
@@ -73,6 +76,19 @@ test("merge preserves lastRunOn when restock fields change", () => {
     expect(merged.preferences.restock.lastRunOn).toBe("2026-11-01");
     expect(merged.preferences.restock.enabled).toBe(false);
     expect(merged.preferences.restock.time).toBe("08:30");
+});
+
+test("unverified recipe expiry defaults null and validates range", () => {
+    expect(parseUnverifiedRecipeExpiryDays(undefined, true)).toEqual({
+        ok: true,
+        value: null,
+    });
+    expect(parseUnverifiedRecipeExpiryDays(30, false)).toEqual({
+        ok: true,
+        value: 30,
+    });
+    expect(parseUnverifiedRecipeExpiryDays(0, false).ok).toBe(false);
+    expect(parseUnverifiedRecipeExpiryDays("nope", false).ok).toBe(false);
 });
 
 test("a missing preferences object on a row becomes empty preferences", () => {
