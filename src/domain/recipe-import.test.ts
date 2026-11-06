@@ -20,6 +20,7 @@ import {
     type RecipeImportOutcome,
     type RecipeImportStatus,
     verifyRecipe,
+    prepareImportedRecipe,
 } from "./recipe-import.js";
 import {
     createMemoryRecipesStore,
@@ -737,6 +738,123 @@ describe("importRecipeFromUrl", () => {
             ),
         ).rejects.toThrow("insert failed");
     });
+});
+
+describe("prepareImportedRecipe clamps page values to what the editors accept", () => {
+    const base = {
+        name: "Soup",
+        fallbackName: "example.com",
+        yieldPortions: 4,
+        steps: ["Simmer."],
+        prepMinutes: 10,
+        cookMinutes: 20,
+        parsed: { items: [], unresolved: [] },
+    };
+
+    test("yield out of range becomes 1", () => {
+        for (const y of [0, 0.4, -3, 1e16, Number.NaN, null]) {
+            expect(
+                prepareImportedRecipe({ ...base, yieldPortions: y })
+                    .yieldPortions,
+            ).toBe(1);
+        }
+        expect(
+            prepareImportedRecipe({ ...base, yieldPortions: 6 }).yieldPortions,
+        ).toBe(6);
+    });
+
+    test("names without letters fall back and long text is clipped", () => {
+        expect(prepareImportedRecipe({ ...base, name: "   " }).name).toBe(
+            "example.com",
+        );
+        expect(prepareImportedRecipe({ ...base, name: "​" }).name).toBe(
+            "example.com",
+        );
+        const long = prepareImportedRecipe({ ...base, name: "x".repeat(120) });
+        expect(long.name.length).toBeLessThanOrEqual(80);
+        const steps = prepareImportedRecipe({
+            ...base,
+            steps: Array.from({ length: 500 }, () => "y".repeat(100)),
+        });
+        expect(steps.instructions!.length).toBeLessThanOrEqual(20_000);
+    });
+
+    test("absurd durations are dropped", () => {
+        const out = prepareImportedRecipe({
+            ...base,
+            prepMinutes: 2_880_000_000,
+            cookMinutes: -5,
+        });
+        expect(out.prepMinutes).toBeNull();
+        expect(out.cookMinutes).toBeNull();
+    });
+
+    test("blank names and non-positive amounts go to unresolved", () => {
+        const out = prepareImportedRecipe({
+            ...base,
+            parsed: {
+                items: [
+                    {
+                        line: "1 cup (sifted)",
+                        name: "",
+                        quantity: { amount: 1, unit: "cup" },
+                        note: "sifted",
+                        section: null,
+                    },
+                    {
+                        line: "0 g salt",
+                        name: "salt",
+                        quantity: { amount: 0, unit: "g" },
+                        note: null,
+                        section: null,
+                    },
+                    {
+                        line: "1 cup flour",
+                        name: "flour",
+                        quantity: { amount: 1, unit: "cup" },
+                        note: "n".repeat(600),
+                        section: null,
+                    },
+                ],
+                unresolved: [],
+            },
+        });
+        expect(out.parsed.unresolved).toEqual(["1 cup (sifted)", "0 g salt"]);
+        expect(out.parsed.items.map((i) => i.name)).toEqual(["flour"]);
+        expect(out.parsed.items[0]!.note!.length).toBeLessThanOrEqual(500);
+    });
+});
+
+test("a page with zero yield and a nameless line still imports as an outcome", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const html = `<script type="application/ld+json">${JSON.stringify({
+        "@type": "Recipe",
+        name: "Soup",
+        recipeYield: "0 servings",
+        prepTime: "P2000000D",
+        recipeIngredient: ["1 cup (sifted)", "0 g salt", "2 cups stock"],
+        recipeInstructions: ["Simmer."],
+    })}</script>`;
+    const fetcher = {
+        robotsAllows: async () => true,
+        fetchPage: async () => ({
+            ok: true as const,
+            url: "https://example.com/soup",
+            status: 200,
+            contentType: "text/html",
+            body: html,
+        }),
+    };
+    const out = await importRecipeFromUrl(
+        { recipes, foods, fetcher },
+        { householdId: HH, creatorId: USER, url: "https://example.com/soup" },
+    );
+    expect(out.status).toBe("unverified_needs_review");
+    expect(out.unresolvedLines).toEqual(["1 cup (sifted)", "0 g salt"]);
+    const recipe = await recipes.getRecipe(HH, out.recipeId!);
+    expect(recipe?.yieldPortions).toBe(1);
+    expect(recipe?.prepMinutes).toBeNull();
 });
 
 test("handled unresolved lines can be cleared so a fixed recipe verifies", async () => {
