@@ -7486,6 +7486,66 @@ describe("authenticated dashboard HTTP", () => {
         expect(pinBadHtml).toContain("Saved caption text");
         expect(pinBadHtml).toContain('value="Still Here"');
 
+        // A website link that validates but can't be read falls back to the
+        // pasted caption under the pin's link; with no caption the Pinterest
+        // step stays open with what was typed.
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: false as const,
+                    reason: "not_found" as const,
+                    status: 404,
+                    detail: "gone",
+                };
+            },
+        };
+        const pinFallback = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/fallback/",
+                website_url: "https://example.com/gone",
+                text: "Ingredients:\n2 cups flour\nMethod:\n1. Mix",
+                credit: "Fallback Chef",
+            }).toString(),
+        });
+        expect(pinFallback.status).toBe(303);
+        const fallbackId = (pinFallback.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        const fallbackImport = await db.recipesStore.getImport(
+            "hh-1",
+            fallbackId,
+        );
+        expect(fallbackImport?.sourceKind).toBe("pinterest");
+        expect(fallbackImport?.credit).toBe("Fallback Chef");
+
+        const pinGone = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/gone/",
+                website_url: "https://example.com/gone-too",
+                credit: "Kept Chef",
+            }).toString(),
+        });
+        expect(pinGone.status).toBe(422);
+        const pinGoneHtml = await pinGone.text();
+        expect(pinGoneHtml).toContain("That page doesn't exist anymore.");
+        expect(pinGoneHtml).toContain('value="Kept Chef"');
+        expect(pinGoneHtml).toContain("Recipe website link");
+
         const pinEmpty = await siteApp.request("http://x/recipes/import", {
             method: "POST",
             headers: {
