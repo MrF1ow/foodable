@@ -285,6 +285,17 @@ test("putAwayGroceryLines requires an amount for to-taste lines", async () => {
             lineIds: [line.id],
         }),
     ).rejects.toThrow(/to taste/);
+    for (const amount of [0, -500, Number.NaN]) {
+        await expect(
+            putAwayGroceryLines(grocery, fridge, stock, foods, {
+                householdId: HH,
+                lineIds: [line.id],
+                amountOverrides: { [line.id]: { amount } },
+            }),
+        ).rejects.toThrow(/greater than zero/);
+    }
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+    expect(await stock.listMovements(HH, salt.id)).toHaveLength(0);
 });
 
 test("ledger sum equals current state across purchases and cooks", async () => {

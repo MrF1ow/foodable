@@ -53,6 +53,10 @@ export const TOASTS = {
         kind: "warning",
         text: "Recipe cooked — some ingredients were short",
     },
+    "recipes.cooked.shortfall.unmeasured": {
+        kind: "warning",
+        text: "Recipe cooked — some ingredients were short. Nothing deducted for: {names}.",
+    },
     "recipes.cooked.unmeasured": {
         kind: "info",
         text: "Recipe cooked. Nothing deducted for: {names}.",

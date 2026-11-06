@@ -168,10 +168,14 @@ function ingredientFill(
         title: `Edit ${ingredient.displayName}`,
         fields: {
             note: ingredient.note ?? "",
-            amount:
+            ing_amount:
                 ingredient.quantity == null
                     ? ""
                     : String(ingredient.quantity.amount),
+            ing_unit:
+                ingredient.quantity?.unit ??
+                (ingredient as RecipeIngredientRow).defaultUnit ??
+                "g",
         },
     };
 }
@@ -335,7 +339,7 @@ function sharedIngredientModals(view: RecipeDetailView): string {
             submitDisabled: editItem == null,
             body: `${editOpen ? modalFormError(view, `${EDIT_INGREDIENT_PREFIX}${editItem?.id}`) : ""}<form class="recipe-ingredient-edit" method="post" action="${editItem ? `/recipes/${recipeId}/ingredients/${editId}` : ""}">
 ${field({ id: "recipe-ingredient-note", label: "Note", control: `<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />` })}
-${editItem ? renderQuantityField({ kind: "food", namePrefix: "ing", idPrefix: "recipe-ingredient", amount: editItem.quantity?.amount, unit: editItem.quantity?.unit ?? (editItem as RecipeIngredientRow).defaultUnit ?? "g" }) : ""}
+${renderQuantityField({ kind: "food", namePrefix: "ing", idPrefix: "recipe-ingredient", amount: editItem?.quantity?.amount, unit: editItem?.quantity?.unit ?? (editItem as RecipeIngredientRow | null)?.defaultUnit ?? "g" })}
 <button type="submit" class="btn-primary">Save ingredient</button>
 </form>`,
         }) +
