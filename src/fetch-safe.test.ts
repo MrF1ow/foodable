@@ -64,6 +64,14 @@ describe("isPublicAddress", () => {
     test("accepts a public address", () => {
         expect(isPublicAddress(PUBLIC)).toBe(true);
         expect(isPublicAddress("2606:4700::")).toBe(true);
+        expect(isPublicAddress("[2606:4700::1]")).toBe(true);
+    });
+
+    test("classifies bracketed and mapped IPv6 forms", () => {
+        expect(isPublicAddress("[::1]")).toBe(false);
+        expect(isPublicAddress("::7f00:1")).toBe(false);
+        expect(isPublicAddress("::ffff:10.0.0.1")).toBe(false);
+        expect(isPublicAddress("::ffff:93.184.216.34")).toBe(true);
     });
 });
 
@@ -264,6 +272,86 @@ describe("createSafeFetcher", () => {
         expect(out.ok).toBe(false);
         if (out.ok) return;
         expect(out.reason).toBe("too_large");
+    });
+
+    test("timeout when body read exceeds deadline after fast headers", async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode("partial"));
+            },
+            pull(controller) {
+                return new Promise(() => {});
+            },
+        });
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () =>
+                new Response(stream, {
+                    status: 200,
+                    headers: { "content-type": "text/html" },
+                }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/slow-body", {
+            accept: ["text/html"],
+            checkRobots: false,
+            timeoutMs: 20,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+    });
+
+    test("timeout spans redirect hops on one deadline", async () => {
+        let hop = 0;
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                hop += 1;
+                if (hop < 4) {
+                    await new Promise((r) => setTimeout(r, 40));
+                    return okResponse("", {
+                        status: 302,
+                        headers: { location: `/hop${hop}` },
+                    });
+                }
+                return okResponse("<html></html>");
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/hop0", {
+            accept: ["text/html"],
+            checkRobots: false,
+            timeoutMs: 50,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+    });
+
+    test("slow robots body is treated as disallow", async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode("User-agent:"));
+            },
+            pull() {
+                return new Promise(() => {});
+            },
+        });
+        const fetcher = createSafeFetcher({
+            defaultTimeoutMs: 20,
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                if (String(url).includes("robots.txt")) {
+                    return new Response(stream, {
+                        status: 200,
+                        headers: { "content-type": "text/plain" },
+                    });
+                }
+                return okResponse("<html></html>");
+            },
+        });
+        expect(await fetcher.robotsAllows("https://example.com/page")).toBe(
+            false,
+        );
     });
 
     test("timeout on slow response", async () => {

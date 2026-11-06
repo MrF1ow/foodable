@@ -81,6 +81,53 @@ describe("readRecipeJsonLd durations and yield", () => {
         expect(recipe?.totalMinutes).toBe(60);
     });
 
+    test("keeps full yield text and strips tags after entity decode", () => {
+        const html = `<script type="application/ld+json">${JSON.stringify({
+            "@type": "Recipe",
+            name: "Tagged",
+            recipeYield: "6 servings",
+            recipeIngredient: ["&lt;b&gt;flour&lt;/b&gt;"],
+            recipeInstructions: ["Mix"],
+        })}</script>`;
+        const recipe = readRecipeJsonLd(html);
+        expect(recipe?.yieldText).toBe("6 servings");
+        expect(recipe?.ingredients[0]).toBe("flour");
+    });
+
+    test("unwraps ItemList instructions", () => {
+        const html = `<script type="application/ld+json">${JSON.stringify({
+            "@type": "Recipe",
+            name: "List steps",
+            recipeIngredient: ["1 cup water"],
+            recipeInstructions: {
+                "@type": "ItemList",
+                itemListElement: [
+                    { "@type": "HowToStep", text: "Boil water." },
+                    { "@type": "HowToStep", text: "Steep." },
+                ],
+            },
+        })}</script>`;
+        expect(readRecipeJsonLd(html)?.instructions).toEqual([
+            "Boil water.",
+            "Steep.",
+        ]);
+    });
+
+    test("invalid numeric entities do not drop the recipe", () => {
+        for (const entity of ["&#999999999;", "&#x110000;"]) {
+            const html = `<script type="application/ld+json">${JSON.stringify({
+                "@type": "Recipe",
+                name: `Bad ${entity} entity`,
+                recipeIngredient: ["1 tsp salt"],
+                recipeInstructions: ["Mix"],
+            })}</script>`;
+            const recipe = readRecipeJsonLd(html);
+            expect(recipe?.name).toContain("Bad");
+            expect(recipe?.name).toContain("entity");
+            expect(recipe?.ingredients).toEqual(["1 tsp salt"]);
+        }
+    });
+
     test("invalid duration becomes null", () => {
         const html = `<script type="application/ld+json">${JSON.stringify({
             "@type": "Recipe",

@@ -42,8 +42,25 @@ const SIZE_WORDS = new Set(["large", "medium", "small"]);
 const RUN_TOGETHER_RE =
     /\d+(?:\.\d+)?(?:\s+\d+\/\d+)?(?:\s*\/\s*\d+)?\s*(?:kg|kilograms?|g|grams?|mg|lb|lbs|pounds?|oz|ounces?|ml|milliliters?|l|liters?|litres?|cups?|tbsp|tablespoons?|tsp|teaspoons?|fl\s*oz|fluid\s*ounces?|cloves?|cans?|slices?|pieces?|bunch(?:es)?|sprigs?|sticks?|heads?|packages?|pkgs?|jars?|bottles?)\b/gi;
 
+const PARSE_INGREDIENT_OPTS = {
+    ignoreUOMs: ["small", "medium", "large"],
+} as const;
+
+const FOOTNOTE_ONLY_RE = /^[*†]+$/;
+
+function stripParentheticalGroups(line: string): string {
+    let s = line;
+    let prev = "";
+    while (s !== prev) {
+        prev = s;
+        s = s.replace(/\([^()]*\)/g, " ");
+    }
+    return s.replace(/\s+/g, " ").trim();
+}
+
 function countRunTogetherTokens(line: string): number {
-    const matches = line.match(RUN_TOGETHER_RE);
+    const stripped = stripParentheticalGroups(line);
+    const matches = stripped.match(RUN_TOGETHER_RE);
     return matches?.length ?? 0;
 }
 
@@ -51,9 +68,12 @@ export function mapUnit(
     unitId: string | null,
     unitText: string | null,
 ): { unit: QuantityUnit; countNote: string | null } | null {
-    if (!unitId && !unitText) return null;
     const id = (unitId ?? unitText ?? "").toLowerCase();
     const text = (unitText ?? unitId ?? "").toLowerCase();
+
+    if (!unitId && !unitText) {
+        return { unit: "each", countNote: null };
+    }
 
     if (SIZE_WORDS.has(id) || SIZE_WORDS.has(text)) return null;
 
@@ -106,10 +126,6 @@ export function mapUnit(
         return { unit: "each", countNote: unitText ?? unitId };
     }
 
-    if (!unitId && !unitText) {
-        return { unit: "each", countNote: null };
-    }
-
     return null;
 }
 
@@ -138,33 +154,69 @@ function findNotMeasuredPhrase(text: string): string | null {
             `(^|[^a-z])${phrase.replace(/ /g, "\\s+")}([^a-z]|$)`,
             "i",
         );
-        const match = lower.match(re);
-        if (match && match.index != null) {
-            const start = match.index + (match[1]?.length ?? 0);
-            return text
-                .slice(start, start + phrase.length)
-                .replace(/\s+/g, " ");
+        const capture = new RegExp(
+            `(?:^|[^a-z])(${phrase.replace(/ /g, "\\s+")})(?:[^a-z]|$)`,
+            "i",
+        );
+        const match = text.match(capture);
+        if (match?.[1]) {
+            return match[1].replace(/\s+/g, " ").trim();
         }
     }
     return null;
+}
+
+function normalizeNote(raw: string | null | undefined): string | null {
+    if (raw == null) return null;
+    let note = raw.trim();
+    if (!note) return null;
+    let prev = "";
+    while (note !== prev) {
+        prev = note;
+        note = note.replace(/^\((.*)\)$/s, "$1").trim();
+    }
+    note = note.replace(/\s+/g, " ").replace(/,\s*$/, "").trim();
+    if (!note || FOOTNOTE_ONLY_RE.test(note)) return null;
+    return note;
 }
 
 function splitNameAndNote(description: string): {
     name: string;
     note: string | null;
 } {
-    const trimmed = description.trim().replace(/,\s*$/, "");
+    let trimmed = description.trim().replace(/,\s*$/, "");
+    const inlineNotes: string[] = [];
+
+    let prev = "";
+    while (trimmed !== prev) {
+        prev = trimmed;
+        trimmed = trimmed
+            .replace(/\(([^()]*)\)/g, (_m, inner: string) => {
+                const part = inner
+                    .trim()
+                    .replace(/^,\s*/, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                if (part) inlineNotes.push(part);
+                return " ";
+            })
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     const comma = trimmed.lastIndexOf(",");
     if (comma > 0) {
         const name = trimmed.slice(0, comma).trim();
         const note = trimmed.slice(comma + 1).trim();
-        if (name && note) return { name, note };
+        if (name && note) inlineNotes.unshift(note);
+        trimmed = name || trimmed;
     }
-    const paren = trimmed.match(/^(.+?)\s*(\([^)]+\))\s*$/);
-    if (paren) {
-        return { name: paren[1]!.trim(), note: paren[2]!.trim() };
-    }
-    return { name: trimmed, note: null };
+
+    const name = trimmed.trim();
+    const note = normalizeNote(
+        inlineNotes.length ? inlineNotes.join(", ") : null,
+    );
+    return { name, note };
 }
 
 function buildNoteParts(
@@ -195,7 +247,7 @@ export function parseIngredientLines(lines: string[]): {
 
         let parsed;
         try {
-            parsed = parseIngredient(line)[0];
+            parsed = parseIngredient(line, PARSE_INGREDIENT_OPTS)[0];
         } catch {
             unresolved.push(rawLine);
             continue;
@@ -222,17 +274,19 @@ export function parseIngredientLines(lines: string[]): {
                 notMeasured ?? findNotMeasuredPhrase(parsed.description);
             let name = parsed.description;
             if (phrase) {
+                const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                 const re = new RegExp(
-                    `[,\s]*${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[.\s]*`,
+                    `[,\s]*${escaped.replace(/ /g, "\\s+")}[.\s]*`,
                     "i",
                 );
                 name = name.replace(re, "").trim().replace(/,\s*$/, "");
             }
+            const split = splitNameAndNote(name || parsed.description);
             items.push({
                 line: rawLine,
-                name: name || parsed.description,
+                name: split.name || parsed.description,
                 quantity: null,
-                note: phrase,
+                note: buildNoteParts([phrase, split.note]),
                 section,
             });
             continue;
@@ -285,8 +339,9 @@ export function parseIngredientLines(lines: string[]): {
 }
 
 export function lineLooksRunTogether(line: string): boolean {
+    const stripped = stripParentheticalGroups(line);
     return (
         countRunTogetherTokens(line) >= 2 ||
-        extractMeasurements(line).length >= 2
+        extractMeasurements(stripped).length >= 2
     );
 }

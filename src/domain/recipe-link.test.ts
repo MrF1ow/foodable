@@ -43,6 +43,7 @@ describe("validateRecipeLink", () => {
             "https://[::1]/",
             "https://[fd00::1]/",
             "https://[::ffff:10.0.0.1]/",
+            "https://[::7f00:1]/",
             "https://localhost/recipe",
             "https://app.local/x",
             "https://svc.internal/y",
@@ -53,6 +54,11 @@ describe("validateRecipeLink", () => {
                 reason: "invalid_link",
             });
         }
+    });
+
+    test("allows public IPv6 literal hosts", () => {
+        const ok = validateRecipeLink("https://[2606:4700::1]/recipe");
+        expect(ok.ok).toBe(true);
     });
 });
 
@@ -141,6 +147,18 @@ describe("recipeSource", () => {
             shortLink: false,
         },
         {
+            url: "https://www.pinterest.com.au/pin/1",
+            kind: "pinterest",
+            label: "Pinterest",
+            shortLink: false,
+        },
+        {
+            url: "https://pinterest.com.mx/pin/1",
+            kind: "pinterest",
+            label: "Pinterest",
+            shortLink: false,
+        },
+        {
             url: "https://pin.it/abc",
             kind: "pinterest",
             label: "Pinterest",
@@ -150,6 +168,24 @@ describe("recipeSource", () => {
             url: "https://youtu.be/abc",
             kind: "youtube",
             label: "YouTube",
+            shortLink: true,
+        },
+        {
+            url: "https://youtube.com.br/watch?v=1",
+            kind: "youtube",
+            label: "YouTube",
+            shortLink: false,
+        },
+        {
+            url: "https://youtube.co.uk/watch?v=1",
+            kind: "youtube",
+            label: "YouTube",
+            shortLink: false,
+        },
+        {
+            url: "https://fb.me/abc",
+            kind: "facebook",
+            label: "Facebook",
             shortLink: true,
         },
         {
