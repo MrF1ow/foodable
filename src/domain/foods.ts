@@ -94,6 +94,7 @@ export type FoodsStore = {
         foodId: string,
     ): Promise<string[]>;
     searchFoods(householdId: string, query: string): Promise<Food[]>;
+    listBarcodedFoodIds(householdId: string): Promise<Set<string>>;
     repointFoodRefs(
         householdId: string,
         fromId: string,
@@ -504,6 +505,13 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             return hits;
         },
+        async listBarcodedFoodIds(householdId) {
+            const ids = new Set<string>();
+            for (const row of barcodes) {
+                if (row.householdId === householdId) ids.add(row.foodId);
+            }
+            return ids;
+        },
         async repointFoodRefs(_householdId, fromId, toId) {
             for (const row of refs) {
                 if (row.foodId === fromId) row.foodId = toId;
@@ -690,15 +698,33 @@ export async function findUpsertFoodByName(
     );
     if (exact) return { kind: "existing", food: exact };
     if (keyBrand == null) {
+        const normalized = normalizeFoodName(trimmed);
         const existing = await existingByNameOrAlias(
             store,
             householdId,
             kind,
-            normalizeFoodName(trimmed),
+            normalized,
         );
         if (existing && !existing.brand) {
             return { kind: "existing", food: existing };
         }
+        const loose = await findFoodByLooseKey(
+            store,
+            householdId,
+            kind,
+            trimmed,
+            { rejectBranded: true },
+        );
+        if (loose) return { kind: "existing", food: loose };
+    } else {
+        const loose = await findFoodByLooseKey(
+            store,
+            householdId,
+            kind,
+            trimmed,
+            { requiredBrand: keyBrand },
+        );
+        if (loose) return { kind: "existing", food: loose };
     }
     return { kind: "create", name: trimmed, brand: keyBrand };
 }
@@ -720,6 +746,44 @@ async function existingByNameOrAlias(
     const aliased = await store.getFood(householdId, aliasId);
     if (!aliased || aliased.kind !== kind || aliased.archivedAt) return null;
     return aliased;
+}
+
+function preferLooseNameMatch(a: Food, b: Food): number {
+    const aPlain = a.brand == null ? 1 : 0;
+    const bPlain = b.brand == null ? 1 : 0;
+    if (aPlain !== bPlain) return bPlain - aPlain;
+    const byCreated = a.createdAt.localeCompare(b.createdAt);
+    if (byCreated !== 0) return byCreated;
+    return a.id.localeCompare(b.id);
+}
+
+async function findFoodByLooseKey(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    opts?: { rejectBranded?: boolean; requiredBrand?: string | null },
+): Promise<Food | null> {
+    const key = looseFoodKey(name);
+    const listed = await store.listFoods(householdId);
+    let matches = listed.filter(
+        (food) =>
+            food.kind === kind &&
+            food.archivedAt == null &&
+            looseFoodKey(food.name) === key,
+    );
+    if (opts?.rejectBranded) {
+        matches = matches.filter((food) => food.brand == null);
+    }
+    if (opts?.requiredBrand !== undefined) {
+        const want = normalizeFoodBrand(opts.requiredBrand);
+        matches = matches.filter(
+            (food) => normalizeFoodBrand(food.brand) === want,
+        );
+    }
+    if (matches.length === 0) return null;
+    matches.sort(preferLooseNameMatch);
+    return copyFood(matches[0]!);
 }
 
 export async function findOrCreateFoodByBarcodeResult(
@@ -808,6 +872,8 @@ export async function findOrCreateManualFood(
         normalized,
     );
     if (existing) return existing;
+    const loose = await findFoodByLooseKey(store, householdId, kind, trimmed);
+    if (loose) return loose;
     return store.insertFood(
         newFood({
             householdId,
@@ -982,12 +1048,97 @@ function singularizeNameToken(token: string): string {
     return token;
 }
 
-function foodNameTokens(name: string): string[] {
-    const normalized = normalizeFoodName(name);
-    return normalized
+function prepareFoodNameForTokens(text: string): string {
+    return normalizeFoodName(text).replace(/'/g, "").replace(/&/g, " and ");
+}
+
+export function looseFoodKey(name: string): string {
+    return prepareFoodNameForTokens(name)
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+
+export function foodNameTokens(text: string): string[] {
+    return prepareFoodNameForTokens(text)
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
         .map(singularizeNameToken);
+}
+
+function foodSearchTokenSet(
+    food: Food,
+    aliases: readonly string[],
+): { set: Set<string>; list: string[] } {
+    const parts = [food.name, food.brand ?? "", ...aliases];
+    const list: string[] = [];
+    for (const part of parts) {
+        list.push(...foodNameTokens(part));
+    }
+    return { set: new Set(list), list };
+}
+
+function queryTokensMatchFood(
+    queryTokens: readonly string[],
+    foodTokens: { set: Set<string>; list: string[] },
+): boolean {
+    if (queryTokens.length === 0) return false;
+    for (let i = 0; i < queryTokens.length - 1; i++) {
+        if (!foodTokens.set.has(queryTokens[i]!)) return false;
+    }
+    const last = queryTokens[queryTokens.length - 1]!;
+    if (foodTokens.set.has(last)) return true;
+    return foodTokens.list.some((token) => token.startsWith(last));
+}
+
+export function matchFoodsByWords(
+    query: string,
+    foods: readonly Food[],
+    aliasesByFoodId: ReadonlyMap<string, string[]>,
+): Food[] {
+    const queryTokens = foodNameTokens(query);
+    if (queryTokens.length === 0) return [];
+    const queryNorm = normalizeFoodName(query);
+    const queryLoose = looseFoodKey(query);
+    const queryTokenSet = new Set(queryTokens);
+    const hits: Food[] = [];
+    // A food every query word names outright ranks ahead of one reached only
+    // by the last word's prefix, so "eggs" puts Duck eggs before Eggplant.
+    const needsPrefix = new Map<string, number>();
+    for (const food of foods) {
+        if (food.archivedAt) continue;
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        const tokens = foodSearchTokenSet(food, aliases);
+        if (!queryTokensMatchFood(queryTokens, tokens)) continue;
+        hits.push(food);
+        needsPrefix.set(
+            food.id,
+            queryTokens.every((token) => tokens.set.has(token)) ? 0 : 1,
+        );
+    }
+    const nameTokens = (food: Food) => foodNameTokens(food.name);
+    const extraNameTokens = (food: Food) =>
+        nameTokens(food).filter((token) => !queryTokenSet.has(token)).length;
+    const exactRank = (food: Food) => {
+        if (normalizeFoodName(food.name) === queryNorm) return 0;
+        if (looseFoodKey(food.name) === queryLoose) return 0;
+        return 1;
+    };
+    hits.sort((a, b) => {
+        const exact = exactRank(a) - exactRank(b);
+        if (exact !== 0) return exact;
+        const prefix =
+            (needsPrefix.get(a.id) ?? 1) - (needsPrefix.get(b.id) ?? 1);
+        if (prefix !== 0) return prefix;
+        const extra = extraNameTokens(a) - extraNameTokens(b);
+        if (extra !== 0) return extra;
+        if (a.name.length !== b.name.length) {
+            return a.name.length - b.name.length;
+        }
+        const byName = a.name.localeCompare(b.name);
+        if (byName !== 0) return byName;
+        return a.id.localeCompare(b.id);
+    });
+    return hits;
 }
 
 export function foodHasNoNutrition(
@@ -1037,10 +1188,14 @@ export type UsualProductRow = {
  * because a recipe or grocery line uses it. `addable` is every other live
  * plain food, the choices behind "Add usual product".
  */
-export function usualProductRows(input: { foods: readonly Food[] }): {
+export function usualProductRows(input: {
+    foods: readonly Food[];
+    barcodedFoodIds?: ReadonlySet<string>;
+}): {
     rows: UsualProductRow[];
     addable: Food[];
 } {
+    const barcoded = input.barcodedFoodIds ?? new Set<string>();
     const live = input.foods.filter((row) => !row.archivedAt);
     const plainFoods = live.filter((row) => !row.genericFoodId);
     const productsByPlain = new Map<string, Food[]>();
@@ -1056,6 +1211,7 @@ export function usualProductRows(input: { foods: readonly Food[] }): {
     for (const food of plainFoods) {
         const products = (productsByPlain.get(food.id) ?? []).sort(byName);
         if (products.length === 0) {
+            if (barcoded.has(food.id) || food.offSourceId) continue;
             addable.push(food);
             continue;
         }
@@ -1626,10 +1782,10 @@ export async function searchFoodCatalog(
     query: string,
     offHits: FoodResult[],
 ): Promise<FoodSearchHit[]> {
-    const household = await store.searchFoods(householdId, query);
-    const nameById = new Map(
-        (await store.listFoods(householdId)).map((row) => [row.id, row.name]),
-    );
+    const listed = await store.listFoods(householdId);
+    const aliasMap = await store.listAllAliases(householdId);
+    const household = matchFoodsByWords(query, listed, aliasMap);
+    const nameById = new Map(listed.map((row) => [row.id, row.name]));
     const genericFields = (food: Food | null | undefined) => {
         if (!food?.genericFoodId) {
             return {

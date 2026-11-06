@@ -101,6 +101,24 @@ test("usualProductRows lists only foods with products", async () => {
     expect(empty.rows).toEqual([]);
 });
 
+test("usualProductRows skips scanned plain foods for addable", async () => {
+    const store = createMemoryFoodsStore();
+    const cilantro = await plain(store, "Cilantro");
+    const carton = await plain(store, "Cage Free Grade A Large Eggs", {
+        offSourceId: "070852010016",
+    });
+    const barcoded = await plain(store, "Milk");
+    await store.setBarcode(HH, "1234567890123", barcoded.id);
+    const barcodedIds = await store.listBarcodedFoodIds(HH);
+    const { addable } = usualProductRows({
+        foods: await store.listFoods(HH),
+        barcodedFoodIds: barcodedIds,
+    });
+    expect(addable.map((f) => f.id)).toEqual([cilantro.id]);
+    expect(addable.some((f) => f.id === carton.id)).toBe(false);
+    expect(addable.some((f) => f.id === barcoded.id)).toBe(false);
+});
+
 test("findOrCreateManualFood still works for suggest fixtures", async () => {
     const store = createMemoryFoodsStore();
     const eggs = await findOrCreateManualFood(store, HH, "food", "Eggs");

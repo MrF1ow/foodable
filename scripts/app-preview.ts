@@ -38,7 +38,7 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import { usualProductRows } from "../src/domain/foods.js";
+import { matchFoodsByWords, usualProductRows } from "../src/domain/foods.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -334,6 +334,11 @@ function previewFoodCatalog() {
         food("f-gv", "Great Value Eggs", 130, { genericFoodId: "f-eggs" }),
         food("f-buttermilk", "Buttermilk", null),
         food("f2", "Milk", 64),
+        food("f-flour-a", "All purpose flour", null),
+        food("f-flour-b", "all-purpose flour", null),
+        food("f-carton", "Cage Free Grade A Large Eggs", 140, {
+            offSourceId: "070852010016",
+        }),
     ];
     const usual = usualProductRows({ foods: catalog });
     return { catalog, usual };
@@ -497,6 +502,20 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             rows: usual.rows,
             addable: usual.addable,
+        } as never),
+        "usual-products-search": renderUsualProductsListPage({
+            chrome,
+            rows: usual.rows,
+            addable: usual.addable,
+            addSearch: {
+                q: "flour",
+                results: matchFoodsByWords(
+                    "flour",
+                    usual.addable,
+                    new Map(),
+                ).slice(0, 20),
+                truncated: false,
+            },
         } as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),

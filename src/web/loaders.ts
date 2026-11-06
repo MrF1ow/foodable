@@ -47,6 +47,7 @@ import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/se
 import {
     effectiveFoodsByIds,
     foodHasNoNutrition,
+    matchFoodsByWords,
     suggestFoodFor,
     usualProductRows,
     type Food,
@@ -534,14 +535,28 @@ export async function renderSettingsFoodsPage(
 
 export async function renderUsualProductsListPage(
     viewerUserId: string,
-    opts: { error?: string; from?: string } = {},
+    opts: { error?: string; from?: string; q?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const foods = await liveFoodsStore().listFoods(householdId);
-    const { rows, addable } = usualProductRows({ foods });
+    const store = liveFoodsStore();
+    const foods = await store.listFoods(householdId);
+    const barcodedFoodIds = await store.listBarcodedFoodIds(householdId);
+    const { rows, addable } = usualProductRows({ foods, barcodedFoodIds });
+    const q = opts.q?.trim() ?? "";
+    let addSearch:
+        { q: string; results: Food[]; truncated: boolean } | undefined;
+    if (q) {
+        const aliases = await store.listAllAliases(householdId);
+        const matched = matchFoodsByWords(q, addable, aliases);
+        addSearch = {
+            q,
+            results: matched.slice(0, 20),
+            truncated: matched.length > 20,
+        };
+    }
     return {
         status: 200,
         html: renderUsualProductsListHtml({
@@ -550,6 +565,7 @@ export async function renderUsualProductsListPage(
             addable,
             from: opts.from,
             error: opts.error,
+            addSearch,
         }),
     };
 }

@@ -150,6 +150,7 @@ householdRoutes.get("/household/usual-products", requireSiteUser, async (c) => {
     }
     const page = await renderUsualProductsListPage(c.get("userId"), {
         from: c.req.query("from"),
+        q: c.req.query("q"),
     });
     return c.html(page.html, page.status);
 });

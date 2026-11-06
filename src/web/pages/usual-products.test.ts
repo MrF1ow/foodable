@@ -18,8 +18,10 @@ test("usual products list starts empty with an add action", () => {
     expect(html).not.toContain("Needs a usual product");
     expect(html).toContain("Add usual product");
     expect(html).toContain('action="/household/usual-products"');
-    expect(html).toContain('name="food"');
-    expect(html).toContain(`value="${eggs.id}"`);
+    expect(html).toContain('name="q"');
+    expect(html).toContain('type="search"');
+    expect(html).not.toContain('name="food"');
+    expect(html).not.toContain("<select");
 });
 
 test("usual products list shows foods with products", () => {

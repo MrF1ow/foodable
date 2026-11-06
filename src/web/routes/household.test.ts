@@ -290,11 +290,81 @@ describe("household usual products and items routes", () => {
         const html = await list.text();
         expect(html).toContain("No usual products yet.");
         expect(html).not.toContain("Needs a usual product");
-        expect(html).toContain(`value="${cilantro.id}"`);
+        expect(html).toContain('name="q"');
         const add = await get(`/household/usual-products?food=${cilantro.id}`);
         expect(add.status).toBe(302);
         expect(add.headers.get("location")).toBe(
             `/household/usual-products/${cilantro.id}`,
+        );
+    });
+
+    test("GET usual-products search lists addable foods and excludes scanned products", async () => {
+        const get = (path: string) =>
+            app().request(`http://x${path}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            });
+        const flourA = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "All purpose flour",
+            }),
+        );
+        const flourB = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "all-purpose flour",
+            }),
+        );
+        const carton = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Cage Free Grade A Large Eggs",
+                offSourceId: "070852010016",
+            }),
+        );
+        await db.foodsStore.setBarcode(HH, "1234567890123", carton.id);
+        // A scanned flour must not be offered either, whether it came from
+        // Open Food Facts or only carries a barcode.
+        await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Gold Medal flour",
+                offSourceId: "016000196100",
+            }),
+        );
+        const barcodedFlour = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Pillsbury flour" }),
+        );
+        await db.foodsStore.setBarcode(HH, "051500255162", barcodedFlour.id);
+
+        const r = await get("/household/usual-products?q=flour");
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toMatch(
+            /id="usual-product-add"[^>]*data-modal-open-on-load/,
+        );
+        expect(html).toContain("All purpose flour");
+        expect(html).toContain("all-purpose flour");
+        expect(html).toContain(`?food=${flourA.id}`);
+        expect(html).toContain(`?food=${flourB.id}`);
+        expect(html).toContain("Choose");
+        expect(html).not.toContain("Gold Medal flour");
+        expect(html).not.toContain("Pillsbury flour");
+        const eggs = await get("/household/usual-products?q=large+eggs");
+        expect(await eggs.text()).not.toContain("Cage Free Grade A Large Eggs");
+
+        const none = await get("/household/usual-products?q=zzz");
+        expect(none.status).toBe(200);
+        expect(await none.text()).toContain("No matching food.");
+
+        const pick = await get(`/household/usual-products?food=${flourA.id}`);
+        expect(pick.status).toBe(302);
+        expect(pick.headers.get("location")).toBe(
+            `/household/usual-products/${flourA.id}`,
         );
     });
 

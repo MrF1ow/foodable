@@ -1,6 +1,5 @@
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
-import type { Food } from "../../domain/foods.js";
-import type { UsualProductRow } from "../../domain/foods.js";
+import type { Food, UsualProductRow } from "../../domain/foods.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
@@ -21,6 +20,12 @@ import {
 
 export const USUAL_PRODUCT_ADD_MODAL_ID = "usual-product-add";
 
+export type UsualProductsAddSearchView = {
+    q: string;
+    results: Food[];
+    truncated: boolean;
+};
+
 export type UsualProductsListView = {
     chrome: ViewerChrome;
     rows: UsualProductRow[];
@@ -29,6 +34,7 @@ export type UsualProductsListView = {
     from?: string;
     error?: string;
     openFoodId?: string;
+    addSearch?: UsualProductsAddSearchView;
 };
 
 export type UsualProductsPickerView = {
@@ -107,22 +113,40 @@ export function renderUsualProductsListPage(
             : panel({
                   body: `<ul class="list">${mainRows}</ul>`,
               });
-    const addOptions = view.addable
-        .map(
-            (food) =>
-                `<option value="${escapeHtml(food.id)}">${escapeHtml(food.name)}</option>`,
-        )
+    const searchQ = view.addSearch?.q ?? "";
+    const searchResults = view.addSearch?.results ?? [];
+    const resultRows = searchResults
+        .map((food) => {
+            const brand = food.brand
+                ? `<p class="row-meta">${escapeHtml(food.brand)}</p>`
+                : "";
+            const chooseHref = `/household/usual-products?food=${encodeURIComponent(food.id)}${listFrom !== "/household/usual-products" ? `&from=${encodeURIComponent(listFrom)}` : ""}`;
+            return `<li><div class="row">
+<p class="row-title">${escapeHtml(food.name)}</p>
+${brand}
+<div class="row-actions"><a class="btn-sm" href="${escapeHtml(chooseHref)}">Choose</a></div>
+</div></li>`;
+        })
         .join("");
+    const searchOutcome =
+        view.addSearch == null
+            ? ""
+            : searchResults.length === 0
+              ? `<p class="muted">No matching food.</p>`
+              : `<ul class="list">${resultRows}</ul>${view.addSearch.truncated ? `<p class="muted">Showing the first 20. Type more to narrow it.</p>` : ""}`;
     const addModal =
         view.addable.length === 0
             ? ""
             : modal({
                   id: USUAL_PRODUCT_ADD_MODAL_ID,
                   title: "Add usual product",
+                  openOnLoad: view.addSearch != null,
                   body: `<form method="get" action="/household/usual-products" class="usual-product-add">
-${field({ id: "usual-product-add-food", label: "Food", control: `<select id="usual-product-add-food" name="food" required>${addOptions}</select>` })}
-<button type="submit" class="btn-primary">Choose product</button>
-</form>`,
+${field({ id: "usual-product-add-q", label: "Food", control: `<input id="usual-product-add-q" name="q" type="search" autocomplete="off" value="${escapeHtml(searchQ)}" />` })}
+<button type="submit" class="btn-primary">Search</button>
+</form>
+<p class="muted">Scanned products aren't listed. File them under a food with Belongs to… on <a href="/household/items">Items</a>.</p>
+${searchOutcome}`,
               });
     const addTrigger =
         view.addable.length === 0

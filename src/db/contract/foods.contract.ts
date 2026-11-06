@@ -230,6 +230,31 @@ export function runFoodsStoreContract(
             ).toEqual(["fruit"]);
         });
 
+        test("listBarcodedFoodIds", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const a = sampleFood(c.householdId, {
+                name: "Barcoded A",
+                normalizedName: "barcoded a",
+            });
+            const b = sampleFood(c.householdId, {
+                name: "Barcoded B",
+                normalizedName: "barcoded b",
+            });
+            await store.insertFood(a);
+            await store.insertFood(b);
+            expect(await store.listBarcodedFoodIds(c.householdId)).toEqual(
+                new Set(),
+            );
+            await store.setBarcode(c.householdId, "1111111111111", a.id);
+            await store.setBarcode(c.householdId, "2222222222222", a.id);
+            await store.setBarcode(c.householdId, "3333333333333", b.id);
+            expect(await store.listBarcodedFoodIds(c.householdId)).toEqual(
+                new Set([a.id, b.id]),
+            );
+        });
+
         test("searchFoods and repointFoodRefs", async () => {
             await reset();
             const c = ctx();

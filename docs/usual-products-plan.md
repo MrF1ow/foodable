@@ -135,7 +135,7 @@ Lands after the layout change below.
     - plain foods list their products nested underneath, with a "Usual" badge;
     - standalone products show a "Belongs to…" action;
     - the edit modal gains "Belongs to" for a product, and "Products" and "Usual product" for a plain food.
-- **Household › Usual products.** One row per plain food that has products: "Eggs → Kirkland Large Eggs · Change". A household starts with an empty list and adds to it with **Add usual product** (pick a plain food, then its picker). Nothing is listed just because a recipe or grocery line uses it; a recipe names each food it is missing nutrition for, with a "Pick usual product" link. "Change" offers:
+- **Household › Usual products.** One row per plain food that has products: "Eggs → Kirkland Large Eggs · Change". A household starts with an empty list and adds to it with **Add usual product** (search your plain foods in the dialog, then its picker; scanned products are filed with Belongs to… on Items). Nothing is listed just because a recipe or grocery line uses it; a recipe names each food it is missing nutrition for, with a "Pick usual product" link. "Change" offers:
     - the food's existing products;
     - a name search through Open Food Facts (the existing `search_food` path);
     - a barcode lookup;
