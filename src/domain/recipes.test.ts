@@ -635,7 +635,8 @@ test("recipe pages use modals for create and detail actions", async () => {
     expect(detail).toContain('commandfor="recipe-delete-ingredient"');
     expect(detail).not.toContain('commandfor="recipe-edit-ingredient-ing1"');
     expect(detail).toContain('data-fill-action="/recipes/r1/ingredients/ing1"');
-    expect(detail).toContain('data-fill-field-amount="400"');
+    expect(detail).toContain('data-fill-field-ing_amount="400"');
+    expect(detail).toContain('data-fill-field-ing_unit="g"');
     expect(detail).toContain('action="/recipes/r1/delete"');
     expect(detail).toContain('action="/recipes/r1/ingredients/ing1/delete"');
 });
@@ -1639,6 +1640,34 @@ test("updateRecipeIngredient uses food default unit when measuring unmeasured in
         foods,
     );
     expect(updated.quantity).toEqual({ amount: 2, unit: "each" });
+    // The web form always posts ing_unit; a blank one is "not given", not grams.
+    await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: null },
+        foods,
+    );
+    const blankUnit = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 3, unit: "", note: "" },
+        foods,
+    );
+    expect(blankUnit.quantity).toEqual({ amount: 3, unit: "each" });
+    // Saving the note alone keeps a measured amount.
+    const noteOnly = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 3, unit: "each", note: "beaten" },
+        foods,
+    );
+    expect(noteOnly.quantity).toEqual({ amount: 3, unit: "each" });
 });
 
 test("unmeasured ingredient per-portion and per-person amounts stay null", async () => {

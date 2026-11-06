@@ -80,6 +80,10 @@ describe("toast-flash helpers", () => {
         expect(cookRecipeToastFlash(false, true, 2)).toEqual({
             key: "recipes.cooked.shortfall",
         });
+        expect(cookRecipeToastFlash(true, false, 1, ["Salt"])).toEqual({
+            key: "recipes.cooked.shortfall.unmeasured",
+            params: { names: "Salt" },
+        });
     });
 
     test("addRecipeToGroceryToastFlash", () => {

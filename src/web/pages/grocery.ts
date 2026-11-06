@@ -1,5 +1,8 @@
 import { type Quantity } from "../../domain/quantity.js";
-import { formatQuantityDisplayParts } from "../display-quantity.js";
+import {
+    formatQuantityDisplayParts,
+    quantityUnitOptionLabel,
+} from "../display-quantity.js";
 import type { GroceryLine } from "../../domain/grocery.js";
 import type { Notice } from "../../domain/notices.js";
 import { UNKNOWN_ALLERGEN_TEXT } from "../../copy/notices.js";
@@ -238,7 +241,8 @@ function lineRow(
             : "";
         const amountField = line.note?.trim()
             ? `<label class="visually-hidden" for="put-away-amt-${escapeHtml(line.id)}">Amount</label>
-<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" required />`
+<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" inputmode="decimal" value="1" required />
+<span class="muted grocery-put-away-unit">${escapeHtml(quantityUnitOptionLabel(line.quantity.unit))}</span>`
             : "";
         putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>

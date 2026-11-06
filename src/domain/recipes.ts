@@ -936,6 +936,8 @@ export async function updateRecipeIngredient(
         patch.note === undefined
             ? ingredient.note
             : parseOptionalText(patch.note, "Ingredient note", 500);
+    // A blank unit (an untouched form field) means "not given", not grams.
+    const unitIn = patch.unit?.trim() ? patch.unit : undefined;
     let quantity: RecipeIngredient["quantity"];
     if (patch.amount === null) {
         quantity = null;
@@ -946,16 +948,16 @@ export async function updateRecipeIngredient(
             quantity = {
                 amount: ingredient.quantity.amount,
                 unit:
-                    patch.unit === undefined
+                    unitIn === undefined
                         ? ingredient.quantity.unit
-                        : parseUnit(patch.unit),
+                        : parseUnit(unitIn),
             };
         }
     } else {
         const amount = parseAmount(patch.amount);
         let unit;
-        if (patch.unit !== undefined) {
-            unit = parseUnit(patch.unit);
+        if (unitIn !== undefined) {
+            unit = parseUnit(unitIn);
         } else if (ingredient.quantity?.unit) {
             unit = ingredient.quantity.unit;
         } else if (foods && ingredient.foodId) {

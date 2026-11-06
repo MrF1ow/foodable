@@ -924,6 +924,14 @@ export async function putAwayGroceryLines(
         if (line.note?.trim() && override == null) {
             throw new NotedGroceryLineAmountRequiredError(line.displayName);
         }
+        if (
+            override &&
+            !(Number.isFinite(override.amount) && override.amount > 0)
+        ) {
+            throw new StockInputError(
+                `Enter an amount greater than zero for ${line.displayName}.`,
+            );
+        }
         const delta = override?.amount ?? line.quantity.amount;
         const unit =
             override?.unit != null && override.unit !== ""

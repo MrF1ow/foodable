@@ -1209,9 +1209,6 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         })),
                         recipe_search_places: places,
                     };
-                    const gapLines = payload.ingredients.filter(
-                        (row) => row.missing.length > 0,
-                    );
                     return {
                         content: [
                             {
