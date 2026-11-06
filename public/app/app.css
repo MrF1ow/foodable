@@ -442,6 +442,12 @@ ul.notice-list.allergen-warning > li {
     margin: 0;
     padding: 0;
 }
+/* The allergen retry (warning + Add anyway) is one wrapper so dialog-fill
+   can drop it; space its children like the rest of the modal body. */
+.modal-body > [data-fill-transient] {
+    display: grid;
+    gap: var(--gap-field);
+}
 .allergen-unknown {
     padding: 9px 11px;
     border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--panel-border));
