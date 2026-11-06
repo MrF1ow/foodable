@@ -371,7 +371,6 @@ for (const icon of ["icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
         if (!(await file.exists())) return c.notFound();
         return c.body(await file.arrayBuffer(), 200, {
             "Content-Type": "image/png",
-            "Cache-Control": "public, max-age=31536000, immutable",
         });
     });
 }

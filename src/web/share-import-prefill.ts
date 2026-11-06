@@ -59,6 +59,10 @@ export function shareImportPrefill(share: ReadShareResult): ShareImportPrefill {
 
     return {
         ...base,
+        importPasteStep: true,
+        importTextOnly: true,
+        importSourceKind: "text",
+        importSourceLabel: "Recipe text",
         importError: NOTHING_MESSAGE,
     };
 }

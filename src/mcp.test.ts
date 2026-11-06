@@ -48,6 +48,7 @@ import * as actualRecipeUrlFetcher from "./recipe-url-fetcher.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
+import * as actualDbUsers from "./db/users.js";
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
@@ -73,6 +74,7 @@ const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbUsers = { ...actualDbUsers };
 const exportMemoryStore = createMemoryExportArchiveStore();
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
 import {
@@ -637,6 +639,15 @@ mock.module("./db/sql.js", () => ({
     run: async <T>(fn: (tx: unknown) => Promise<T>) => fn({}),
 }));
 
+mock.module("./db/users.js", () => ({
+    ...actualDbUsers,
+    authUserCount: async () => 1,
+    signInUser: async () => "11111111-1111-4111-8111-111111111111",
+    signUpUser: async () => {
+        throw new Error("signUp disabled in mcp.test mock");
+    },
+}));
+
 mock.module("./recipe-url-fetcher.js", () => ({
     ...actualRecipeUrlFetcher,
     recipeImportFetcher: () => {
@@ -665,6 +676,7 @@ afterAll(() => {
     mock.module("./food-search.js", () => realFoodSearch);
     mock.module("./db/exports.js", () => realExports);
     mock.module("./db/sql.js", () => realDbSql);
+    mock.module("./db/users.js", () => realDbUsers);
     mock.module("./recipe-url-fetcher.js", () => realRecipeUrlFetcher);
 });
 
@@ -6881,6 +6893,35 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toMatch(/<script>alert\(1\)<\/script>/);
     });
 
+    test("signed-out long share survives site login redirect", async () => {
+        const longText = "q".repeat(2100);
+        const qs = new URLSearchParams({ text: longText });
+        const loginRes = await siteApp.request(`http://x/share?${qs}`);
+        expect(loginRes.status).toBe(200);
+        const loginHtml = await loginRes.text();
+        const sessionMatch = loginHtml.match(
+            /name="session_id" value="([^"]+)"/,
+        );
+        expect(sessionMatch).not.toBeNull();
+        const approveRes = await siteApp.request("http://x/approve", {
+            method: "POST",
+            headers: {
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                session_id: sessionMatch![1]!,
+                email: "alice@example.com",
+                password: "password1234",
+            }).toString(),
+            redirect: "manual",
+        });
+        expect(approveRes.status).toBe(302);
+        const loc = approveRes.headers.get("location") ?? "";
+        expect(loc.startsWith("/share?")).toBe(true);
+        const returnedText = new URL(loc, "http://x").searchParams.get("text");
+        expect(returnedText).toBe(longText);
+    });
+
     test("a site cookie renders the viewer's dashboard widgets", async () => {
         const r = await siteApp.request("http://x/", {
             headers: { cookie: cookieFor(alice) },
@@ -7441,6 +7482,60 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipesHtml).not.toContain("Coming soon.");
         expect(recipesHtml).toContain('action="/recipes"');
         expect(recipesHtml).toContain("Add a recipe.");
+    });
+
+    test("shared text_origin survives import 422 retry", async () => {
+        const { readFileSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                throw new Error("fetch should not run in shared origin test");
+            },
+        };
+        const noRecipe = "Recipe in my bio 👆\n#food #dinner";
+        const first = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                text_only: "1",
+                text_origin: "shared",
+                text: noRecipe,
+            }).toString(),
+        });
+        expect(first.status).toBe(422);
+        const firstHtml = await first.text();
+        expect(firstHtml).toContain('name="text_origin" value="shared"');
+
+        const caption = readFileSync(
+            join(import.meta.dir, "domain/fixtures/captions/clean-headers.txt"),
+            "utf8",
+        );
+        const second = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                text_only: "1",
+                text_origin: "shared",
+                text: caption,
+            }).toString(),
+        });
+        expect(second.status).toBe(303);
+        const recipeId = (second.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        const imp = await db.recipesStore.getImport("hh-1", recipeId);
+        expect(imp?.sourceTextOrigin).toBe("shared");
     });
 
     test("POST /recipes/import paste flow for Instagram and Pinterest website_url", async () => {

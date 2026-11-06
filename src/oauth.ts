@@ -105,9 +105,7 @@ async function finishAuthorization(
             "Set-Cookie",
             siteCookieHeader(mintSiteSession(userId), secure),
         );
-        const dest = isSafeShareReturnPath(session.redirectUri)
-            ? session.redirectUri
-            : "/";
+        const dest = isSafeShareReturnPath(session.redirectUri) ?? "/";
         return c.redirect(dest);
     }
 
@@ -502,9 +500,11 @@ export function createOAuthRouter() {
 export function siteLoginReturnPath(c: Context): string {
     const reqUrl = new URL(c.req.url);
     const fromRequest = reqUrl.pathname + reqUrl.search;
-    if (isSafeShareReturnPath(fromRequest)) return fromRequest;
+    const fromShare = isSafeShareReturnPath(fromRequest);
+    if (fromShare) return fromShare;
     const next = c.req.query("next")?.trim();
-    if (next && isSafeShareReturnPath(next)) return next;
+    const fromNext = next ? isSafeShareReturnPath(next) : null;
+    if (fromNext) return fromNext;
     return "/";
 }
 

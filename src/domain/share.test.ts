@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { isSafeShareReturnPath, readShare } from "./share.js";
+import {
+    isSafeShareReturnPath,
+    readShare,
+    SHARE_RETURN_PATH_MAX,
+} from "./share.js";
 
 describe("readShare", () => {
     test("url field only", () => {
@@ -98,13 +102,47 @@ describe("readShare", () => {
 });
 
 describe("isSafeShareReturnPath", () => {
-    test("allows /share with query", () => {
-        expect(isSafeShareReturnPath("/share?text=hello&url=")).toBe(true);
+    test("allows /share and /share/probe with query", () => {
+        expect(isSafeShareReturnPath("/share?text=hello&url=")).toBe(
+            "/share?text=hello&url=",
+        );
+        expect(isSafeShareReturnPath("/share?text=hi")).toBe("/share?text=hi");
+        expect(isSafeShareReturnPath("/share/probe?text=hi")).toBe(
+            "/share/probe?text=hi",
+        );
     });
 
-    test("refuses external and protocol-relative paths", () => {
-        expect(isSafeShareReturnPath("https://evil.com/share")).toBe(false);
-        expect(isSafeShareReturnPath("//evil.com/share")).toBe(false);
-        expect(isSafeShareReturnPath("/recipes")).toBe(false);
+    test("refuses traversal, external, and lookalike paths", () => {
+        expect(isSafeShareReturnPath("/share/../logout")).toBeNull();
+        expect(isSafeShareReturnPath("/share/%2e%2e/logout")).toBeNull();
+        expect(isSafeShareReturnPath("/share/./probe")).toBeNull();
+        expect(isSafeShareReturnPath("//evil.com")).toBeNull();
+        expect(isSafeShareReturnPath("/\\evil.com")).toBeNull();
+        expect(isSafeShareReturnPath("https://evil.com")).toBeNull();
+        expect(isSafeShareReturnPath("/share@evil.com")).toBeNull();
+        expect(isSafeShareReturnPath("%2F%2Fevil.com")).toBeNull();
+        expect(isSafeShareReturnPath("/sharex")).toBeNull();
+        expect(isSafeShareReturnPath("/recipes")).toBeNull();
+        expect(isSafeShareReturnPath("https://evil.com/share")).toBeNull();
+        expect(isSafeShareReturnPath("//evil.com/share")).toBeNull();
+    });
+
+    test("refuses control characters and CRLF smuggling", () => {
+        expect(
+            isSafeShareReturnPath("/share?text=hi%0d%0aLocation:%20/evil"),
+        ).toBeNull();
+        expect(isSafeShareReturnPath("/share\r\n")).toBeNull();
+        expect(isSafeShareReturnPath("/share?next=%0a%0d")).toBeNull();
+    });
+
+    test("accepts long /share queries within the return cap", () => {
+        const text = "z".repeat(2100);
+        const path = `/share?text=${encodeURIComponent(text)}`;
+        expect(path.length).toBeGreaterThan(2048);
+        expect(path.length).toBeLessThanOrEqual(SHARE_RETURN_PATH_MAX);
+        const normalized = isSafeShareReturnPath(path);
+        expect(normalized).not.toBeNull();
+        const u = new URL(normalized!, "https://x.test");
+        expect(u.searchParams.get("text")).toBe(text);
     });
 });
