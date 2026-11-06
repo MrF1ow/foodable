@@ -27,6 +27,8 @@ export type Food = {
     nutritionSource: NutritionSource | null;
     allergens: string[];
     offSourceId: string | null;
+    genericFoodId: string | null;
+    usualProductId: string | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
@@ -525,6 +527,7 @@ export function newFood(input: {
     nutritionSource?: NutritionSource | null;
     allergens?: string[];
     offSourceId?: string | null;
+    genericFoodId?: string | null;
     createdBy?: string | null;
 }): Food {
     const name = input.name.trim();
@@ -550,6 +553,8 @@ export function newFood(input: {
         nutritionSource: input.nutritionSource ?? null,
         allergens: [...(input.allergens ?? [])],
         offSourceId: input.offSourceId ?? null,
+        genericFoodId: input.genericFoodId ?? null,
+        usualProductId: null,
         createdBy: input.createdBy ?? null,
         archivedAt: null,
         createdAt: stamp,
@@ -728,6 +733,346 @@ export async function foodsByIds(
     return new Map(entries.filter((entry) => entry != null));
 }
 
+export type FoodProductRef = { id: string; name: string; brand: string | null };
+export type EffectiveFood = Food & { product: FoodProductRef | null };
+
+const NUTRITION_BLOCK_KEYS = [
+    "calories",
+    "proteinG",
+    "carbsG",
+    "fatG",
+    "fiberG",
+    "sugarG",
+    "alcoholG",
+    "caffeineMg",
+] as const;
+
+export function familyOf(food: Pick<Food, "id" | "genericFoodId">): string {
+    return food.genericFoodId ?? food.id;
+}
+
+function usualHasAnyNutrient(food: Food): boolean {
+    return NUTRITION_BLOCK_KEYS.some((key) => food[key] != null);
+}
+
+function mergeAllergens(plain: string[], usual: string[]): string[] {
+    const out = [...plain];
+    const seen = new Set(plain);
+    for (const code of usual) {
+        if (!seen.has(code)) {
+            seen.add(code);
+            out.push(code);
+        }
+    }
+    return out;
+}
+
+function nutritionBlockFrom(
+    source: Food,
+): Pick<Food, (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource"> {
+    return {
+        calories: source.calories,
+        proteinG: source.proteinG,
+        carbsG: source.carbsG,
+        fatG: source.fatG,
+        fiberG: source.fiberG,
+        sugarG: source.sugarG,
+        alcoholG: source.alcoholG,
+        caffeineMg: source.caffeineMg,
+        nutritionSource: source.nutritionSource,
+    };
+}
+
+export function effectiveFood(
+    food: Food,
+    catalog: ReadonlyMap<string, Food>,
+): EffectiveFood {
+    if (food.genericFoodId) {
+        return { ...copyFood(food), product: null };
+    }
+    const usualId = food.usualProductId;
+    if (!usualId) {
+        return { ...copyFood(food), product: null };
+    }
+    const u = catalog.get(usualId);
+    if (!u || u.archivedAt || u.genericFoodId !== food.id) {
+        return { ...copyFood(food), product: null };
+    }
+    const base = copyFood(food);
+    const product: FoodProductRef = {
+        id: u.id,
+        name: u.name,
+        brand: u.brand,
+    };
+    const nutritionFrom = usualHasAnyNutrient(u) ? u : food;
+    const block = nutritionBlockFrom(nutritionFrom);
+    return {
+        ...base,
+        ...block,
+        gramsPerEach: u.gramsPerEach ?? food.gramsPerEach,
+        gramsPerMl: u.gramsPerMl ?? food.gramsPerMl,
+        allergens: mergeAllergens(food.allergens, u.allergens),
+        product,
+    };
+}
+
+export async function effectiveFoodsByIds(
+    store: FoodsStore,
+    householdId: string,
+    ids: Iterable<string | null | undefined>,
+): Promise<Map<string, EffectiveFood>> {
+    const loaded = await foodsByIds(store, householdId, ids);
+    const extraIds = new Set<string>();
+    for (const food of loaded.values()) {
+        const usualId = food.usualProductId;
+        if (usualId && !loaded.has(usualId)) extraIds.add(usualId);
+    }
+    const usualMap =
+        extraIds.size > 0
+            ? await foodsByIds(store, householdId, extraIds)
+            : new Map<string, Food>();
+    const catalog = new Map([...loaded, ...usualMap]);
+    const out = new Map<string, EffectiveFood>();
+    for (const [id, food] of loaded) {
+        out.set(id, effectiveFood(food, catalog));
+    }
+    return out;
+}
+
+async function liveProductsOf(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+): Promise<Food[]> {
+    const listed = await store.listFoods(householdId);
+    return listed.filter((row) => row.genericFoodId === foodId);
+}
+
+async function requireLiveFood(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+): Promise<Food> {
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt) {
+        throw new FoodsInputError("Unknown food.");
+    }
+    return food;
+}
+
+function assertCanReceiveGenericFoodId(row: Food, liveProducts: Food[]): void {
+    if (row.genericFoodId) return;
+    if (row.usualProductId) {
+        throw new FoodsInputError("That food already has a usual product.");
+    }
+    if (liveProducts.length > 0) {
+        throw new FoodsInputError("A product can't have its own products.");
+    }
+}
+
+function assertProductRow(product: Food, liveProducts: Food[]): void {
+    if (product.usualProductId) {
+        throw new FoodsInputError("A product can't have its own products.");
+    }
+    if (liveProducts.length > 0) {
+        throw new FoodsInputError("A product can't have its own products.");
+    }
+}
+
+function assertPlainFoodTarget(food: Food): void {
+    if (food.genericFoodId) {
+        throw new FoodsInputError("That food is a product of another food.");
+    }
+}
+
+function assertSameKindLiveNotSelf(
+    a: Food,
+    b: Food,
+    aId: string,
+    bId: string,
+): void {
+    if (aId === bId) {
+        throw new FoodsInputError("Pick two different foods.");
+    }
+    if (a.kind !== b.kind) {
+        throw new FoodsInputError(
+            "A product must be the same kind as its food.",
+        );
+    }
+}
+
+async function saveFood(store: FoodsStore, row: Food): Promise<Food> {
+    const saved = await store.updateFoodRow({ ...row, updatedAt: nowIso() });
+    if (!saved) throw new FoodsInputError("Unknown food.");
+    return saved;
+}
+
+export async function linkProduct(
+    store: FoodsStore,
+    householdId: string,
+    productId: string,
+    foodId: string | null,
+): Promise<Food> {
+    const product = await requireLiveFood(store, householdId, productId);
+    if (foodId === null) {
+        if (!product.genericFoodId) return product;
+        const plainId = product.genericFoodId;
+        const plain = await store.getFood(householdId, plainId);
+        if (plain && plain.usualProductId === productId) {
+            await saveFood(store, {
+                ...plain,
+                usualProductId: null,
+            });
+        }
+        return saveFood(store, { ...product, genericFoodId: null });
+    }
+    if (productId === foodId) {
+        throw new FoodsInputError("Pick two different foods.");
+    }
+    const food = await requireLiveFood(store, householdId, foodId);
+    const productChildren = await liveProductsOf(store, householdId, productId);
+    if (product.genericFoodId) {
+        assertProductRow(product, productChildren);
+    } else {
+        assertCanReceiveGenericFoodId(product, productChildren);
+    }
+    assertPlainFoodTarget(food);
+    assertSameKindLiveNotSelf(product, food, productId, foodId);
+    if (product.genericFoodId === foodId) return product;
+    if (product.genericFoodId && product.genericFoodId !== foodId) {
+        const oldPlain = await store.getFood(
+            householdId,
+            product.genericFoodId,
+        );
+        if (oldPlain && oldPlain.usualProductId === productId) {
+            await saveFood(store, {
+                ...oldPlain,
+                usualProductId: null,
+            });
+        }
+    }
+    return saveFood(store, { ...product, genericFoodId: foodId });
+}
+
+export async function setUsualProduct(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    productId: string | null,
+): Promise<Food> {
+    const food = await requireLiveFood(store, householdId, foodId);
+    if (food.genericFoodId) {
+        throw new FoodsInputError("That food is a product of another food.");
+    }
+    if (productId === null) {
+        if (!food.usualProductId) return food;
+        return saveFood(store, { ...food, usualProductId: null });
+    }
+    if (productId === foodId) {
+        throw new FoodsInputError("Pick two different foods.");
+    }
+    const product = await requireLiveFood(store, householdId, productId);
+    assertSameKindLiveNotSelf(food, product, foodId, productId);
+    if (product.genericFoodId === foodId) {
+        return saveFood(store, { ...food, usualProductId: productId });
+    }
+    if (product.genericFoodId && product.genericFoodId !== foodId) {
+        throw new FoodsInputError(
+            "That product belongs to another food. Link it here first.",
+        );
+    }
+    await linkProduct(store, householdId, productId, foodId);
+    const refreshed = await requireLiveFood(store, householdId, foodId);
+    return saveFood(store, { ...refreshed, usualProductId: productId });
+}
+
+export async function createProduct(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    input: {
+        name: string;
+        brand?: string | null;
+        defaultUnit?: string;
+        gramsPerEach?: number | null;
+        gramsPerMl?: number | null;
+        calories?: number | null;
+        proteinG?: number | null;
+        carbsG?: number | null;
+        fatG?: number | null;
+        fiberG?: number | null;
+        sugarG?: number | null;
+        alcoholG?: number | null;
+        caffeineMg?: number | null;
+        allergens?: string[];
+        nutritionSource?: NutritionSource | null;
+        makeUsual?: boolean;
+        createdBy?: string | null;
+    },
+): Promise<Food> {
+    const plain = await requireLiveFood(store, householdId, foodId);
+    if (plain.genericFoodId) {
+        throw new FoodsInputError("That food is a product of another food.");
+    }
+    const name = input.name.trim();
+    if (!name) throw new FoodsInputError("Enter a food name.");
+    const nutrients = {
+        calories: parseOptionalNutrient(input.calories),
+        proteinG: parseOptionalNutrient(input.proteinG),
+        carbsG: parseOptionalNutrient(input.carbsG),
+        fatG: parseOptionalNutrient(input.fatG),
+        fiberG: parseOptionalNutrient(input.fiberG),
+        sugarG: parseOptionalNutrient(input.sugarG),
+        alcoholG: parseOptionalNutrient(input.alcoholG),
+        caffeineMg: parseOptionalNutrient(input.caffeineMg),
+    };
+    const hasNutrient = NUTRITION_BLOCK_KEYS.some(
+        (key) => nutrients[key] != null,
+    );
+    const allergens = (input.allergens ?? []).filter(
+        (code) => isNamedAllergen(code) || code === "other",
+    );
+    const created = await store.insertFood(
+        newFood({
+            householdId,
+            kind: plain.kind,
+            name,
+            brand: input.brand,
+            defaultUnit: input.defaultUnit ?? plain.defaultUnit,
+            gramsPerEach: parsePositiveFactor(input.gramsPerEach),
+            gramsPerMl: parsePositiveFactor(input.gramsPerMl),
+            ...nutrients,
+            nutritionSource:
+                input.nutritionSource ?? (hasNutrient ? "manual" : null),
+            allergens,
+            genericFoodId: foodId,
+            createdBy: input.createdBy,
+        }),
+    );
+    if (input.makeUsual) {
+        await setUsualProduct(store, householdId, foodId, created.id);
+    }
+    return created;
+}
+
+async function applyArchiveLinkCleanup(
+    store: FoodsStore,
+    householdId: string,
+    current: Food,
+): Promise<void> {
+    if (current.genericFoodId) {
+        const plain = await store.getFood(householdId, current.genericFoodId);
+        if (plain && plain.usualProductId === current.id) {
+            await saveFood(store, { ...plain, usualProductId: null });
+        }
+        return;
+    }
+    const products = await liveProductsOf(store, householdId, current.id);
+    for (const product of products) {
+        await saveFood(store, { ...product, genericFoodId: null });
+    }
+}
+
 function parseOptionalNutrient(
     value: number | null | undefined,
 ): number | null {
@@ -772,6 +1117,8 @@ export async function updateFood(
               (code) => isNamedAllergen(code) || code === "other",
           )
         : current.allergens;
+    const archiving = patch.archived === true && current.archivedAt == null;
+    const unarchiving = patch.archived === false && current.archivedAt != null;
     const archivedAt =
         patch.archived === undefined
             ? current.archivedAt
@@ -830,8 +1177,14 @@ export async function updateFood(
                 : current.nutritionSource,
         allergens,
         archivedAt,
+        genericFoodId: archiving || unarchiving ? null : current.genericFoodId,
+        usualProductId:
+            archiving || unarchiving ? null : current.usualProductId,
         updatedAt: nowIso(),
     };
+    if (archiving) {
+        await applyArchiveLinkCleanup(store, householdId, current);
+    }
     const saved = await store.updateFoodRow(next);
     if (!saved) throw new FoodsInputError("Unknown food.");
     if (patch.aliases) {
@@ -869,6 +1222,27 @@ export async function mergeFoods(
     if (drop.kind !== keep.kind) {
         throw new FoodsInputError("Foods must be the same kind to merge.");
     }
+    if (familyOf(keep) === familyOf(drop)) {
+        throw new FoodsInputError(
+            "Those are already the same food. Use Set usual instead.",
+        );
+    }
+    if (keep.genericFoodId && drop.genericFoodId) {
+        throw new FoodsInputError(
+            "Those belong to different foods. Unlink one first.",
+        );
+    }
+    const listed = await store.listFoods(householdId);
+    const dropProducts = listed.filter((row) => row.genericFoodId === dropId);
+    const keepProducts = listed.filter((row) => row.genericFoodId === keepId);
+    const mergedGenericId = keep.genericFoodId ?? drop.genericFoodId;
+    const mergedUsualId = keep.usualProductId ?? drop.usualProductId ?? null;
+    const liveProductsAfter = keepProducts.length + dropProducts.length;
+    if (mergedGenericId && (liveProductsAfter > 0 || mergedUsualId)) {
+        throw new FoodsInputError(
+            "Merging those would nest products two deep.",
+        );
+    }
     const dropBarcodes = await store.deleteBarcodesForFood(householdId, dropId);
     for (const barcode of dropBarcodes) {
         const taken = await store.getBarcodeFoodId(householdId, barcode);
@@ -884,12 +1258,39 @@ export async function mergeFoods(
         if (!taken) await store.setAlias(householdId, alias, keepId);
     }
     await store.repointFoodRefs(householdId, dropId, keepId);
+    const keepNext: Food = {
+        ...keep,
+        genericFoodId: mergedGenericId,
+        usualProductId: mergedUsualId,
+        updatedAt: nowIso(),
+    };
+    await store.updateFoodRow(keepNext);
+    for (const product of dropProducts) {
+        await store.updateFoodRow({
+            ...product,
+            genericFoodId: keepId,
+            updatedAt: nowIso(),
+        });
+    }
+    for (const row of listed) {
+        if (row.usualProductId === dropId) {
+            await store.updateFoodRow({
+                ...row,
+                usualProductId: keepId,
+                updatedAt: nowIso(),
+            });
+        }
+    }
     await store.updateFoodRow({
         ...drop,
+        genericFoodId: null,
+        usualProductId: null,
         archivedAt: nowIso(),
         updatedAt: nowIso(),
     });
-    return keep;
+    const savedKeep = await store.getFood(householdId, keepId);
+    if (!savedKeep) throw new FoodsInputError("Unknown food.");
+    return savedKeep;
 }
 
 export type FoodSearchHit = {
@@ -982,6 +1383,8 @@ export function foodFromRow(row: {
     nutrition_source: unknown;
     allergens: unknown;
     off_source_id: unknown;
+    generic_food_id: unknown;
+    usual_product_id: unknown;
     created_by: unknown;
     archived_at: unknown;
     created_at: unknown;
@@ -1023,6 +1426,14 @@ export function foodFromRow(row: {
             typeof row.off_source_id === "string" && row.off_source_id
                 ? row.off_source_id
                 : null,
+        genericFoodId:
+            typeof row.generic_food_id === "string" && row.generic_food_id
+                ? row.generic_food_id
+                : null,
+        usualProductId:
+            typeof row.usual_product_id === "string" && row.usual_product_id
+                ? row.usual_product_id
+                : null,
         createdBy:
             typeof row.created_by === "string" && row.created_by
                 ? row.created_by
@@ -1058,6 +1469,8 @@ export function foodToRow(row: Food) {
         nutrition_source: row.nutritionSource,
         allergens: row.allergens,
         off_source_id: row.offSourceId,
+        generic_food_id: row.genericFoodId,
+        usual_product_id: row.usualProductId,
         created_by: row.createdBy,
         archived_at: row.archivedAt,
         created_at: row.createdAt,

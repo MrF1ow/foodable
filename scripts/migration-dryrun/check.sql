@@ -194,5 +194,164 @@ begin
     exception when raise_exception then
         if sqlerrm <> 'dryrun-rollback' then raise; end if;
     end;
+
+    -- Usual products: columns, index, and rule-1 shape (one level deep).
+    if not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'foods'
+          and column_name = 'generic_food_id'
+    ) then
+        raise exception 'foods.generic_food_id missing';
+    end if;
+    if not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'foods'
+          and column_name = 'usual_product_id'
+    ) then
+        raise exception 'foods.usual_product_id missing';
+    end if;
+    if not exists (
+        select 1
+        from pg_indexes
+        where schemaname = 'public'
+          and tablename = 'foods'
+          and indexname = 'foods_generic_idx'
+    ) then
+        raise exception 'foods_generic_idx missing';
+    end if;
+    if exists (
+        select 1
+        from public.foods p
+        join public.foods g on g.id = p.generic_food_id
+        where p.generic_food_id is not null
+          and g.generic_food_id is not null
+    ) then
+        raise exception 'a product points at another product (rule 1)';
+    end if;
+    if exists (
+        select 1
+        from public.foods p
+        join public.foods g on g.id = p.generic_food_id
+        where p.generic_food_id is not null
+          and g.generic_food_id is not null
+          and exists (
+              select 1
+              from public.foods c
+              where c.generic_food_id = g.id
+                and c.id <> p.id
+          )
+    ) then
+        raise exception 'a plain food has products and is also a product (rule 1)';
+    end if;
+    if exists (
+        select 1
+        from public.foods plain_food
+        join public.foods usual_p on usual_p.id = plain_food.usual_product_id
+        where plain_food.usual_product_id is not null
+          and usual_p.generic_food_id is distinct from plain_food.id
+    ) then
+        raise exception 'usual product is not a product of its food (rule 3)';
+    end if;
+
+    begin
+        update public.foods
+        set generic_food_id = id
+        where id = (
+            select id from public.foods where normalized_name = 'eggs' limit 1
+        );
+        raise exception 'foods_generic_not_self did not fire';
+    exception
+        when check_violation then
+            null;
+    end;
+
+    begin
+        update public.foods
+        set usual_product_id = id
+        where id = (
+            select id from public.foods where normalized_name = 'eggs' limit 1
+        );
+        raise exception 'foods_usual_not_self did not fire';
+    exception
+        when check_violation then
+            null;
+    end;
+
+    begin
+        insert into public.foods (
+            id, household_id, kind, name, normalized_name
+        ) values (
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01',
+            '11111111-1111-1111-1111-111111111111',
+            'food',
+            'Dry Plain Two Prods',
+            'dry-plain-two-prods'
+        );
+        insert into public.foods (
+            id, household_id, kind, name, normalized_name, generic_food_id
+        ) values (
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa02',
+            '11111111-1111-1111-1111-111111111111',
+            'food',
+            'Dry Kirkland',
+            'dry-kirkland',
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01'
+        );
+        insert into public.foods (
+            id, household_id, kind, name, normalized_name, generic_food_id
+        ) values (
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa03',
+            '11111111-1111-1111-1111-111111111111',
+            'food',
+            'Dry Great Value',
+            'dry-great-value',
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01'
+        );
+        update public.foods
+        set usual_product_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa02'
+        where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01';
+
+        if exists (
+            select 1
+            from public.foods p
+            join public.foods g on g.id = p.generic_food_id
+            where p.generic_food_id is not null
+              and g.generic_food_id is not null
+        ) then
+            raise exception 'a product points at another product (rule 1)';
+        end if;
+        if exists (
+            select 1
+            from public.foods p
+            join public.foods g on g.id = p.generic_food_id
+            where p.generic_food_id is not null
+              and g.generic_food_id is not null
+              and exists (
+                  select 1
+                  from public.foods c
+                  where c.generic_food_id = g.id
+                    and c.id <> p.id
+              )
+        ) then
+            raise exception 'a plain food has products and is also a product (rule 1)';
+        end if;
+        if exists (
+            select 1
+            from public.foods plain_food
+            join public.foods usual_p on usual_p.id = plain_food.usual_product_id
+            where plain_food.usual_product_id is not null
+              and usual_p.generic_food_id is distinct from plain_food.id
+        ) then
+            raise exception 'usual product is not a product of its food (rule 3)';
+        end if;
+
+        raise exception 'dryrun-rollback';
+    exception when raise_exception then
+        if sqlerrm <> 'dryrun-rollback' then raise; end if;
+    end;
 end
 $$;

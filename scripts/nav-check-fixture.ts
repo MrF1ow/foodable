@@ -264,6 +264,8 @@ function food(id: string, name: string, calories: number | null) {
         nutritionSource: null,
         allergens: [],
         offSourceId: null,
+        genericFoodId: null,
+        usualProductId: null,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",

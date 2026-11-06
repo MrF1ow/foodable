@@ -53,6 +53,8 @@ export function sampleFood(
         nutritionSource: null,
         allergens: [],
         offSourceId: null,
+        genericFoodId: null,
+        usualProductId: null,
         createdBy: null,
         archivedAt: null,
         createdAt: now,

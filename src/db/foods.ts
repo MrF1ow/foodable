@@ -14,7 +14,7 @@ const FOODS = "foods";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, generic_food_id, usual_product_id, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",
