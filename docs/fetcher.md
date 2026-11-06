@@ -23,7 +23,7 @@ User-agent: Foodable
 Disallow: /
 ```
 
-A **401**, **403**, or **429** response stops the import with no retry.
+A **401**, **403**, or **429** response stops the import with no retry. After that, Foodable remembers the host for **7 days** and skips further requests for any recipe link on that host (use **Check again** on the import error or **Try again** in Household › Recipe settings to lift it sooner). A **404** or **410** is remembered for that exact cleaned link (**30 days** for **404**, **410** permanently until someone checks again).
 
 ## Contact
 

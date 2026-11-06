@@ -101,6 +101,9 @@ export type RecipesPageView = {
     importSourceLabel?: string;
     importTextOrigin?: "shared" | "pasted";
     importTextOnly?: boolean;
+    /** Memory short-circuit: show Check again above paste step */
+    importShowRetry?: boolean;
+    importRetryDisabled?: boolean;
     shareArrived?: ReadShareResult;
     shareArrivedOpen?: boolean;
 };
@@ -322,6 +325,9 @@ export function renderRecipesPage(view: RecipesPageView): string {
         view.importTextOrigin === "shared"
             ? `<input type="hidden" name="text_origin" value="shared" />`
             : "";
+    const importRetryBlock = view.importShowRetry
+        ? `<p class="recipe-import-retry"><button type="submit" name="retry" value="1"${view.importRetryDisabled ? " disabled" : ""}>Check again</button></p>`
+        : "";
     const importPasteBody = view.importPasteStep
         ? (() => {
               if (view.importTextOnly) {
@@ -329,6 +335,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
 <input type="hidden" name="import_step" value="paste" />
 <input type="hidden" name="text_only" value="1" />
 ${importTextOriginHidden}
+${importRetryBlock}
 ${field({
     id: "import-url-optional",
     label: "Recipe link",
@@ -372,6 +379,7 @@ ${field({
 <input type="hidden" name="import_step" value="paste" />
 <input type="hidden" name="url" value="${importUrlValue}" />
 ${importTextOriginHidden}
+${importRetryBlock}
 <p class="recipe-import-source">${sourceIcon(kind, { label, decorative: true })} ${label}</p>
 <p class="recipe-import-open"><a href="${importUrlValue}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a></p>
 ${pinterestFields}
@@ -386,6 +394,7 @@ ${creditField}
           })()
         : `<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
                 ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
+                ${importRetryBlock}
                 <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
             </form>`;
     const importModal = modal({

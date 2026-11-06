@@ -718,6 +718,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "url", required: true },
             { name: "text", required: false },
             { name: "credit", required: false },
+            { name: "retry", required: false },
         ],
         hasPhotoHint: false,
     },
