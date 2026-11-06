@@ -43,10 +43,30 @@ const RUN_TOGETHER_RE =
     /\d+(?:\.\d+)?(?:\s+\d+\/\d+)?(?:\s*\/\s*\d+)?\s*(?:kg|kilograms?|g|grams?|mg|lb|lbs|pounds?|oz|ounces?|ml|milliliters?|l|liters?|litres?|cups?|tbsp|tablespoons?|tsp|teaspoons?|fl\s*oz|fluid\s*ounces?|cloves?|cans?|slices?|pieces?|bunch(?:es)?|sprigs?|sticks?|heads?|packages?|pkgs?|jars?|bottles?)\b/gi;
 
 const PARSE_INGREDIENT_OPTS = {
-    ignoreUOMs: ["small", "medium", "large"],
+    // Size words (and their abbreviations) describe the food, not a unit.
+    ignoreUOMs: ["small", "medium", "large", "sm", "med", "md", "lg"],
 } as const;
 
 const FOOTNOTE_ONLY_RE = /^[*†]+$/;
+const TRAILING_FOOTNOTE_RE = /\s*[*†]+$/;
+
+/** Longest phrases first, so "a pinch" wins over "pinch". */
+const PHRASES_LONGEST_FIRST = [...NOT_MEASURED_PHRASES].sort(
+    (a, b) => b.length - a.length,
+);
+
+/** A bare count ("3 eggs") is only an ingredient when what is left is a real
+ *  name: it has a letter, is not just a size word, and holds no other
+ *  measure ("1 x 400g tin tomatoes" stays unresolved). */
+function countableName(description: string): boolean {
+    const rest = stripParentheticalGroups(description)
+        .replace(/^x\s+/i, "")
+        .trim();
+    if (!/[a-z]/i.test(rest)) return false;
+    if (SIZE_WORDS.has(rest.toLowerCase())) return false;
+    if (/\d/.test(rest)) return false;
+    return true;
+}
 
 function stripParentheticalGroups(line: string): string {
     let s = line;
@@ -149,11 +169,7 @@ function scaleAmount(amount: number, unitId: string | null): number {
 
 function findNotMeasuredPhrase(text: string): string | null {
     const lower = text.toLowerCase();
-    for (const phrase of NOT_MEASURED_PHRASES) {
-        const re = new RegExp(
-            `(^|[^a-z])${phrase.replace(/ /g, "\\s+")}([^a-z]|$)`,
-            "i",
-        );
+    for (const phrase of PHRASES_LONGEST_FIRST) {
         const capture = new RegExp(
             `(?:^|[^a-z])(${phrase.replace(/ /g, "\\s+")})(?:[^a-z]|$)`,
             "i",
@@ -175,7 +191,11 @@ function normalizeNote(raw: string | null | undefined): string | null {
         prev = note;
         note = note.replace(/^\((.*)\)$/s, "$1").trim();
     }
-    note = note.replace(/\s+/g, " ").replace(/,\s*$/, "").trim();
+    note = note
+        .replace(/\s+/g, " ")
+        .replace(/,\s*$/, "")
+        .replace(TRAILING_FOOTNOTE_RE, "")
+        .trim();
     if (!note || FOOTNOTE_ONLY_RE.test(note)) return null;
     return note;
 }
@@ -212,7 +232,7 @@ function splitNameAndNote(description: string): {
         trimmed = name || trimmed;
     }
 
-    const name = trimmed.trim();
+    const name = trimmed.replace(TRAILING_FOOTNOTE_RE, "").trim();
     const note = normalizeNote(
         inlineNotes.length ? inlineNotes.join(", ") : null,
     );
@@ -240,7 +260,7 @@ export function parseIngredientLines(lines: string[]): {
         const line = rawLine.trim();
         if (!line) continue;
 
-        if (countRunTogetherTokens(line) >= 2) {
+        if (lineLooksRunTogether(line)) {
             unresolved.push(rawLine);
             continue;
         }
@@ -268,8 +288,15 @@ export function parseIngredientLines(lines: string[]): {
             continue;
         }
 
-        const notMeasured = findNotMeasuredPhrase(line);
-        if (notMeasured || isNotMeasuredNote(parsed.description)) {
+        const mapped = mapUnit(parsed.unitOfMeasureID, parsed.unitOfMeasure);
+        // A measured line keeps its measure even when it also says "optional"
+        // or "or to taste"; only an unmeasured line becomes "not measured".
+        const measured = parsed.quantity != null && mapped != null;
+        const notMeasured = measured ? null : findNotMeasuredPhrase(line);
+        if (
+            !measured &&
+            (notMeasured || isNotMeasuredNote(parsed.description))
+        ) {
             const phrase =
                 notMeasured ?? findNotMeasuredPhrase(parsed.description);
             let name = parsed.description;
@@ -279,7 +306,11 @@ export function parseIngredientLines(lines: string[]): {
                     `[,\s]*${escaped.replace(/ /g, "\\s+")}[.\s]*`,
                     "i",
                 );
-                name = name.replace(re, "").trim().replace(/,\s*$/, "");
+                name = name
+                    .replace(re, " ")
+                    .trim()
+                    .replace(/^of\s+/i, "")
+                    .replace(/,\s*$/, "");
             }
             const split = splitNameAndNote(name || parsed.description);
             items.push({
@@ -291,8 +322,6 @@ export function parseIngredientLines(lines: string[]): {
             });
             continue;
         }
-
-        const mapped = mapUnit(parsed.unitOfMeasureID, parsed.unitOfMeasure);
 
         if (parsed.quantity == null) {
             const { name, note } = splitNameAndNote(parsed.description);
@@ -306,7 +335,12 @@ export function parseIngredientLines(lines: string[]): {
             continue;
         }
 
-        if (!mapped) {
+        if (
+            !mapped ||
+            (!parsed.unitOfMeasureID &&
+                !parsed.unitOfMeasure &&
+                !countableName(parsed.description))
+        ) {
             unresolved.push(rawLine);
             continue;
         }

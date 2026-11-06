@@ -31,6 +31,8 @@ const NAMED_ENTITIES: Record<string, string> = {
 
 function codePointChar(code: number): string {
     if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return "";
+    // Lone surrogates are not characters.
+    if (code >= 0xd800 && code <= 0xdfff) return "";
     try {
         return String.fromCodePoint(code);
     } catch {
@@ -38,26 +40,31 @@ function codePointChar(code: number): string {
     }
 }
 
-function decodeEntities(text: string): string {
-    let out = text.replace(/<[^>]+>/g, " ");
-    out = out.replace(/&#(\d+);/g, (_, code) => codePointChar(Number(code)));
+function decodeOnce(text: string): string {
+    let out = text.replace(/&#(\d+);/g, (_, code) =>
+        codePointChar(Number(code)),
+    );
     out = out.replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
         codePointChar(parseInt(hex, 16)),
     );
-    out = out.replace(
-        /&([a-z]+);/gi,
+    return out.replace(
+        /&([a-z][a-z0-9]*);/gi,
         (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match,
     );
-    out = out.replace(/<[^>]+>/g, " ");
-    out = out.replace(/\s+/g, " ").trim();
-    if (
-        /&(?:#|amp|lt|gt|quot|apos|nbsp|frac|deg|ndash|mdash|rsquo|lsquo|rdquo|ldquo|hellip);/i.test(
-            out,
-        )
-    ) {
-        return decodeEntities(out);
+}
+
+/** Decode entities until the text stops changing (twice-escaped `&amp;#39;`
+ *  included), with a pass cap so no input can loop. Unknown or malformed
+ *  entities (`&frac;`, `&#;`) are left as they are. */
+function decodeEntities(text: string): string {
+    let out = text.replace(/<[^>]+>/g, " ");
+    for (let pass = 0; pass < 4; pass++) {
+        const next = decodeOnce(out);
+        if (next === out) break;
+        out = next;
     }
-    return out;
+    out = out.replace(/<[^>]+>/g, " ");
+    return out.replace(/\s+/g, " ").trim();
 }
 
 function normalizeType(value: unknown): string[] {
@@ -173,6 +180,21 @@ function parseYieldValue(value: unknown): {
         }
         return { portions: null, text: trimmed };
     }
+    if (typeof value === "object") {
+        // schema.org QuantitativeValue: { value: 4, unitText: "servings" }.
+        const obj = value as Record<string, unknown>;
+        const inner = parseYieldValue(obj.value);
+        const unit =
+            typeof obj.unitText === "string"
+                ? decodeEntities(obj.unitText)
+                : "";
+        if (inner.portions != null) {
+            return {
+                portions: inner.portions,
+                text: unit ? `${inner.portions} ${unit}` : inner.text,
+            };
+        }
+    }
     return { portions: null, text: null };
 }
 
@@ -212,6 +234,10 @@ function instructionText(value: unknown): string | null {
     }
     if (typeof obj.text === "string") return decodeEntities(obj.text);
     if (typeof obj.name === "string") return decodeEntities(obj.name);
+    // An ItemList's ListItem can carry its step under `item`.
+    if (obj.item && typeof obj.item === "object") {
+        return instructionText(obj.item);
+    }
     return null;
 }
 

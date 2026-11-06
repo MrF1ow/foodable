@@ -29,6 +29,11 @@ describe("FOODABLE_USER_AGENT", () => {
     });
 });
 
+test("6to4 addresses are not public", () => {
+    expect(isPublicAddress("2002:7f00:1::")).toBe(false);
+    expect(isPublicAddress("2002:808:808::")).toBe(false);
+});
+
 describe("isPublicAddress", () => {
     const privateV4 = [
         "0.0.0.0",
@@ -325,6 +330,38 @@ describe("createSafeFetcher", () => {
         expect(out.ok).toBe(false);
         if (out.ok) return;
         expect(out.reason).toBe("timeout");
+    });
+
+    test("a redirect hop's slow robots.txt shares the page deadline", async () => {
+        const started = Date.now();
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                const href = String(url);
+                if (href.startsWith("https://other.example/robots.txt")) {
+                    await new Promise((r) => setTimeout(r, 400));
+                    return okResponse("User-agent: *\nAllow: /");
+                }
+                if (href.endsWith("/robots.txt")) {
+                    return okResponse("User-agent: *\nAllow: /");
+                }
+                if (href.startsWith("https://example.com/")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: { location: "https://other.example/r" },
+                    });
+                }
+                return okResponse("<html></html>");
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["text/html"],
+            timeoutMs: 60,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+        expect(Date.now() - started).toBeLessThan(350);
     });
 
     test("slow robots body is treated as disallow", async () => {

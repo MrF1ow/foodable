@@ -253,3 +253,56 @@ describe("parseIngredientLines with verifyRecipe", () => {
         ).toBe(true);
     });
 });
+
+describe("parseIngredientLines review round 2", () => {
+    const parse = (line: string) => parseIngredientLines([line]);
+
+    test("bare counts need a real name", () => {
+        for (const line of ["1 x 400g tin tomatoes", "1.", "1 large", "12"]) {
+            expect(parse(line).unresolved).toEqual([line]);
+        }
+        expect(parse("3 eggs").items[0]?.quantity).toEqual({
+            amount: 3,
+            unit: "each",
+        });
+    });
+
+    test("unicode fractions count toward run-together lines", () => {
+        expect(parse("1½ cups flour 2 tbsp sugar").unresolved).toHaveLength(1);
+        expect(parse("½ cup milk 1 tsp vanilla").unresolved).toHaveLength(1);
+        expect(parse("½ cup flour").items[0]?.quantity).toEqual({
+            amount: 0.5,
+            unit: "cup",
+        });
+    });
+
+    test("size abbreviations are not units", () => {
+        expect(parse("2 lg eggs").items[0]?.quantity).toEqual({
+            amount: 2,
+            unit: "each",
+        });
+        expect(parse("3 sm potatoes").unresolved).toEqual([]);
+    });
+
+    test("a measured line keeps its measure next to a not-measured phrase", () => {
+        const flour = parse("1 cup flour, optional").items[0]!;
+        expect(flour.quantity).toEqual({ amount: 1, unit: "cup" });
+        expect(flour.note).toBe("optional");
+        expect(parse("1 tsp salt, or to taste").items[0]?.quantity).toEqual({
+            amount: 1,
+            unit: "tsp",
+        });
+        expect(
+            parse("2 tbsp oil (or some melted butter)").items[0]?.quantity,
+        ).toEqual({ amount: 2, unit: "tbsp" });
+    });
+
+    test("footnote marks and longer phrases", () => {
+        expect(parse("1 cup flour*").items[0]?.name).toBe("flour");
+        expect(parse("salt to taste*").items[0]?.name).toBe("salt");
+        const pinch = parse("a pinch of salt").items[0]!;
+        expect(pinch.name).toBe("salt");
+        expect(pinch.note).toBe("a pinch");
+        expect(pinch.quantity).toBeNull();
+    });
+});
