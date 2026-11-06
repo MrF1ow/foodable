@@ -43,6 +43,7 @@
         "db:migrate": "bun run scripts/migrate.ts",
         "db:dev": "bun run scripts/dev-db.ts",
         "db:import-postgres": "bun run scripts/import-postgres-data.ts",
+        "foods:merge-duplicates": "bun run scripts/merge-duplicate-foods.ts",
         "pr:check": "bun run scripts/pr-lint.ts",
         "labels:sync": "bun run scripts/sync-labels.ts",
         "release": "bun run scripts/release.ts",

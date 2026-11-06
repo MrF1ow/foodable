@@ -57,6 +57,8 @@ export type FoodPatch = {
 
 export type FoodsStore = {
     listFoods(householdId: string): Promise<Food[]>;
+    /** Counts referring rows per food id in fridge, grocery, recipe, meals, and stock (household-scoped). */
+    countFoodRefs(householdId: string): Promise<Map<string, number>>;
     getFood(householdId: string, id: string): Promise<Food | null>;
     insertFood(row: Food): Promise<Food>;
     updateFoodRow(row: Food): Promise<Food | null>;
@@ -287,6 +289,7 @@ export type MemoryFoodRefRow = {
 
 export type MemoryFoodRefHolder = {
     repointFood(householdId: string, fromId: string, toId: string): void;
+    countFoodRefs?(householdId: string): Map<string, number>;
 };
 
 export type MemoryFoodsStore = FoodsStore & {
@@ -549,6 +552,29 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             for (const holder of refHolders) {
                 holder.repointFood(householdId, fromId, toId);
             }
+        },
+        async countFoodRefs(householdId) {
+            const counts = new Map<string, number>();
+            const bump = (foodId: string, n = 1) => {
+                counts.set(foodId, (counts.get(foodId) ?? 0) + n);
+            };
+            for (const row of refs) {
+                if (
+                    row.householdId !== undefined &&
+                    row.householdId !== householdId
+                ) {
+                    continue;
+                }
+                bump(row.foodId);
+            }
+            for (const holder of refHolders) {
+                const extra = holder.countFoodRefs?.(householdId);
+                if (!extra) continue;
+                for (const [id, n] of extra) {
+                    bump(id, n);
+                }
+            }
+            return counts;
         },
     };
     return store;
@@ -994,7 +1020,7 @@ export async function foodsByIds(
 export type FoodProductRef = { id: string; name: string; brand: string | null };
 export type EffectiveFood = Food & { product: FoodProductRef | null };
 
-const NUTRITION_BLOCK_KEYS = [
+export const NUTRITION_BLOCK_KEYS = [
     "calories",
     "proteinG",
     "carbsG",
@@ -1009,7 +1035,7 @@ export function familyOf(food: Pick<Food, "id" | "genericFoodId">): string {
     return food.genericFoodId ?? food.id;
 }
 
-function usualHasAnyNutrient(food: Food): boolean {
+export function usualHasAnyNutrient(food: Food): boolean {
     return NUTRITION_BLOCK_KEYS.some((key) => food[key] != null);
 }
 
@@ -1839,6 +1865,424 @@ export type FoodSearchHit = {
     generic_food_id: string | null;
     generic_food_name: string | null;
 };
+
+export type DuplicateFoodSide = {
+    id: string;
+    householdId: string;
+    kind: FoodKind;
+    name: string;
+    brand: string | null;
+    references: number;
+    createdAt: string;
+};
+
+export type DuplicateMerge = {
+    keep: DuplicateFoodSide;
+    drop: DuplicateFoodSide;
+    reason: string;
+    fieldsFilled: string[];
+};
+
+export type DuplicateSkip = {
+    keep: DuplicateFoodSide;
+    drop: DuplicateFoodSide;
+    reason: string;
+};
+
+export type DuplicatePairsReport = {
+    merges: DuplicateMerge[];
+    skipped: DuplicateSkip[];
+};
+
+const DUPLICATE_NUTRITION_LABELS: Record<
+    (typeof NUTRITION_BLOCK_KEYS)[number],
+    string
+> = {
+    calories: "calories",
+    proteinG: "protein",
+    carbsG: "carbs",
+    fatG: "fat",
+    fiberG: "fiber",
+    sugarG: "sugar",
+    alcoholG: "alcohol",
+    caffeineMg: "caffeine",
+};
+
+function duplicateBrandKey(brand: string | null | undefined): string | null {
+    return brand?.trim() ? brand.trim() : null;
+}
+
+function formatNutrientCompareValue(value: number | null): string {
+    return value == null ? "unknown" : String(value);
+}
+
+function nutritionBlockConflictReason(keep: Food, drop: Food): string | null {
+    const keepHas = usualHasAnyNutrient(keep);
+    const dropHas = usualHasAnyNutrient(drop);
+    if (!keepHas || !dropHas) return null;
+    for (const key of NUTRITION_BLOCK_KEYS) {
+        if (keep[key] !== drop[key]) {
+            const label = DUPLICATE_NUTRITION_LABELS[key];
+            return `${label} differ: ${formatNutrientCompareValue(keep[key])} vs ${formatNutrientCompareValue(drop[key])}`;
+        }
+    }
+    return null;
+}
+
+function allergenArraysEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+const FIELDS_FILLED_KEY_ORDER: (
+    keyof MergedFoodFieldPick | "usualProductId"
+)[] = [
+    "calories",
+    "proteinG",
+    "carbsG",
+    "fatG",
+    "fiberG",
+    "sugarG",
+    "alcoholG",
+    "caffeineMg",
+    "nutritionSource",
+    "gramsPerEach",
+    "gramsPerMl",
+    "defaultUnit",
+    "allergens",
+    "usualProductId",
+];
+
+function fieldsFilledKeys(
+    state: Food,
+    drop: Food,
+    merged: MergedFoodFieldPick,
+): string[] {
+    const filled: string[] = [];
+    for (const key of FIELDS_FILLED_KEY_ORDER) {
+        if (key === "usualProductId") {
+            if (!state.usualProductId && drop.usualProductId) {
+                filled.push("usualProductId");
+            }
+            continue;
+        }
+        if (key === "allergens") {
+            const nextAllergens = merged.allergens;
+            if (!allergenArraysEqual(state.allergens, nextAllergens)) {
+                filled.push("allergens");
+            }
+            continue;
+        }
+        const before = state[key];
+        const after = merged[key];
+        if (before !== after) filled.push(key);
+    }
+    return filled;
+}
+
+/** Unit string used by stock/fridge ledger resolution (`defaultUnit || "g"`). */
+export function ledgerDefaultUnit(food: Pick<Food, "defaultUnit">): string {
+    return food.defaultUnit.trim() || "g";
+}
+
+function duplicateMergeReason(
+    keep: Food,
+    drop: Food,
+    refCounts: ReadonlyMap<string, number>,
+): string {
+    const kr = refCounts.get(keep.id) ?? 0;
+    const dr = refCounts.get(drop.id) ?? 0;
+    if (kr !== dr) {
+        return `more references (${kr} vs ${dr})`;
+    }
+    if (keep.createdAt !== drop.createdAt) {
+        const kDate = keep.createdAt.slice(0, 10);
+        const dDate = drop.createdAt.slice(0, 10);
+        const shownKeep = kDate !== dDate ? kDate : keep.createdAt;
+        const shownDrop = kDate !== dDate ? dDate : drop.createdAt;
+        return `same references, older (${shownKeep} vs ${shownDrop})`;
+    }
+    return "same references and age, lower id";
+}
+
+function toDuplicateFoodSide(
+    row: Food,
+    refCounts: ReadonlyMap<string, number>,
+): DuplicateFoodSide {
+    return {
+        id: row.id,
+        householdId: row.householdId,
+        kind: row.kind,
+        name: row.name,
+        brand: duplicateBrandKey(row.brand),
+        references: refCounts.get(row.id) ?? 0,
+        createdAt: row.createdAt,
+    };
+}
+
+function aliasOwnersByNormalizedName(
+    aliases: ReadonlyMap<string, string[]>,
+): Map<string, string> {
+    const owners = new Map<string, string>();
+    for (const [foodId, texts] of aliases) {
+        for (const raw of texts) {
+            const norm = normalizeFoodName(raw);
+            if (!norm) continue;
+            owners.set(norm, foodId);
+        }
+    }
+    return owners;
+}
+
+/**
+ * Plans duplicate merges for a catalog snapshot and reference counts.
+ * Pairing mirrors sequential {@link mergeFoods} with accumulated keep state.
+ */
+export function duplicatePairs(
+    foods: readonly Food[],
+    refCounts: ReadonlyMap<string, number>,
+    aliases: ReadonlyMap<string, string[]> = new Map(),
+): DuplicatePairsReport {
+    const catalog = foods;
+    const foodsById = new Map(catalog.map((row) => [row.id, row]));
+    const aliasOwnerByNorm = aliasOwnersByNormalizedName(aliases);
+    // Aliases an earlier accepted merge in this run will write (household + text → keep id).
+    const plannedAliasOwner = new Map<string, string>();
+    const livePlain = foods.filter(
+        (row) => row.archivedAt == null && row.genericFoodId == null,
+    );
+
+    const liveRows = catalog.filter((row) => row.archivedAt == null);
+
+    function rowHasProducts(foodId: string): boolean {
+        return liveRows.some((row) => row.genericFoodId === foodId);
+    }
+
+    type Group = {
+        rows: Food[];
+        householdId: string;
+        kind: FoodKind;
+        loose: string;
+        brand: string | null;
+    };
+    const groups: Group[] = [];
+    const byKey = new Map<string, Food[]>();
+
+    for (const row of livePlain) {
+        const loose = looseFoodKey(row.name);
+        if (!loose) continue;
+        const brand = duplicateBrandKey(row.brand);
+        const key = `${row.householdId}\0${row.kind}\0${loose}\0${brand === null ? "" : brand}`;
+        const list = byKey.get(key);
+        if (list) list.push(row);
+        else byKey.set(key, [row]);
+    }
+
+    for (const [, rows] of byKey) {
+        if (rows.length < 2) continue;
+        const first = rows[0]!;
+        groups.push({
+            rows,
+            householdId: first.householdId,
+            kind: first.kind,
+            loose: looseFoodKey(first.name),
+            brand: duplicateBrandKey(first.brand),
+        });
+    }
+
+    groups.sort((a, b) => {
+        if (a.householdId !== b.householdId) {
+            return a.householdId.localeCompare(b.householdId);
+        }
+        if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+        if (a.loose !== b.loose) return a.loose.localeCompare(b.loose);
+        const aNull = a.brand == null ? 0 : 1;
+        const bNull = b.brand == null ? 0 : 1;
+        if (aNull !== bNull) return aNull - bNull;
+        return (a.brand ?? "").localeCompare(b.brand ?? "");
+    });
+
+    const merges: DuplicateMerge[] = [];
+    const skipped: DuplicateSkip[] = [];
+
+    for (const group of groups) {
+        const sorted = group.rows.slice().sort((a, b) => {
+            const ra = refCounts.get(a.id) ?? 0;
+            const rb = refCounts.get(b.id) ?? 0;
+            if (rb !== ra) return rb - ra;
+            const byCreated = a.createdAt.localeCompare(b.createdAt);
+            if (byCreated !== 0) return byCreated;
+            return a.id.localeCompare(b.id);
+        });
+
+        const keepOriginal = sorted[0]!;
+        let state = copyFood(keepOriginal);
+        const acceptedDropIds: string[] = [];
+
+        for (const drop of sorted.slice(1)) {
+            const keepSide = toDuplicateFoodSide(keepOriginal, refCounts);
+            const dropSide = toDuplicateFoodSide(drop, refCounts);
+
+            if (state.id === drop.id) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: "Pick two different foods to merge.",
+                });
+                continue;
+            }
+            if (familyOf(state) === familyOf(drop)) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: "Those are already the same food. Use Set usual instead.",
+                });
+                continue;
+            }
+            if (state.kind !== drop.kind) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: "Foods must be the same kind to merge.",
+                });
+                continue;
+            }
+
+            const keepIdsForProducts = [state.id, ...acceptedDropIds];
+            const keepHasProducts = keepIdsForProducts.some((id) =>
+                rowHasProducts(id),
+            );
+            const dropHasProducts = rowHasProducts(drop.id);
+            if (keepHasProducts && dropHasProducts) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: "both have products",
+                });
+                continue;
+            }
+            if (state.usualProductId != null && drop.usualProductId != null) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: "both have a usual product",
+                });
+                continue;
+            }
+
+            const dropNameNorm = normalizeFoodName(drop.name);
+            const aliasOwnerId =
+                aliasOwnerByNorm.get(dropNameNorm) ??
+                plannedAliasOwner.get(`${drop.householdId}\0${dropNameNorm}`);
+            if (aliasOwnerId !== undefined) {
+                const allowedIds = new Set<string>([
+                    keepOriginal.id,
+                    drop.id,
+                    ...acceptedDropIds,
+                ]);
+                if (!allowedIds.has(aliasOwnerId)) {
+                    const owner = foodsById.get(aliasOwnerId);
+                    const ownerLabel = owner?.name ?? aliasOwnerId;
+                    skipped.push({
+                        keep: keepSide,
+                        drop: dropSide,
+                        reason: `"${drop.name}" is already another name for "${ownerLabel}"`,
+                    });
+                    continue;
+                }
+            }
+
+            if (
+                state.gramsPerEach != null &&
+                drop.gramsPerEach != null &&
+                state.gramsPerEach !== drop.gramsPerEach
+            ) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: `grams per each differ: ${state.gramsPerEach} vs ${drop.gramsPerEach}`,
+                });
+                continue;
+            }
+            if (
+                state.gramsPerMl != null &&
+                drop.gramsPerMl != null &&
+                state.gramsPerMl !== drop.gramsPerMl
+            ) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: `grams per ml differ: ${state.gramsPerMl} vs ${drop.gramsPerMl}`,
+                });
+                continue;
+            }
+
+            const keepLedgerUnit = ledgerDefaultUnit(state);
+            const dropLedgerUnit = ledgerDefaultUnit(drop);
+            if (keepLedgerUnit !== dropLedgerUnit) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: `default unit differs: ${keepLedgerUnit} vs ${dropLedgerUnit}`,
+                });
+                continue;
+            }
+
+            const nutSkip = nutritionBlockConflictReason(state, drop);
+            if (nutSkip) {
+                skipped.push({
+                    keep: keepSide,
+                    drop: dropSide,
+                    reason: nutSkip,
+                });
+                continue;
+            }
+
+            const mergedFields = mergedFoodFields(state, drop);
+            const nextUsual =
+                state.usualProductId ?? drop.usualProductId ?? null;
+            const nextGeneric =
+                state.genericFoodId ?? drop.genericFoodId ?? null;
+            const nextState: Food = {
+                ...state,
+                ...mergedFields,
+                usualProductId: nextUsual,
+                genericFoodId: nextGeneric,
+            };
+
+            const fieldsFilled = fieldsFilledKeys(state, drop, mergedFields);
+
+            merges.push({
+                keep: keepSide,
+                drop: dropSide,
+                reason: duplicateMergeReason(keepOriginal, drop, refCounts),
+                fieldsFilled,
+            });
+
+            state = nextState;
+            acceptedDropIds.push(drop.id);
+            // Record the aliases this merge will write, so a later group in the
+            // same run (another brand or kind with the same spelling) sees the
+            // text as taken: the alias table is one row per household.
+            // Keyed by household, since `foods` may span several.
+            if (
+                dropNameNorm &&
+                dropNameNorm !== keepOriginal.normalizedName &&
+                !aliasOwnerByNorm.has(dropNameNorm)
+            ) {
+                const plannedKey = `${drop.householdId}\0${dropNameNorm}`;
+                if (!plannedAliasOwner.has(plannedKey)) {
+                    plannedAliasOwner.set(plannedKey, keepOriginal.id);
+                }
+            }
+        }
+    }
+
+    return { merges, skipped };
+}
 
 export async function searchFoodCatalog(
     store: FoodsStore,

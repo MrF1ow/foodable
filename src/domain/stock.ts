@@ -130,6 +130,15 @@ export function createMemoryStockStore(): MemoryStockStore {
                 }
             }
         },
+        countFoodRefs(householdId) {
+            const counts = new Map<string, number>();
+            for (const row of movements) {
+                if (row.householdId !== householdId) continue;
+                const fid = row.foodId;
+                counts.set(fid, (counts.get(fid) ?? 0) + 1);
+            }
+            return counts;
+        },
         async insertMovement(row) {
             const saved = { ...row };
             movements.push(saved);
@@ -734,29 +743,52 @@ export function ledgerMatchesStock(
     movements: readonly StockMovement[],
     food: Food,
 ): boolean {
-    const itemTotal = items
-        .filter((item) => item.foodId === food.id)
-        .reduce((sum, item) => {
-            const converted = convertStockAmount(
-                item.quantity.amount,
-                item.quantity.unit,
-                food.defaultUnit || "g",
-                food,
-            );
-            return converted == null ? sum : sum + converted;
-        }, 0);
-    const ledgerTotal = movements
-        .filter((row) => row.foodId === food.id)
-        .reduce((sum, row) => {
-            const converted = convertStockAmount(
-                row.delta,
-                row.unit,
-                food.defaultUnit || "g",
-                food,
-            );
-            return converted == null ? sum : sum + converted;
-        }, 0);
+    const itemTotal = ledgerTotalInUnit(
+        items
+            .filter((item) => item.foodId === food.id)
+            .map((item) => ({
+                amount: item.quantity.amount,
+                unit: item.quantity.unit,
+            })),
+        food,
+    );
+    const ledgerTotal = ledgerTotalInUnit(
+        movements
+            .filter((row) => row.foodId === food.id)
+            .map((row) => ({ amount: row.delta, unit: row.unit })),
+        food,
+    );
     return roundAmount(itemTotal) === roundAmount(ledgerTotal);
+}
+
+/**
+ * Sums amounts per unit first, then converts each sum once to the food's
+ * ledger unit. Converting row by row rounds each row, so two 15 ml rows on a
+ * gram food read 15.5 + 15.5 on one side and 30.9 on the other once a density
+ * is known (for example after a merge fills `gramsPerMl`).
+ */
+function ledgerTotalInUnit(
+    rows: readonly { amount: number; unit: string }[],
+    food: Food,
+): number {
+    const byUnit = new Map<string, { unit: string; amount: number }>();
+    for (const row of rows) {
+        const key = row.unit.trim().toLowerCase();
+        const group = byUnit.get(key);
+        if (group) group.amount += row.amount;
+        else byUnit.set(key, { unit: row.unit, amount: row.amount });
+    }
+    let total = 0;
+    for (const group of byUnit.values()) {
+        const converted = convertStockAmount(
+            group.amount,
+            group.unit,
+            food.defaultUnit || "g",
+            food,
+        );
+        if (converted != null) total += converted;
+    }
+    return total;
 }
 
 export type PutAwayResult = {

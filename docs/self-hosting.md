@@ -119,6 +119,24 @@ ExecStop=/usr/bin/bun run db:dev stop
 WantedBy=default.target
 ```
 
+### Merging duplicate foods
+
+`bun run foods:merge-duplicates` merges foods that are certainly the same: same household, same kind, both live, not a product, the same name once case and punctuation are ignored ("All purpose flour" and "all-purpose flour"), and the same brand (or both none). A group of three spellings becomes one food.
+
+- **Which row is kept:** the one with the most references (fridge items, grocery lines, recipe ingredients, meal items, stock movements), then the oldest, then the lower id. Everything moves to it, and the dropped name becomes another name for it.
+- **What is filled:** a field known on one row only (nutrition, grams per each, grams per ml, default unit) is copied to the kept row. Allergens are combined.
+- **What is skipped and listed:** pairs that disagree. A unit factor or default unit set differently on both rows (a blank unit counts as grams). Nutrition on both rows that is not identical, field for field, including which fields are unknown. Both rows having products, or both having a usual product. A dropped name that is already another food's name.
+- **Never merged:** plurals ("egg" / "eggs"), synonyms, word-order variants, different brands or kinds, products and archived rows.
+
+It is not a migration and does not run on deploy. Run the dry run first: it prints each kept row and why, each dropped row, the fields that will be filled and every skipped pair with its reason, and writes nothing. Review it, then apply:
+
+```bash
+bun run foods:merge-duplicates          # dry run (default)
+bun run foods:merge-duplicates --apply  # merge exactly what the dry run listed
+```
+
+On Railway, prefix both with `railway run`. `--json` prints the report as JSON. Each merge is its own transaction; a failed merge is reported and the rest continue, and a second `--apply` finds nothing to do. Reverting the code does not undo merges already applied.
+
 ## Environment variables
 
 | Variable                | Required     | Purpose                                                                                                                     |
