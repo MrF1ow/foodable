@@ -238,7 +238,7 @@ function lineRow(
             : "";
         const amountField = line.note?.trim()
             ? `<label class="visually-hidden" for="put-away-amt-${escapeHtml(line.id)}">Amount</label>
-<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" value="${escapeHtml(String(line.quantity.amount))}" />`
+<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" required />`
             : "";
         putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>

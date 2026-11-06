@@ -106,6 +106,17 @@ export class StockInputError extends Error {
     }
 }
 
+export class NotedGroceryLineAmountRequiredError extends StockInputError {
+    readonly webMessage = "Enter the amount you bought.";
+
+    constructor(displayName: string) {
+        super(
+            `${displayName} is 'to taste' on the list; give the amount you bought.`,
+        );
+        this.name = "NotedGroceryLineAmountRequiredError";
+    }
+}
+
 function roundAmount(amount: number): number {
     return Math.round(amount * 10) / 10;
 }
@@ -844,7 +855,10 @@ export async function putAwayGroceryLines(
         expiresOn?: string | null;
         productFoodIds?: Record<string, string | null>;
         /** Overrides line quantity when putting away (e.g. to-taste lines). */
-        amountsByLineId?: Record<string, number>;
+        amountOverrides?: Record<
+            string,
+            { amount: number; unit?: string | null }
+        >;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
@@ -906,12 +920,20 @@ export async function putAwayGroceryLines(
                 recentLocationForFood(fridgeItems, line.foodId!) ??
                 (await lastUsedLocationId(fridge, input.householdId, chosenId));
         }
-        const delta = input.amountsByLineId?.[line.id] ?? line.quantity.amount;
+        const override = input.amountOverrides?.[line.id];
+        if (line.note?.trim() && override == null) {
+            throw new NotedGroceryLineAmountRequiredError(line.displayName);
+        }
+        const delta = override?.amount ?? line.quantity.amount;
+        const unit =
+            override?.unit != null && override.unit !== ""
+                ? override.unit
+                : line.quantity.unit;
         const applied = await applyMovement(fridge, stock, foods, {
             householdId: input.householdId,
             foodId: chosenId,
             delta,
-            unit: line.quantity.unit,
+            unit,
             reason: "purchase",
             locationId,
             groceryLineId: line.id,
@@ -960,9 +982,6 @@ export async function cookRecipe(
     );
     const shortfalls: StockShortfall[] = [];
     const unmeasured: CookRecipeResult["unmeasured"] = [];
-    if (input.deductStock === false) {
-        return { totalPortions, shortfalls, unmeasured };
-    }
     const scale = totalPortions / recipe.yieldPortions;
     for (const ingredient of ingredients) {
         if (ingredient.quantity == null) {
@@ -970,6 +989,9 @@ export async function cookRecipe(
                 foodId: ingredient.foodId,
                 displayName: ingredient.displayName,
             });
+            continue;
+        }
+        if (input.deductStock === false) {
             continue;
         }
         if (!ingredient.foodId) {

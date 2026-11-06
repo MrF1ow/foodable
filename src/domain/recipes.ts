@@ -1,5 +1,5 @@
 import { formatMissingNutrientList, noticeSentence } from "../copy/notices.js";
-import type { FoodResult } from "../foods.js";
+import { normalizeBarcode, type FoodResult } from "../foods.js";
 import type { Notice, NoticeCode, NoticeRelated } from "./notices.js";
 import { NOTICE_SEVERITY } from "./notices.js";
 import {
@@ -7,6 +7,7 @@ import {
     familyOf,
     findFoodById,
     findOrCreateFoodByBarcode,
+    findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
     FoodsInputError,
     type EffectiveFood,
@@ -923,6 +924,7 @@ export async function updateRecipeIngredient(
     recipeId: string,
     ingredientId: string,
     patch: RecipeIngredientPatch,
+    foods?: FoodsStore,
 ): Promise<RecipeIngredient> {
     const ingredient = await requireIngredient(
         store,
@@ -951,10 +953,19 @@ export async function updateRecipeIngredient(
         }
     } else {
         const amount = parseAmount(patch.amount);
-        const unit =
-            patch.unit === undefined
-                ? (ingredient.quantity?.unit ?? parseUnit(undefined))
-                : parseUnit(patch.unit);
+        let unit;
+        if (patch.unit !== undefined) {
+            unit = parseUnit(patch.unit);
+        } else if (ingredient.quantity?.unit) {
+            unit = ingredient.quantity.unit;
+        } else if (foods && ingredient.foodId) {
+            const food = await foods.getFood(householdId, ingredient.foodId);
+            unit = parseUnit(
+                storedFoodUnit(undefined, food ?? { defaultUnit: "g" }),
+            );
+        } else {
+            unit = parseUnit(undefined);
+        }
         quantity = { amount, unit };
     }
     const saved = await store.updateIngredient({
@@ -1307,12 +1318,15 @@ export async function addRecipeToGrocery(opts: {
             [...foodsById.values()].map((row) => [row.id, familyOf(row)]),
         );
     }
+    function familyKey(foodId: string): string {
+        return familyById.get(foodId) ?? foodId;
+    }
     function listHasFoodFamily(foodId: string | null): boolean {
         if (!foodId) return false;
-        const family = familyIdOf(foodId, foodsById);
+        const family = familyKey(foodId);
         return existingLines.some((row) => {
             if (!row.foodId) return false;
-            return familyIdOf(row.foodId, foodsById) === family;
+            return familyKey(row.foodId) === family;
         });
     }
 
@@ -1623,58 +1637,80 @@ export async function importRecipeFromText(
     const lines = input.ingredients ?? [];
     const validated = lines.map((line) => validateImportLine(line));
 
-    const barcodeResolved: ImportLineResolved[] = [];
-    for (const [index, line] of lines.entries()) {
-        const { quantity, note } = validated[index]!;
-        let food: Food;
-        try {
-            if (line.foodId) {
-                food = await findFoodById(
-                    foods,
-                    input.householdId,
-                    line.foodId,
-                );
-                if (food.kind !== "food") {
-                    throw new RecipeInputError(
-                        "That catalog item is a supply.",
-                    );
-                }
-            } else if (line.barcode) {
-                food = await findOrCreateFoodByBarcode(
-                    foods,
-                    input.householdId,
-                    line.barcode,
-                    opts.lookup,
-                );
-            } else {
-                food = await findOrCreateManualFood(
-                    foods,
-                    input.householdId,
-                    "food",
-                    line.name,
-                );
+    const barcodeHits = new Map<string, FoodResult>();
+    for (const line of lines) {
+        if (!line.barcode) continue;
+        const normalized = normalizeBarcode(line.barcode);
+        if (normalized && !barcodeHits.has(normalized)) {
+            const hit = await opts.lookup(normalized);
+            if (hit == null) {
+                throw new RecipeInputError("Unknown barcode.");
             }
-        } catch (err) {
-            wrapFoodsError(err);
+            barcodeHits.set(normalized, hit);
         }
-        const storedQuantity =
-            quantity == null
-                ? null
-                : {
-                      amount: quantity.amount,
-                      unit: storedFoodUnit(line.unit, food),
-                  };
-        barcodeResolved.push({
-            index,
-            line,
-            food,
-            quantity: storedQuantity,
-            note,
-        });
     }
 
     const runTx = opts.transaction ?? ((fn) => fn());
     return runTx(async () => {
+        const barcodeResolved: ImportLineResolved[] = [];
+        for (const [index, line] of lines.entries()) {
+            const { quantity, note } = validated[index]!;
+            let food: Food;
+            try {
+                if (line.foodId) {
+                    food = await findFoodById(
+                        foods,
+                        input.householdId,
+                        line.foodId,
+                    );
+                    if (food.kind !== "food") {
+                        throw new RecipeInputError(
+                            "That catalog item is a supply.",
+                        );
+                    }
+                } else if (line.barcode) {
+                    const normalized = normalizeBarcode(line.barcode);
+                    if (!normalized) {
+                        throw new RecipeInputError("Enter a valid barcode.");
+                    }
+                    const hit = barcodeHits.get(normalized);
+                    if (!hit) {
+                        throw new RecipeInputError("Unknown barcode.");
+                    }
+                    food = (
+                        await findOrCreateFoodByBarcodeFromHit(
+                            foods,
+                            input.householdId,
+                            normalized,
+                            hit,
+                        )
+                    ).food;
+                } else {
+                    food = await findOrCreateManualFood(
+                        foods,
+                        input.householdId,
+                        "food",
+                        line.name,
+                    );
+                }
+            } catch (err) {
+                wrapFoodsError(err);
+            }
+            const storedQuantity =
+                quantity == null
+                    ? null
+                    : {
+                          amount: quantity.amount,
+                          unit: storedFoodUnit(line.unit, food),
+                      };
+            barcodeResolved.push({
+                index,
+                line,
+                food,
+                quantity: storedQuantity,
+                note,
+            });
+        }
         const instructionBody =
             input.instructions !== undefined
                 ? parseOptionalText(input.instructions, "Instructions", 20_000)

@@ -989,6 +989,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             unit: args.unit,
                             note: args.note,
                         },
+                        liveFoodsStore(),
                     );
                     return {
                         content: [
@@ -1220,7 +1221,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         (row) =>
                                             `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
                                     )
-                                    .join("\n")}${gapLines.length ? "" : ""}${
+                                    .join("\n")}${
                                     places.length
                                         ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
                                         : ""

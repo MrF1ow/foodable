@@ -4985,6 +4985,8 @@ describe("phone-app domain MCP tools", () => {
                 }>
             ).flatMap((s) => s.sections.flatMap((sec) => sec.lines));
             expect(lines.some((row) => row.note === "to taste")).toBe(true);
+            expect(textOf(listed)).toContain("Salt · to taste");
+            expect(textOf(listed)).not.toMatch(/Salt 1 g/);
             const cooked = await call("cook_recipe", {
                 recipe_id: recipeId,
                 portions_by_member: [{ user_id: alice, portions: 1 }],

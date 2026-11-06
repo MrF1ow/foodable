@@ -1568,6 +1568,12 @@ test("macrosForPerson counts only measured ingredients when one is unmeasured", 
         fatG: 1,
     });
     const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    await updateFood(foods, HH, salt.id, {
+        calories: 9999,
+        proteinG: 999,
+        carbsG: 999,
+        fatG: 999,
+    });
     const catalog = await effectiveFoodsByIds(foods, HH, [flour.id, salt.id]);
     const measured = recipeIngredientFromRow({
         id: "i-flour",
@@ -1597,6 +1603,42 @@ test("macrosForPerson counts only measured ingredients when one is unmeasured", 
     const amountGap = macros.gaps.find((g) => g.reason === "no_amount");
     expect(amountGap?.message).toContain("Salt has no amount");
     expect(macros.calories).toBe(364);
+    expect(macros.protein_g).toBe(10);
+    expect(macros.carbs_g).toBe(76);
+    expect(macros.fat_g).toBe(1);
+});
+
+test("updateRecipeIngredient uses food default unit when measuring unmeasured ingredient", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+    await updateFood(foods, HH, eggs.id, { defaultUnit: "each" });
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Omelette",
+        yieldPortions: 1,
+    });
+    const ingredient = await store.insertIngredient({
+        id: "ing-eggs",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Eggs",
+        quantity: null,
+        foodId: eggs.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const updated = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 2 },
+        foods,
+    );
+    expect(updated.quantity).toEqual({ amount: 2, unit: "each" });
 });
 
 test("unmeasured ingredient per-portion and per-person amounts stay null", async () => {
@@ -1702,6 +1744,63 @@ test("addRecipeToGrocery handles unmeasured salt against list and stock", async 
     expect(withStock.added).toHaveLength(0);
 });
 
+test("addRecipeToGrocery skips unmeasured when usual product is already on the list", async () => {
+    const recipes = createMemoryRecipesStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const plain = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const morton = await createProduct(foods, HH, plain.id, {
+        name: "Morton Salt",
+        brand: "Morton",
+    });
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const sections = await settings.listSections(store.id);
+    await grocery.insertLine({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        storeId: store.id,
+        sectionId: sections[0]!.id,
+        kind: "food",
+        displayName: "Morton Salt",
+        quantity: { amount: 1, unit: "g" },
+        foodId: morton.id,
+        checked: false,
+        note: "to taste",
+    });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Eggs",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: plain.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const result = await addRecipeToGrocery({
+        recipes,
+        grocery,
+        settings,
+        foods,
+        householdId: HH,
+        recipeId: recipe.id,
+        storeId: store.id,
+        portionCounts: [1],
+        foodsById: catalog,
+        fridgeItems: [],
+    });
+    expect(result.added).toHaveLength(0);
+});
+
 test("importRecipeFromText optional amount instructions and rollback", async () => {
     const recipes = createMemoryRecipesStore();
     const foods = createMemoryFoodsStore();
@@ -1738,19 +1837,31 @@ test("importRecipeFromText optional amount instructions and rollback", async () 
         { lookup },
     );
     expect(legacy.recipe.instructions).toBe("Title\nBody only");
+    const supply = await findOrCreateManualFood(foods, HH, "supply", "Spice");
     const rollback = async <T>(fn: () => Promise<T>): Promise<T> => {
-        const before = await recipes.listRecipes(HH);
-        const ids = new Set(before.map((row) => row.id));
+        const recipeIdsBefore = new Set(
+            (await recipes.listRecipes(HH)).map((row) => row.id),
+        );
+        const foodIdsBefore = new Set(
+            (await foods.listFoods(HH)).map((row) => row.id),
+        );
         try {
             return await fn();
-        } catch {
-            const after = await recipes.listRecipes(HH);
-            for (const row of after) {
-                if (!ids.has(row.id)) {
+        } catch (err) {
+            for (const row of await recipes.listRecipes(HH)) {
+                if (!recipeIdsBefore.has(row.id)) {
                     await recipes.deleteRecipe(HH, row.id);
                 }
             }
-            throw new Error("rolled back");
+            for (const row of await foods.listFoods(HH)) {
+                if (!foodIdsBefore.has(row.id)) {
+                    await foods.updateFoodRow({
+                        ...row,
+                        archivedAt: new Date().toISOString(),
+                    });
+                }
+            }
+            throw err;
         }
     };
     await expect(
@@ -1765,13 +1876,19 @@ test("importRecipeFromText optional amount instructions and rollback", async () 
                 ingredients: [
                     { name: "Ok", amount: 1, unit: "g" },
                     { name: "Ok2", amount: 1, unit: "g" },
-                    { name: "", amount: 1, unit: "g" },
+                    { name: "Spice", amount: 1, unit: "g", foodId: supply.id },
                 ],
             },
             { lookup, transaction: rollback },
         ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/supply/);
     expect((await recipes.listRecipes(HH)).some((r) => r.name === "Bad")).toBe(
+        false,
+    );
+    expect((await foods.listFoods(HH)).some((f) => f.name === "Ok")).toBe(
+        false,
+    );
+    expect((await foods.listFoods(HH)).some((f) => f.name === "Ok2")).toBe(
         false,
     );
 });

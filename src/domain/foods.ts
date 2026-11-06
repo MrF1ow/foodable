@@ -954,14 +954,12 @@ async function findFoodByLooseKey(
     return copyFood(matches[0]!);
 }
 
-export async function findOrCreateFoodByBarcodeResult(
+export async function findOrCreateFoodByBarcodeFromHit(
     store: FoodsStore,
     householdId: string,
-    barcode: string,
-    lookup: (barcode: string) => Promise<FoodResult | null>,
+    normalized: string,
+    hit: FoodResult,
 ): Promise<{ food: Food; created: boolean }> {
-    const normalized = normalizeBarcode(barcode);
-    if (!normalized) throw new FoodsInputError("Enter a valid barcode.");
     const existingId = await store.getBarcodeFoodId(householdId, normalized);
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
@@ -969,8 +967,6 @@ export async function findOrCreateFoodByBarcodeResult(
             return { food: existing, created: false };
         }
     }
-    const hit = await lookup(normalized);
-    if (hit == null) throw new FoodsInputError("Unknown barcode.");
     const byOff = await store.getByOffSourceId(householdId, normalized);
     if (byOff) {
         await store.setBarcode(householdId, normalized, byOff.id);
@@ -1002,6 +998,31 @@ export async function findOrCreateFoodByBarcodeResult(
     );
     await store.setBarcode(householdId, normalized, created.id);
     return { food: created, created: true };
+}
+
+export async function findOrCreateFoodByBarcodeResult(
+    store: FoodsStore,
+    householdId: string,
+    barcode: string,
+    lookup: (barcode: string) => Promise<FoodResult | null>,
+): Promise<{ food: Food; created: boolean }> {
+    const normalized = normalizeBarcode(barcode);
+    if (!normalized) throw new FoodsInputError("Enter a valid barcode.");
+    const existingId = await store.getBarcodeFoodId(householdId, normalized);
+    if (existingId) {
+        const existing = await store.getFood(householdId, existingId);
+        if (existing && !existing.archivedAt) {
+            return { food: existing, created: false };
+        }
+    }
+    const hit = await lookup(normalized);
+    if (hit == null) throw new FoodsInputError("Unknown barcode.");
+    return findOrCreateFoodByBarcodeFromHit(
+        store,
+        householdId,
+        normalized,
+        hit,
+    );
 }
 
 export async function findOrCreateFoodByBarcode(

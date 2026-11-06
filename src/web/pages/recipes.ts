@@ -8,6 +8,7 @@ import {
 import type { Notice } from "../../domain/notices.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
+import { renderQuantityField } from "../components/quantity-field.js";
 import { renderMemberMultiSelect } from "../components/member-multi-select.js";
 import {
     renderRecipeCard,
@@ -56,7 +57,9 @@ export type RecipesPageView = {
     openModalId?: string;
 };
 
-export type RecipeIngredientRow = RecipeIngredientView;
+export type RecipeIngredientRow = RecipeIngredientView & {
+    defaultUnit?: string;
+};
 
 export type RecipeDetailView = {
     chrome: ViewerChrome;
@@ -331,7 +334,7 @@ function sharedIngredientModals(view: RecipeDetailView): string {
             submitDisabled: editItem == null,
             body: `${editOpen ? modalFormError(view, `${EDIT_INGREDIENT_PREFIX}${editItem?.id}`) : ""}<form class="recipe-ingredient-edit" method="post" action="${editItem ? `/recipes/${recipeId}/ingredients/${editId}` : ""}">
 ${field({ id: "recipe-ingredient-note", label: "Note", control: `<input id="recipe-ingredient-note" name="note" type="text" maxlength="500" value="${escapeHtml(editItem?.note ?? "")}" autocomplete="off" />` })}
-${field({ id: "recipe-ingredient-amount", label: "Amount", control: `<input id="recipe-ingredient-amount" name="amount" type="number" min="0" step="any" placeholder="to taste" value="${editItem && editItem.quantity != null ? escapeHtml(String(editItem.quantity.amount)) : ""}" />` })}
+${editItem ? renderQuantityField({ kind: "food", namePrefix: "ing", idPrefix: "recipe-ingredient", amount: editItem.quantity?.amount, unit: editItem.quantity?.unit ?? (editItem as RecipeIngredientRow).defaultUnit ?? "g" }) : ""}
 <button type="submit" class="btn-primary">Save ingredient</button>
 </form>`,
         }) +
