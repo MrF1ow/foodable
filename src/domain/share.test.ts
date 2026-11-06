@@ -128,11 +128,18 @@ describe("isSafeShareReturnPath", () => {
     });
 
     test("refuses control characters and CRLF smuggling", () => {
-        expect(
-            isSafeShareReturnPath("/share?text=hi%0d%0aLocation:%20/evil"),
-        ).toBeNull();
+        // Encoded controls in the query stay encoded (a caption is multiline),
+        // so they can never split the Location header.
+        const smuggled = isSafeShareReturnPath(
+            "/share?text=hi%0d%0aLocation:%20/evil",
+        );
+        expect(smuggled).toBe("/share?text=hi%0d%0aLocation:%20/evil");
+        expect(smuggled).not.toMatch(/[\r\n]/);
         expect(isSafeShareReturnPath("/share\r\n")).toBeNull();
-        expect(isSafeShareReturnPath("/share?next=%0a%0d")).toBeNull();
+        expect(isSafeShareReturnPath("/share%0a?text=x")).toBeNull();
+        expect(isSafeShareReturnPath("/share?text=line1%0Aline2")).toBe(
+            "/share?text=line1%0Aline2",
+        );
     });
 
     test("accepts long /share queries within the return cap", () => {

@@ -7536,6 +7536,27 @@ describe("authenticated dashboard HTTP", () => {
         );
         const imp = await db.recipesStore.getImport("hh-1", recipeId);
         expect(imp?.sourceTextOrigin).toBe("shared");
+
+        // A bad link beside a shared caption keeps the caption and its origin.
+        const badLink = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                text_only: "1",
+                text_origin: "shared",
+                url: "not a link",
+                text: "Keep this caption",
+            }).toString(),
+        });
+        expect(badLink.status).toBe(422);
+        const badHtml = await badLink.text();
+        expect(badHtml).toContain("Keep this caption");
+        expect(badHtml).toContain('name="text_origin" value="shared"');
+        expect(badHtml).toContain("That doesn't look like a web link.");
     });
 
     test("POST /recipes/import paste flow for Instagram and Pinterest website_url", async () => {

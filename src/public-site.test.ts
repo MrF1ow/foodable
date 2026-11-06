@@ -336,6 +336,7 @@ describe("runtime surfaces that stay", () => {
         expect(sw.headers.get("service-worker-allowed")).toBe("/");
         expect(sw.headers.get("cache-control")).toBe("no-cache");
 
+        const touch = await app.request("http://x/apple-touch-icon.png");
         for (const path of [
             "/icon-192.png",
             "/icon-512.png",
@@ -344,6 +345,10 @@ describe("runtime surfaces that stay", () => {
             const r = await app.request(`http://x${path}`);
             expect(r.status, path).toBe(200);
             expect(r.headers.get("content-type")).toBe("image/png");
+            // Unversioned URLs: never immutable, same as the touch icon.
+            expect(r.headers.get("cache-control"), path).toBe(
+                touch.headers.get("cache-control"),
+            );
         }
     });
 
