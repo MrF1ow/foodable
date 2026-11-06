@@ -716,6 +716,7 @@ export async function renderHouseholdSettingsRoute(
             timezone: profile?.timezone ?? "UTC",
             fetchRefusals,
             fetchRefusalsShowMore,
+            fetchRefusalsPaged: refusalsAfter != null,
         }),
     };
 }
@@ -740,6 +741,7 @@ export async function renderRecipesListPage(
         importSourceLabel?: string;
         importTextOrigin?: "shared" | "pasted";
         importTextOnly?: boolean;
+        importWebsiteUrl?: string;
         importShowRetry?: boolean;
         importRetryDisabled?: boolean;
         shareArrived?: import("../domain/share.js").ReadShareResult;
@@ -848,6 +850,7 @@ export async function renderRecipesListPage(
             importSourceLabel: opts.importSourceLabel,
             importTextOrigin: opts.importTextOrigin,
             importTextOnly: opts.importTextOnly,
+            importWebsiteUrl: opts.importWebsiteUrl,
             importShowRetry: opts.importShowRetry,
             importRetryDisabled: opts.importRetryDisabled,
             shareArrived: opts.shareArrived,

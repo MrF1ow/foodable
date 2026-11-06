@@ -1551,6 +1551,44 @@ describe("importRecipeFromUrl fetch memory (websites)", () => {
         expect(fetcher.calls.fetch).toBe(2);
     });
 
+    test("a retry that gets through clears the redirect host's refusal too", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const now = new Date();
+        await memory.recordRefusal(HH, "cdn.example", 403, now);
+        await memory.recordRefusal(HH, "start.example", 403, now);
+        const fetcher: SafeFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true as const,
+                    url: "https://cdn.example/soup",
+                    status: 200,
+                    contentType: "text/html",
+                    body: loadFixture("array-top-level"),
+                };
+            },
+        };
+        const out = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://start.example/soup",
+                retry: true,
+            },
+        );
+        expect(out.status).toMatch(/imported|unverified_needs_review/);
+        expect(await memory.getRefusal(HH, "cdn.example", now)).toBeNull();
+        expect(await memory.getRefusal(HH, "start.example", now)).toBeNull();
+    });
+
     test("404 records URL; same link skips fetch; other path still fetches", async () => {
         const memory = createMemoryFetchMemoryStore();
         const recipes = createMemoryRecipesStore();

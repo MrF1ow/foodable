@@ -1082,6 +1082,19 @@ export async function importRecipeFromUrl(
             });
         }
 
+        // A retry that got through shows the redirect host serves us again;
+        // forget its refusal too, not just the link's own host.
+        if (memory && input.retry) {
+            const finalHost = normalizeMemoryHost(
+                new URL(fetched.url).hostname,
+            );
+            if (finalHost !== memoryHost) {
+                await safeFetchMemory("clear redirect host", async () => {
+                    await memory.clearRefusal(input.householdId, finalHost);
+                });
+            }
+        }
+
         const jsonld = readRecipeJsonLd(fetched.body);
         if (!jsonld) {
             return emptyOutcome("no_recipe_on_page", {
@@ -1391,7 +1404,7 @@ let fetchMemorySweepRunning = false;
 
 /** Daily sweep of expired fetch memory rows (refusals and 404 dead links). */
 export function startFetchMemorySweep(memory: FetchMemoryStore): void {
-    setInterval(() => {
+    const sweep = () => {
         if (fetchMemorySweepRunning) return;
         fetchMemorySweepRunning = true;
         const now = new Date();
@@ -1406,5 +1419,9 @@ export function startFetchMemorySweep(memory: FetchMemoryStore): void {
             .finally(() => {
                 fetchMemorySweepRunning = false;
             });
-    }, SWEEP_INTERVAL_MS);
+    };
+    // Once shortly after boot (a server that restarts often would otherwise
+    // never sweep), then daily. Reads already ignore expired rows.
+    setTimeout(sweep, 60_000).unref?.();
+    setInterval(sweep, SWEEP_INTERVAL_MS);
 }

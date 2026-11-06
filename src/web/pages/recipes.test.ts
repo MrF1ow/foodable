@@ -597,3 +597,27 @@ test("a read import shows its caption and spoken transcript", () => {
     expect(html).toContain("Spoken transcript");
     expect(html).toContain("two cups of pasta &lt;then&gt; butter");
 });
+
+test("check again submits the import form on screen with the typed text", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: "recipe-import-url",
+        importUrl: "https://example.com/soup",
+        importError:
+            "This site refused Foodable recently. Paste the recipe instead.",
+        importPasteStep: true,
+        importPasteText: "my typed recipe",
+        importShowRetry: true,
+        importSourceKind: "website",
+        importSourceLabel: "example.com",
+    } as never);
+    expect(html).toContain('id="recipe-import-form"');
+    expect(html).toMatch(
+        /<button type="submit" form="recipe-import-form" name="retry" value="1" formnovalidate/,
+    );
+    expect(html).not.toContain("recipe-import-retry-form");
+    expect(html).toContain("my typed recipe");
+});

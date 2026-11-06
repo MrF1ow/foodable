@@ -317,7 +317,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 text,
                 credit: credit.trim() || undefined,
                 textOrigin,
-                retry,
             });
         }
         if (
@@ -332,6 +331,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 importPasteText: text,
                 importCredit: credit,
                 importWebsiteError: websiteError,
+                importWebsiteUrl: websiteUrl,
                 importError:
                     text.trim() !== ""
                         ? importOutcomeMessage(outcome)
