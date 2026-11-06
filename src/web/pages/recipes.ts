@@ -54,6 +54,19 @@ export type RecipesPageFilter = {
     verification: "" | RecipeVerification;
 };
 
+export function recipesListHref(
+    verification: "" | RecipeVerification,
+    filter: RecipesPageFilter,
+): string {
+    const params = new URLSearchParams();
+    if (filter.tag.trim()) params.set("tag", filter.tag.trim());
+    if (filter.canMakeNow) params.set("can_make_now", "1");
+    if (filter.safeFor) params.set("safe_for", filter.safeFor);
+    if (verification) params.set("verification", verification);
+    const query = params.toString();
+    return query ? `/recipes?${query}` : "/recipes";
+}
+
 export type RecipesPageView = {
     chrome: AppChromeBase;
     recipes: Recipe[];
@@ -232,12 +245,13 @@ export function renderRecipesPage(view: RecipesPageView): string {
         filter.verification !== "";
     const verificationSeg = (value: "" | RecipeVerification, label: string) => {
         const active = filter.verification === value ? "true" : "false";
-        const href =
-            value === ""
-                ? "/recipes"
-                : `/recipes?verification=${encodeURIComponent(value)}`;
+        const href = recipesListHref(value, filter);
         return `<a class="seg-btn" href="${href}" aria-selected="${active}">${escapeHtml(label)}</a>`;
     };
+    const verificationField =
+        filter.verification === ""
+            ? ""
+            : `<input type="hidden" name="verification" value="${escapeHtml(filter.verification)}" />`;
     const list =
         view.recipes.length === 0
             ? ""
@@ -273,6 +287,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
             summary: "Filter",
             open: filtering,
             body: `<form class="recipe-list-filters" method="get" action="/recipes">
+                ${verificationField}
                 ${field({ id: "recipe-tag", label: "Tag", control: `<input id="recipe-tag" name="tag" type="text" value="${escapeHtml(filter.tag)}" autocomplete="off" />` })}
                 <label class="recipe-filter-check">
                     <input type="checkbox" name="can_make_now" value="1"${filter.canMakeNow ? " checked" : ""} />

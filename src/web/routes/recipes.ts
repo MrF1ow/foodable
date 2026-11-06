@@ -60,7 +60,10 @@ function redirectIfUnverified(
     recipeId: string,
     err: unknown,
 ) {
-    if (err instanceof RecipeUnverifiedError) {
+    if (
+        err instanceof RecipeUnverifiedError ||
+        (err instanceof MealItemsError && err.code === "recipe_unverified")
+    ) {
         return redirectWithToast(
             c,
             `/recipes/${recipeId}`,
@@ -639,22 +642,29 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
 recipesRoutes.post("/recipes/:id/verify", requireMember, async (c) => {
     const member = siteMember(c);
     const recipeId = c.req.param("id");
-    const checked = await recheckRecipe(
-        liveRecipesStore(),
-        member.householdId,
-        recipeId,
-    );
-    if (checked.verified) {
+    try {
+        const checked = await recheckRecipe(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+        );
+        if (checked.verified) {
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                "recipes.verify.passed",
+            );
+        }
         return redirectWithToast(
             c,
             `/recipes/${recipeId}`,
-            "recipes.verify.passed",
+            "recipes.verify.failed",
+            { count: String(checked.problems.length) },
         );
+    } catch (err) {
+        if (err instanceof RecipeInputError) {
+            return redirectWithToast(c, "/recipes", "recipes.not_found");
+        }
+        throw err;
     }
-    return redirectWithToast(
-        c,
-        `/recipes/${recipeId}`,
-        "recipes.verify.failed",
-        { count: String(checked.problems.length) },
-    );
 });

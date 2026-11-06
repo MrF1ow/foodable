@@ -1026,6 +1026,7 @@ test("importRecipeFromText find-or-creates foods and reports nutrition gaps", as
             householdId: HH,
             creatorId: ALICE,
             text: "Pancakes\nMix and fry.",
+            instructions: "Mix and fry.",
             sourceUrl: "https://example.com/pancakes",
             name: "Pancakes",
             yieldPortions: 4,
@@ -1038,7 +1039,7 @@ test("importRecipeFromText find-or-creates foods and reports nutrition gaps", as
         { lookup: async () => null },
     );
     expect(result.recipe.name).toBe("Pancakes");
-    expect(result.recipe.instructions).toBe("Pancakes\nMix and fry.");
+    expect(result.recipe.instructions).toBe("Mix and fry.");
     expect(result.recipe.sourceUrl).toBe("https://example.com/pancakes");
     expect(result.ingredients).toHaveLength(2);
     expect(result.ingredients[0]?.note).toBe("sifted");
@@ -1885,7 +1886,13 @@ test("importRecipeFromText optional amount instructions and rollback", async () 
         },
         { lookup },
     );
-    expect(legacy.recipe.instructions).toBe("Title\nBody only");
+    expect(legacy.recipe.instructions).toBeNull();
+    expect(legacy.verification).toBe("unverified");
+    expect(legacy.problems.some((p) => p.code === "no_instructions")).toBe(
+        true,
+    );
+    const imp = await recipes.getImport(HH, legacy.recipe.id);
+    expect(imp?.sourceText).toBe("Title\nBody only");
     const supply = await findOrCreateManualFood(foods, HH, "supply", "Spice");
     const rollback = async <T>(fn: () => Promise<T>): Promise<T> => {
         const recipeIdsBefore = new Set(
@@ -1996,6 +2003,83 @@ test("importRecipeFromText stays unverified when instructions are missing", asyn
     expect(result.problems.some((p) => p.code === "no_instructions")).toBe(
         true,
     );
+});
+
+test("importRecipeFromText without instructions field keeps source text separate", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const result = await importRecipeFromText(
+        store,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Raw caption only",
+            name: "No steps param",
+            ingredients: [{ name: "Flour", amount: 100, unit: "g" }],
+        },
+        { lookup: async () => null },
+    );
+    expect(result.recipe.instructions).toBeNull();
+    expect(result.verification).toBe("unverified");
+    expect(result.problems.some((p) => p.code === "no_instructions")).toBe(
+        true,
+    );
+    const imp = await store.getImport(HH, result.recipe.id);
+    expect(imp?.sourceText).toBe("Raw caption only");
+});
+
+test("addRecipeManualIngredient with unmeasured amount stores to taste", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Seasoned",
+        yieldPortions: 2,
+        instructions: "1. Mix",
+    });
+    const ingredient = await addRecipeManualIngredient(store, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Salt",
+        amount: null,
+    });
+    expect(ingredient.quantity).toBeNull();
+    expect(ingredient.note).toBe("to taste");
+    const saved = await store.getRecipe(HH, recipe.id);
+    expect(saved?.verification).toBe("verified");
+});
+
+test("updateRecipeIngredient clearing amount with blank note stores to taste", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Adjustable",
+        yieldPortions: 2,
+        instructions: "1. Stir",
+    });
+    const ingredient = await addRecipeManualIngredient(store, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Pepper",
+        amount: 1,
+        unit: "g",
+    });
+    const updated = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: null, note: "" },
+        foods,
+    );
+    expect(updated.quantity).toBeNull();
+    expect(updated.note).toBe("to taste");
+    const saved = await store.getRecipe(HH, recipe.id);
+    expect(saved?.verification).toBe("verified");
 });
 
 test("editing an unverified recipe until complete verifies it", async () => {

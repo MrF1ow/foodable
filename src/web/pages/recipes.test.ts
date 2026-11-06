@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
 import {
+    recipesListHref,
     renderRecipeDetailPage,
     renderRecipesPage,
     type RecipeDetailView,
@@ -216,6 +217,33 @@ test("a failed steps save reopens the Method modal", () => {
         openModalId: "recipe-method-r1",
     });
     expect(html).toMatch(/id="recipe-method-r1"[^>]*data-modal-open-on-load/);
+});
+
+test("verification segment links keep list filters", () => {
+    const filter = {
+        tag: "dinner",
+        canMakeNow: true,
+        safeFor: VIEWER,
+        verification: "verified" as const,
+    };
+    expect(recipesListHref("unverified", filter)).toBe(
+        `/recipes?tag=dinner&can_make_now=1&safe_for=${encodeURIComponent(VIEWER)}&verification=unverified`,
+    );
+    expect(recipesListHref("", filter)).toBe(
+        `/recipes?tag=dinner&can_make_now=1&safe_for=${encodeURIComponent(VIEWER)}`,
+    );
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [{ userId: VIEWER, displayName: "Alice" }],
+        viewerId: VIEWER,
+        filter,
+    });
+    expect(html).toContain(
+        `href="/recipes?tag=dinner&can_make_now=1&safe_for=${VIEWER}&verification=unverified"`,
+    );
+    expect(html).toContain('name="verification"');
+    expect(html).toContain('value="verified"');
 });
 
 test("recipes list shows verification filter and unverified badge", () => {

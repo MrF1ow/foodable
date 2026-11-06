@@ -1240,7 +1240,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                "Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients; pass instructions for the method steps when you have them (otherwise text is stored as instructions for older callers). Optional ingredient amount means to taste. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.",
+                "Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Optional ingredient amount means to taste. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,

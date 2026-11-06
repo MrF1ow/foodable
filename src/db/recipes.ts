@@ -38,6 +38,15 @@ const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
 const RECIPE_IMPORT_COLS =
     "recipe_id, household_id, source_kind, source_url, source_text, source_text_origin, transcript, credit, unresolved_lines, problems, imported_at";
 
+export function recipeImportSqlValues(
+    row: ReturnType<typeof recipeImportToRow>,
+) {
+    return {
+        unresolvedLinesJson: JSON.stringify(row.unresolved_lines),
+        problemsJson: JSON.stringify(row.problems),
+    };
+}
+
 function patchKeys(keys: string[]): [string, ...string[]] {
     return keys as [string, ...string[]];
 }
@@ -378,10 +387,37 @@ export function liveRecipesStore(): RecipesStore {
             return run(async (tx) => {
                 try {
                     const payload = recipeImportToRow(row);
+                    const { unresolvedLinesJson, problemsJson } =
+                        recipeImportSqlValues(payload);
                     const data = await one<Record<string, unknown>>(
                         tx,
                         tx`
-                            insert into ${tx.unsafe(RECIPE_IMPORTS)} ${tx(payload)}
+                            insert into ${tx.unsafe(RECIPE_IMPORTS)} (
+                                recipe_id,
+                                household_id,
+                                source_kind,
+                                source_url,
+                                source_text,
+                                source_text_origin,
+                                transcript,
+                                credit,
+                                unresolved_lines,
+                                problems,
+                                imported_at
+                            )
+                            values (
+                                ${payload.recipe_id},
+                                ${payload.household_id},
+                                ${payload.source_kind},
+                                ${payload.source_url},
+                                ${payload.source_text},
+                                ${payload.source_text_origin},
+                                ${payload.transcript},
+                                ${payload.credit},
+                                ${unresolvedLinesJson}::jsonb,
+                                ${problemsJson}::jsonb,
+                                ${payload.imported_at}
+                            )
                             on conflict (recipe_id) do update set
                                 household_id = excluded.household_id,
                                 source_kind = excluded.source_kind,
