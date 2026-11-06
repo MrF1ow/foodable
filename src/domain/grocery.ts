@@ -4,6 +4,7 @@ import {
     familyOf,
     findFoodById,
     findOrCreateFoodByBarcode,
+    findManualFood,
     findOrCreateManualFood,
     FoodsInputError,
     normalizeFoodName,
@@ -631,6 +632,21 @@ type GroceryPickCallback = (pick: {
     amountReason: GroceryAmountPickReason;
 }) => void;
 
+/**
+ * A line with no store picks one, and that needs at least one store. Checked
+ * before the food is found or created, so a household with no stores never
+ * gets a new catalog row from a line that cannot be placed.
+ */
+async function requireAnyStore(
+    settings: SettingsStore,
+    householdId: string,
+): Promise<void> {
+    const stores = await settings.listStores(householdId);
+    if (stores.length === 0) {
+        throw new GroceryInputError("Add a store first.");
+    }
+}
+
 export async function addGroceryFoodById(
     grocery: GroceryListStore,
     settings: SettingsStore,
@@ -653,6 +669,8 @@ export async function addGroceryFoodById(
     if (hasExplicitStore) {
         await requireStore(settings, input.householdId, explicit!);
         await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    } else {
+        await requireAnyStore(settings, input.householdId);
     }
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
@@ -764,6 +782,8 @@ export async function addGroceryFoodByBarcode(
     if (hasExplicitStore) {
         await requireStore(settings, input.householdId, explicit!);
         await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    } else {
+        await requireAnyStore(settings, input.householdId);
     }
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
@@ -874,6 +894,8 @@ export async function addGroceryManualFood(
     if (hasExplicitStore) {
         await requireStore(settings, input.householdId, explicit!);
         await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    } else {
+        await requireAnyStore(settings, input.householdId);
     }
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
@@ -985,11 +1007,26 @@ export async function addGrocerySupply(
     if (hasExplicitStore) {
         await requireStore(settings, input.householdId, explicit!);
         await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    } else {
+        await requireAnyStore(settings, input.householdId);
     }
     if (hasExplicitAmount) {
         const u = input.unit?.trim() ?? "";
         if (!u) throw new GroceryInputError("Enter a unit.");
         parseAmount(Number(input.amount));
+    } else if (!input.unit?.trim()) {
+        // No amount and no unit: only an existing supply's usual pair can
+        // supply them. A name that is not in the catalog yet has none, so
+        // refuse before findOrCreateManualFood would insert it.
+        const existing = input.foodId
+            ? await foods.getFood(input.householdId, input.foodId)
+            : await findManualFood(
+                  foods,
+                  input.householdId,
+                  "supply",
+                  input.name,
+              );
+        if (!existing) throw new GroceryInputError("Enter a unit.");
     }
 
     try {

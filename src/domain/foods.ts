@@ -1020,6 +1020,25 @@ export async function findOrCreateFoodByBarcode(
     ).food;
 }
 
+/** The food `findOrCreateManualFood` would return without creating one, or null. */
+export async function findManualFood(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+): Promise<Food | null> {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const existing = await existingByNameOrAlias(
+        store,
+        householdId,
+        kind,
+        normalizeFoodName(trimmed),
+    );
+    if (existing) return existing;
+    return findFoodByLooseKey(store, householdId, kind, trimmed);
+}
+
 export async function findOrCreateManualFood(
     store: FoodsStore,
     householdId: string,
@@ -1032,16 +1051,8 @@ export async function findOrCreateManualFood(
             kind === "supply" ? "Enter a supply name." : "Enter a food name.",
         );
     }
-    const normalized = normalizeFoodName(trimmed);
-    const existing = await existingByNameOrAlias(
-        store,
-        householdId,
-        kind,
-        normalized,
-    );
-    if (existing) return existing;
-    const loose = await findFoodByLooseKey(store, householdId, kind, trimmed);
-    if (loose) return loose;
+    const found = await findManualFood(store, householdId, kind, trimmed);
+    if (found) return found;
     return store.insertFood(
         newFood({
             householdId,

@@ -4382,6 +4382,47 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("upsert_food create saves a usual store and amount, on a new food and a new product", async () => {
+        await withPat(async (call) => {
+            const shop = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Trader Joe's",
+            );
+            const created = await call("upsert_food", {
+                name: `Oat milk ${crypto.randomUUID()}`,
+                calories: 40,
+                usual_store_id: shop.id,
+                usual_amount: 1000,
+                usual_unit: "ml",
+            });
+            expect(created.isError).toBeFalsy();
+            const food = FOOD_OUTPUT.parse(created.structuredContent);
+            expect(food.calories).toBe(40);
+            expect(food.usual_store_id).toBe(shop.id);
+            expect(food.usual_amount).toBe(1000);
+            expect(food.usual_unit).toBe("ml");
+
+            const product = await call("upsert_food", {
+                generic_food_id: food.id,
+                name: `Oatly ${crypto.randomUUID()}`,
+                calories: 46,
+                usual_store_id: shop.id,
+                usual_amount: 2,
+                usual_unit: "each",
+            });
+            expect(product.isError).toBeFalsy();
+            const row = await db.foodsStore.getFood(
+                "hh-1",
+                product.structuredContent?.id as string,
+            );
+            expect(row?.genericFoodId).toBe(food.id);
+            expect(row?.calories).toBe(46);
+            expect(row?.usualStoreId).toBe(shop.id);
+            expect(row?.usualAmount).toEqual({ amount: 2, unit: "each" });
+        });
+    });
+
     test("upsert_food create with bad usual unit creates no food", async () => {
         await withPat(async (call) => {
             const before = await db.foodsStore.listFoods("hh-1");

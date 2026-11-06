@@ -1304,6 +1304,48 @@ test("addGrocerySupply without amount or unit and no usual pair throws Enter a u
             name: "Sponges",
         }),
     ).rejects.toThrow("Enter a unit.");
+    expect(await foods.listFoods(HH)).toEqual([]);
+    expect(await grocery.listLines(HH)).toEqual([]);
+});
+
+test("addGrocerySupply without amount or unit uses an existing supply's usual pair", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const foil = await foods.insertFood({
+        ...newFood({ householdId: HH, kind: "supply", name: "Foil" }),
+        usualAmount: { amount: 2, unit: "each" },
+    });
+    const line = await addGrocerySupply(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "foil",
+    });
+    expect(line.foodId).toBe(foil.id);
+    expect(line.quantity).toEqual({ amount: 2, unit: "each" });
+    expect(await foods.listFoods(HH)).toHaveLength(1);
+});
+
+test("a line with no store in a household with no stores creates no food", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const settings = createMemorySettingsStore();
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            name: "Sourdough",
+            amount: 1,
+        }),
+    ).rejects.toThrow("Add a store first.");
+    await expect(
+        addGrocerySupply(grocery, settings, foods, {
+            householdId: HH,
+            name: "Sponges",
+            amount: 1,
+            unit: "each",
+        }),
+    ).rejects.toThrow("Add a store first.");
+    expect(await foods.listFoods(HH)).toEqual([]);
 });
 
 test("addGroceryFoodById no store no amount uses usual store and name-based section", async () => {

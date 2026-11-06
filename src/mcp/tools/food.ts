@@ -26,7 +26,6 @@ import {
     type FoodPatch,
     searchFoodCatalog,
     setUsualProduct,
-    setUsualPurchase,
     updateFood,
     type EffectiveFood,
     type Food,
@@ -710,24 +709,16 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                                       }),
                                   );
                     }
-                    let saved = await updateFood(
+                    // The usual fields ride on the same patch, so a create
+                    // and an edit save them in one write. They were parsed
+                    // above, before any insert.
+                    const saved = await updateFood(
                         store,
                         householdId,
                         food.id,
                         patch,
-                        usualPurchasePatch && args.food_id
-                            ? { stores: settings }
-                            : undefined,
+                        usualPurchasePatch ? { stores: settings } : undefined,
                     );
-                    if (usualPurchasePatch && !args.food_id) {
-                        saved = await setUsualPurchase(
-                            store,
-                            householdId,
-                            saved.id,
-                            usualPurchasePatch,
-                            { stores: settings },
-                        );
-                    }
                     if (normalizedBarcode) {
                         await store.setBarcode(
                             householdId,

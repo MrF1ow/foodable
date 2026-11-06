@@ -10,6 +10,7 @@ import {
     setUsualProduct,
     setUsualPurchase,
     updateFood,
+    type UsualPurchasePatch,
 } from "./foods.js";
 import { createMemorySettingsStore } from "./settings.js";
 
@@ -24,7 +25,7 @@ describe("parseUsualPurchase / effectiveFood / merge usual purchase", () => {
                 kind: "food",
                 name: "Eggs",
                 usualStoreId: "store-plain",
-                usualAmount: { amount: 6, unit: "each" },
+                usualAmount: { amount: 6, unit: "g" },
             }),
         );
         const product = await store.insertFood(
@@ -456,7 +457,9 @@ describe("parseUsualPurchase invalid unit before bad amount", () => {
     });
 });
 
-describe("usual purchase rejections: exact message and listFoods unchanged", () => {
+describe("usual purchase rejections: exact message and nothing written", () => {
+    // The product is linked but NOT yet usual, so setUsualProduct would
+    // change the plain food if it wrote anything before validating.
     async function baseline() {
         const foods = createMemoryFoodsStore();
         const settings = createMemorySettingsStore();
@@ -466,7 +469,12 @@ describe("usual purchase rejections: exact message and listFoods unchanged", () 
             name: "A",
             sortOrder: 0,
         });
-        await settings.listSections("g1");
+        await settings.insertStore({
+            id: "foreign",
+            householdId: "hh-other",
+            name: "Far",
+            sortOrder: 0,
+        });
         const plain = await foods.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Eggs" }),
         );
@@ -478,130 +486,101 @@ describe("usual purchase rejections: exact message and listFoods unchanged", () 
                 genericFoodId: plain.id,
             }),
         );
-        await foods.updateFoodRow({ ...plain, usualProductId: product.id });
         return { foods, settings, plain, product };
     }
 
-    test("buildFoodUpdate", async () => {
-        const { foods, settings, plain } = await baseline();
-        const before = await foods.listFoods(HH);
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: 1, unit: "nope" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("Pick a known unit for the usual amount.");
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: 0, unit: "g" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("The usual amount must be greater than zero.");
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: -2, unit: "g" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("The usual amount must be greater than zero.");
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: 2, unit: "" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("Enter a usual amount with its unit.");
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: null, unit: "g" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("Enter a usual amount with its unit.");
-        expect(await foods.listFoods(HH)).toEqual(before);
-    });
+    const cases: {
+        name: string;
+        purchase: UsualPurchasePatch;
+        message: string;
+    }[] = [
+        {
+            name: "bad unit",
+            purchase: { usualAmount: { amount: 1, unit: "nope" } },
+            message: "Pick a known unit for the usual amount.",
+        },
+        {
+            name: "amount 0",
+            purchase: { usualAmount: { amount: 0, unit: "g" } },
+            message: "The usual amount must be greater than zero.",
+        },
+        {
+            name: "negative amount",
+            purchase: { usualAmount: { amount: -2, unit: "g" } },
+            message: "The usual amount must be greater than zero.",
+        },
+        {
+            name: "amount without unit",
+            purchase: { usualAmount: { amount: 2, unit: "" } },
+            message: "Enter a usual amount with its unit.",
+        },
+        {
+            name: "unit without amount",
+            purchase: { usualAmount: { amount: null, unit: "g" } },
+            message: "Enter a usual amount with its unit.",
+        },
+        {
+            name: "another household's store",
+            purchase: { usualStoreId: "foreign" },
+            message: "Unknown store.",
+        },
+    ];
 
-    test("updateFood", async () => {
-        const { foods, settings, plain } = await baseline();
-        const before = await foods.listFoods(HH);
-        await expect(
-            updateFood(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: 1, unit: "nope" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("Pick a known unit for the usual amount.");
-        expect(await foods.listFoods(HH)).toEqual(before);
-    });
+    const writers: {
+        name: string;
+        run: (
+            ctx: Awaited<ReturnType<typeof baseline>>,
+            purchase: UsualPurchasePatch,
+        ) => Promise<unknown>;
+    }[] = [
+        {
+            name: "buildFoodUpdate",
+            run: ({ foods, settings, plain }, purchase) =>
+                buildFoodUpdate(foods, HH, plain.id, purchase, {
+                    stores: settings,
+                }),
+        },
+        {
+            name: "updateFood",
+            run: ({ foods, settings, plain }, purchase) =>
+                updateFood(foods, HH, plain.id, purchase, {
+                    stores: settings,
+                }),
+        },
+        {
+            name: "setUsualPurchase",
+            run: ({ foods, settings, plain }, purchase) =>
+                setUsualPurchase(foods, HH, plain.id, purchase, {
+                    stores: settings,
+                }),
+        },
+        {
+            name: "setUsualProduct",
+            run: ({ foods, settings, plain, product }, purchase) =>
+                setUsualProduct(foods, HH, plain.id, product.id, {
+                    purchase,
+                    stores: settings,
+                }),
+        },
+    ];
 
-    test("setUsualPurchase", async () => {
-        const { foods, settings, plain } = await baseline();
-        const before = await foods.listFoods(HH);
-        await expect(
-            setUsualPurchase(
-                foods,
-                HH,
-                plain.id,
-                { usualAmount: { amount: 0, unit: "g" } },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("The usual amount must be greater than zero.");
-        expect(await foods.listFoods(HH)).toEqual(before);
-    });
-
-    test("setUsualProduct with purchase", async () => {
-        const { foods, settings, plain, product } = await baseline();
-        const before = await foods.listFoods(HH);
-        await expect(
-            setUsualProduct(foods, HH, plain.id, product.id, {
-                purchase: { usualAmount: { amount: 1, unit: "nope" } },
-                stores: settings,
-            }),
-        ).rejects.toThrow("Pick a known unit for the usual amount.");
-        expect(await foods.listFoods(HH)).toEqual(before);
-        const plainRow = await foods.getFood(HH, plain.id);
-        expect(plainRow?.usualProductId).toBe(product.id);
-    });
-
-    test("unknown store in another household", async () => {
-        const foods = createMemoryFoodsStore();
-        const hh2 = "hh-other";
-        const settings = createMemorySettingsStore();
-        await settings.insertStore({
-            id: "foreign",
-            householdId: hh2,
-            name: "Far",
-            sortOrder: 0,
-        });
-        const plain = await foods.insertFood(
-            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
-        );
-        const before = await foods.listFoods(HH);
-        await expect(
-            buildFoodUpdate(
-                foods,
-                HH,
-                plain.id,
-                { usualStoreId: "foreign" },
-                { stores: settings },
-            ),
-        ).rejects.toThrow("Unknown store.");
-        expect(await foods.listFoods(HH)).toEqual(before);
-    });
+    for (const writer of writers) {
+        for (const c of cases) {
+            test(`${writer.name}: ${c.name}`, async () => {
+                const ctx = await baseline();
+                const before = await ctx.foods.listFoods(HH);
+                const error = await writer.run(ctx, c.purchase).then(
+                    () => null,
+                    (err: unknown) => err,
+                );
+                expect(error).toBeInstanceOf(FoodsInputError);
+                expect((error as Error).message).toBe(c.message);
+                expect(await ctx.foods.listFoods(HH)).toEqual(before);
+                const plainRow = await ctx.foods.getFood(HH, ctx.plain.id);
+                expect(plainRow?.usualProductId).toBeNull();
+            });
+        }
+    }
 });
 
 describe("setUsualProduct writes purchase after link", () => {
