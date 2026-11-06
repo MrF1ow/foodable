@@ -63,6 +63,7 @@ import {
     importOutcomeShowsPasteStep,
     importOutcomeToastKey,
     importRecipeFromUrl,
+    importRecipeFromSharedText,
     importReviewCount,
 } from "../../domain/recipe-import.js";
 import {
@@ -165,10 +166,13 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const member = siteMember(c);
     const body = await c.req.parseBody();
     const pasteStep = formText(body, "import_step") === "paste";
+    const textOnly = formText(body, "text_only") === "1";
     const pinOrPageUrl = formText(body, "url");
     const websiteUrl = formText(body, "website_url").trim();
     const text = formText(body, "text");
     const credit = formText(body, "credit");
+    const textOrigin =
+        formText(body, "text_origin") === "shared" ? "shared" : "pasted";
     const pinValidated = validateRecipeLink(pinOrPageUrl);
     const cleanedPinUrl = pinValidated.ok
         ? cleanRecipeLink(pinValidated.url)
@@ -217,13 +221,64 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     }
 
     const importDeps = await recipeImportDeps(member.householdId);
+
+    if (
+        pasteStep &&
+        textOnly &&
+        pinOrPageUrl.trim() === "" &&
+        text.trim() !== ""
+    ) {
+        const outcome = await importRecipeFromSharedText(importDeps, {
+            householdId: member.householdId,
+            creatorId: userId,
+            text,
+            credit: credit.trim() || undefined,
+            textOrigin,
+        });
+        if (
+            outcome.status === "imported" ||
+            outcome.status === "unverified_needs_review"
+        ) {
+            const key =
+                outcome.status === "imported"
+                    ? ("recipes.import.imported" as const)
+                    : importOutcomeToastKey(outcome);
+            const params: Record<string, string> = {
+                name: truncateToastParam(outcome.recipeName ?? "Recipe"),
+                site: truncateToastParam(
+                    outcome.source?.label ?? "Recipe text",
+                ),
+            };
+            if (outcome.status === "unverified_needs_review") {
+                params.count = importReviewCount(outcome.problems);
+            }
+            return redirectWithToast(
+                c,
+                `/recipes/${outcome.recipeId!}`,
+                key,
+                params,
+            );
+        }
+        const page = await renderRecipesListPage(userId, {
+            openModalId: IMPORT_RECIPE_MODAL_ID,
+            importError: importOutcomeMessage(outcome),
+            importPasteStep: true,
+            importPasteText: text,
+            importTextOnly: true,
+            importTextOrigin: textOrigin === "shared" ? "shared" : undefined,
+            importSourceKind: "text",
+            importSourceLabel: "Recipe text",
+        });
+        return c.html(page.html, 422);
+    }
+
     let outcome = await importRecipeFromUrl(importDeps, {
         householdId: member.householdId,
         creatorId: userId,
         url: importUrl,
         text: websiteUrl ? undefined : text,
         credit: credit.trim() || undefined,
-        textOrigin: "pasted",
+        textOrigin,
     });
     const onPinStep =
         pasteStep &&
@@ -247,7 +302,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 url: cleanedPinUrl,
                 text,
                 credit: credit.trim() || undefined,
-                textOrigin: "pasted",
+                textOrigin,
             });
         }
         if (

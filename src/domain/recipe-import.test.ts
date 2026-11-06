@@ -7,6 +7,7 @@ import {
     importOutcomeMessage,
     importOutcomeToastKey,
     importRecipeFromUrl,
+    importRecipeFromSharedText,
     importRecipeFromUrlAnalyticsOutcome,
     importReviewCount,
     isNotMeasuredNote,
@@ -1152,6 +1153,29 @@ describe("importRecipeFromUrl", () => {
         expect(result.status).toBe("paste_needed");
         expect(fetcher.calls.fetch).toBe(0);
         expect(fetcher.calls.robots).toBe(0);
+    });
+
+    test("importRecipeFromSharedText saves sourceKind text", async () => {
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromSharedText(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                text: loadCaption("clean-headers"),
+                textOrigin: "shared",
+            },
+        );
+        expect(result.status).toBe("imported");
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceKind).toBe("text");
+        expect(imp?.sourceUrl).toBeNull();
+        expect(imp?.sourceTextOrigin).toBe("shared");
     });
 
     test("textOrigin shared is stored on import row", async () => {

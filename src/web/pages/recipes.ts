@@ -49,6 +49,8 @@ import {
     recipeDisplaySource,
     type RecipeSourceKind,
 } from "../../domain/recipe-import.js";
+import type { ReadShareResult } from "../../domain/share.js";
+import { shareArrivedDisclosure } from "../components/share-arrived.js";
 
 export type RecipeMember = { userId: string; displayName: string };
 export type RecipeStoreOption = { id: string; name: string };
@@ -97,6 +99,10 @@ export type RecipesPageView = {
     importWebsiteError?: string;
     importSourceKind?: RecipeSourceKind;
     importSourceLabel?: string;
+    importTextOrigin?: "shared" | "pasted";
+    importTextOnly?: boolean;
+    shareArrived?: ReadShareResult;
+    shareArrivedOpen?: boolean;
 };
 
 export type RecipeIngredientRow = RecipeIngredientView & {
@@ -312,8 +318,30 @@ export function renderRecipesPage(view: RecipesPageView): string {
         view.importError && !view.importDuplicateRecipeId
             ? errorBanner(view.importError)
             : "";
+    const importTextOriginHidden =
+        view.importTextOrigin === "shared"
+            ? `<input type="hidden" name="text_origin" value="shared" />`
+            : "";
     const importPasteBody = view.importPasteStep
         ? (() => {
+              if (view.importTextOnly) {
+                  return `<form class="recipe-import-paste" method="post" action="/recipes/import" data-busy-form>
+<input type="hidden" name="import_step" value="paste" />
+<input type="hidden" name="text_only" value="1" />
+${importTextOriginHidden}
+${field({
+    id: "import-url-optional",
+    label: "Recipe link",
+    control: `<input id="import-url-optional" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="https://… (optional)" />`,
+})}
+${field({
+    id: "import-text",
+    label: "Recipe text",
+    control: `<textarea id="import-text" name="text" rows="10" required>${importPasteTextValue}</textarea>`,
+})}
+<button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
+</form>`;
+              }
               const kind = view.importSourceKind ?? "website";
               const label = escapeHtml(view.importSourceLabel ?? "Link");
               const openLabel =
@@ -343,6 +371,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
               return `<form class="recipe-import-paste" method="post" action="/recipes/import" data-busy-form>
 <input type="hidden" name="import_step" value="paste" />
 <input type="hidden" name="url" value="${importUrlValue}" />
+${importTextOriginHidden}
 <p class="recipe-import-source">${sourceIcon(kind, { label, decorative: true })} ${label}</p>
 <p class="recipe-import-open"><a href="${importUrlValue}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a></p>
 ${pinterestFields}
@@ -411,6 +440,13 @@ ${modalTrigger({
         })}
         ${empty}
         ${list}
+        ${
+            view.shareArrived
+                ? shareArrivedDisclosure(view.shareArrived, {
+                      open: view.shareArrivedOpen === true,
+                  })
+                : ""
+        }
         ${importModal}
         ${newRecipeModal}
     `;

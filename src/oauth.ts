@@ -26,6 +26,7 @@ import {
     getAppCss,
     getAppJs,
 } from "./widgets.js";
+import { isSafeShareReturnPath } from "./domain/share.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -104,7 +105,10 @@ async function finishAuthorization(
             "Set-Cookie",
             siteCookieHeader(mintSiteSession(userId), secure),
         );
-        return c.redirect("/");
+        const dest = isSafeShareReturnPath(session.redirectUri)
+            ? session.redirectUri
+            : "/";
+        return c.redirect(dest);
     }
 
     const authCode = crypto.randomUUID();
@@ -495,6 +499,15 @@ export function createOAuthRouter() {
     return oauth;
 }
 
+export function siteLoginReturnPath(c: Context): string {
+    const reqUrl = new URL(c.req.url);
+    const fromRequest = reqUrl.pathname + reqUrl.search;
+    if (isSafeShareReturnPath(fromRequest)) return fromRequest;
+    const next = c.req.query("next")?.trim();
+    if (next && isSafeShareReturnPath(next)) return next;
+    return "/";
+}
+
 export async function beginSiteLogin(
     c: Context,
     _localeQuery?: string,
@@ -503,7 +516,7 @@ export async function beginSiteLogin(
     const sessionId = crypto.randomUUID();
     const session: OAuthSession = {
         state: "site",
-        redirectUri: "/",
+        redirectUri: siteLoginReturnPath(c),
         clientId: process.env.OAUTH_CLIENT_ID ?? "site",
         purpose: "site",
     };

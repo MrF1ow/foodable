@@ -84,6 +84,11 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "How do I get unverified recipes verified?",
         body: "Imports that do not pass the check stay unverified. They cannot go on the grocery list, be cooked, or be logged until the check passes. Give this prompt to your agent, or set it up as a nightly or weekly automation in your agent.",
     },
+    {
+        id: "share-to-foodable",
+        title: "Share recipes from your phone",
+        body: "Install Foodable to your home screen (Android Chrome: menu › Install app, or Add to home screen; iOS Safari: Share › Add to Home Screen — iPhone does not list web apps in the share sheet, so on iPhone paste the link instead). Then use Share › Foodable from TikTok, Instagram, Facebook or the browser. Captions that come through are filled in; if only a link arrives you may be asked to paste the caption.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
