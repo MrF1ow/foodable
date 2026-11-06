@@ -297,6 +297,29 @@ test("matching fridge stock tags the grocery line already-have", async () => {
     expect(alreadyHaveTag(line, [fridgeItem])).toEqual({ cover: "full" });
 });
 
+test("groceryAllergenWarning two-member blocking text matches MCP warning literal", async () => {
+    const rules = createMemoryRulesStore();
+    await addAllergen(rules, {
+        householdId: HH,
+        userId: "bob",
+        allergen: "peanut",
+    });
+    await addAllergen(rules, {
+        householdId: HH,
+        userId: "ann",
+        allergen: "peanut",
+    });
+    const bobAllergens = await rules.listAllergens(HH, "bob");
+    const annAllergens = await rules.listAllergens(HH, "ann");
+    const members = [
+        { displayName: "Bob", userId: "bob", allergens: bobAllergens },
+        { displayName: "Ann", userId: "ann", allergens: annAllergens },
+    ];
+    expect(
+        groceryAllergenWarning("Peanut Snack", members, ["peanut"])?.text,
+    ).toBe("Contains peanut — Bob, Ann.");
+});
+
 test("grocery allergen warning uses catalog allergens before the name", async () => {
     const rules = createMemoryRulesStore();
     await addAllergen(rules, {
@@ -797,7 +820,15 @@ test("blocking allergen warning and Add anyway form render inside the reopened a
                 ],
             },
         ],
-        allergenWarning: "Peanut allergen for Bob.",
+        allergenNotices: [
+            {
+                code: "grocery.allergen",
+                severity: "block",
+                subject: { kind: "grocery_line", id: "" },
+                related: [{ kind: "member", id: "stub-user", name: "Bob" }],
+                params: { allergens: ["peanut"] },
+            },
+        ],
         openModalId: "grocery-add-food-st-1",
         allergenRetry: {
             storeId: "st-1",
@@ -810,11 +841,10 @@ test("blocking allergen warning and Add anyway form render inside the reopened a
             },
         },
     } as never);
-    expect(html).not.toMatch(
-        /<header class="dash-head">[\s\S]*class="allergen-warning"/,
-    );
     const modal = dialogHtml(html, "grocery-add-food");
-    expect(modal).toContain('class="allergen-warning"');
+    // The warning sits only in the reopened modal, not as a page banner.
+    expect(html.replace(modal, "")).not.toContain("allergen-warning");
+    expect(modal).toContain('class="notice-list allergen-warning"');
     expect(modal).toContain("data-fill-transient");
     expect(modal).toContain('name="confirm_allergen" value="1"');
     expect(modal).toContain("Add anyway");

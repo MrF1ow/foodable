@@ -383,6 +383,29 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "nutrition-peer": nutritionPeer,
         fridge: renderFridgePage(fridgeView(chrome) as never),
         grocery: renderGroceryPage(groceryView(chrome) as never),
+        "grocery-allergen-modal": renderGroceryPage({
+            ...(groceryView(chrome) as object),
+            allergenNotices: [
+                {
+                    code: "grocery.allergen",
+                    severity: "block",
+                    subject: { kind: "grocery_line", id: "" },
+                    related: [{ kind: "member", id: "u1", name: "Morgan" }],
+                    params: { allergens: ["peanut"] },
+                },
+            ],
+            openModalId: "grocery-add-food-s1",
+            allergenRetry: {
+                storeId: "s1",
+                fields: {
+                    kind: "food",
+                    store_id: "s1",
+                    food_name: "Peanut butter",
+                    qty_amount: "1",
+                    qty_unit: "each",
+                },
+            },
+        } as never),
         recipes: renderRecipesPage({
             chrome,
             recipes: [RECIPE, RECIPE_TWO],

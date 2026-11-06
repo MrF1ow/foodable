@@ -9,7 +9,36 @@ export type NoticeCopy = {
     action?: { label: string; to: NoticeRoute };
     help: string;
     dismissible: boolean;
+    badgeTone?: "bad" | "warn" | "dim";
 };
+
+export const UNKNOWN_ALLERGEN_TEXT = "unknown allergen data";
+
+export function fridgeExpiryLine(p: {
+    name: string;
+    amount: number;
+    unit: string;
+    expiresOn: string;
+}): string {
+    return `${p.name} ${p.amount} ${p.unit} expires ${p.expiresOn}`;
+}
+
+function fridgeSentence(notice: Notice): string {
+    return fridgeExpiryLine({
+        name: String(notice.params.name),
+        amount: Number(notice.params.amount),
+        unit: String(notice.params.unit),
+        expiresOn: String(notice.params.expiresOn),
+    });
+}
+
+/** Today's `groceryAllergenWarning` text: the first allergen, then every affected member. */
+function allergenSentence(notice: Notice): string {
+    const allergens = (notice.params.allergens ?? []) as string[];
+    const label = allergens[0] ?? "allergen";
+    const names = notice.related.map((r) => r.name);
+    return `Contains ${label} — ${names.join(", ")}.`;
+}
 
 const NUTRIENT_WORD: Record<RecipeGapNutrient, string> = {
     calories: "calories",
@@ -28,6 +57,31 @@ export function formatMissingNutrientList(
 }
 
 export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
+    "fridge.expired": {
+        badge: "Expired",
+        badgeTone: "bad",
+        sentence: fridgeSentence,
+        help: "expiry-levels",
+        dismissible: false,
+    },
+    "fridge.expiring": {
+        badge: "Expiring soon",
+        sentence: fridgeSentence,
+        help: "expiry-levels",
+        dismissible: false,
+    },
+    "grocery.allergen": {
+        badge: "Allergen",
+        sentence: allergenSentence,
+        help: "allergens",
+        dismissible: false,
+    },
+    "recipe.allergen": {
+        badge: "Allergen",
+        sentence: allergenSentence,
+        help: "allergens",
+        dismissible: false,
+    },
     "recipe.no_food": {
         badge: "Not linked",
         sentence: (notice) =>

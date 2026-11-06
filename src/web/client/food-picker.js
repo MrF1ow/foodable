@@ -9,12 +9,29 @@ function esc(s) {
 const foodPickerInit = new WeakSet();
 var foodPickerFillResetBound = false;
 
-function resetFoodPicker(root) {
-    root._foodPickerEpoch = (root._foodPickerEpoch || 0) + 1;
+// A new search (or clearing the box) makes every earlier one stale: its
+// response is dropped and, where the browser can, its request aborted. The
+// search waits on Open Food Facts, so responses often land out of order.
+function cancelFoodPickerSearch(root) {
+    root._foodPickerSearchSeq = (root._foodPickerSearchSeq || 0) + 1;
     if (root._foodPickerSearchTimer) {
         clearTimeout(root._foodPickerSearchTimer);
         root._foodPickerSearchTimer = null;
     }
+    if (root._foodPickerSearchAbort) {
+        try {
+            root._foodPickerSearchAbort.abort();
+        } catch (err) {
+            // Already settled.
+        }
+        root._foodPickerSearchAbort = null;
+    }
+    return root._foodPickerSearchSeq;
+}
+
+function resetFoodPicker(root) {
+    root._foodPickerEpoch = (root._foodPickerEpoch || 0) + 1;
+    cancelFoodPickerSearch(root);
     var searchInput = root.querySelector("[data-search-input]");
     if (searchInput) searchInput.value = "";
     var searchResults = root.querySelector("[data-search-results]");
@@ -134,28 +151,38 @@ function initFoodPicker(root) {
     if (searchInput && searchResults) {
         searchInput.addEventListener("input", function () {
             var q = String(searchInput.value || "").trim();
-            if (root._foodPickerSearchTimer) {
-                clearTimeout(root._foodPickerSearchTimer);
-                root._foodPickerSearchTimer = null;
-            }
+            var seq = cancelFoodPickerSearch(root);
             if (!q) {
                 searchResults.innerHTML = "";
                 return;
             }
             var epoch = root._foodPickerEpoch || 0;
+            function current() {
+                return (
+                    (root._foodPickerEpoch || 0) === epoch &&
+                    root._foodPickerSearchSeq === seq
+                );
+            }
             root._foodPickerSearchTimer = setTimeout(function () {
-                fetch("/api/foods/search?q=" + encodeURIComponent(q), {
-                    credentials: "same-origin",
-                })
+                root._foodPickerSearchTimer = null;
+                var init = { credentials: "same-origin" };
+                if (typeof AbortController === "function") {
+                    var controller = new AbortController();
+                    root._foodPickerSearchAbort = controller;
+                    init.signal = controller.signal;
+                }
+                fetch("/api/foods/search?q=" + encodeURIComponent(q), init)
                     .then(function (res) {
                         return res.ok ? res.json() : { foods: [] };
                     })
                     .then(function (data) {
-                        if ((root._foodPickerEpoch || 0) !== epoch) return;
+                        if (!current()) return;
+                        root._foodPickerSearchAbort = null;
                         renderHits(searchResults, (data && data.foods) || []);
                     })
                     .catch(function () {
-                        if ((root._foodPickerEpoch || 0) !== epoch) return;
+                        if (!current()) return;
+                        root._foodPickerSearchAbort = null;
                         searchResults.innerHTML = "";
                     });
             }, 200);

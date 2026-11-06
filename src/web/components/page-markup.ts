@@ -1,11 +1,8 @@
 import { escapeHtml } from "../shell.js";
-import type { ExpiryLevel } from "../../domain/stock.js";
+import type { Notice } from "../../domain/notices.js";
 import { iconArrowDown, iconArrowUp, iconPencil, iconTrash } from "./icons.js";
 import { disclosure, modalTrigger, type ModalFill } from "./ui.js";
-
-function expiryPillExpired(): string {
-    return `<span class="pill pill-bad expiry-pill">Expired</span>`;
-}
+import { noticeBadge } from "./notices.js";
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
@@ -67,13 +64,17 @@ export function renderFridgeItemRow(opts: {
     displayName: string;
     quantityLabel: string;
     expiresOn?: string | null;
-    expiryLevel?: ExpiryLevel | null;
+    notices: readonly Notice[];
     rowActions: string;
 }): string {
     const id = escapeHtml(opts.id);
-    const expired = opts.expiryLevel === "expired";
+    const expiredNotice = opts.notices.find((n) => n.code === "fridge.expired");
+    const expired = expiredNotice != null;
     const expiryAttr = expired ? ` data-expiry="expired"` : "";
-    const pill = expired ? expiryPillExpired() : "";
+    const pill =
+        expiredNotice != null
+            ? noticeBadge(expiredNotice, { className: "expiry-pill" })
+            : "";
     const expiryText = opts.expiresOn
         ? `Expires ${escapeHtml(opts.expiresOn)}`
         : "No expiry";

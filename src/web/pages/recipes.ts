@@ -71,7 +71,7 @@ export type RecipeDetailView = {
     portionCount: number;
     macros: RecipeMacros;
     macrosPerPortion?: RecipeMacros;
-    allergenWarning?: string;
+    allergenNotices?: Notice[];
     dislikeNote?: string;
     isOwner: boolean;
     error?: string;
@@ -374,9 +374,9 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
             : []),
     ];
     const error = pageLevelErrorBanner(view, renderedModalIds);
-    const allergen = view.allergenWarning
-        ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
-        : "";
+    const allergen = noticeList(view.allergenNotices ?? [], {
+        className: "allergen-warning",
+    });
     const dislike = view.dislikeNote
         ? `<p class="dislike-note">${escapeHtml(view.dislikeNote)}</p>`
         : "";

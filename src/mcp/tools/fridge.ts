@@ -26,6 +26,7 @@ import {
     StockInputError,
     updateFridgeItemQuantityAdjust,
 } from "../../domain/stock.js";
+import { fridgeExpiryLine } from "../../copy/notices.js";
 import { findFoodById } from "../../domain/foods.js";
 import {
     descriptionFromItems,
@@ -579,9 +580,14 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                     payload.items.length === 0
                                         ? "Nothing expiring soon."
                                         : payload.items
-                                              .map(
-                                                  (item) =>
-                                                      `${item.display_name} ${item.amount} ${item.unit} expires ${item.expires_on}`,
+                                              .map((item) =>
+                                                  fridgeExpiryLine({
+                                                      name: item.display_name,
+                                                      amount: item.amount,
+                                                      unit: item.unit,
+                                                      expiresOn:
+                                                          item.expires_on,
+                                                  }),
                                               )
                                               .join("\n"),
                             },

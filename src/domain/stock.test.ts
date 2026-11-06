@@ -25,6 +25,7 @@ import {
     discardFridgeItem,
     eatFridgeItem,
     fridgeEatLogsMeal,
+    fridgeNotices,
     ledgerMatchesStock,
     expiryLevel,
     listExpiring,
@@ -32,6 +33,7 @@ import {
     putAwayGroceryLines,
     updateFridgeItemQuantityAdjust,
 } from "./stock.js";
+import { fridgeExpiryLine } from "../copy/notices.js";
 
 const HH = "hh-1";
 
@@ -254,6 +256,107 @@ test("list_expiring includes items within the window, oldest first", () => {
         now,
     );
     expect(listed.map((item) => item.id)).toEqual(["soon"]);
+});
+
+test("fridgeNotices maps expiry levels to notice codes", () => {
+    const today = "2026-11-06";
+    const item = {
+        id: "i1",
+        displayName: "Eggs",
+        quantity: { amount: 6, unit: "each" },
+        expiresOn: "2026-11-05" as string,
+    };
+    const expired = fridgeNotices([item], today);
+    expect(expired).toHaveLength(1);
+    expect(expired[0]?.code).toBe("fridge.expired");
+    expect(expired[0]?.severity).toBe("warn");
+    expect(expired[0]?.subject).toEqual({
+        kind: "fridge_item",
+        id: "i1",
+    });
+    expect(expired[0]?.params).toMatchObject({
+        name: "Eggs",
+        amount: 6,
+        unit: "each",
+        expiresOn: "2026-11-05",
+        level: "expired",
+    });
+    expect(
+        fridgeExpiryLine({
+            name: String(expired[0]!.params.name),
+            amount: Number(expired[0]!.params.amount),
+            unit: String(expired[0]!.params.unit),
+            expiresOn: String(expired[0]!.params.expiresOn),
+        }),
+    ).toBe("Eggs 6 each expires 2026-11-05");
+
+    expect(
+        fridgeNotices(
+            [
+                {
+                    ...item,
+                    id: "a",
+                    expiresOn: today,
+                },
+            ],
+            today,
+        )[0]?.code,
+    ).toBe("fridge.expiring");
+    expect(
+        fridgeNotices([{ ...item, id: "a2", expiresOn: today }], today)[0]
+            ?.severity,
+    ).toBe("info");
+    expect(
+        fridgeNotices(
+            [
+                {
+                    ...item,
+                    id: "b",
+                    expiresOn: "2026-11-07",
+                },
+            ],
+            today,
+        )[0]?.params.level,
+    ).toBe("high");
+    expect(
+        fridgeNotices(
+            [
+                {
+                    ...item,
+                    id: "c",
+                    expiresOn: "2026-11-09",
+                },
+            ],
+            today,
+        )[0]?.params.level,
+    ).toBe("medium");
+    expect(
+        fridgeNotices(
+            [
+                {
+                    ...item,
+                    id: "d",
+                    expiresOn: "2026-11-13",
+                },
+            ],
+            today,
+        )[0]?.params.level,
+    ).toBe("low");
+    expect(
+        fridgeNotices(
+            [
+                {
+                    ...item,
+                    id: "e",
+                    expiresOn: "2026-11-14",
+                },
+            ],
+            today,
+        ),
+    ).toEqual([]);
+    expect(
+        fridgeNotices([{ ...item, id: "f", expiresOn: null }], today),
+    ).toEqual([]);
 });
 
 test("manual add writes an adjust movement and the ledger matches stock", async () => {

@@ -16,7 +16,7 @@ import {
     addGrocerySupply,
     checkGroceryLine,
     clearCheckedLines,
-    groceryAllergenWarning,
+    allergenNotices,
     GroceryInputError,
 } from "../../domain/grocery.js";
 import { putAwayGroceryLines, StockInputError } from "../../domain/stock.js";
@@ -156,14 +156,15 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                         )
                     )?.name ?? previewName;
             }
-            const warning = groceryAllergenWarning(
+            const notices = allergenNotices(
+                { kind: "grocery_line", id: "" },
                 previewName,
                 members,
                 catalogAllergens,
             );
-            if (warning?.blocking && !confirmed) {
+            if (notices.length > 0 && !confirmed) {
                 const page = await renderGroceryListPage(userId, {
-                    allergenWarning: warning.text,
+                    allergenNotices: notices,
                     openModalId: `grocery-add-food-${storeId}`,
                     allergenRetry: {
                         storeId,

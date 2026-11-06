@@ -39,6 +39,11 @@ const GLOSSARY: GlossaryEntry[] = [
         body: "Only expired items show an Expired badge on the row. Later dates and items with no expiry date show no badge. Expiring soon lists items already expired or due within three days, and shows that count.",
     },
     {
+        id: "allergens",
+        title: "Allergens",
+        body: "Adding a food to the grocery list that contains a member's allergen stops and asks first; Add anyway adds it. A recipe shows a warning when an ingredient contains the allergen of the person it is viewed for. Allergens come from the food's allergen list when it has one, otherwise from its name.",
+    },
+    {
         id: "put-away",
         title: "Put away",
         body: "After you check off a grocery line, Put away moves that amount into the location you pick. If that food is already there with the same expiry, the amounts combine; otherwise it's added as a new item. The line then leaves the grocery list.",

@@ -49,10 +49,19 @@ import {
 } from "../web/pages/recipes.js";
 import { getAppCss } from "../widgets.js";
 import type { FoodResult } from "../foods.js";
+import type { Notice } from "./notices.js";
 
 const HH = "hh-1";
 const ALICE = "alice";
 const BOB = "bob";
+
+const BOB_PEA_RECIPE_ALLERGEN_NOTICE: Notice = {
+    code: "recipe.allergen",
+    severity: "block",
+    subject: { kind: "recipe", id: "r1" },
+    related: [{ kind: "member", id: BOB, name: "Bob" }],
+    params: { allergens: ["peanut"] },
+};
 
 function emptyRecipeNotices(recipeId: string) {
     return {
@@ -507,7 +516,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
             incompleteReasons: [],
             gaps: [],
         },
-        allergenWarning: "Contains peanut — Bob.",
+        allergenNotices: [BOB_PEA_RECIPE_ALLERGEN_NOTICE],
         dislikeNote: "Bob dislikes cilantro.",
         isOwner: true,
     });

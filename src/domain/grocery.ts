@@ -19,6 +19,9 @@ import {
     type AllergenCode,
     type MemberAllergen,
 } from "./rules.js";
+import type { Notice } from "./notices.js";
+import { NOTICE_SEVERITY } from "./notices.js";
+import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
 
 export type GroceryKind = "food" | "supply";
 
@@ -51,6 +54,7 @@ export type GroceryListStore = {
 
 export type GroceryAllergenMember = {
     displayName: string;
+    userId?: string;
     allergens: MemberAllergen[];
 };
 
@@ -727,16 +731,20 @@ function allergenNeedle(
     return [code.replaceAll("_", " "), ALLERGEN_LABELS[code].toLowerCase()];
 }
 
-export function groceryAllergenWarning(
+export type GroceryAllergenMatch =
+    { members: GroceryAllergenMember[]; labels: string[] } | "unknown";
+
+/** Pure matcher: hit members in input order, allergen labels in insertion order (Set). */
+export function matchGroceryAllergens(
     displayName: string,
     members: GroceryAllergenMember[],
     foodAllergens?: readonly string[] | null,
-): GroceryAllergenWarning | null {
+): GroceryAllergenMatch | null {
     if (foodAllergens != null) {
         const hay = new Set(
             foodAllergens.map((code) => code.trim().toLowerCase()),
         );
-        const hitNames: string[] = [];
+        const hitMembers: GroceryAllergenMember[] = [];
         const hitCodes = new Set<string>();
         for (const member of members) {
             const matched = member.allergens.filter((row) => {
@@ -752,7 +760,7 @@ export function groceryAllergenWarning(
                 return hay.has(row.allergen);
             });
             if (matched.length === 0) continue;
-            hitNames.push(member.displayName);
+            hitMembers.push(member);
             for (const row of matched) {
                 hitCodes.add(
                     row.allergen === "other"
@@ -761,15 +769,11 @@ export function groceryAllergenWarning(
                 );
             }
         }
-        if (hitNames.length === 0) return null;
-        const label = [...hitCodes][0] ?? "allergen";
-        return {
-            blocking: true,
-            text: `Contains ${label} — ${hitNames.join(", ")}.`,
-        };
+        if (hitMembers.length === 0) return null;
+        return { members: hitMembers, labels: [...hitCodes] };
     }
     const haystack = displayName.toLowerCase();
-    const hitNames: string[] = [];
+    const hitMembers: GroceryAllergenMember[] = [];
     const hitCodes = new Set<string>();
     for (const member of members) {
         const matched = member.allergens.some((row) =>
@@ -778,22 +782,70 @@ export function groceryAllergenWarning(
             ),
         );
         if (!matched) continue;
-        hitNames.push(member.displayName);
+        hitMembers.push(member);
         for (const row of member.allergens) {
             for (const needle of allergenNeedle(row.allergen, row.otherLabel)) {
                 if (needle && haystack.includes(needle)) hitCodes.add(needle);
             }
         }
     }
-    if (hitNames.length === 0) {
+    if (hitMembers.length === 0) {
         const anyAllergen = members.some((row) => row.allergens.length > 0);
         if (!anyAllergen) return null;
-        return { blocking: false, text: "unknown allergen data" };
+        return "unknown";
     }
-    const label = [...hitCodes][0] ?? "allergen";
+    return { members: hitMembers, labels: [...hitCodes] };
+}
+
+function allergenHitNotice(
+    subject:
+        { kind: "grocery_line"; id: string } | { kind: "recipe"; id: string },
+    match: { members: GroceryAllergenMember[]; labels: string[] },
+): Notice {
+    const code =
+        subject.kind === "grocery_line"
+            ? "grocery.allergen"
+            : "recipe.allergen";
+    return {
+        code,
+        severity: NOTICE_SEVERITY[code],
+        subject,
+        related: match.members.map((member) => ({
+            kind: "member" as const,
+            id: member.userId ?? member.displayName,
+            name: member.displayName,
+        })),
+        params: { allergens: match.labels },
+    };
+}
+
+export function allergenNotices(
+    subject:
+        { kind: "grocery_line"; id: string } | { kind: "recipe"; id: string },
+    displayName: string,
+    members: GroceryAllergenMember[],
+    foodAllergens?: readonly string[] | null,
+): Notice[] {
+    const match = matchGroceryAllergens(displayName, members, foodAllergens);
+    if (match == null || match === "unknown") return [];
+    return [allergenHitNotice(subject, match)];
+}
+
+export function groceryAllergenWarning(
+    displayName: string,
+    members: GroceryAllergenMember[],
+    foodAllergens?: readonly string[] | null,
+): GroceryAllergenWarning | null {
+    const match = matchGroceryAllergens(displayName, members, foodAllergens);
+    if (match == null) return null;
+    if (match === "unknown") {
+        return { blocking: false, text: UNKNOWN_ALLERGEN_TEXT };
+    }
     return {
         blocking: true,
-        text: `Contains ${label} — ${hitNames.join(", ")}.`,
+        text: noticeSentence(
+            allergenHitNotice({ kind: "grocery_line", id: "" }, match),
+        ),
     };
 }
 

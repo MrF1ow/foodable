@@ -21,7 +21,16 @@ import {
     NOTICE_COPY,
     formatMissingNutrientList,
     noticeSentence,
+    UNKNOWN_ALLERGEN_TEXT,
 } from "./notices.js";
+import { addAllergen, createMemoryRulesStore } from "../domain/rules.js";
+import {
+    allergenNotices,
+    groceryAllergenWarning,
+    type GroceryAllergenMember,
+} from "../domain/grocery.js";
+import { fridgeNotices } from "../domain/stock.js";
+import { noticeBadge } from "../web/components/notices.js";
 
 const HH = "household-1";
 
@@ -74,6 +83,157 @@ test("NOTICE_COPY is complete and well-formed", () => {
         expect(HELP_IDS).toContain(entry.help);
         expect(entry.dismissible).toBe(false);
     }
+});
+
+test("only fridge.expired sets badgeTone bad", () => {
+    const withTone = Object.entries(NOTICE_COPY).filter(
+        ([, e]) => e.badgeTone === "bad",
+    );
+    expect(withTone.map(([code]) => code)).toEqual(["fridge.expired"]);
+});
+
+test("fridge.expired badge and pill markup are pinned", () => {
+    expect(NOTICE_COPY["fridge.expired"].badge).toBe("Expired");
+    const today = "2026-11-06";
+    const n = fridgeNotices(
+        [
+            {
+                id: "x",
+                displayName: "Milk",
+                quantity: { amount: 1, unit: "l" },
+                expiresOn: "2026-11-05",
+            },
+        ],
+        today,
+    )[0]!;
+    expect(noticeBadge(n, { className: "expiry-pill" })).toBe(
+        '<span class="pill pill-bad expiry-pill" data-notice="fridge.expired">Expired</span>',
+    );
+});
+
+test("groceryAllergenWarning and allergenNotices sentences match pinned literals", async () => {
+    const rules = createMemoryRulesStore();
+
+    await addAllergen(rules, {
+        householdId: HH,
+        userId: "bob-id",
+        allergen: "peanut",
+    });
+    const bobAllergens = await rules.listAllergens(HH, "bob-id");
+    const membersOne: GroceryAllergenMember[] = [
+        { displayName: "Bob", userId: "bob-id", allergens: bobAllergens },
+    ];
+    const oneName = groceryAllergenWarning("Peanut Butter", membersOne, null);
+    expect(oneName?.text).toBe("Contains peanut — Bob.");
+    expect(
+        noticeSentence(
+            allergenNotices(
+                { kind: "grocery_line", id: "line-1" },
+                "Peanut Butter",
+                membersOne,
+                null,
+            )[0]!,
+        ),
+    ).toBe(oneName!.text);
+
+    const oneCatalog = groceryAllergenWarning("Skippy", membersOne, ["peanut"]);
+    expect(oneCatalog?.text).toBe("Contains peanut — Bob.");
+    expect(
+        noticeSentence(
+            allergenNotices(
+                { kind: "grocery_line", id: "" },
+                "Skippy",
+                membersOne,
+                ["peanut"],
+            )[0]!,
+        ),
+    ).toBe(oneCatalog!.text);
+
+    await addAllergen(rules, {
+        householdId: HH,
+        userId: "ann-id",
+        allergen: "peanut",
+    });
+    const annAllergens = await rules.listAllergens(HH, "ann-id");
+    const twoMembers: GroceryAllergenMember[] = [
+        { displayName: "Bob", userId: "bob-id", allergens: bobAllergens },
+        { displayName: "Ann", userId: "ann-id", allergens: annAllergens },
+    ];
+    const two = groceryAllergenWarning("Peanut Snack", twoMembers, ["peanut"]);
+    expect(two?.text).toBe("Contains peanut — Bob, Ann.");
+    expect(groceryAllergenWarning("Peanut Snack", twoMembers, null)?.text).toBe(
+        "Contains peanut — Bob, Ann.",
+    );
+
+    await addAllergen(rules, {
+        householdId: HH,
+        userId: "other-id",
+        allergen: "other",
+        otherLabel: "Mustard",
+    });
+    const otherAllergens = await rules.listAllergens(HH, "other-id");
+    const otherMember: GroceryAllergenMember[] = [
+        {
+            displayName: "Pat",
+            userId: "other-id",
+            allergens: otherAllergens,
+        },
+    ];
+    const nameOtherLabel = groceryAllergenWarning(
+        "Mustard Sauce",
+        otherMember,
+        null,
+    );
+    expect(nameOtherLabel?.text).toBe("Contains mustard — Pat.");
+
+    const catalogOther = groceryAllergenWarning("Condiment", otherMember, [
+        "other",
+    ]);
+    expect(catalogOther?.text).toBe("Contains Mustard — Pat.");
+
+    const unknown = groceryAllergenWarning("Apples", membersOne, null);
+    expect(unknown?.text).toBe(UNKNOWN_ALLERGEN_TEXT);
+    expect(
+        allergenNotices(
+            { kind: "grocery_line", id: "" },
+            "Apples",
+            membersOne,
+            null,
+        ),
+    ).toEqual([]);
+
+    expect(groceryAllergenWarning("Apples", membersOne, [])).toBeNull();
+    expect(
+        allergenNotices(
+            { kind: "grocery_line", id: "" },
+            "Apples",
+            membersOne,
+            [],
+        ),
+    ).toEqual([]);
+
+    const g = allergenNotices(
+        { kind: "grocery_line", id: "line-a" },
+        "Skippy",
+        membersOne,
+        ["peanut"],
+    )[0]!;
+    expect(g.code).toBe("grocery.allergen");
+    expect(g.severity).toBe("block");
+    expect(g.related).toEqual([{ kind: "member", id: "bob-id", name: "Bob" }]);
+    expect(g.params).toEqual({ allergens: ["peanut"] });
+
+    const r = allergenNotices(
+        { kind: "recipe", id: "r99" },
+        "Skippy",
+        membersOne,
+        ["peanut"],
+    )[0]!;
+    expect(r.code).toBe("recipe.allergen");
+    expect(r.subject).toEqual({ kind: "recipe", id: "r99" });
+    expect(r.severity).toBe("block");
+    expect(r.related).toEqual([{ kind: "member", id: "bob-id", name: "Bob" }]);
+    expect(r.params).toEqual({ allergens: ["peanut"] });
 });
 
 test("registry sentences match #162 cases and recipeIngredientGaps / missingGramsReason", async () => {
