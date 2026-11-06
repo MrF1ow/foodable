@@ -7,35 +7,40 @@ import {
 
 const HH = "hh-web";
 
-test("usual products list puts needs-usual first", () => {
+test("usual products list starts empty with an add action", () => {
     const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
-    const milk = newFood({
+    const html = renderUsualProductsListPage({
+        chrome: { theme: "light" },
+        rows: [],
+        addable: [eggs],
+    });
+    expect(html).toContain("No usual products yet.");
+    expect(html).not.toContain("Needs a usual product");
+    expect(html).toContain("Add usual product");
+    expect(html).toContain('action="/household/usual-products"');
+    expect(html).toContain('name="food"');
+    expect(html).toContain(`value="${eggs.id}"`);
+});
+
+test("usual products list shows foods with products", () => {
+    const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
+    const kirkland = newFood({
         householdId: HH,
         kind: "food",
-        name: "Milk",
-        calories: 50,
+        name: "Kirkland Large Eggs",
+        brand: "Kirkland",
+        genericFoodId: eggs.id,
     });
     const html = renderUsualProductsListPage({
         chrome: { theme: "light" },
-        needsUsual: [eggs],
-        rows: [
-            {
-                food: eggs,
-                products: [],
-                usual: null,
-            },
-            {
-                food: milk,
-                products: [],
-                usual: null,
-            },
-        ],
+        rows: [{ food: eggs, products: [kirkland], usual: kirkland }],
+        addable: [],
     });
-    const needsAt = html.indexOf("Needs a usual product");
-    const eggsAt = html.indexOf(">Eggs<");
-    expect(needsAt).toBeGreaterThan(-1);
-    expect(needsAt).toBeLessThan(eggsAt);
-    expect(html).toContain("No nutrition");
+    expect(html).toContain(">Eggs<");
+    expect(html).toContain("Kirkland Large Eggs · Kirkland");
+    expect(html).toContain("Change");
+    expect(html).not.toContain("No usual products yet.");
+    expect(html).not.toContain("Add usual product");
 });
 
 test("picker page includes search and manual product panels", () => {

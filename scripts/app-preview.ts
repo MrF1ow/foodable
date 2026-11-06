@@ -335,14 +335,8 @@ function previewFoodCatalog() {
         food("f-buttermilk", "Buttermilk", null),
         food("f2", "Milk", 64),
     ];
-    const recipeFoodIds = new Set(["f-eggs", "f-buttermilk"]);
-    const groceryFoodIds = new Set(["f-eggs"]);
-    const usual = usualProductRows({
-        foods: catalog,
-        recipeFoodIds,
-        groceryFoodIds,
-    });
-    return { catalog, usual, recipeFoodIds, groceryFoodIds };
+    const usual = usualProductRows({ foods: catalog });
+    return { catalog, usual };
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
@@ -501,8 +495,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         "usual-products": renderUsualProductsListPage({
             chrome,
-            needsUsual: usual.needsUsual,
             rows: usual.rows,
+            addable: usual.addable,
         } as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
