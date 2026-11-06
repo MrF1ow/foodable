@@ -1,0 +1,435 @@
+import { describe, expect, test } from "bun:test";
+import pkg from "../package.json" with { type: "json" };
+import {
+    FOODABLE_USER_AGENT,
+    createSafeFetcher,
+    isPublicAddress,
+} from "./fetch-safe.js";
+
+const PUBLIC = "93.184.216.34";
+
+function okResponse(
+    body: string,
+    init?: { status?: number; headers?: Record<string, string> },
+): Response {
+    return new Response(body, {
+        status: init?.status ?? 200,
+        headers: {
+            "content-type": "text/html",
+            ...init?.headers,
+        },
+    });
+}
+
+describe("FOODABLE_USER_AGENT", () => {
+    test("matches the plan format exactly", () => {
+        expect(FOODABLE_USER_AGENT).toBe(
+            `Mozilla/5.0 (compatible; Foodable/${pkg.version}; +https://github.com/MrF1ow/foodable/blob/main/docs/fetcher.md)`,
+        );
+    });
+});
+
+describe("isPublicAddress", () => {
+    const privateV4 = [
+        "0.0.0.0",
+        "10.0.0.1",
+        "100.64.0.1",
+        "127.0.0.1",
+        "169.254.1.1",
+        "172.16.0.1",
+        "192.0.0.1",
+        "192.0.2.1",
+        "192.168.0.1",
+        "198.18.0.1",
+        "198.51.100.1",
+        "203.0.113.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "255.255.255.255",
+    ];
+    for (const ip of privateV4) {
+        test(`rejects ${ip}`, () => {
+            expect(isPublicAddress(ip)).toBe(false);
+        });
+    }
+    test("rejects IPv6 private", () => {
+        expect(isPublicAddress("::")).toBe(false);
+        expect(isPublicAddress("::1")).toBe(false);
+        expect(isPublicAddress("fd00::1")).toBe(false);
+        expect(isPublicAddress("fe80::1")).toBe(false);
+        expect(isPublicAddress("ff00::1")).toBe(false);
+        expect(isPublicAddress("2001:db8::1")).toBe(false);
+        expect(isPublicAddress("::ffff:10.0.0.1")).toBe(false);
+    });
+    test("accepts a public address", () => {
+        expect(isPublicAddress(PUBLIC)).toBe(true);
+        expect(isPublicAddress("2606:4700::")).toBe(true);
+    });
+});
+
+describe("createSafeFetcher", () => {
+    test("sends Foodable user agent on page and robots requests", async () => {
+        const seen: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (_url, init) => {
+                const ua = (init?.headers as Record<string, string>)?.[
+                    "User-Agent"
+                ];
+                seen.push(ua ?? "");
+                return okResponse("User-agent: *\nDisallow:");
+            },
+        });
+        await fetcher.fetchPage("https://example.com/page", {
+            accept: ["text/html"],
+            checkRobots: true,
+        });
+        expect(seen.length).toBeGreaterThanOrEqual(2);
+        expect(seen.every((ua) => ua === FOODABLE_USER_AGENT)).toBe(true);
+    });
+
+    test("refuses hosts resolving to private addresses", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async (host) =>
+                host === "bad.example" ? ["127.0.0.1"] : [PUBLIC],
+            fetch: async () => okResponse("ok"),
+        });
+        const blocked = await fetcher.fetchPage("https://bad.example/", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(blocked).toEqual({
+            ok: false,
+            reason: "blocked_address",
+            status: null,
+            detail: "127.0.0.1",
+        });
+    });
+
+    test("refuses when any resolved address is private", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC, "10.0.0.5"],
+            fetch: async () => okResponse("ok"),
+        });
+        const blocked = await fetcher.fetchPage("https://example.com/", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(blocked.ok).toBe(false);
+        if (blocked.ok) return;
+        expect(blocked.reason).toBe("blocked_address");
+    });
+
+    test("refuses http redirect targets", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                if (String(url).endsWith("/start")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: { location: "http://example.com/nope" },
+                    });
+                }
+                return okResponse("ok");
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("invalid_link");
+    });
+
+    test("refuses redirect when new host resolves privately", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async (host) =>
+                host === "evil.example" ? ["10.0.0.1"] : [PUBLIC],
+            fetch: async (url) => {
+                if (String(url).includes("start")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: {
+                            location: "https://evil.example/target",
+                        },
+                    });
+                }
+                return okResponse("ok");
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("blocked_address");
+    });
+
+    test("checks robots on redirect target host", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                const href = String(url);
+                if (href.includes("robots.txt")) {
+                    return okResponse("User-agent: Foodable\nDisallow: /");
+                }
+                if (href.includes("start")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: {
+                            location: "https://other.example/target",
+                        },
+                    });
+                }
+                return okResponse("<html></html>");
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["text/html"],
+            checkRobots: true,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("robots_disallowed");
+    });
+
+    test("too many redirects", async () => {
+        let n = 0;
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () => {
+                n += 1;
+                return okResponse("", {
+                    status: 302,
+                    headers: { location: "/next" },
+                });
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/0", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("too_many_redirects");
+        expect(n).toBe(4);
+    });
+
+    test("streamed body over cap without content-length is too_large", async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new Uint8Array(1024 * 1024));
+                controller.enqueue(new Uint8Array(1024 * 1024));
+                controller.enqueue(new Uint8Array(1024 * 1024));
+                controller.enqueue(new Uint8Array(1));
+                controller.close();
+            },
+        });
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () =>
+                new Response(stream, {
+                    status: 200,
+                    headers: { "content-type": "text/html" },
+                }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/big", {
+            accept: ["text/html"],
+            checkRobots: false,
+            maxBytes: 3 * 1024 * 1024,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("too_large");
+    });
+
+    test("content-length over cap rejects without reading body", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () =>
+                new Response(null, {
+                    status: 200,
+                    headers: {
+                        "content-type": "text/html",
+                        "content-length": String(4 * 1024 * 1024),
+                    },
+                }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/len", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("too_large");
+    });
+
+    test("timeout on slow response", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (_url, init) =>
+                new Promise((_resolve, reject) => {
+                    init?.signal?.addEventListener("abort", () => {
+                        reject(new DOMException("Aborted", "AbortError"));
+                    });
+                }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/slow", {
+            accept: ["text/html"],
+            checkRobots: false,
+            timeoutMs: 5,
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+    });
+
+    test("bad content type", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () =>
+                okResponse("%PDF", {
+                    headers: { "content-type": "application/pdf" },
+                }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/pdf", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out).toMatchObject({
+            ok: false,
+            reason: "bad_content_type",
+        });
+    });
+
+    test("401/403/429 are site_refused with one fetch attempt", async () => {
+        for (const status of [401, 403, 429]) {
+            let calls = 0;
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => {
+                    calls += 1;
+                    return okResponse("nope", { status });
+                },
+            });
+            const out = await fetcher.fetchPage("https://example.com/x", {
+                accept: ["text/html"],
+                checkRobots: false,
+            });
+            expect(out.ok).toBe(false);
+            if (out.ok) continue;
+            expect(out.reason).toBe("site_refused");
+            expect(calls).toBe(1);
+        }
+    });
+
+    test("404 is not_found", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async () => okResponse("missing", { status: 404 }),
+        });
+        const out = await fetcher.fetchPage("https://example.com/missing", {
+            accept: ["text/html"],
+            checkRobots: false,
+        });
+        expect(out).toMatchObject({ ok: false, reason: "not_found" });
+    });
+
+    describe("robotsAllows", () => {
+        const allowAll = "User-agent: *\nDisallow:";
+        const denyFoodable = "User-agent: Foodable\nDisallow: /";
+        const pathRule = "User-agent: *\nDisallow: /recipes/";
+        const wildcardQuery = "User-agent: *\nDisallow: /*?print=";
+
+        test("allows when Foodable is not blocked", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse(allowAll),
+            });
+            expect(await fetcher.robotsAllows("https://example.com/any")).toBe(
+                true,
+            );
+        });
+
+        test("denies when Foodable is fully disallowed", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse(denyFoodable),
+            });
+            expect(await fetcher.robotsAllows("https://example.com/")).toBe(
+                false,
+            );
+        });
+
+        test("honours path rules", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse(pathRule),
+            });
+            expect(
+                await fetcher.robotsAllows("https://example.com/recipes/1"),
+            ).toBe(false);
+            expect(
+                await fetcher.robotsAllows("https://example.com/blog/1"),
+            ).toBe(true);
+        });
+
+        test("404 robots means allow all", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse("missing", { status: 404 }),
+            });
+            expect(await fetcher.robotsAllows("https://example.com/x")).toBe(
+                true,
+            );
+        });
+
+        test("500 robots means disallow", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse("error", { status: 500 }),
+            });
+            expect(await fetcher.robotsAllows("https://example.com/x")).toBe(
+                false,
+            );
+        });
+
+        test("wildcard query disallow rule", async () => {
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: async () => okResponse(wildcardQuery),
+            });
+            expect(
+                await fetcher.robotsAllows("https://example.com/page?print=1"),
+            ).toBe(false);
+        });
+
+        test("caches robots within TTL", async () => {
+            let now = 0;
+            let fetches = 0;
+            const fetcher = createSafeFetcher({
+                now: () => now,
+                robotsTtlMs: 60_000,
+                resolve: async () => [PUBLIC],
+                fetch: async () => {
+                    fetches += 1;
+                    return okResponse(allowAll);
+                },
+            });
+            expect(await fetcher.robotsAllows("https://cache.example/a")).toBe(
+                true,
+            );
+            expect(await fetcher.robotsAllows("https://cache.example/b")).toBe(
+                true,
+            );
+            expect(fetches).toBe(1);
+            now = 61_000;
+            expect(await fetcher.robotsAllows("https://cache.example/c")).toBe(
+                true,
+            );
+            expect(fetches).toBe(2);
+        });
+    });
+});
