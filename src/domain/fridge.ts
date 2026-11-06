@@ -90,6 +90,16 @@ export function createMemoryFridgeStore(): MemoryFridgeStore {
                 }
             }
         },
+        countFoodRefs(householdId) {
+            const counts = new Map<string, number>();
+            for (const item of items) {
+                if (item.householdId !== householdId) continue;
+                if (!item.foodId) continue;
+                const fid = item.foodId;
+                counts.set(fid, (counts.get(fid) ?? 0) + 1);
+            }
+            return counts;
+        },
         async listLocations(householdId) {
             return locations
                 .filter((row) => row.householdId === householdId)

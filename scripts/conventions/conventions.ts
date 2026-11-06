@@ -125,6 +125,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/routes/recipes.ts": "recipes",
     "src/web/pages/recipes.ts": "recipes",
     "src/domain/foods.ts": "foods",
+    "src/domain/food-merge-job.ts": "foods",
     "src/domain/food-identity.ts": "foods",
     "src/domain/food-quantity.ts": "foods",
     "src/domain/linking.ts": "foods",

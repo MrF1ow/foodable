@@ -5,6 +5,11 @@ import {
     type MemoryFoodsStore,
 } from "../../domain/foods.js";
 import { sampleFood, type StoreContractCtx } from "./helpers.js";
+import {
+    seedFridgeLocation,
+    seedGrocerySection,
+    seedGroceryStore,
+} from "../testing/fixtures.js";
 
 // A row elsewhere that names `foodId` (a dislike on the live side, the memory
 // store's own ref list otherwise); returns a reader for its current food_id.
@@ -153,6 +158,170 @@ async function trackMealItemFoodRef(
             proteinG: row?.protein_g != null ? Number(row.protein_g) : null,
             grams: row?.grams != null ? Number(row.grams) : null,
         };
+    };
+}
+
+async function trackFridgeItemFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+    householdId: string,
+): Promise<() => Promise<string | null>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId, householdId);
+        return async () => row.foodId;
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const locTag = crypto.randomUUID().slice(0, 8);
+    const locId = await seedFridgeLocation(
+        sql,
+        householdId,
+        `Contract loc ${locTag}`,
+    );
+    const [inserted] = await sql`
+        insert into public.fridge_items (
+            household_id,
+            location_id,
+            kind,
+            display_name,
+            amount,
+            unit,
+            food_id
+        )
+        values (
+            ${householdId},
+            ${locId},
+            ${"food"},
+            ${"Contract item"},
+            ${1},
+            ${"g"},
+            ${foodId}
+        )
+        returning id
+    `;
+    const id = String(inserted.id);
+    return async () => {
+        const [row] = await sql`
+            select food_id::text as food_id from public.fridge_items where id = ${id}
+        `;
+        return row?.food_id ?? null;
+    };
+}
+
+async function trackGroceryLineFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+    householdId: string,
+): Promise<() => Promise<string | null>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId, householdId);
+        return async () => row.foodId;
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const tag = crypto.randomUUID().slice(0, 8);
+    const storeId = await seedGroceryStore(
+        sql,
+        householdId,
+        `Contract store ${tag}`,
+    );
+    const sectionId = await seedGrocerySection(
+        sql,
+        householdId,
+        storeId,
+        `Contract section ${tag}`,
+    );
+    const id = crypto.randomUUID();
+    await sql`
+        insert into public.grocery_lines (
+            id,
+            household_id,
+            store_id,
+            section_id,
+            kind,
+            display_name,
+            amount,
+            unit,
+            food_id
+        )
+        values (
+            ${id},
+            ${householdId},
+            ${storeId},
+            ${sectionId},
+            ${"food"},
+            ${"Line"},
+            ${1},
+            ${"g"},
+            ${foodId}
+        )
+    `;
+    return async () => {
+        const [row] = await sql`
+            select food_id::text as food_id from public.grocery_lines where id = ${id}
+        `;
+        return row?.food_id ?? null;
+    };
+}
+
+async function trackRecipeIngredientFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+    householdId: string,
+    userId: string,
+): Promise<() => Promise<string | null>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId, householdId);
+        return async () => row.foodId;
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const recipeId = crypto.randomUUID();
+    await sql`
+        insert into public.recipes (
+            id,
+            household_id,
+            creator_id,
+            name,
+            yield_portions
+        )
+        values (${recipeId}, ${householdId}, ${userId}, ${"Contract recipe"}, ${2})
+    `;
+    const id = crypto.randomUUID();
+    await sql`
+        insert into public.recipe_ingredients (
+            id,
+            household_id,
+            recipe_id,
+            kind,
+            display_name,
+            amount,
+            unit,
+            food_id,
+            sort_order
+        )
+        values (
+            ${id},
+            ${householdId},
+            ${recipeId},
+            ${"food"},
+            ${"Ingredient"},
+            ${100},
+            ${"g"},
+            ${foodId},
+            ${0}
+        )
+    `;
+    return async () => {
+        const [row] = await sql`
+            select food_id::text as food_id
+            from public.recipe_ingredients
+            where id = ${id}
+        `;
+        return row?.food_id ?? null;
     };
 }
 
@@ -586,6 +755,112 @@ export function runFoodsStoreContract(
             const store = createStore();
             await store.insertFood(sampleFood(c.householdId));
             expect(await store.listFoods(c.otherHouseholdId)).toEqual([]);
+        });
+
+        test("countFoodRefs aggregates five tables per household", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const foodA = sampleFood(c.householdId, {
+                name: "Ref A",
+                normalizedName: "ref a",
+            });
+            const foodB = sampleFood(c.householdId, {
+                name: "Ref B",
+                normalizedName: "ref b",
+            });
+            const foodOrphan = sampleFood(c.householdId, {
+                name: "No refs",
+                normalizedName: "no refs",
+            });
+            await store.insertFood(foodA);
+            await store.insertFood(foodB);
+            await store.insertFood(foodOrphan);
+
+            if ("trackRef" in store) {
+                const mem = store as MemoryFoodsStore;
+                mem.trackRef(foodA.id, c.householdId);
+                mem.trackRef(foodA.id, c.householdId);
+                mem.trackRef(foodA.id, c.householdId);
+                mem.trackRef(foodA.id, c.householdId);
+                mem.trackRef(foodA.id, c.householdId);
+                mem.trackRef(foodB.id, c.householdId);
+                mem.trackRef(foodB.id, c.householdId);
+                mem.trackRef(foodA.id, c.otherHouseholdId);
+            } else {
+                const sql = c.sql;
+                if (!sql) throw new Error("live foods contract needs ctx.sql");
+                await (
+                    await trackFridgeItemFoodRef(
+                        store,
+                        c,
+                        foodA.id,
+                        c.householdId,
+                    )
+                )();
+                await (
+                    await trackGroceryLineFoodRef(
+                        store,
+                        c,
+                        foodA.id,
+                        c.householdId,
+                    )
+                )();
+                await (
+                    await trackRecipeIngredientFoodRef(
+                        store,
+                        c,
+                        foodA.id,
+                        c.householdId,
+                        c.userId,
+                    )
+                )();
+                await (
+                    await trackMealItemFoodRef(
+                        store,
+                        c,
+                        foodA.id,
+                        c.householdId,
+                        c.userId,
+                    )
+                )();
+                await (
+                    await trackStockMovementFoodRef(
+                        store,
+                        c,
+                        foodA.id,
+                        c.householdId,
+                    )
+                )();
+                await (
+                    await trackFridgeItemFoodRef(
+                        store,
+                        c,
+                        foodB.id,
+                        c.householdId,
+                    )
+                )();
+                await (
+                    await trackStockMovementFoodRef(
+                        store,
+                        c,
+                        foodB.id,
+                        c.householdId,
+                    )
+                )();
+            }
+
+            const primary = await store.countFoodRefs(c.householdId);
+            expect(primary.get(foodA.id)).toBe(5);
+            expect(primary.get(foodB.id)).toBe(2);
+            expect(primary.get(foodOrphan.id)).toBeUndefined();
+
+            const other = await store.countFoodRefs(c.otherHouseholdId);
+            if (c.sql) {
+                expect(other.size).toBe(0);
+            } else {
+                expect(other.get(foodA.id)).toBe(1);
+            }
         });
     });
 }

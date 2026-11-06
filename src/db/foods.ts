@@ -445,6 +445,43 @@ export function liveFoodsStore(): FoodsStore {
                 }
             });
         },
+        async countFoodRefs(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ food_id: string; count: number }>(
+                        tx,
+                        tx`
+                            select food_id::text, count(*)::int as count
+                            from (
+                                select food_id from ${tx.unsafe("fridge_items")}
+                                where household_id = ${householdId}
+                                union all
+                                select food_id from ${tx.unsafe("grocery_lines")}
+                                where household_id = ${householdId}
+                                union all
+                                select food_id from ${tx.unsafe("recipe_ingredients")}
+                                where household_id = ${householdId}
+                                union all
+                                select food_id from ${tx.unsafe("meal_items")}
+                                where household_id = ${householdId}
+                                union all
+                                select food_id from ${tx.unsafe("stock_movements")}
+                                where household_id = ${householdId}
+                            ) r
+                            where food_id is not null
+                            group by food_id
+                        `,
+                    );
+                    const map = new Map<string, number>();
+                    for (const row of data) {
+                        map.set(row.food_id, row.count);
+                    }
+                    return map;
+                } catch (err) {
+                    throw pgError("count food references", err);
+                }
+            });
+        },
     };
     return store;
 }
