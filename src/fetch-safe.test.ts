@@ -457,6 +457,35 @@ describe("createSafeFetcher", () => {
         }
     });
 
+    test("allowedHosts refuses redirect to a host outside the list", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async (host) =>
+                host === "graph.example" || host === "example.com"
+                    ? [PUBLIC]
+                    : [PUBLIC],
+            fetch: async (url) => {
+                const href = String(url);
+                if (href.includes("graph.example")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: {
+                            location: "https://www.facebook.com/nope",
+                        },
+                    });
+                }
+                return okResponse("ok");
+            },
+        });
+        const out = await fetcher.fetchPage("https://graph.example/start", {
+            accept: ["text/html"],
+            checkRobots: false,
+            allowedHosts: ["graph.example"],
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("host_not_allowed");
+    });
+
     test("404 is not_found", async () => {
         const fetcher = createSafeFetcher({
             resolve: async () => [PUBLIC],

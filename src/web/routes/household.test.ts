@@ -27,6 +27,7 @@ import {
     EMPTY_HOUSEHOLD_PREFERENCES,
     setSocialReaderEnabled,
     type HouseholdConfig,
+    type HouseholdMember,
 } from "../../household.js";
 import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
 import * as actualDbSocialReaders from "../../db/social-readers.js";
@@ -62,13 +63,28 @@ const PROFILE: actualDbProfiles.Profile = {
     updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-const db = {
+const db: {
+    profile: actualDbProfiles.Profile;
+    members: HouseholdMember[];
+    household: HouseholdConfig;
+    socialReaderStatusStore: ReturnType<
+        typeof createMemorySocialReaderStatusStore
+    >;
+    foodsStore: ReturnType<typeof createMemoryFoodsStore>;
+    fridgeStore: ReturnType<typeof createMemoryFridgeStore>;
+    stockStore: ReturnType<typeof createMemoryStockStore>;
+    groceryStore: ReturnType<typeof createMemoryGroceryStore>;
+    recipesStore: ReturnType<typeof createMemoryRecipesStore>;
+    settingsStore: ReturnType<typeof createMemorySettingsStore>;
+    rulesStore: ReturnType<typeof createMemoryRulesStore>;
+    barcodeFoods: Record<string, FoodResult>;
+} = {
     profile: PROFILE,
     members: [
         {
             householdId: HH,
             userId: ALICE,
-            role: "owner" as const,
+            role: "owner",
             displayName: "Alice",
         },
     ],
@@ -76,7 +92,7 @@ const db = {
         name: "Home",
         recipeSearchPlaces: [],
         preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
-    } satisfies HouseholdConfig,
+    },
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
     foodsStore: createMemoryFoodsStore(),
     fridgeStore: createMemoryFridgeStore(),

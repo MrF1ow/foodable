@@ -206,6 +206,7 @@ function socialReaderEnableModal(
 <input type="hidden" name="reader" value="${reader}" />
 <input type="hidden" name="enabled" value="1" />
 <p class="modal-message">Enable automatic reading of ${escapeHtml(label)} captions for recipe imports?</p>
+${socialReaderRiskBlock()}
 ${extra}
 <label><input type="checkbox" name="confirm" value="1" required /> ${escapeHtml(socialReaderConfirmLabel(reader))}</label>
 <div class="modal-actions">

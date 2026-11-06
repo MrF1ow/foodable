@@ -352,4 +352,10 @@ test("recipe settings lists social reader risk text and platforms", () => {
     expect(html).toContain("Never used");
     expect(html).toContain("Turn on TikTok reader");
     expect(html).toContain("Facebook doesn't document");
+    expect(
+        html.match(/goes against that platform's terms of service/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+        html.match(/recipe-import-terms-2026-11\.md/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
 });

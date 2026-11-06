@@ -331,6 +331,7 @@ export function outcomeFromFetchFailure(
             return "timeout";
         case "invalid_link":
         case "blocked_address":
+        case "host_not_allowed":
             return "invalid_link";
         case "too_large":
         case "bad_content_type":
