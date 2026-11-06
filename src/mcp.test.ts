@@ -43,6 +43,7 @@ import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualDbSql from "./db/sql.js";
+import * as actualDbSocialReaders from "./db/social-readers.js";
 import * as actualRecipeUrlFetcher from "./recipe-url-fetcher.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
@@ -66,6 +67,7 @@ const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
 const realDbSql = { ...actualDbSql };
+const realDbSocialReaders = { ...actualDbSocialReaders };
 const realRecipeUrlFetcher = { ...actualRecipeUrlFetcher };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
@@ -109,6 +111,7 @@ import {
 import { addAllergen, createMemoryRulesStore } from "./domain/rules.js";
 import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
+import { createMemorySocialReaderStatusStore } from "./domain/social-readers.js";
 import {
     TOOLS,
     HOUSEHOLD_SCOPED_TOOL_NAMES,
@@ -308,6 +311,7 @@ const db = {
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
+    socialReaderStatusStore: createMemorySocialReaderStatusStore(),
 };
 
 mock.module("./db/analytics.js", () => ({
@@ -610,6 +614,11 @@ mock.module("./db/notice-dismissals.js", () => ({
     liveNoticeDismissalsStore: () => db.dismissalsStore,
 }));
 
+mock.module("./db/social-readers.js", () => ({
+    ...actualDbSocialReaders,
+    liveSocialReaderStatusStore: () => db.socialReaderStatusStore,
+}));
+
 mock.module("./foods.js", () => ({
     ...actualFoods,
     lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
@@ -651,6 +660,7 @@ afterAll(() => {
     mock.module("./db/rules.js", () => realDbRules);
     mock.module("./db/foods.js", () => realDbFoods);
     mock.module("./db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("./db/social-readers.js", () => realDbSocialReaders);
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
     mock.module("./db/exports.js", () => realExports);
@@ -3389,6 +3399,7 @@ describe("household config tools", () => {
                     budget: null,
                     shopping_cadence: null,
                     unverified_recipe_expiry_days: null,
+                    social_readers: { tiktok: false, facebook: false },
                 },
                 timezone: null,
                 effective_timezone: "UTC",

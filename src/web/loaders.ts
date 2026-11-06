@@ -28,6 +28,7 @@ import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
+import { liveSocialReaderStatusStore } from "../db/social-readers.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import { renderFridgePage } from "./pages/fridge.js";
@@ -716,12 +717,14 @@ export async function renderHouseholdSettingsRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const [config, members, location, stores] = await Promise.all([
-        getHouseholdConfig(householdId),
-        listHouseholdMembers(householdId),
-        liveSettingsStore().getLocation(householdId),
-        liveSettingsStore().listStores(householdId),
-    ]);
+    const [config, members, location, stores, socialReaderStatus] =
+        await Promise.all([
+            getHouseholdConfig(householdId),
+            listHouseholdMembers(householdId),
+            liveSettingsStore().getLocation(householdId),
+            liveSettingsStore().listStores(householdId),
+            liveSocialReaderStatusStore().get(householdId),
+        ]);
     const settings = liveSettingsStore();
     const rules = liveRulesStore();
     const storeViews = await Promise.all(
@@ -756,6 +759,9 @@ export async function renderHouseholdSettingsRoute(
             openModalId: opts.openModalId,
             unverifiedRecipeExpiryDays:
                 config.preferences.unverifiedRecipeExpiryDays,
+            socialReaders: config.preferences.socialReaders,
+            socialReaderStatus,
+            timezone: profile?.timezone ?? "UTC",
         }),
     };
 }

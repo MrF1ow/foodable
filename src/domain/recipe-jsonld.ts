@@ -399,3 +399,5 @@ export function readRecipeJsonLd(html: string): JsonLdRecipe | null {
         keywords: parseKeywords(node.keywords),
     };
 }
+
+export { decodeEntities as decodeRecipeHtmlEntities };

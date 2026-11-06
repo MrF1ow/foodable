@@ -45,6 +45,16 @@ export const DEFAULT_RESTOCK: RestockPreferences = {
     lastRunOn: null,
 };
 
+export type SocialReadersPreferences = {
+    tiktok: boolean;
+    facebook: boolean;
+};
+
+export const DEFAULT_SOCIAL_READERS: SocialReadersPreferences = {
+    tiktok: false,
+    facebook: false,
+};
+
 export type HouseholdPreferences = {
     constraints: string[];
     budget: string | null;
@@ -52,6 +62,7 @@ export type HouseholdPreferences = {
     timezone: string | null;
     restock: RestockPreferences;
     unverifiedRecipeExpiryDays: number | null;
+    socialReaders: SocialReadersPreferences;
 };
 
 export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
@@ -61,6 +72,7 @@ export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     timezone: null,
     restock: { ...DEFAULT_RESTOCK },
     unverifiedRecipeExpiryDays: null,
+    socialReaders: { ...DEFAULT_SOCIAL_READERS },
 };
 
 export const HOUSEHOLD_TZ_ERROR = "Enter a valid IANA timezone.";
@@ -95,6 +107,10 @@ export type HouseholdConfigWire = {
         budget: string | null;
         shopping_cadence: string | null;
         unverified_recipe_expiry_days: number | null;
+        social_readers: {
+            tiktok: boolean;
+            facebook: boolean;
+        };
     };
     timezone: string | null;
     effective_timezone: string;
@@ -189,6 +205,9 @@ function copyHousehold(household: Household): Household {
             restock: { ...household.preferences.restock },
             unverifiedRecipeExpiryDays:
                 household.preferences.unverifiedRecipeExpiryDays,
+            socialReaders: {
+                ...household.preferences.socialReaders,
+            },
         },
     };
 }
@@ -629,6 +648,12 @@ export function householdConfigFromRow(row: {
     );
     if (!unverifiedRecipeExpiryDays.ok) return unverifiedRecipeExpiryDays;
 
+    const socialRaw =
+        (prefs as { socialReaders?: unknown; social_readers?: unknown })
+            .socialReaders ??
+        (prefs as { social_readers?: unknown }).social_readers;
+    const socialReaders = parseSocialReadersPrefs(socialRaw);
+
     return {
         ok: true,
         value: {
@@ -641,6 +666,40 @@ export function householdConfigFromRow(row: {
                 timezone,
                 restock,
                 unverifiedRecipeExpiryDays: unverifiedRecipeExpiryDays.value,
+                socialReaders,
+            },
+        },
+    };
+}
+
+function parseSocialReadersPrefs(value: unknown): SocialReadersPreferences {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ...DEFAULT_SOCIAL_READERS };
+    }
+    const record = value as {
+        tiktok?: unknown;
+        facebook?: unknown;
+    };
+    return {
+        tiktok: record.tiktok === true,
+        facebook: record.facebook === true,
+    };
+}
+
+export type SocialReaderToggle = "tiktok" | "facebook";
+
+export function setSocialReaderEnabled(
+    config: HouseholdConfig,
+    reader: SocialReaderToggle,
+    enabled: boolean,
+): HouseholdConfig {
+    return {
+        ...config,
+        preferences: {
+            ...config.preferences,
+            socialReaders: {
+                ...config.preferences.socialReaders,
+                [reader]: enabled,
             },
         },
     };
@@ -707,6 +766,10 @@ export function householdConfigToWire(
             shopping_cadence: config.preferences.shoppingCadence,
             unverified_recipe_expiry_days:
                 config.preferences.unverifiedRecipeExpiryDays,
+            social_readers: {
+                tiktok: config.preferences.socialReaders.tiktok,
+                facebook: config.preferences.socialReaders.facebook,
+            },
         },
         timezone: config.preferences.timezone,
         effective_timezone: effectiveTimezone,
@@ -994,6 +1057,7 @@ export function mergeHouseholdConfig(
                 patch.preferences?.unverifiedRecipeExpiryDays !== undefined
                     ? patch.preferences.unverifiedRecipeExpiryDays
                     : current.preferences.unverifiedRecipeExpiryDays,
+            socialReaders: current.preferences.socialReaders,
         },
     };
 }

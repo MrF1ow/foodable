@@ -1,0 +1,8 @@
+{
+    "html": "<div class=\"fb-post\"><blockquote cite=\"https://www.facebook.com/user/posts/1\" class=\"fb-xfbml-parse-ignore\"><p>Sunday stew: 1 lb beef, 3 carrots. Simmer 2 hours.</p>Posted by <a href=\"https://www.facebook.com/user\">Cook</a> on Monday, 2 November 2026</blockquote></div>",
+    "type": "rich",
+    "version": "1.0",
+    "provider_name": "Facebook",
+    "provider_url": "https://www.facebook.com",
+    "width": 500
+}

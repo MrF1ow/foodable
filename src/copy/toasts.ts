@@ -165,6 +165,14 @@ export const TOASTS = {
         kind: "success",
         text: "Recipe settings saved",
     },
+    "household.social-reader.on": {
+        kind: "success",
+        text: "{platform} reader on",
+    },
+    "household.social-reader.off": {
+        kind: "success",
+        text: "{platform} reader off",
+    },
     "recipes.add-to-grocery.nothing": {
         kind: "info",
         text: "Nothing to add — everything is in stock",
