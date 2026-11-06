@@ -1,6 +1,6 @@
 # Duplicate foods: implementation plan
 
-Status: proposed 2026-11-06. Follows usual products ([usual-products-plan.md](./usual-products-plan.md)) and the word search in #164.
+Status: proposed 2026-11-06. Follows usual products ([usual-products-plan.md](./usual-products-plan.md)) and the word search in #164. Possible duplicates are shown through the shared notices model ([notices-plan.md](./notices-plan.md)), which is built first.
 
 ## Goal
 
@@ -106,7 +106,7 @@ Barcodes and products are covered by usual products. The name paths gain one ste
 
 ### 4. Possible duplicates
 
-One place for every likely duplicate the household has not decided on, whatever created it.
+One place for every likely duplicate the household has not decided on, whatever created it. Each pair is a `food.possible_duplicate` notice ([notices-plan.md](./notices-plan.md)), so its badge, sentence, action and MCP shape come from the shared registry and renderers rather than markup of its own.
 
 - **What is listed:** `possibleDuplicates(foods, aliases, dismissed)` (pure) pairs every two live, same-kind plain foods that `similarFoods` rules 1 and 2 would suggest for each other: same words up to plurals, or one name containing every word of the other. Rule 3, the broad word match, is left out because it is too noisy for a list. Pairs the merge job would merge on its own never wait here; they are merged. Products and scanned cartons are not listed: they are filed with Belongs to…, as in usual products.
 - **Computed, not stored:** the list is worked out from the catalog each time, so it can't go stale. Only the household's "Keep separate" answers are stored, in a new table `food_duplicate_dismissals` (`household_id`, `food_a_id`, `food_b_id` with `food_a_id < food_b_id`, `dismissed_by`, `created_at`; RLS and grants like every new table). A pair is never listed again once dismissed, and comes back only if one of the foods is merged into something else.
@@ -190,19 +190,20 @@ Plus:
     - `duplicatePairs`;
     - `scripts/merge-duplicate-foods.ts`.
       The production dry run is reviewed before anyone runs `--apply`.
-3. **Possible duplicates:**
+3. **Notices foundation:** PRs 1–3 of [notices-plan.md](./notices-plan.md).
+4. **Possible duplicates:**
     - the `food_duplicate_dismissals` migration;
     - `possibleDuplicates`;
     - the Household section, tab dot and "Possible duplicate of…" links;
     - Merge… and Keep separate;
     - `list_possible_duplicates` and `keep_foods_separate`.
-4. **"Did you mean" in the domain and MCP:**
+5. **"Did you mean" in the domain and MCP:**
     - `similarFoods`;
     - `SimilarFoodsError`;
     - `on_similar` and `new_food` on the six tools;
     - `SERVER_INSTRUCTIONS`.
-5. **"Did you mean" in the web app:** the three add forms and the alias checkbox.
-6. **Plurals opt-in:** the `households.plurals_same_food` migration, the setting, name resolution, and plural pairs in the merge job.
+6. **"Did you mean" in the web app:** the three add forms and the alias checkbox.
+7. **Plurals opt-in:** the `households.plurals_same_food` migration, the setting, name resolution, and plural pairs in the merge job.
 
 Possible duplicates comes before "Did you mean" on purpose: it catches every duplicate, whatever created it, so it is useful the day it ships, and "Did you mean" then shrinks what reaches it.
 
@@ -210,5 +211,5 @@ Then the catalog page is evaluated (see "Later").
 
 ## Open questions
 
-- **Keep separate, forever?** A dismissed pair never comes back unless a food is merged. Should a dismissal expire, or be undoable from the food?
+- **Keep separate, forever?** A dismissed pair never comes back unless a food is merged. Should a dismissal expire, or be undoable from the food? This may become the shared dismissal for every `info` notice (an open question in [notices-plan.md](./notices-plan.md)).
 - **The badge:** a dot on the Household tab, or a number? A number may nag when a household has a long list on day one, before the merge job runs.
