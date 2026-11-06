@@ -29,18 +29,26 @@ const NAMED_ENTITIES: Record<string, string> = {
     hellip: "…",
 };
 
+function codePointChar(code: number): string {
+    if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return "";
+    try {
+        return String.fromCodePoint(code);
+    } catch {
+        return "";
+    }
+}
+
 function decodeEntities(text: string): string {
     let out = text.replace(/<[^>]+>/g, " ");
-    out = out.replace(/&#(\d+);/g, (_, code) =>
-        String.fromCodePoint(Number(code)),
-    );
+    out = out.replace(/&#(\d+);/g, (_, code) => codePointChar(Number(code)));
     out = out.replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
-        String.fromCodePoint(parseInt(hex, 16)),
+        codePointChar(parseInt(hex, 16)),
     );
     out = out.replace(
         /&([a-z]+);/gi,
         (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match,
     );
+    out = out.replace(/<[^>]+>/g, " ");
     out = out.replace(/\s+/g, " ").trim();
     if (
         /&(?:#|amp|lt|gt|quot|apos|nbsp|frac|deg|ndash|mdash|rsquo|lsquo|rdquo|ldquo|hellip);/i.test(
@@ -161,8 +169,7 @@ function parseYieldValue(value: unknown): {
         const num = trimmed.match(/(\d+(?:\.\d+)?)/);
         if (num) {
             const portions = Math.round(Number(num[1]));
-            const text = trimmed.replace(String(num[1]), "").trim() || null;
-            return { portions, text: text || trimmed };
+            return { portions, text: trimmed };
         }
         return { portions: null, text: trimmed };
     }
@@ -213,6 +220,14 @@ function parseInstructions(value: unknown): {
     sections: { name: string; steps: string[] }[] | null;
 } {
     if (value == null) return { steps: [], sections: null };
+    if (typeof value === "object" && !Array.isArray(value)) {
+        const types = normalizeType(
+            (value as Record<string, unknown>)["@type"],
+        );
+        if (types.some((t) => t.toLowerCase() === "itemlist")) {
+            return parseInstructions([value]);
+        }
+    }
     if (typeof value === "string") {
         const lines = value
             .split(/\r?\n/)
@@ -237,6 +252,16 @@ function parseInstructions(value: unknown): {
         if (!item || typeof item !== "object") continue;
         const obj = item as Record<string, unknown>;
         const types = normalizeType(obj["@type"]);
+        if (types.some((t) => t.toLowerCase() === "itemlist")) {
+            const elements = obj.itemListElement;
+            if (Array.isArray(elements)) {
+                for (const el of elements) {
+                    const text = instructionText(el);
+                    if (text) flat.push(stripStepNumbering(text));
+                }
+            }
+            continue;
+        }
         if (types.some((t) => t.toLowerCase() === "howtosection")) {
             const name =
                 typeof obj.name === "string"

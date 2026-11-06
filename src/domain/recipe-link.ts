@@ -106,9 +106,11 @@ export function validateRecipeLink(
         return { ok: false, reason: "invalid_link" };
     }
 
-    const isIp = parseIpv4(host) || host.includes(":");
+    const ipHost =
+        host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+    const isIp = parseIpv4(ipHost) || ipHost.includes(":");
     if (isIp) {
-        if (!isPublicAddress(host)) {
+        if (!isPublicAddress(ipHost)) {
             return { ok: false, reason: "invalid_link" };
         }
     } else if (!host.includes(".")) {
@@ -156,6 +158,18 @@ function isPinterestHost(host: string): boolean {
     if (hostMatches(h, "pin.it")) return true;
     if (/^([a-z0-9-]+\.)*pinterest\.[a-z]{2}$/.test(h)) return true;
     if (/^([a-z0-9-]+\.)*pinterest\.co\.[a-z]{2}$/.test(h)) return true;
+    if (/^([a-z0-9-]+\.)*pinterest\.com\.[a-z]{2}$/.test(h)) return true;
+    return false;
+}
+
+function isYoutubeHost(host: string): boolean {
+    const h = host.toLowerCase();
+    if (hostMatches(h, "youtube.com")) return true;
+    if (hostMatches(h, "m.youtube.com")) return true;
+    if (hostMatches(h, "music.youtube.com")) return true;
+    if (hostMatches(h, "youtu.be")) return true;
+    if (/^([a-z0-9-]+\.)*youtube\.com\.[a-z]{2}$/.test(h)) return true;
+    if (/^([a-z0-9-]+\.)*youtube\.co\.[a-z]{2}$/.test(h)) return true;
     return false;
 }
 
@@ -187,12 +201,14 @@ export function recipeSource(url: URL): RecipeSourceInfo {
         hostMatches(host, "facebook.com") ||
         hostMatches(host, "fb.com") ||
         hostMatches(host, "m.facebook.com") ||
-        hostMatches(host, "fb.watch")
+        hostMatches(host, "fb.watch") ||
+        hostMatches(host, "fb.me")
     ) {
         return {
             kind: "facebook",
             label: "Facebook",
-            shortLink: hostMatches(host, "fb.watch"),
+            shortLink:
+                hostMatches(host, "fb.watch") || hostMatches(host, "fb.me"),
             pasteOnly,
         };
     }
@@ -226,12 +242,7 @@ export function recipeSource(url: URL): RecipeSourceInfo {
             pasteOnly,
         };
     }
-    if (
-        hostMatches(host, "youtube.com") ||
-        hostMatches(host, "m.youtube.com") ||
-        hostMatches(host, "music.youtube.com") ||
-        hostMatches(host, "youtu.be")
-    ) {
+    if (isYoutubeHost(host)) {
         return {
             kind: "youtube",
             label: "YouTube",

@@ -83,17 +83,57 @@ function ipv4InCidr(
     return (ip & mask) === (network & mask);
 }
 
+function stripIpv6Brackets(ip: string): string {
+    const trimmed = ip.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        return trimmed.slice(1, -1);
+    }
+    return trimmed;
+}
+
+function ipv4OctetsToHextets(octets: number[]): [bigint, bigint] {
+    const v =
+        ((octets[0]! << 24) |
+            (octets[1]! << 16) |
+            (octets[2]! << 8) |
+            octets[3]!) >>>
+        0;
+    return [BigInt(v >>> 16), BigInt(v & 0xffff)];
+}
+
+function expandIpv6SegmentList(segments: string[]): string[] | null {
+    const out: string[] = [];
+    for (const seg of segments) {
+        if (seg.includes(".")) {
+            const octets = parseIpv4(seg);
+            if (!octets) return null;
+            const [hi, lo] = ipv4OctetsToHextets(octets);
+            out.push(hi.toString(16), lo.toString(16));
+        } else if (seg) {
+            out.push(seg);
+        }
+    }
+    return out;
+}
+
 function expandIpv6(ip: string): bigint[] | null {
-    const lower = ip.toLowerCase();
-    if (!/^[0-9a-f:]+$/i.test(lower)) return null;
+    const lower = stripIpv6Brackets(ip).toLowerCase();
+    if (!/^[0-9a-f:.]+$/i.test(lower)) return null;
     let head: string[];
     let tail: string[];
     if (lower.includes("::")) {
         const [h, t] = lower.split("::");
-        head = h ? h.split(":").filter(Boolean) : [];
-        tail = t ? t.split(":").filter(Boolean) : [];
+        const headRaw = h ? h.split(":").filter(Boolean) : [];
+        const tailRaw = t ? t.split(":").filter(Boolean) : [];
+        const headExpanded = expandIpv6SegmentList(headRaw);
+        const tailExpanded = expandIpv6SegmentList(tailRaw);
+        if (!headExpanded || !tailExpanded) return null;
+        head = headExpanded;
+        tail = tailExpanded;
     } else {
-        head = lower.split(":");
+        const expanded = expandIpv6SegmentList(lower.split(":"));
+        if (!expanded) return null;
+        head = expanded;
         tail = [];
     }
     const missing = 8 - head.length - tail.length;
@@ -175,12 +215,26 @@ function isPrivateIpv6(parts: bigint[]): boolean {
             ];
             return isPrivateIpv4(octets);
         }
+        if (parts[4] === 0n && parts[5] === 0n) {
+            const v32 =
+                (Number(parts[6]! >> 8n) << 24) |
+                (Number(parts[6]! & 0xffn) << 16) |
+                (Number(parts[7]! >> 8n) << 8) |
+                Number(parts[7]! & 0xffn);
+            const octets = [
+                (v32 >>> 24) & 0xff,
+                (v32 >>> 16) & 0xff,
+                (v32 >>> 8) & 0xff,
+                v32 & 0xff,
+            ];
+            return isPrivateIpv4(octets);
+        }
     }
     return false;
 }
 
 export function isPublicAddress(ip: string): boolean {
-    const trimmed = ip.trim();
+    const trimmed = stripIpv6Brackets(ip.trim());
     if (!trimmed) return false;
     const v4 = parseIpv4(trimmed);
     if (v4) return !isPrivateIpv4(v4);
@@ -214,10 +268,11 @@ export function urlAllowedForFetch(url: URL): boolean {
     if (url.port && url.port !== "443") return false;
     const host = url.hostname.toLowerCase();
     if (isBlockedHostname(host)) return false;
-    const isIpv4 = parseIpv4(host) !== null;
-    const isIpv6 = host.includes(":");
+    const ipHost = stripIpv6Brackets(host);
+    const isIpv4 = parseIpv4(ipHost) !== null;
+    const isIpv6 = ipHost.includes(":");
     if (isIpv4 || isIpv6) {
-        return isPublicAddress(host);
+        return isPublicAddress(ipHost);
     }
     return host.includes(".");
 }
@@ -269,13 +324,48 @@ function decodeBody(bytes: Uint8Array, contentType: string | null): string {
     return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
+type BodyStreamReadResult = Awaited<
+    ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>
+>;
+
+async function readWithAbortSignal(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    signal?: AbortSignal,
+): Promise<BodyStreamReadResult> {
+    if (!signal) return reader.read();
+    if (signal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+    }
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            signal.removeEventListener("abort", onAbort);
+            reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal.addEventListener("abort", onAbort);
+        reader.read().then(
+            (result) => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(result);
+            },
+            (err) => {
+                signal.removeEventListener("abort", onAbort);
+                reject(err);
+            },
+        );
+    });
+}
+
 async function readBodyStream(
     response: Response,
     maxBytes: number,
+    signal?: AbortSignal,
 ): Promise<
     | { ok: true; bytes: Uint8Array }
     | { ok: false; reason: FetchFailure; detail: string }
 > {
+    if (signal?.aborted) {
+        return { ok: false, reason: "timeout", detail: "Aborted" };
+    }
     const lengthHeader = response.headers.get("content-length");
     if (lengthHeader) {
         const len = Number(lengthHeader);
@@ -290,7 +380,24 @@ async function readBodyStream(
     const chunks: Uint8Array[] = [];
     let total = 0;
     while (true) {
-        const { done, value } = await reader.read();
+        if (signal?.aborted) {
+            await reader.cancel();
+            return { ok: false, reason: "timeout", detail: "Aborted" };
+        }
+        let readResult: BodyStreamReadResult;
+        try {
+            readResult = await readWithAbortSignal(
+                reader as ReadableStreamDefaultReader<Uint8Array>,
+                signal,
+            );
+        } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+                await reader.cancel().catch(() => {});
+                return { ok: false, reason: "timeout", detail: err.message };
+            }
+            throw err;
+        }
+        const { done, value } = readResult;
         if (done) break;
         if (value) {
             total += value.length;
@@ -342,11 +449,13 @@ export function createSafeFetcher(deps?: {
     resolve?: (host: string) => Promise<string[]>;
     now?: () => number;
     robotsTtlMs?: number;
+    defaultTimeoutMs?: number;
 }) {
     const doFetch: FetchFn = deps?.fetch ?? globalThis.fetch.bind(globalThis);
     const resolve = deps?.resolve ?? defaultResolve;
     const now = deps?.now ?? (() => Date.now());
     const robotsTtlMs = deps?.robotsTtlMs ?? DEFAULT_ROBOTS_TTL_MS;
+    const defaultTimeoutMs = deps?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     const robotsCache = new Map<string, RobotsCacheEntry>();
 
     async function fetchBytes(
@@ -379,142 +488,150 @@ export function createSafeFetcher(deps?: {
 
         let current = url;
         let redirects = 0;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
-        while (true) {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
-            let response: Response;
-            try {
-                response = await doFetch(current.href, {
-                    method: "GET",
-                    redirect: "manual",
-                    headers: {
-                        "User-Agent": FOODABLE_USER_AGENT,
-                        Accept: opts.accept
-                            ? `${opts.accept.join(", ")}, */*;q=0.1`
-                            : "*/*",
-                        "Accept-Language": "en",
-                    },
-                    signal: controller.signal,
-                });
-            } catch (err) {
-                clearTimeout(timer);
-                const message =
-                    err instanceof Error ? err.message : String(err);
-                const reason =
-                    err instanceof Error && err.name === "AbortError"
-                        ? "timeout"
-                        : "network_error";
-                return {
-                    ok: false,
-                    reason,
-                    status: null,
-                    detail: message,
-                };
-            } finally {
-                clearTimeout(timer);
-            }
-
-            if (response.status >= 300 && response.status < 400) {
-                const location = response.headers.get("location");
-                if (!location) {
-                    return {
-                        ok: false,
-                        reason: "http_error",
-                        status: response.status,
-                        detail: "Redirect without Location",
-                    };
-                }
-                redirects += 1;
-                if (redirects > opts.maxRedirects) {
-                    return {
-                        ok: false,
-                        reason: "too_many_redirects",
-                        status: response.status,
-                        detail: location,
-                    };
-                }
-                let next: URL;
+        try {
+            while (true) {
+                let response: Response;
                 try {
-                    next = new URL(location, current);
-                } catch {
+                    response = await doFetch(current.href, {
+                        method: "GET",
+                        redirect: "manual",
+                        headers: {
+                            "User-Agent": FOODABLE_USER_AGENT,
+                            Accept: opts.accept
+                                ? `${opts.accept.join(", ")}, */*;q=0.1`
+                                : "*/*",
+                            "Accept-Language": "en",
+                        },
+                        signal: controller.signal,
+                    });
+                } catch (err) {
+                    const message =
+                        err instanceof Error ? err.message : String(err);
+                    const reason =
+                        err instanceof Error && err.name === "AbortError"
+                            ? "timeout"
+                            : "network_error";
                     return {
                         ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: location,
+                        reason,
+                        status: null,
+                        detail: message,
                     };
                 }
-                if (next.protocol !== "https:") {
-                    return {
-                        ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: next.protocol,
-                    };
-                }
-                if (!urlAllowedForFetch(next)) {
-                    return {
-                        ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: next.href,
-                    };
-                }
-                const hopResolved = await resolveHost(next.hostname, resolve);
-                if (!hopResolved.ok) {
-                    return {
-                        ok: false,
-                        reason: hopResolved.reason,
-                        status: response.status,
-                        detail: hopResolved.detail,
-                    };
-                }
-                current = next;
-                continue;
-            }
 
-            const status = response.status;
-            const classified = classifyHttpStatus(status);
-            if (classified !== "ok") {
-                return {
-                    ok: false,
-                    reason: classified,
-                    status,
-                    detail: response.statusText || String(status),
-                };
-            }
+                if (response.status >= 300 && response.status < 400) {
+                    const location = response.headers.get("location");
+                    if (!location) {
+                        return {
+                            ok: false,
+                            reason: "http_error",
+                            status: response.status,
+                            detail: "Redirect without Location",
+                        };
+                    }
+                    redirects += 1;
+                    if (redirects > opts.maxRedirects) {
+                        return {
+                            ok: false,
+                            reason: "too_many_redirects",
+                            status: response.status,
+                            detail: location,
+                        };
+                    }
+                    let next: URL;
+                    try {
+                        next = new URL(location, current);
+                    } catch {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: location,
+                        };
+                    }
+                    if (next.protocol !== "https:") {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.protocol,
+                        };
+                    }
+                    if (!urlAllowedForFetch(next)) {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.href,
+                        };
+                    }
+                    const hopResolved = await resolveHost(
+                        next.hostname,
+                        resolve,
+                    );
+                    if (!hopResolved.ok) {
+                        return {
+                            ok: false,
+                            reason: hopResolved.reason,
+                            status: response.status,
+                            detail: hopResolved.detail,
+                        };
+                    }
+                    current = next;
+                    continue;
+                }
 
-            const contentType = response.headers.get("content-type") ?? "";
-            if (opts.enforceContentType && opts.accept?.length) {
-                const type = mediaType(contentType);
-                if (!opts.accept.some((a) => a.toLowerCase() === type)) {
+                const status = response.status;
+                const classified = classifyHttpStatus(status);
+                if (classified !== "ok") {
                     return {
                         ok: false,
-                        reason: "bad_content_type",
+                        reason: classified,
                         status,
-                        detail: contentType,
+                        detail: response.statusText || String(status),
                     };
                 }
-            }
 
-            const bodyRead = await readBodyStream(response, opts.maxBytes);
-            if (!bodyRead.ok) {
+                const contentType = response.headers.get("content-type") ?? "";
+                if (opts.enforceContentType && opts.accept?.length) {
+                    const type = mediaType(contentType);
+                    if (!opts.accept.some((a) => a.toLowerCase() === type)) {
+                        return {
+                            ok: false,
+                            reason: "bad_content_type",
+                            status,
+                            detail: contentType,
+                        };
+                    }
+                }
+
+                const bodyRead = await readBodyStream(
+                    response,
+                    opts.maxBytes,
+                    controller.signal,
+                );
+                if (!bodyRead.ok) {
+                    return {
+                        ok: false,
+                        reason: bodyRead.reason,
+                        status,
+                        detail: bodyRead.detail,
+                    };
+                }
+
                 return {
-                    ok: false,
-                    reason: bodyRead.reason,
+                    ok: true,
+                    url: current.href,
                     status,
-                    detail: bodyRead.detail,
+                    contentType,
+                    body: decodeBody(bodyRead.bytes, contentType),
                 };
             }
-
-            return {
-                ok: true,
-                url: current.href,
-                status,
-                contentType,
-                body: decodeBody(bodyRead.bytes, contentType),
-            };
+        } finally {
+            clearTimeout(timer);
         }
     }
 
@@ -527,7 +644,7 @@ export function createSafeFetcher(deps?: {
 
         const robotsUrl = new URL(`https://${host}/robots.txt`);
         const outcome = await fetchBytes(robotsUrl, {
-            timeoutMs: DEFAULT_TIMEOUT_MS,
+            timeoutMs: defaultTimeoutMs,
             maxBytes: ROBOTS_MAX_BYTES,
             maxRedirects: MAX_ROBOTS_REDIRECTS,
             enforceContentType: false,
@@ -598,159 +715,167 @@ export function createSafeFetcher(deps?: {
 
         let current = start;
         let redirects = 0;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
-        while (true) {
-            const resolved = await resolveHost(current.hostname, resolve);
-            if (!resolved.ok) {
-                return {
-                    ok: false,
-                    reason: resolved.reason,
-                    status: null,
-                    detail: resolved.detail,
-                };
-            }
-
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
-            let response: Response;
-            try {
-                response = await doFetch(current.href, {
-                    method: "GET",
-                    redirect: "manual",
-                    headers: {
-                        "User-Agent": FOODABLE_USER_AGENT,
-                        Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
-                        "Accept-Language": "en",
-                    },
-                    signal: controller.signal,
-                });
-            } catch (err) {
-                clearTimeout(timer);
-                const message =
-                    err instanceof Error ? err.message : String(err);
-                const reason =
-                    err instanceof Error && err.name === "AbortError"
-                        ? "timeout"
-                        : "network_error";
-                return {
-                    ok: false,
-                    reason,
-                    status: null,
-                    detail: message,
-                };
-            } finally {
-                clearTimeout(timer);
-            }
-
-            if (response.status >= 300 && response.status < 400) {
-                const location = response.headers.get("location");
-                if (!location) {
+        try {
+            while (true) {
+                const resolved = await resolveHost(current.hostname, resolve);
+                if (!resolved.ok) {
                     return {
                         ok: false,
-                        reason: "http_error",
-                        status: response.status,
-                        detail: "Redirect without Location",
+                        reason: resolved.reason,
+                        status: null,
+                        detail: resolved.detail,
                     };
                 }
-                redirects += 1;
-                if (redirects > MAX_PAGE_REDIRECTS) {
-                    return {
-                        ok: false,
-                        reason: "too_many_redirects",
-                        status: response.status,
-                        detail: location,
-                    };
-                }
-                let next: URL;
+
+                let response: Response;
                 try {
-                    next = new URL(location, current);
-                } catch {
+                    response = await doFetch(current.href, {
+                        method: "GET",
+                        redirect: "manual",
+                        headers: {
+                            "User-Agent": FOODABLE_USER_AGENT,
+                            Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
+                            "Accept-Language": "en",
+                        },
+                        signal: controller.signal,
+                    });
+                } catch (err) {
+                    const message =
+                        err instanceof Error ? err.message : String(err);
+                    const reason =
+                        err instanceof Error && err.name === "AbortError"
+                            ? "timeout"
+                            : "network_error";
                     return {
                         ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: location,
+                        reason,
+                        status: null,
+                        detail: message,
                     };
                 }
-                if (next.protocol !== "https:") {
-                    return {
-                        ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: next.protocol,
-                    };
-                }
-                if (!urlAllowedForFetch(next)) {
-                    return {
-                        ok: false,
-                        reason: "invalid_link",
-                        status: response.status,
-                        detail: next.href,
-                    };
-                }
-                const hopResolved = await resolveHost(next.hostname, resolve);
-                if (!hopResolved.ok) {
-                    return {
-                        ok: false,
-                        reason: hopResolved.reason,
-                        status: response.status,
-                        detail: hopResolved.detail,
-                    };
-                }
-                if (opts.checkRobots) {
-                    const allowed = await robotsAllowsUrl(next);
-                    if (!allowed) {
+
+                if (response.status >= 300 && response.status < 400) {
+                    const location = response.headers.get("location");
+                    if (!location) {
                         return {
                             ok: false,
-                            reason: "robots_disallowed",
+                            reason: "http_error",
                             status: response.status,
-                            detail: next.hostname,
+                            detail: "Redirect without Location",
                         };
                     }
+                    redirects += 1;
+                    if (redirects > MAX_PAGE_REDIRECTS) {
+                        return {
+                            ok: false,
+                            reason: "too_many_redirects",
+                            status: response.status,
+                            detail: location,
+                        };
+                    }
+                    let next: URL;
+                    try {
+                        next = new URL(location, current);
+                    } catch {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: location,
+                        };
+                    }
+                    if (next.protocol !== "https:") {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.protocol,
+                        };
+                    }
+                    if (!urlAllowedForFetch(next)) {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.href,
+                        };
+                    }
+                    const hopResolved = await resolveHost(
+                        next.hostname,
+                        resolve,
+                    );
+                    if (!hopResolved.ok) {
+                        return {
+                            ok: false,
+                            reason: hopResolved.reason,
+                            status: response.status,
+                            detail: hopResolved.detail,
+                        };
+                    }
+                    if (opts.checkRobots) {
+                        const allowed = await robotsAllowsUrl(next);
+                        if (!allowed) {
+                            return {
+                                ok: false,
+                                reason: "robots_disallowed",
+                                status: response.status,
+                                detail: next.hostname,
+                            };
+                        }
+                    }
+                    current = next;
+                    continue;
                 }
-                current = next;
-                continue;
-            }
 
-            const status = response.status;
-            const classified = classifyHttpStatus(status);
-            if (classified !== "ok") {
+                const status = response.status;
+                const classified = classifyHttpStatus(status);
+                if (classified !== "ok") {
+                    return {
+                        ok: false,
+                        reason: classified,
+                        status,
+                        detail: response.statusText || String(status),
+                    };
+                }
+
+                const contentType = response.headers.get("content-type") ?? "";
+                const type = mediaType(contentType);
+                if (!opts.accept.some((a) => a.toLowerCase() === type)) {
+                    return {
+                        ok: false,
+                        reason: "bad_content_type",
+                        status,
+                        detail: contentType,
+                    };
+                }
+
+                const bodyRead = await readBodyStream(
+                    response,
+                    opts.maxBytes,
+                    controller.signal,
+                );
+                if (!bodyRead.ok) {
+                    return {
+                        ok: false,
+                        reason: bodyRead.reason,
+                        status,
+                        detail: bodyRead.detail,
+                    };
+                }
+
                 return {
-                    ok: false,
-                    reason: classified,
+                    ok: true,
+                    url: current.href,
                     status,
-                    detail: response.statusText || String(status),
+                    contentType,
+                    body: decodeBody(bodyRead.bytes, contentType),
                 };
             }
-
-            const contentType = response.headers.get("content-type") ?? "";
-            const type = mediaType(contentType);
-            if (!opts.accept.some((a) => a.toLowerCase() === type)) {
-                return {
-                    ok: false,
-                    reason: "bad_content_type",
-                    status,
-                    detail: contentType,
-                };
-            }
-
-            const bodyRead = await readBodyStream(response, opts.maxBytes);
-            if (!bodyRead.ok) {
-                return {
-                    ok: false,
-                    reason: bodyRead.reason,
-                    status,
-                    detail: bodyRead.detail,
-                };
-            }
-
-            return {
-                ok: true,
-                url: current.href,
-                status,
-                contentType,
-                body: decodeBody(bodyRead.bytes, contentType),
-            };
+        } finally {
+            clearTimeout(timer);
         }
     }
 
@@ -781,7 +906,7 @@ export function createSafeFetcher(deps?: {
                     accept: opts.accept,
                     checkRobots: opts.checkRobots !== false,
                     maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
-                    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+                    timeoutMs: opts.timeoutMs ?? defaultTimeoutMs,
                 });
             } catch {
                 return Promise.resolve({
