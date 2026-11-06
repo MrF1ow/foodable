@@ -68,7 +68,24 @@ const PROFILE: actualDbProfiles.Profile = {
     updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-const db = {
+const db: {
+    profile: actualDbProfiles.Profile;
+    members: HouseholdMember[];
+    household: HouseholdConfig;
+    configWrites: number;
+    dismissalsStore: ReturnType<typeof createMemoryNoticeDismissalsStore>;
+    socialReaderStatusStore: ReturnType<
+        typeof createMemorySocialReaderStatusStore
+    >;
+    foodsStore: ReturnType<typeof createMemoryFoodsStore>;
+    fridgeStore: ReturnType<typeof createMemoryFridgeStore>;
+    stockStore: ReturnType<typeof createMemoryStockStore>;
+    groceryStore: ReturnType<typeof createMemoryGroceryStore>;
+    recipesStore: ReturnType<typeof createMemoryRecipesStore>;
+    settingsStore: ReturnType<typeof createMemorySettingsStore>;
+    rulesStore: ReturnType<typeof createMemoryRulesStore>;
+    barcodeFoods: Record<string, FoodResult>;
+} = {
     profile: PROFILE,
     members: [
         {

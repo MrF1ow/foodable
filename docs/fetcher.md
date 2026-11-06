@@ -4,7 +4,7 @@
 
 ## Why you saw this request
 
-A household member pasted a link to import a recipe. Foodable made **one** HTTPS request for that import (two when a TikTok read also fetches subtitles). It checks `robots.txt` first and on every redirect hop, caches robots rules for a day, sends an honest user agent, and does not crawl, paginate, or download images. Raw pages are not kept after the recipe or caption is read.
+A household member pasted a link to import a recipe. Foodable made **one** HTTPS request for that import, or **two** when a TikTok read also fetches that video's subtitle file. It fetches `robots.txt` once per host (cached for a day), checks it before the page and on every redirect hop (up to **3** redirects for a page, **5** for a robots fetch), sends an honest user agent, does not retry failed requests, and does not crawl, paginate, or download images. Raw pages are not kept after the recipe or caption is read.
 
 ## User agent
 

@@ -131,7 +131,6 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/social-readers.ts": "recipes",
     "src/db/social-readers.ts": "recipes",
     "src/copy/social-readers.ts": "recipes",
-    "docs/fetcher.md": "docs",
     "src/fetch-safe.ts": "platform",
     "src/mcp/tools/recipes.ts": "recipes",
     "src/web/routes/recipes.ts": "recipes",

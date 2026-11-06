@@ -50,9 +50,37 @@ export function readerFailureFromFetch(reason: FetchFailure): ReaderFailure {
             return "not_found";
         case "robots_disallowed":
             return "robots_disallowed";
+        case "host_not_allowed":
+        case "blocked_address":
+            return "blocked";
+        case "too_large":
+        case "bad_content_type":
+        case "too_many_redirects":
+            return "format_changed";
         default:
             return "network";
     }
+}
+
+export const TIKTOK_PAGE_ALLOWED_HOSTS = ["tiktok.com"] as const;
+
+export const TIKTOK_SUBTITLE_ALLOWED_HOSTS = [
+    "tiktok.com",
+    "tiktokcdn.com",
+    "tiktokcdn-us.com",
+    "tiktokv.com",
+    "ibytedtos.com",
+] as const;
+
+export const FACEBOOK_GRAPH_ALLOWED_HOSTS = ["graph.facebook.com"] as const;
+
+function subtitleTrackList(value: unknown): Array<{
+    LanguageCodeName?: string;
+    Url?: string;
+    language?: string;
+    url?: string;
+}> {
+    return Array.isArray(value) ? value : [];
 }
 
 const ENGLISH_SUBTITLE_RE = /^(eng(-us)?|en)([-_]|$)/i;
@@ -70,6 +98,14 @@ export type TikTokPageParse =
     | { ok: false; reason: ReaderFailure };
 
 export function parseTikTokPage(html: string): TikTokPageParse {
+    try {
+        return parseTikTokPageInner(html);
+    } catch {
+        return { ok: false, reason: "format_changed" };
+    }
+}
+
+function parseTikTokPageInner(html: string): TikTokPageParse {
     const match = html.match(
         /<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/i,
     );
@@ -112,7 +148,7 @@ export function parseTikTokPage(html: string): TikTokPageParse {
     };
     const desc = typeof struct.desc === "string" ? struct.desc.trim() : "";
     const tracks: { language: string; url: string }[] = [];
-    for (const info of struct.video?.subtitleInfos ?? []) {
+    for (const info of subtitleTrackList(struct.video?.subtitleInfos)) {
         if (typeof info?.Url === "string" && info.Url.trim()) {
             tracks.push({
                 language: String(info.LanguageCodeName ?? ""),
@@ -120,7 +156,7 @@ export function parseTikTokPage(html: string): TikTokPageParse {
             });
         }
     }
-    for (const info of struct.video?.claInfo?.captionInfos ?? []) {
+    for (const info of subtitleTrackList(struct.video?.claInfo?.captionInfos)) {
         if (typeof info?.url === "string" && info.url.trim()) {
             tracks.push({
                 language: String(info.language ?? ""),
@@ -135,33 +171,46 @@ export function parseTikTokPage(html: string): TikTokPageParse {
     return { ok: true, text: desc, subtitleUrl };
 }
 
+function isVttMetadataBlock(block: string): boolean {
+    if (block.includes("-->")) return false;
+    const first = block
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0);
+    if (!first) return true;
+    if (/^WEBVTT/i.test(first)) return true;
+    if (/^X-TIMESTAMP-MAP=/i.test(first)) return true;
+    if (/^REGION(\s|$)/i.test(first)) return true;
+    if (/^NOTE(\s|$)/i.test(first)) return true;
+    if (/^STYLE(\s|$)/i.test(first)) return true;
+    return false;
+}
+
 export function webVttToText(vtt: string): string {
-    const lines = vtt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const normalized = vtt.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const blocks = normalized.split(/\n\n+/);
     const cues: string[] = [];
-    let inNote = false;
-    let inStyle = false;
-    for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) {
-            inNote = false;
-            inStyle = false;
-            continue;
+    for (const block of blocks) {
+        if (!block.trim() || isVttMetadataBlock(block)) continue;
+        const lines = block.split("\n");
+        let i = 0;
+        while (i < lines.length && !lines[i]!.trim()) i += 1;
+        if (i >= lines.length) continue;
+        const firstLine = lines[i]!.trim();
+        if (/^\d+$/.test(firstLine)) {
+            const nextCue = lines.slice(i + 1).find((l) => l.trim());
+            if (nextCue?.includes("-->")) i += 1;
         }
-        if (/^WEBVTT/i.test(line)) continue;
-        if (/^NOTE/i.test(line)) {
-            inNote = true;
-            continue;
-        }
-        if (/^STYLE/i.test(line)) {
-            inStyle = true;
-            continue;
-        }
-        if (inNote || inStyle) continue;
-        if (/^\d+$/.test(line)) continue;
-        if (/^\d{2}:\d{2}/.test(line) || line.includes("-->")) continue;
-        let text = line.replace(/<[^>]+>/g, "");
-        text = text.replace(/<\d{2}:\d{2}[^>]*>/g, "");
-        text = text.trim();
+        const timingIdx = lines.findIndex(
+            (line, idx) => idx >= i && line.includes("-->"),
+        );
+        if (timingIdx === -1) continue;
+        const textLines = lines.slice(timingIdx + 1).filter((l) => l.trim());
+        let text = textLines
+            .join(" ")
+            .replace(/<[^>]+>/g, "")
+            .replace(/<\d{2}:\d{2}[^>]*>/g, "");
+        text = decodeRecipeHtmlEntities(text).trim();
         if (text) cues.push(text);
     }
     const deduped: string[] = [];
@@ -202,6 +251,7 @@ export function facebookOembedEndpoint(
     if (
         path.includes("/videos/") ||
         path.includes("/reel/") ||
+        path.includes("/reels/") ||
         path.includes("/watch") ||
         path.includes("/share/v/")
     ) {
@@ -223,31 +273,55 @@ export function facebookOembedEndpoint(
     return { ok: false, reason: "unsupported_link" };
 }
 
-/** Undocumented fallback markup inside tokenless oEmbed HTML; Meta may remove it. */
-export function parseFacebookOembed(jsonText: string): ReaderResult {
-    let payload: { html?: unknown };
-    try {
-        payload = JSON.parse(jsonText) as { html?: unknown };
-    } catch {
-        return { ok: false, reason: "format_changed" };
+function extractOuterFacebookBlockquote(html: string): string | null {
+    const openRe =
+        /<blockquote[^>]*class="[^"]*\bfb-xfbml-parse-ignore\b[^"]*"[^>]*>/i;
+    const openMatch = openRe.exec(html);
+    if (!openMatch) return null;
+    const contentStart = openMatch.index! + openMatch[0].length;
+    const lower = html.toLowerCase();
+    let depth = 1;
+    let i = contentStart;
+    while (i < html.length && depth > 0) {
+        const nextOpen = lower.indexOf("<blockquote", i);
+        const nextClose = lower.indexOf("</blockquote>", i);
+        if (nextClose === -1) return null;
+        if (nextOpen !== -1 && nextOpen < nextClose) {
+            depth += 1;
+            i = nextOpen + 1;
+            continue;
+        }
+        depth -= 1;
+        if (depth === 0) {
+            return html.slice(contentStart, nextClose);
+        }
+        i = nextClose + 1;
     }
-    if (typeof payload.html !== "string" || !payload.html.trim()) {
-        return { ok: false, reason: "format_changed" };
-    }
-    const blockMatch = payload.html.match(
-        /<blockquote[^>]*class="[^"]*\bfb-xfbml-parse-ignore\b[^"]*"[^>]*>([\s\S]*?)<\/blockquote>/i,
-    );
-    if (!blockMatch?.[1]) {
-        return { ok: false, reason: "format_changed" };
-    }
-    const inner = blockMatch[1];
-    const titleMatch = inner.match(/<a[^>]*>([\s\S]*?)<\/a>/i);
+    return null;
+}
+
+function stripFacebookBlockquoteAttribution(inner: string): string {
+    return inner
+        .replace(
+            /\s*Posted by\s+(?:<a\b[^>]*>[\s\S]*?<\/a>\s*)+on[\s\S]*$/i,
+            "",
+        )
+        .replace(/\s*A post shared by[\s\S]*$/i, "")
+        .trim();
+}
+
+function parseFacebookBlockquoteInner(inner: string): string {
+    const stripped = stripFacebookBlockquoteAttribution(inner);
+    const firstP = stripped.search(/<p[\s>]/i);
+    const firstPIdx = firstP === -1 ? stripped.length : firstP;
+    const prefix = stripped.slice(0, firstPIdx);
+    const titleMatch = prefix.match(/^\s*<a\b[^>]*>([\s\S]*?)<\/a>\s*$/i);
     const title = titleMatch?.[1]
-        ? decodeRecipeHtmlEntities(titleMatch[1])
+        ? decodeRecipeHtmlEntities(titleMatch[1].trim())
         : "";
     const paragraphs: string[] = [];
-    for (const pMatch of inner.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)) {
-        const text = decodeRecipeHtmlEntities(pMatch[1] ?? "");
+    for (const pMatch of stripped.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)) {
+        const text = decodeRecipeHtmlEntities(pMatch[1] ?? "").trim();
         if (text) paragraphs.push(text);
     }
     let body = paragraphs.join("\n").trim();
@@ -255,14 +329,37 @@ export function parseFacebookOembed(jsonText: string): ReaderResult {
     else if (title && body && !body.startsWith(title)) {
         body = `${title}\n${body}`;
     }
-    body = body
-        .replace(/\s*Posted by[\s\S]*$/i, "")
-        .replace(/\s*A post shared by[\s\S]*$/i, "")
-        .trim();
-    if (!body) {
-        return { ok: false, reason: "empty" };
+    return body.trim();
+}
+
+/** Undocumented fallback markup inside tokenless oEmbed HTML; Meta may remove it. */
+export function parseFacebookOembed(jsonText: string): ReaderResult {
+    try {
+        let payload: unknown;
+        try {
+            payload = JSON.parse(jsonText);
+        } catch {
+            return { ok: false, reason: "format_changed" };
+        }
+        if (!payload || typeof payload !== "object") {
+            return { ok: false, reason: "format_changed" };
+        }
+        const html = (payload as { html?: unknown }).html;
+        if (typeof html !== "string" || !html.trim()) {
+            return { ok: false, reason: "format_changed" };
+        }
+        const inner = extractOuterFacebookBlockquote(html);
+        if (!inner) {
+            return { ok: false, reason: "format_changed" };
+        }
+        const body = parseFacebookBlockquoteInner(inner);
+        if (!body) {
+            return { ok: false, reason: "empty" };
+        }
+        return { ok: true, text: body, transcript: null };
+    } catch {
+        return { ok: false, reason: "format_changed" };
     }
-    return { ok: true, text: body, transcript: null };
 }
 
 export function facebookGraphOembedUrl(
@@ -272,55 +369,88 @@ export function facebookGraphOembedUrl(
     return `https://graph.facebook.com/v27.0/${endpoint}?url=${encodeURIComponent(link)}`;
 }
 
+async function runReader(
+    fn: () => Promise<ReaderResult>,
+): Promise<ReaderResult> {
+    try {
+        return await fn();
+    } catch {
+        return { ok: false, reason: "format_changed" };
+    }
+}
+
 export async function readTikTok(
     fetcher: SafeFetcher,
     url: string,
 ): Promise<ReaderResult> {
-    const page = await fetcher.fetchPage(url, {
-        accept: ["text/html"],
-        checkRobots: true,
+    return runReader(async () => {
+        const page = await fetcher.fetchPage(url, {
+            accept: ["text/html"],
+            checkRobots: true,
+            allowedHosts: TIKTOK_PAGE_ALLOWED_HOSTS,
+        });
+        if (!page.ok) {
+            return {
+                ok: false,
+                reason: readerFailureFromFetch(page.reason),
+            };
+        }
+        let parsed: TikTokPageParse;
+        try {
+            parsed = parseTikTokPage(page.body);
+        } catch {
+            return { ok: false, reason: "format_changed" };
+        }
+        if (!parsed.ok) return parsed;
+        if (!parsed.subtitleUrl) {
+            return { ok: true, text: parsed.text, transcript: null };
+        }
+        const sub = await fetcher.fetchPage(parsed.subtitleUrl, {
+            accept: ["text/vtt", "text/plain", "application/octet-stream"],
+            checkRobots: true,
+            allowedHosts: TIKTOK_SUBTITLE_ALLOWED_HOSTS,
+        });
+        if (!sub.ok) {
+            return { ok: true, text: parsed.text, transcript: null };
+        }
+        let transcript: string;
+        try {
+            transcript = webVttToText(sub.body);
+        } catch {
+            return { ok: true, text: parsed.text, transcript: null };
+        }
+        return {
+            ok: true,
+            text: parsed.text,
+            transcript: transcript || null,
+        };
     });
-    if (!page.ok) {
-        return { ok: false, reason: readerFailureFromFetch(page.reason) };
-    }
-    const parsed = parseTikTokPage(page.body);
-    if (!parsed.ok) return parsed;
-    if (!parsed.subtitleUrl) {
-        return { ok: true, text: parsed.text, transcript: null };
-    }
-    const sub = await fetcher.fetchPage(parsed.subtitleUrl, {
-        accept: ["text/vtt", "text/plain", "application/octet-stream"],
-        checkRobots: true,
-    });
-    if (!sub.ok) {
-        return { ok: true, text: parsed.text, transcript: null };
-    }
-    const transcript = webVttToText(sub.body);
-    return {
-        ok: true,
-        text: parsed.text,
-        transcript: transcript || null,
-    };
 }
 
 export async function readFacebook(
     fetcher: SafeFetcher,
     url: string,
 ): Promise<ReaderResult> {
-    const endpoint = facebookOembedEndpoint(url);
-    if (!endpoint.ok) {
-        return { ok: false, reason: endpoint.reason };
-    }
-    const graphUrl = facebookGraphOembedUrl(endpoint.endpoint, url);
-    // Tokenless Graph oEmbed is an API endpoint, not a web page; robots.txt does not apply.
-    const res = await fetcher.fetchPage(graphUrl, {
-        accept: ["application/json", "text/javascript"],
-        checkRobots: false,
+    return runReader(async () => {
+        const endpoint = facebookOembedEndpoint(url);
+        if (!endpoint.ok) {
+            return { ok: false, reason: endpoint.reason };
+        }
+        const graphUrl = facebookGraphOembedUrl(endpoint.endpoint, url);
+        // Tokenless Graph oEmbed is an API endpoint, not a web page; robots.txt does not apply.
+        const res = await fetcher.fetchPage(graphUrl, {
+            accept: ["application/json", "text/javascript"],
+            checkRobots: false,
+            allowedHosts: FACEBOOK_GRAPH_ALLOWED_HOSTS,
+        });
+        if (!res.ok) {
+            return {
+                ok: false,
+                reason: readerFailureFromFetch(res.reason),
+            };
+        }
+        return parseFacebookOembed(res.body);
     });
-    if (!res.ok) {
-        return { ok: false, reason: readerFailureFromFetch(res.reason) };
-    }
-    return parseFacebookOembed(res.body);
 }
 
 export function createMemorySocialReaderStatusStore(): SocialReaderStatusStore {
