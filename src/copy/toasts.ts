@@ -89,6 +89,10 @@ export const TOASTS = {
         kind: "info",
         text: "This recipe is unverified. Fix the problems, then check again.",
     },
+    "recipes.not_found": {
+        kind: "info",
+        text: "That recipe was not found.",
+    },
     "household.recipe-settings.saved": {
         kind: "success",
         text: "Recipe settings saved",

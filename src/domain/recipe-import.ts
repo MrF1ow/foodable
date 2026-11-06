@@ -1,5 +1,5 @@
 import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
-import { recipeSteps } from "./recipes.js";
+import { RecipeInputError, recipeSteps } from "./recipes.js";
 
 export type RecipeVerification = "verified" | "unverified";
 
@@ -140,7 +140,7 @@ export async function recheckRecipe(
 }> {
     const recipe = await store.getRecipe(householdId, recipeId);
     if (!recipe) {
-        throw new Error("Unknown recipe.");
+        throw new RecipeInputError("Unknown recipe.");
     }
     const ingredients = await store.listIngredients(householdId, recipeId);
     const importRow = await store.getImport(householdId, recipeId);

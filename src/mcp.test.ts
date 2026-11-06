@@ -6736,6 +6736,83 @@ describe("authenticated dashboard HTTP", () => {
         expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
     });
 
+    test("POST cook redirects when recipe is unverified", async () => {
+        const imported = await importRecipeFromText(
+            db.recipesStore,
+            db.foodsStore,
+            {
+                householdId: "hh-1",
+                creatorId: alice,
+                text: "paste",
+                instructions: "",
+                name: "Unverified cook",
+                ingredients: [{ name: "Flour", amount: 50, unit: "g" }],
+            },
+            { lookup: async () => null },
+        );
+        const res = await siteApp.request(
+            `http://x/recipes/${imported.recipe.id}/cook`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "total_portions=1",
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/recipes/${imported.recipe.id}`,
+        );
+        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+    });
+
+    test("POST log-portion redirects when recipe is unverified", async () => {
+        const imported = await importRecipeFromText(
+            db.recipesStore,
+            db.foodsStore,
+            {
+                householdId: "hh-1",
+                creatorId: alice,
+                text: "paste",
+                instructions: "",
+                name: "Unverified log",
+                ingredients: [{ name: "Flour", amount: 50, unit: "g" }],
+            },
+            { lookup: async () => null },
+        );
+        const res = await siteApp.request(
+            `http://x/recipes/${imported.recipe.id}/log-portion`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "portions=1&meal_type=lunch",
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/recipes/${imported.recipe.id}`,
+        );
+        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+    });
+
+    test("POST verify on unknown recipe redirects to list with toast", async () => {
+        const res = await siteApp.request(
+            `http://x/recipes/${crypto.randomUUID()}/verify`,
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/recipes");
+        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+    });
+
     test("POST /grocery/lines adds a supply and checking it does not insert fridge stock", async () => {
         const store = await createGroceryStore(
             db.settingsStore,

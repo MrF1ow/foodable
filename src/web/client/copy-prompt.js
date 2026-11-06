@@ -1,5 +1,4 @@
-(function () {
-    if (!window.FoodableApp) return;
+if (window.FoodableApp) {
     const seen = new WeakSet();
     window.FoodableApp.onLoad(function () {
         document.querySelectorAll("[data-copy-target]").forEach(function (btn) {
@@ -25,4 +24,4 @@
             });
         });
     });
-})();
+}

@@ -15,11 +15,15 @@ import {
 } from "./recipes.js";
 
 export class MealItemsError extends Error {
-    readonly code = "meal_items" as const;
+    readonly code: "meal_items" | "recipe_unverified";
 
-    constructor(message: string) {
+    constructor(
+        message: string,
+        code: "meal_items" | "recipe_unverified" = "meal_items",
+    ) {
         super(message);
         this.name = "MealItemsError";
+        this.code = code;
     }
 }
 
@@ -397,7 +401,7 @@ export async function resolveAndBuildMeal(opts: {
                     err instanceof Error &&
                     err.name === "RecipeUnverifiedError"
                 ) {
-                    throw new MealItemsError(err.message);
+                    throw new MealItemsError(err.message, "recipe_unverified");
                 }
                 throw err;
             }

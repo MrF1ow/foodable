@@ -256,6 +256,14 @@ function quantityForNewIngredient(
     };
 }
 
+function noteForUnmeasuredIngredient(
+    quantity: RecipeIngredient["quantity"],
+    note: string | null,
+): string | null {
+    if (quantity != null) return note;
+    return note?.trim() ? note : "to taste";
+}
+
 function parseYield(yieldPortions: number): number {
     if (!Number.isFinite(yieldPortions) || yieldPortions <= 0) {
         throw new RecipeInputError("Enter a yield greater than zero.");
@@ -1113,7 +1121,7 @@ export async function updateRecipeIngredient(
     const saved = await store.updateIngredient({
         ...ingredient,
         quantity,
-        note,
+        note: noteForUnmeasuredIngredient(quantity, note),
     });
     if (!saved) throw new RecipeInputError("Unknown ingredient.");
     await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
@@ -1218,16 +1226,21 @@ export async function addRecipeIngredientById(
         if (food.kind !== "food") {
             throw new RecipeInputError("That catalog item is a supply.");
         }
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
         const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
         await maybeRecheckUnverified(
             store,
@@ -1269,16 +1282,21 @@ export async function addRecipeIngredientByBarcode(
             input.barcode,
             opts.lookup,
         );
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
         const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
         await maybeRecheckUnverified(
             store,
@@ -1317,16 +1335,21 @@ export async function addRecipeManualIngredient(
             "food",
             input.name,
         );
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
         const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
         await maybeRecheckUnverified(
             store,
@@ -1903,7 +1926,7 @@ export async function importRecipeFromText(
         const instructionBody =
             input.instructions !== undefined
                 ? parseOptionalText(input.instructions, "Instructions", 20_000)
-                : input.text;
+                : null;
         const recipe = await createRecipe(store, {
             householdId: input.householdId,
             creatorId: input.creatorId,
