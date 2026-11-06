@@ -407,7 +407,14 @@ export function createCachedFetchMemory(
         async recordRefusal(householdId, host, status, now) {
             await store.recordRefusal(householdId, host, status, now);
             refusalGen += 1;
+            const gen1 = refusalGen;
             const row = await store.getRefusal(householdId, host, now);
+            // A clear or record that landed during the read wins: drop the
+            // entry so the next lookup reads the database.
+            if (gen1 !== refusalGen) {
+                refusalCache.delete(`${householdId}|${host}`);
+                return;
+            }
             setRefusalCache(householdId, host, row);
         },
         async clearRefusal(householdId, host) {
@@ -435,7 +442,12 @@ export function createCachedFetchMemory(
         async recordDeadLink(householdId, urlHash, url, status, now) {
             await store.recordDeadLink(householdId, urlHash, url, status, now);
             deadGen += 1;
+            const gen1 = deadGen;
             const row = await store.getDeadLink(householdId, urlHash, now);
+            if (gen1 !== deadGen) {
+                deadCache.delete(`${householdId}|${urlHash}`);
+                return;
+            }
             setDeadCache(householdId, urlHash, row);
         },
         async clearDeadLink(householdId, urlHash) {

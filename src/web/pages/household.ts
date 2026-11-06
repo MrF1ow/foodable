@@ -80,6 +80,8 @@ export type HouseholdSettingsView = {
     timezone?: string;
     fetchRefusals?: HostRefusalRow[];
     fetchRefusalsShowMore?: string | null;
+    /** True on a page after the first, so the list offers a way back. */
+    fetchRefusalsPaged?: boolean;
 };
 
 export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
@@ -216,10 +218,18 @@ function fetchRefusalListBlock(
             return `<li class="row"><div class="row-title">${escapeHtml(r.host)}</div><span class="row-meta">${escapeHtml(meta)}</span>${actions}</li>`;
         })
         .join("\n");
-    const more =
+    // Each page replaces the list (keyset paging), so say so and offer a
+    // way back to the newest refusals.
+    const links = [
+        view.fetchRefusalsPaged
+            ? `<a href="/household">Newest refusals</a>`
+            : "",
         showMore != null
-            ? `<p class="muted"><a href="${escapeHtml(showMore)}">Show more</a></p>`
-            : "";
+            ? `<a href="${escapeHtml(showMore)}">Older refusals</a>`
+            : "",
+    ].filter(Boolean);
+    const more =
+        links.length > 0 ? `<p class="muted">${links.join(" · ")}</p>` : "";
     return `<ul class="list">${items}</ul>${more}`;
 }
 

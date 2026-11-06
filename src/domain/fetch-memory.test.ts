@@ -310,4 +310,45 @@ describe("cached fetch memory", () => {
         await cached.getRefusal(hh, "race.example", now);
         expect(getCalls).toBe(2);
     });
+
+    test("a clear during record's follow-up read wins over the record", async () => {
+        const backing = createMemoryFetchMemoryStore();
+        const hh = "66666666-6666-6666-6666-666666666666";
+        const now = new Date("2026-01-01T00:00:00.000Z");
+        let release!: () => void;
+        const barrier = new Promise<void>((res) => {
+            release = res;
+        });
+        let paused = true;
+        let getCalls = 0;
+        const store = {
+            ...backing,
+            async getRefusal(
+                id: string,
+                host: string,
+                d: Date,
+            ): Promise<HostRefusalRow | null> {
+                getCalls += 1;
+                const row = await backing.getRefusal(id, host, d);
+                if (paused) {
+                    paused = false;
+                    await barrier;
+                }
+                return row;
+            },
+        };
+        const cached = createCachedFetchMemory(store, {
+            ttlMs: 60_000,
+            maxEntries: 100,
+            now: () => 0,
+        });
+        const recordP = cached.recordRefusal(hh, "race.example", 403, now);
+        // Let record reach its follow-up read, then clear and release it.
+        await new Promise((r) => setTimeout(r, 0));
+        await cached.clearRefusal(hh, "race.example");
+        release();
+        await recordP;
+        expect(await cached.getRefusal(hh, "race.example", now)).toBeNull();
+        expect(getCalls).toBe(2);
+    });
 });
