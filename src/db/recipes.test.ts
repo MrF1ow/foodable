@@ -187,6 +187,53 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
         expect(ingredients.length).toBeGreaterThan(0);
         const imp = await recipes.getImport(householdId, recipeId);
         expect(imp?.sourceKind).toBe("website");
+        expect(imp?.sourceText).toBeNull();
+        expect(imp?.sourceTextOrigin).toBeNull();
+    });
+
+    test("caption import through live stores persists source text origin and credit", async () => {
+        const caption = await Bun.file(
+            join(
+                import.meta.dir,
+                "../domain/fixtures/captions/clean-headers.txt",
+            ),
+        ).text();
+        const fetcher: SafeFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                throw new Error("fetch should not run for social paste");
+            },
+        };
+        const recipes = liveRecipesStore();
+        const foods = liveFoodsStore();
+        let recipeId = "";
+        await run(async () => {
+            const outcome = await importRecipeFromUrl(
+                {
+                    recipes,
+                    foods,
+                    fetcher,
+                    transaction: (fn) => run(async () => fn()),
+                },
+                {
+                    householdId,
+                    creatorId: userId,
+                    url: "https://www.instagram.com/p/db-caption/",
+                    text: caption,
+                    credit: "Studio Kitchen",
+                    textOrigin: "pasted",
+                },
+            );
+            expect(outcome.status).toBe("imported");
+            recipeId = outcome.recipeId!;
+        });
+        const imp = await recipes.getImport(householdId, recipeId);
+        expect(imp?.sourceText).toBe(caption.trim());
+        expect(imp?.sourceTextOrigin).toBe("pasted");
+        expect(imp?.credit).toBe("Studio Kitchen");
+        expect(imp?.sourceKind).toBe("instagram");
     });
 
     test("importRecipeFromUrl rolls back recipe ingredients import row and new foods on failure", async () => {

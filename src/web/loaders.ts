@@ -772,6 +772,11 @@ export async function renderRecipesListPage(
         importUrl?: string;
         importError?: string;
         importDuplicateRecipeId?: string;
+        importPasteStep?: boolean;
+        importPasteText?: string;
+        importCredit?: string;
+        importSourceKind?: import("../domain/recipe-import.js").RecipeSourceKind;
+        importSourceLabel?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -868,6 +873,11 @@ export async function renderRecipesListPage(
             importUrl: opts.importUrl,
             importError: opts.importError,
             importDuplicateRecipeId: opts.importDuplicateRecipeId,
+            importPasteStep: opts.importPasteStep,
+            importPasteText: opts.importPasteText,
+            importCredit: opts.importCredit,
+            importSourceKind: opts.importSourceKind,
+            importSourceLabel: opts.importSourceLabel,
         }),
     };
 }

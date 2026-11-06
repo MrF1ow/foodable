@@ -56,10 +56,12 @@ import { redirectWithToast } from "../components/toast.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
+    importOutcomeShowsPasteStep,
     importOutcomeToastKey,
     importRecipeFromUrl,
     importReviewCount,
 } from "../../domain/recipe-import.js";
+import { recipeSource, validateRecipeLink } from "../../domain/recipe-link.js";
 import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
@@ -142,7 +144,31 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
-    const url = formText(body, "url");
+    const pasteStep = formText(body, "import_step") === "paste";
+    const pinOrPageUrl = formText(body, "url");
+    const websiteUrl = formText(body, "website_url").trim();
+    const text = formText(body, "text");
+    const credit = formText(body, "credit");
+    const importUrl = websiteUrl || pinOrPageUrl;
+
+    if (pasteStep && websiteUrl === "" && text.trim() === "") {
+        const pinValidated = validateRecipeLink(pinOrPageUrl);
+        const pinKind = pinValidated.ok
+            ? recipeSource(pinValidated.url).kind
+            : null;
+        if (pinKind === "pinterest") {
+            const page = await renderRecipesListPage(userId, {
+                openModalId: IMPORT_RECIPE_MODAL_ID,
+                importUrl: pinOrPageUrl,
+                importError: "Paste the recipe website link or the recipe.",
+                importPasteStep: true,
+                importSourceKind: "pinterest",
+                importSourceLabel: "Pinterest",
+            });
+            return c.html(page.html, 422);
+        }
+    }
+
     const outcome = await importRecipeFromUrl(
         {
             recipes: liveRecipesStore(),
@@ -153,7 +179,10 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         {
             householdId: member.householdId,
             creatorId: userId,
-            url,
+            url: importUrl,
+            text: websiteUrl ? undefined : text,
+            credit: websiteUrl ? undefined : credit,
+            textOrigin: "pasted",
         },
     );
     if (
@@ -181,15 +210,21 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     if (outcome.status === "duplicate") {
         const page = await renderRecipesListPage(userId, {
             openModalId: IMPORT_RECIPE_MODAL_ID,
-            importUrl: url,
+            importUrl: pinOrPageUrl,
             importDuplicateRecipeId: outcome.recipeId ?? undefined,
         });
         return c.html(page.html, 409);
     }
+    const pasteRender = importOutcomeShowsPasteStep(outcome.status);
     const page = await renderRecipesListPage(userId, {
         openModalId: IMPORT_RECIPE_MODAL_ID,
-        importUrl: url,
+        importUrl: pinOrPageUrl,
         importError: importOutcomeMessage(outcome),
+        importPasteStep: pasteRender,
+        importPasteText: pasteRender ? text : undefined,
+        importCredit: pasteRender ? credit : undefined,
+        importSourceKind: outcome.source?.kind,
+        importSourceLabel: outcome.source?.label,
     });
     return c.html(page.html, 422);
 });

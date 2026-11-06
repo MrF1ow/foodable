@@ -5261,7 +5261,48 @@ describe("phone-app domain MCP tools", () => {
             IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(dup.structuredContent);
             expect(dup.structuredContent?.status).toBe("duplicate");
             expect(dup.structuredContent?.recipe_id).toBe(dupId);
+
+            const caption = await Bun.file(
+                join(
+                    import.meta.dir,
+                    "domain/fixtures/captions/clean-headers.txt",
+                ),
+            ).text();
+            const fromCaption = await call("import_recipe_from_url", {
+                url: "https://www.instagram.com/p/import-caption/",
+                text: caption,
+            });
+            expect(fromCaption.isError).toBeUndefined();
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                fromCaption.structuredContent,
+            );
+            expect(fromCaption.structuredContent?.status).toBe("imported");
+
+            const noRecipe = await call("import_recipe_from_url", {
+                url: "https://www.instagram.com/p/empty-caption/",
+                text: await Bun.file(
+                    join(
+                        import.meta.dir,
+                        "domain/fixtures/captions/no-recipe.txt",
+                    ),
+                ).text(),
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                noRecipe.structuredContent,
+            );
+            expect(noRecipe.structuredContent?.status).toBe(
+                "no_recipe_in_text",
+            );
         });
+    });
+
+    test("import_recipe_from_url catalog lists text and credit params", () => {
+        const tool = TOOLS.find(
+            (item) => item.name === "import_recipe_from_url",
+        );
+        expect(tool?.params.map((row) => row.name)).toEqual(
+            expect.arrayContaining(["url", "text", "credit"]),
+        );
     });
 
     test("verify_recipe output validates for verified, unverified, and not_found", async () => {
@@ -7338,6 +7379,102 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipesHtml).not.toContain("Coming soon.");
         expect(recipesHtml).toContain('action="/recipes"');
         expect(recipesHtml).toContain("Add a recipe.");
+    });
+
+    test("POST /recipes/import paste flow for Instagram and Pinterest website_url", async () => {
+        const { join } = await import("node:path");
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                throw new Error("fetch should not run in paste flow test");
+            },
+        };
+        const caption = await Bun.file(
+            join(import.meta.dir, "domain/fixtures/captions/clean-headers.txt"),
+        ).text();
+        const pasteNeeded = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "url=https%3A%2F%2Fwww.instagram.com%2Fp%2Fweb-import%2F",
+        });
+        expect(pasteNeeded.status).toBe(422);
+        const pasteHtml = await pasteNeeded.text();
+        expect(pasteHtml).toContain("Paste the Instagram caption below.");
+        expect(pasteHtml).toContain("Open the post");
+        expect(pasteHtml).toContain('name="text"');
+
+        const imported = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.instagram.com/p/web-import/",
+                text: caption,
+                credit: "Web Chef",
+            }).toString(),
+        });
+        expect(imported.status).toBe(303);
+        const recipeId = (imported.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        expect(recipeId.length).toBeGreaterThan(0);
+
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true as const,
+                    url: "https://example.com/pin-target",
+                    status: 200,
+                    contentType: "text/html",
+                    body: await Bun.file(
+                        join(
+                            import.meta.dir,
+                            "domain/fixtures/recipe-pages/array-top-level.html",
+                        ),
+                    ).text(),
+                };
+            },
+        };
+        const pinSite = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/site-only/",
+                website_url: "https://example.com/pin-target",
+            }).toString(),
+        });
+        expect(pinSite.status).toBe(303);
+
+        const pinEmpty = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/empty/",
+            }).toString(),
+        });
+        expect(pinEmpty.status).toBe(422);
+        expect(await pinEmpty.text()).toContain(
+            "Paste the recipe website link or the recipe.",
+        );
     });
 
     test("POST /recipes creates, member delete is refused, owner deletes member recipe", async () => {

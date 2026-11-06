@@ -37,10 +37,20 @@ const FIXTURES = new Map<string, string>();
 for await (const file of new Bun.Glob("*.html").scan(FIXTURE_DIR)) {
     FIXTURES.set(file, await Bun.file(join(FIXTURE_DIR, file)).text());
 }
+const CAPTION_DIR = join(import.meta.dir, "fixtures/captions");
 function loadFixture(name: string): string {
     const html = FIXTURES.get(`${name}.html`);
     if (html == null) throw new Error(`Missing fixture ${name}.html`);
     return html;
+}
+const CAPTIONS = new Map<string, string>();
+for await (const file of new Bun.Glob("*.txt").scan(CAPTION_DIR)) {
+    CAPTIONS.set(file, await Bun.file(join(CAPTION_DIR, file)).text());
+}
+function loadCaption(name: string): string {
+    const text = CAPTIONS.get(`${name}.txt`);
+    if (text == null) throw new Error(`Missing caption ${name}.txt`);
+    return text;
 }
 
 function fakeFetcher(opts: {
@@ -747,6 +757,208 @@ describe("importRecipeFromUrl", () => {
                 },
             ),
         ).rejects.toThrow("insert failed");
+    });
+
+    test("Instagram link with clean caption imports verified without fetch", async () => {
+        const fetcher = fakeFetcher({});
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const caption = loadCaption("clean-headers");
+        const result = await importRecipeFromUrl(
+            { recipes, foods, fetcher, transaction: (fn) => fn() },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/abc123/",
+                text: caption,
+                credit: "Test Creator",
+            },
+        );
+        expect(result.status).toBe("imported");
+        expect(result.verification).toBe("verified");
+        expect(fetcher.calls.fetch).toBe(0);
+        expect(fetcher.calls.robots).toBe(0);
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceKind).toBe("instagram");
+        expect(imp?.sourceText).toBe(caption.trim());
+        expect(imp?.sourceTextOrigin).toBe("pasted");
+        expect(imp?.credit).toBe("Test Creator");
+    });
+
+    test("run-together caption imports unverified with unresolved lines", async () => {
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.tiktok.com/@x/video/1",
+                text: loadCaption("run-together"),
+            },
+        );
+        expect(result.status).toBe("unverified_needs_review");
+        expect(result.unresolvedLines.length).toBeGreaterThan(0);
+    });
+
+    test("no-recipe caption returns no_recipe_in_text and saves nothing", async () => {
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/norecipe/",
+                text: loadCaption("no-recipe"),
+            },
+        );
+        expect(result.status).toBe("no_recipe_in_text");
+        expect(await recipes.listRecipes(HH)).toHaveLength(0);
+    });
+
+    test("website link with pasted text skips fetch and stores source text", async () => {
+        const fetcher = fakeFetcher({});
+        const recipes = createMemoryRecipesStore();
+        const caption = loadCaption("clean-headers");
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/blocked-page",
+                text: caption,
+            },
+        );
+        expect(result.status).toBe("imported");
+        expect(fetcher.calls.fetch).toBe(0);
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceKind).toBe("website");
+        expect(imp?.sourceText).toBe(caption.trim());
+    });
+
+    test("Pinterest link with text saves pinterest source kind", async () => {
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.pinterest.com/pin/123/",
+                text: loadCaption("clean-headers"),
+            },
+        );
+        expect(result.status).toBe("imported");
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceKind).toBe("pinterest");
+    });
+
+    test("duplicate link still wins when text is supplied", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({});
+        const first = await importRecipeFromUrl(
+            { recipes, foods, fetcher, transaction: (fn) => fn() },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.youtube.com/watch?v=abc",
+                text: loadCaption("clean-headers"),
+            },
+        );
+        expect(first.status).toBe("imported");
+        const dup = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.youtube.com/watch?v=abc",
+                text: loadCaption("clean-headers"),
+            },
+        );
+        expect(dup.status).toBe("duplicate");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("YouTube without text is paste_needed with zero fetcher calls", async () => {
+        const fetcher = fakeFetcher({});
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.youtube.com/watch?v=xyz",
+            },
+        );
+        expect(result.status).toBe("paste_needed");
+        expect(fetcher.calls.fetch).toBe(0);
+        expect(fetcher.calls.robots).toBe(0);
+    });
+
+    test("textOrigin shared is stored on import row", async () => {
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/shared/",
+                text: loadCaption("clean-headers"),
+                textOrigin: "shared",
+            },
+        );
+        expect(result.status).toBe("imported");
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceTextOrigin).toBe("shared");
+    });
+
+    test("credit longer than 120 chars is clipped", async () => {
+        const longCredit = `Chef ${"x".repeat(130)}`;
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/credit/",
+                text: loadCaption("to-taste"),
+                credit: longCredit,
+            },
+        );
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.credit).not.toBeNull();
+        expect(imp!.credit!.length).toBeLessThanOrEqual(120);
+        expect(imp!.credit!.endsWith("…")).toBe(true);
     });
 });
 
