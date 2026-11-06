@@ -6,6 +6,7 @@ import {
     FoodsInputError,
     type Food,
     type FoodsStore,
+    type MemoryFoodRefHolder,
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
 
@@ -60,6 +61,9 @@ export class FridgeInputError extends Error {
 
 type MemoryFridgeItem = FridgeItem & { createdAt: string };
 
+/** Memory fridge store plus merge hook so `MemoryFoodsStore.repointFoodRefs` can retarget items. */
+export type MemoryFridgeStore = FridgeStore & MemoryFoodRefHolder;
+
 // createdAt only orders the memory list, like the live store's
 // `order by created_at`; it is not part of FridgeItem, so it never leaves.
 function publicItem({
@@ -69,13 +73,23 @@ function publicItem({
     return { ...row, quantity: { ...row.quantity } };
 }
 
-export function createMemoryFridgeStore(): FridgeStore {
+export function createMemoryFridgeStore(): MemoryFridgeStore {
     const locations: FridgeLocation[] = [];
     const items: MemoryFridgeItem[] = [];
 
-    const store: FridgeStore & {
+    const store: MemoryFridgeStore & {
         __paritySetItemCreatedAt(id: string, createdAt: string): void;
     } = {
+        repointFood(householdId, fromId, toId) {
+            for (const item of items) {
+                if (
+                    item.householdId === householdId &&
+                    item.foodId === fromId
+                ) {
+                    item.foodId = toId;
+                }
+            }
+        },
         async listLocations(householdId) {
             return locations
                 .filter((row) => row.householdId === householdId)

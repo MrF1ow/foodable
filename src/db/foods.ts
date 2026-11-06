@@ -21,6 +21,8 @@ const REF_TABLES = [
     "grocery_lines",
     "recipe_ingredients",
     "member_dislikes",
+    "stock_movements",
+    "meal_items",
 ] as const;
 
 function patchKeys(keys: string[]): [string, ...string[]] {

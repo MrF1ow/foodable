@@ -32,6 +32,130 @@ async function trackFoodRef(
     };
 }
 
+type MealItemSnap = {
+    foodId: string | null;
+    calories: number | null;
+    proteinG: number | null;
+    grams: number | null;
+};
+
+async function trackStockMovementFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+    householdId: string,
+): Promise<() => Promise<string | null>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId, householdId);
+        return async () => row.foodId;
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const id = crypto.randomUUID();
+    await sql`
+        insert into public.stock_movements (
+            id,
+            household_id,
+            food_id,
+            delta,
+            unit,
+            reason
+        )
+        values (${id}, ${householdId}, ${foodId}, ${100}, ${"g"}, ${"adjust"})
+    `;
+    return async () => {
+        const [row] = await sql`
+            select food_id::text as food_id from public.stock_movements where id = ${id}
+        `;
+        return row?.food_id ?? null;
+    };
+}
+
+async function trackMealItemFoodRef(
+    store: FoodsStore,
+    c: StoreContractCtx,
+    foodId: string,
+    householdId: string,
+    userId: string,
+): Promise<() => Promise<MealItemSnap>> {
+    if ("trackRef" in store) {
+        const row = (store as MemoryFoodsStore).trackRef(foodId, householdId, {
+            calories: 123,
+            proteinG: 4.5,
+            grams: 80,
+        });
+        return async () => ({
+            foodId: row.foodId,
+            calories: row.calories as number,
+            proteinG: row.proteinG as number,
+            grams: row.grams as number,
+        });
+    }
+    const sql = c.sql;
+    if (!sql) throw new Error("live foods contract needs ctx.sql");
+    const mealId = crypto.randomUUID();
+    const itemId = crypto.randomUUID();
+    await sql`
+        insert into public.meals (
+            id,
+            user_id,
+            description,
+            meal_type,
+            logged_at,
+            idempotency_key
+        )
+        values (
+            ${mealId},
+            ${userId},
+            ${"contract meal"},
+            ${"lunch"},
+            now(),
+            ${`contract:${itemId}`}
+        )
+    `;
+    await sql`
+        insert into public.meal_items (
+            id,
+            meal_id,
+            user_id,
+            household_id,
+            food_id,
+            label,
+            calories,
+            protein_g,
+            grams
+        )
+        values (
+            ${itemId},
+            ${mealId},
+            ${userId},
+            ${householdId},
+            ${foodId},
+            ${"snap"},
+            ${123},
+            ${4.5},
+            ${80}
+        )
+    `;
+    return async () => {
+        const [row] = await sql`
+            select
+                food_id::text as food_id,
+                calories,
+                protein_g,
+                grams
+            from public.meal_items
+            where id = ${itemId}
+        `;
+        return {
+            foodId: row?.food_id ?? null,
+            calories: row?.calories != null ? Number(row.calories) : null,
+            proteinG: row?.protein_g != null ? Number(row.protein_g) : null,
+            grams: row?.grams != null ? Number(row.grams) : null,
+        };
+    };
+}
+
 export function runFoodsStoreContract(
     label: string,
     createStore: () => FoodsStore,
@@ -280,6 +404,78 @@ export function runFoodsStoreContract(
             await store.repointFoodRefs(c.householdId, from.id, to.id);
             expect(await refFoodId()).toBe(to.id);
             expect(await store.getFood(c.householdId, from.id)).toBeTruthy();
+        });
+
+        test("repointFoodRefs moves stock_movements and meal_items in the household only", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const from = sampleFood(c.householdId, {
+                name: "From ledger",
+                normalizedName: "from-ledger",
+            });
+            const to = sampleFood(c.householdId, {
+                name: "To ledger",
+                normalizedName: "to-ledger",
+            });
+            const untouched = sampleFood(c.householdId, {
+                name: "Other food id",
+                normalizedName: "other-food-id",
+            });
+            await store.insertFood(from);
+            await store.insertFood(to);
+            await store.insertFood(untouched);
+
+            const readPrimaryStock = await trackStockMovementFoodRef(
+                store,
+                c,
+                from.id,
+                c.householdId,
+            );
+            const readPrimaryMeal = await trackMealItemFoodRef(
+                store,
+                c,
+                from.id,
+                c.householdId,
+                c.userId,
+            );
+            const readControlStock = await trackStockMovementFoodRef(
+                store,
+                c,
+                untouched.id,
+                c.householdId,
+            );
+            const readControlMeal = await trackMealItemFoodRef(
+                store,
+                c,
+                untouched.id,
+                c.householdId,
+                c.userId,
+            );
+
+            const primaryMealBefore = await readPrimaryMeal();
+
+            if (!c.sql) {
+                const otherHouseholdRef = (store as MemoryFoodsStore).trackRef(
+                    from.id,
+                    c.otherHouseholdId,
+                );
+                await store.repointFoodRefs(c.householdId, from.id, to.id);
+                expect(otherHouseholdRef.foodId).toBe(from.id);
+            } else {
+                await store.repointFoodRefs(c.householdId, from.id, to.id);
+            }
+
+            expect(await readPrimaryStock()).toBe(to.id);
+            const primaryMealAfter = await readPrimaryMeal();
+            expect(primaryMealAfter.foodId).toBe(to.id);
+            expect(primaryMealAfter.calories).toBe(primaryMealBefore.calories);
+            expect(primaryMealAfter.proteinG).toBe(primaryMealBefore.proteinG);
+            expect(primaryMealAfter.grams).toBe(primaryMealBefore.grams);
+
+            expect(await readControlStock()).toBe(untouched.id);
+            const controlMealAfter = await readControlMeal();
+            expect(controlMealAfter.foodId).toBe(untouched.id);
         });
 
         test("listAllAliases pages past 1000 rows", async () => {
