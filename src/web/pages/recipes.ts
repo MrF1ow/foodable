@@ -44,7 +44,10 @@ import {
     type NoticeRouteContext,
 } from "../components/notices.js";
 import { sourceIcon } from "../components/source-icon.js";
-import { recipeDisplaySource } from "../../domain/recipe-import.js";
+import {
+    recipeDisplaySource,
+    type RecipeSourceKind,
+} from "../../domain/recipe-import.js";
 
 export type RecipeMember = { userId: string; displayName: string };
 export type RecipeStoreOption = { id: string; name: string };
@@ -87,6 +90,11 @@ export type RecipesPageView = {
     importUrl?: string;
     importError?: string;
     importDuplicateRecipeId?: string;
+    importPasteStep?: boolean;
+    importPasteText?: string;
+    importCredit?: string;
+    importSourceKind?: RecipeSourceKind;
+    importSourceLabel?: string;
 };
 
 export type RecipeIngredientRow = RecipeIngredientView & {
@@ -288,6 +296,8 @@ export function renderRecipesPage(view: RecipesPageView): string {
                   body: `<ul class="recipe-list list">${cards}</ul>`,
               });
     const importUrlValue = escapeHtml(view.importUrl ?? "");
+    const importPasteTextValue = escapeHtml(view.importPasteText ?? "");
+    const importCreditValue = escapeHtml(view.importCredit ?? "");
     const importDuplicateBanner =
         view.importDuplicateRecipeId != null
             ? errorBannerWithLink(
@@ -300,14 +310,55 @@ export function renderRecipesPage(view: RecipesPageView): string {
         view.importError && !view.importDuplicateRecipeId
             ? errorBanner(view.importError)
             : "";
+    const importPasteBody = view.importPasteStep
+        ? (() => {
+              const kind = view.importSourceKind ?? "website";
+              const label = escapeHtml(view.importSourceLabel ?? "Link");
+              const openLabel =
+                  kind === "website" ? "Open the page" : "Open the post";
+              const textLabel =
+                  kind === "website" ? "Paste the recipe" : "Paste the caption";
+              const creditField =
+                  kind === "website"
+                      ? ""
+                      : field({
+                            id: "import-credit",
+                            label: "Creator",
+                            control: `<input id="import-credit" name="credit" type="text" maxlength="120" autocomplete="off" value="${importCreditValue}" />`,
+                        });
+              const pinterestFields =
+                  kind === "pinterest"
+                      ? `${field({
+                            id: "import-website-url",
+                            label: "Recipe website link",
+                            control: `<input id="import-website-url" name="website_url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="https://…" />`,
+                        })}<p class="muted recipe-import-pin-hint">Pins usually lead to the recipe's website. Paste that link here.</p><h3 class="recipe-import-or">Or paste the recipe</h3>`
+                      : "";
+              const textRequired = kind === "pinterest" ? "" : " required";
+              return `<form class="recipe-import-paste" method="post" action="/recipes/import" data-busy-form>
+<input type="hidden" name="import_step" value="paste" />
+<input type="hidden" name="url" value="${importUrlValue}" />
+<p class="recipe-import-source">${sourceIcon(kind, { label, decorative: true })} ${label}</p>
+<p class="recipe-import-open"><a href="${importUrlValue}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a></p>
+${pinterestFields}
+${field({
+    id: "import-text",
+    label: textLabel,
+    control: `<textarea id="import-text" name="text" rows="10"${textRequired}>${importPasteTextValue}</textarea>`,
+})}
+${creditField}
+<button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
+</form>`;
+          })()
+        : `<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
+                ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
+                <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
+            </form>`;
     const importModal = modal({
         id: IMPORT_RECIPE_MODAL_ID,
         title: "Import from link",
         openOnLoad: modalOpen(view, IMPORT_RECIPE_MODAL_ID),
-        body: `${importDuplicateBanner}${importErrorBanner}<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
-                ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
-                <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
-            </form>`,
+        body: `${importDuplicateBanner}${importErrorBanner}${importPasteBody}`,
     });
     const newRecipeModal = modal({
         id: NEW_RECIPE_MODAL_ID,
