@@ -196,6 +196,9 @@ function isPrivateIpv6(parts: bigint[]): boolean {
         [[0xff00n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 8],
         [[0x2001n, 0x0db8n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
         [[0x0064n, 0xff9bn, 0n, 0n, 0n, 0n, 0n, 0n], 96],
+        // 6to4 tunnels an IPv4 address inside the prefix; a recipe site never
+        // needs one, so the whole prefix is refused.
+        [[0x2002n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 16],
     ];
     if (checks.some(([base, len]) => ipv6InCidr(parts, base, len))) {
         return true;
@@ -275,6 +278,29 @@ export function urlAllowedForFetch(url: URL): boolean {
         return isPublicAddress(ipHost);
     }
     return host.includes(".");
+}
+
+/** Settle with `"timeout"` as soon as `signal` aborts, so DNS and a
+ *  redirect hop's robots.txt check share the page's one deadline. */
+function beforeDeadline<T>(
+    work: Promise<T>,
+    signal: AbortSignal,
+): Promise<T | "timeout"> {
+    if (signal.aborted) return Promise.resolve("timeout");
+    return new Promise((resolve, reject) => {
+        const onAbort = () => resolve("timeout");
+        signal.addEventListener("abort", onAbort, { once: true });
+        work.then(
+            (value) => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(value);
+            },
+            (err) => {
+                signal.removeEventListener("abort", onAbort);
+                reject(err);
+            },
+        );
+    });
 }
 
 async function resolveHost(
@@ -720,7 +746,17 @@ export function createSafeFetcher(deps?: {
 
         try {
             while (true) {
-                const resolved = await resolveHost(current.hostname, resolve);
+                const resolved = await beforeDeadline(
+                    resolveHost(current.hostname, resolve),
+                    controller.signal,
+                );
+                if (resolved === "timeout")
+                    return {
+                        ok: false,
+                        reason: "timeout",
+                        status: null,
+                        detail: "deadline",
+                    };
                 if (!resolved.ok) {
                     return {
                         ok: false,
@@ -803,10 +839,17 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
-                    const hopResolved = await resolveHost(
-                        next.hostname,
-                        resolve,
+                    const hopResolved = await beforeDeadline(
+                        resolveHost(next.hostname, resolve),
+                        controller.signal,
                     );
+                    if (hopResolved === "timeout")
+                        return {
+                            ok: false,
+                            reason: "timeout",
+                            status: null,
+                            detail: "deadline",
+                        };
                     if (!hopResolved.ok) {
                         return {
                             ok: false,
@@ -816,7 +859,17 @@ export function createSafeFetcher(deps?: {
                         };
                     }
                     if (opts.checkRobots) {
-                        const allowed = await robotsAllowsUrl(next);
+                        const allowed = await beforeDeadline(
+                            robotsAllowsUrl(next),
+                            controller.signal,
+                        );
+                        if (allowed === "timeout")
+                            return {
+                                ok: false,
+                                reason: "timeout",
+                                status: null,
+                                detail: "deadline",
+                            };
                         if (!allowed) {
                             return {
                                 ok: false,

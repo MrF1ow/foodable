@@ -139,3 +139,48 @@ describe("readRecipeJsonLd durations and yield", () => {
         expect(readRecipeJsonLd(html)?.totalMinutes).toBeNull();
     });
 });
+
+describe("readRecipeJsonLd review round 2", () => {
+    const page = (recipe: Record<string, unknown>) =>
+        `<script type="application/ld+json">${JSON.stringify({ "@type": "Recipe", recipeIngredient: ["1 cup flour"], ...recipe })}</script>`;
+
+    test("malformed entities terminate and twice-escaped ones decode", () => {
+        expect(readRecipeJsonLd(page({ name: "A &#; B" }))?.name).toBe(
+            "A &#; B",
+        );
+        expect(readRecipeJsonLd(page({ name: "A &frac; B" }))?.name).toBe(
+            "A &frac; B",
+        );
+        expect(readRecipeJsonLd(page({ name: "&amp;frac12; cup" }))?.name).toBe(
+            "½ cup",
+        );
+        expect(readRecipeJsonLd(page({ name: "&amp;#39;s" }))?.name).toBe("'s");
+        expect(readRecipeJsonLd(page({ name: "&#xD800;x" }))?.name).toBe("x");
+    });
+
+    test("ListItem steps under item and QuantitativeValue yields", () => {
+        const recipe = readRecipeJsonLd(
+            page({
+                name: "Tea",
+                recipeYield: {
+                    "@type": "QuantitativeValue",
+                    value: 4,
+                    unitText: "servings",
+                },
+                recipeInstructions: {
+                    "@type": "ItemList",
+                    itemListElement: [
+                        {
+                            "@type": "ListItem",
+                            item: { "@type": "HowToStep", text: "Boil water." },
+                        },
+                        { "@type": "ListItem", name: "Steep." },
+                    ],
+                },
+            }),
+        )!;
+        expect(recipe.instructions).toEqual(["Boil water.", "Steep."]);
+        expect(recipe.yieldPortions).toBe(4);
+        expect(recipe.yieldText).toBe("4 servings");
+    });
+});
