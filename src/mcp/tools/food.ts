@@ -9,6 +9,7 @@ import {
 } from "../../foods.js";
 import { searchFoodsByName } from "../../food-search.js";
 import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
+import { liveSettingsStore } from "../../db/settings.js";
 import {
     assertBarcodeFree,
     assertFoodPatchValid,
@@ -21,9 +22,11 @@ import {
     linkProduct,
     findUpsertFoodByName,
     newFood,
+    parseUsualPurchase,
     type FoodPatch,
     searchFoodCatalog,
     setUsualProduct,
+    setUsualPurchase,
     updateFood,
     type EffectiveFood,
     type Food,
@@ -180,6 +183,9 @@ export const FOOD_OUTPUT = z.object({
     archived: z.boolean(),
     generic_food_id: z.string().nullable(),
     usual_product_id: z.string().nullable(),
+    usual_store_id: z.string().nullable(),
+    usual_amount: z.number().nullable(),
+    usual_unit: z.string().nullable(),
 });
 
 const FOOD_PRODUCT_ITEM = z.object({
@@ -209,6 +215,9 @@ const EFFECTIVE_FOOD = z.object({
             brand: z.string().nullable(),
         })
         .nullable(),
+    usual_store_id: z.string().nullable(),
+    usual_amount: z.number().nullable(),
+    usual_unit: z.string().nullable(),
 });
 
 export const GET_FOOD_OUTPUT = FOOD_OUTPUT.extend({
@@ -239,6 +248,8 @@ function foodPayload(
         | "archivedAt"
         | "genericFoodId"
         | "usualProductId"
+        | "usualStoreId"
+        | "usualAmount"
     >,
     aliases: string[],
     barcodes: string[],
@@ -266,6 +277,9 @@ function foodPayload(
         archived: food.archivedAt != null,
         generic_food_id: food.genericFoodId,
         usual_product_id: food.usualProductId,
+        usual_store_id: food.usualStoreId,
+        usual_amount: food.usualAmount?.amount ?? null,
+        usual_unit: food.usualAmount?.unit ?? null,
     };
 }
 
@@ -284,6 +298,9 @@ function effectivePayload(eff: EffectiveFood) {
         grams_per_ml: eff.gramsPerMl,
         allergens: eff.allergens,
         product: eff.product,
+        usual_store_id: eff.usualStoreId,
+        usual_amount: eff.usualAmount?.amount ?? null,
+        usual_unit: eff.usualAmount?.unit ?? null,
     };
 }
 
@@ -401,7 +418,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Food",
             description:
-                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product).",
+                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Returns stored usual store and usual amount on the row plus effective usual store/amount (read through the usual product for plain foods). Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product).",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -491,6 +508,9 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                 aliases: z.array(z.string()).optional(),
                 archived: z.boolean().optional(),
                 barcode: z.string().optional(),
+                usual_store_id: z.string().nullable().optional(),
+                usual_amount: z.coerce.number().nullable().optional(),
+                usual_unit: z.string().nullable().optional(),
             }),
             outputSchema: FOOD_OUTPUT,
         },
@@ -513,6 +533,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             throw new FoodsInputError("Enter a valid barcode.");
                         }
                     }
+                    const settings = liveSettingsStore();
                     const patch: FoodPatch = {
                         name: args.name,
                         brand: args.brand,
@@ -532,6 +553,35 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         aliases: args.aliases,
                         archived: args.archived,
                     };
+                    const hasUsualKeys =
+                        args.usual_store_id !== undefined ||
+                        args.usual_amount !== undefined ||
+                        args.usual_unit !== undefined;
+                    const usualPurchasePatch = hasUsualKeys
+                        ? {
+                              ...(args.usual_store_id !== undefined
+                                  ? {
+                                        usualStoreId: args.usual_store_id,
+                                    }
+                                  : {}),
+                              ...(args.usual_amount !== undefined ||
+                              args.usual_unit !== undefined
+                                  ? {
+                                        usualAmount: {
+                                            amount: args.usual_amount ?? null,
+                                            unit: args.usual_unit ?? null,
+                                        },
+                                    }
+                                  : {}),
+                          }
+                        : null;
+                    if (usualPurchasePatch) {
+                        await parseUsualPurchase(
+                            householdId,
+                            usualPurchasePatch,
+                            settings,
+                        );
+                    }
                     // Everything that can reject runs before the first write,
                     // so a refused call leaves no new row and no barcode
                     // behind. The barcode is attached last.
@@ -648,12 +698,21 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                                       }),
                                   );
                     }
-                    const saved = await updateFood(
+                    let saved = await updateFood(
                         store,
                         householdId,
                         food.id,
                         patch,
                     );
+                    if (usualPurchasePatch) {
+                        saved = await setUsualPurchase(
+                            store,
+                            householdId,
+                            saved.id,
+                            usualPurchasePatch,
+                            { stores: settings },
+                        );
+                    }
                     if (normalizedBarcode) {
                         await store.setBarcode(
                             householdId,
@@ -783,7 +842,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Set Usual Product",
             description:
-                "Set which product the household usually buys for a plain food, or pass product_food_id null to clear it. Recipes, grocery lines and new meal logs read the plain food's nutrition and unit factors through its usual product; already-logged meals never change. Links the product to the food first if it is standalone. Never pick a brand for the household on your own: ask, then call this.",
+                "Set which product the household usually buys for a plain food, or pass product_food_id null to clear it. Optional store_id, amount, and unit are saved on that product (or on the plain food when product_food_id is null). Recipes, grocery lines and new meal logs read the plain food's nutrition and unit factors through its usual product; already-logged meals never change. Links the product to the food first if it is standalone. Never pick a brand for the household on your own: ask, then call this.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -793,6 +852,9 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 food_id: z.string(),
                 product_food_id: z.string().nullable(),
+                store_id: z.string().nullable().optional(),
+                amount: z.coerce.number().nullable().optional(),
+                unit: z.string().nullable().optional(),
             }),
             outputSchema: FOOD_OUTPUT,
         },
@@ -802,22 +864,76 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const householdId = await callerHouseholdId();
                     const store = liveFoodsStore();
+                    const settings = liveSettingsStore();
+                    const hasPurchase =
+                        args.store_id !== undefined ||
+                        args.amount !== undefined ||
+                        args.unit !== undefined;
+                    const purchase = hasPurchase
+                        ? {
+                              ...(args.store_id !== undefined
+                                  ? { usualStoreId: args.store_id }
+                                  : {}),
+                              ...(args.amount !== undefined ||
+                              args.unit !== undefined
+                                  ? {
+                                        usualAmount: {
+                                            amount: args.amount ?? null,
+                                            unit: args.unit ?? null,
+                                        },
+                                    }
+                                  : {}),
+                          }
+                        : undefined;
                     const saved = await setUsualProduct(
                         store,
                         householdId,
                         args.food_id,
                         args.product_food_id,
+                        purchase != null
+                            ? { purchase, stores: settings }
+                            : undefined,
                     );
                     const [aliases, barcodes] = await Promise.all([
                         store.listAliases(householdId, saved.id),
                         store.listBarcodes(householdId, saved.id),
                     ]);
                     const payload = foodPayload(saved, aliases, barcodes);
+                    const bits = [
+                        `Saved usual product for ${payload.name} ${payload.id}`,
+                    ];
+                    if (
+                        args.store_id !== undefined ||
+                        args.amount !== undefined ||
+                        args.unit !== undefined
+                    ) {
+                        const extras: string[] = [];
+                        if (args.store_id != null) {
+                            const stores =
+                                await settings.listStores(householdId);
+                            const name =
+                                stores.find((row) => row.id === args.store_id)
+                                    ?.name ?? args.store_id;
+                            extras.push(`store ${name}`);
+                        }
+                        if (
+                            args.amount != null &&
+                            args.unit != null &&
+                            String(args.unit).trim() !== ""
+                        ) {
+                            extras.push(
+                                `usual amount ${args.amount} ${args.unit}`,
+                            );
+                        }
+                        if (extras.length > 0) {
+                            bits.push(extras.join(", "));
+                        }
+                    }
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `Saved usual product for ${payload.name} ${payload.id}`,
+                                text: bits.join(". "),
                             },
                         ],
                         structuredContent: payload,

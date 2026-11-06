@@ -4317,6 +4317,71 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("usual purchase: set_usual_product, upsert_food, get_food effective, add_grocery_line pick text", async () => {
+        await withPat(async (call) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            const second = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Costco",
+            );
+            const eggs = await call("upsert_food", {
+                name: "Milk",
+                default_unit: "ml",
+            });
+            const milkId = eggs.structuredContent?.id as string;
+            const patch = await call("upsert_food", {
+                food_id: milkId,
+                usual_store_id: store.id,
+                usual_amount: 2000,
+                usual_unit: "ml",
+            });
+            expect(patch.isError).toBeFalsy();
+            const patched = FOOD_OUTPUT.parse(patch.structuredContent);
+            expect(patched.usual_store_id).toBe(store.id);
+            expect(patched.usual_amount).toBe(2000);
+            expect(patched.usual_unit).toBe("ml");
+
+            const brand = await call("upsert_food", {
+                generic_food_id: milkId,
+                name: "Organic Milk",
+                calories: 50,
+            });
+            const productId = brand.structuredContent?.id as string;
+            const set = await call("set_usual_product", {
+                food_id: milkId,
+                product_food_id: productId,
+                store_id: second.id,
+                amount: 1890,
+                unit: "ml",
+            });
+            expect(set.isError).toBeFalsy();
+            const prodRow = await db.foodsStore.getFood("hh-1", productId);
+            expect(prodRow?.usualStoreId).toBe(second.id);
+            expect(prodRow?.usualAmount).toEqual({ amount: 1890, unit: "ml" });
+
+            const got = await call("get_food", { food_id: milkId });
+            const full = GET_FOOD_OUTPUT.parse(got.structuredContent);
+            expect(full.usual_store_id).toBe(store.id);
+            expect(full.effective.usual_store_id).toBe(second.id);
+            expect(full.effective.usual_amount).toBe(1890);
+            expect(full.effective.usual_unit).toBe("ml");
+
+            const line = await call("add_grocery_line", {
+                kind: "food",
+                food_id: milkId,
+            });
+            expect(line.isError).toBeFalsy();
+            expect(textOf(line)).toContain("usual store");
+            expect(textOf(line)).toContain("usual amount");
+            expect(line.structuredContent?.store_id).toBe(second.id);
+        });
+    });
+
     test("upsert_food with generic_food_id creates a product", async () => {
         await withPat(async (call) => {
             const eggs = await call("upsert_food", { name: "Eggs" });
