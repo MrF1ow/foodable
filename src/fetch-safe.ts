@@ -315,6 +315,14 @@ function beforeDeadline<T>(
     });
 }
 
+/** Same host, its www. twin, or one a subdomain of the other. */
+export function sameSite(a: string, b: string): boolean {
+    const strip = (host: string) => host.toLowerCase().replace(/^www\./, "");
+    const x = strip(a);
+    const y = strip(b);
+    return x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`);
+}
+
 async function resolveHost(
     host: string,
     resolve: (host: string) => Promise<string[]>,
@@ -504,6 +512,8 @@ export function createSafeFetcher(deps?: {
             maxBytes: number;
             maxRedirects: number;
             enforceContentType: boolean;
+            /** robots.txt: a redirect may only stay on the same site. */
+            sameSiteAs?: string;
         },
     ): Promise<FetchOutcome> {
         if (!urlAllowedForFetch(url)) {
@@ -606,6 +616,21 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
+                    if (
+                        opts.sameSiteAs != null &&
+                        !sameSite(next.hostname, opts.sameSiteAs)
+                    ) {
+                        // A robots.txt that redirects to another site is
+                        // treated as unreachable (disallow), so a reader with
+                        // an allow-list never ends up requesting a host it
+                        // was not allowed to contact.
+                        return {
+                            ok: false,
+                            reason: "host_not_allowed",
+                            status: null,
+                            detail: next.hostname,
+                        };
+                    }
                     const hopResolved = await resolveHost(
                         next.hostname,
                         resolve,
@@ -686,6 +711,7 @@ export function createSafeFetcher(deps?: {
             maxBytes: ROBOTS_MAX_BYTES,
             maxRedirects: MAX_ROBOTS_REDIRECTS,
             enforceContentType: false,
+            sameSiteAs: host,
         });
 
         let policy: RobotsPolicy;

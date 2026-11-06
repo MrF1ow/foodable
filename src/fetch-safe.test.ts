@@ -594,3 +594,44 @@ describe("createSafeFetcher", () => {
         });
     });
 });
+
+test("a robots.txt redirect to another site is never followed", async () => {
+    const requested: string[] = [];
+    const fetcher = createSafeFetcher({
+        resolve: async () => [PUBLIC],
+        fetch: async (url) => {
+            const href = String(url);
+            requested.push(href);
+            if (href === "https://www.tiktok.com/robots.txt") {
+                return okResponse("", {
+                    status: 302,
+                    headers: {
+                        location: "https://www.facebook.com/robots.txt",
+                    },
+                });
+            }
+            return okResponse("<html></html>");
+        },
+    });
+    expect(
+        await fetcher.robotsAllows("https://www.tiktok.com/@a/video/1"),
+    ).toBe(false);
+    expect(requested.some((href) => href.includes("facebook.com"))).toBe(false);
+});
+
+test("a robots.txt redirect to the www twin is followed", async () => {
+    const fetcher = createSafeFetcher({
+        resolve: async () => [PUBLIC],
+        fetch: async (url) => {
+            const href = String(url);
+            if (href === "https://example.com/robots.txt") {
+                return okResponse("", {
+                    status: 301,
+                    headers: { location: "https://www.example.com/robots.txt" },
+                });
+            }
+            return okResponse("User-agent: *\nAllow: /");
+        },
+    });
+    expect(await fetcher.robotsAllows("https://example.com/soup")).toBe(true);
+});

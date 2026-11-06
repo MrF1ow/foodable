@@ -389,3 +389,25 @@ test("readFacebook uses tokenless graph url", async () => {
         ),
     );
 });
+
+describe("reader text keeps its line breaks", () => {
+    test("each subtitle cue is its own line", () => {
+        const vtt =
+            "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\n2 cups flour\n\n2\n00:00:01.000 --> 00:00:02.000\n1 tsp salt\n\n3\n00:00:02.000 --> 00:00:03.000\nDirections: mix.";
+        expect(webVttToText(vtt)).toBe(
+            "2 cups flour\n1 tsp salt\nDirections: mix.",
+        );
+    });
+
+    test("a Facebook caption keeps <br> lines inside one paragraph", () => {
+        const json = JSON.stringify({
+            html: '<blockquote class="fb-xfbml-parse-ignore"><p>Sunday stew:<br/>1 lb beef<br />3 carrots<br><br>Simmer 2 hours.</p>Posted by <a href="https://x">Cook</a> on <a href="https://y">Tuesday</a></blockquote>',
+        });
+        const result = parseFacebookOembed(json);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.text).toBe(
+            "Sunday stew:\n1 lb beef\n3 carrots\n\nSimmer 2 hours.",
+        );
+    });
+});

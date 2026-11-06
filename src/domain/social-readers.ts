@@ -217,7 +217,11 @@ export function webVttToText(vtt: string): string {
     for (const cue of cues) {
         if (deduped.at(-1) !== cue) deduped.push(cue);
     }
-    return deduped.join(" ").replace(/\s+/g, " ").trim();
+    // One cue per line: the caption parser reads a recipe line by line.
+    return deduped
+        .map((cue) => cue.replace(/\s+/g, " ").trim())
+        .filter((cue) => cue.length > 0)
+        .join("\n");
 }
 
 export function facebookOembedEndpoint(
@@ -321,7 +325,14 @@ function parseFacebookBlockquoteInner(inner: string): string {
         : "";
     const paragraphs: string[] = [];
     for (const pMatch of stripped.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)) {
-        const text = decodeRecipeHtmlEntities(pMatch[1] ?? "").trim();
+        // Keep <br> line breaks: captions put one ingredient per line. The
+        // shared decoder collapses whitespace, so decode each line on its own.
+        const text = (pMatch[1] ?? "")
+            .split(/<br\s*\/?>/i)
+            .map((line) => decodeRecipeHtmlEntities(line).trim())
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
         if (text) paragraphs.push(text);
     }
     let body = paragraphs.join("\n").trim();
