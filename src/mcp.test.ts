@@ -4382,6 +4382,120 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("upsert_food create with bad usual unit creates no food", async () => {
+        await withPat(async (call) => {
+            const before = await db.foodsStore.listFoods("hh-1");
+            const r = await call("upsert_food", {
+                name: `Badusual-${crypto.randomUUID()}`,
+                usual_amount: 1,
+                usual_unit: "nope",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain(
+                "Pick a known unit for the usual amount.",
+            );
+            expect(await db.foodsStore.listFoods("hh-1")).toEqual(before);
+        });
+    });
+
+    test("get_food: stored usual null on plain, effective from usual product", async () => {
+        await withPat(async (call) => {
+            const costco = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Costco",
+            );
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const brand = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "K Eggs",
+                calories: 100,
+            });
+            const productId = brand.structuredContent?.id as string;
+            await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+                store_id: costco.id,
+                amount: 12,
+                unit: "each",
+            });
+            const plainRow = await db.foodsStore.getFood("hh-1", eggsId);
+            expect(plainRow?.usualStoreId).toBeNull();
+            expect(plainRow?.usualAmount).toBeNull();
+            const got = await call("get_food", { food_id: eggsId });
+            const full = GET_FOOD_OUTPUT.parse(got.structuredContent);
+            expect(full.usual_store_id).toBeNull();
+            expect(full.usual_amount).toBeNull();
+            expect(full.usual_unit).toBeNull();
+            expect(full.effective.usual_store_id).toBe(costco.id);
+            expect(full.effective.usual_amount).toBe(12);
+            expect(full.effective.usual_unit).toBe("each");
+        });
+    });
+
+    test("add_grocery_line with only food: structured content and store name", async () => {
+        await withPat(async (call) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            const created = await call("upsert_food", { name: "Oats" });
+            expect(created.isError).toBeFalsy();
+            const foodId = created.structuredContent?.id as string;
+            const patched = await call("upsert_food", {
+                food_id: foodId,
+                usual_store_id: store.id,
+                usual_amount: 500,
+                usual_unit: "g",
+            });
+            expect(patched.isError).toBeFalsy();
+            const line = await call("add_grocery_line", {
+                kind: "food",
+                food_id: foodId,
+            });
+            expect(line.isError).toBeFalsy();
+            expect(line.structuredContent?.store_id).toBe(store.id);
+            expect(line.structuredContent?.amount).toBe(500);
+            expect(line.structuredContent?.unit).toBe("g");
+            const t = textOf(line);
+            expect(t).toContain("Safeway");
+            expect(t).toContain("500");
+            expect(t).toContain("g");
+        });
+    });
+
+    test("set_usual_product text mentions saved store and amount", async () => {
+        await withPat(async (call) => {
+            const st = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Walmart",
+            );
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const brand = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Brand A",
+                calories: 100,
+            });
+            const productId = brand.structuredContent?.id as string;
+            const set = await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+                store_id: st.id,
+                amount: 18,
+                unit: "each",
+            });
+            expect(set.isError).toBeFalsy();
+            const txt = textOf(set);
+            expect(txt).toContain("Walmart");
+            expect(txt).toContain("18");
+            expect(txt).toContain("each");
+        });
+    });
+
     test("upsert_food with generic_food_id creates a product", async () => {
         await withPat(async (call) => {
             const eggs = await call("upsert_food", { name: "Eggs" });

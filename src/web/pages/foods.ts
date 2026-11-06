@@ -249,25 +249,29 @@ function belongsSelectSlot(
     return `<div data-fill-slot="belongs_select" data-filled-template="${escapeHtml(templateId)}">${belongsSelectInner(view, product)}</div>`;
 }
 
+function sortStoresByName<T extends { name: string }>(stores: T[]): T[] {
+    return [...stores].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function usualBuyFieldsEdit(
     view: FoodsSettingsView,
     food: FoodRow | null,
 ): string {
-    if (!food || food.archivedAt) return "";
+    if (food?.archivedAt) return "";
     const amountVal =
-        food.usualAmount != null ? String(food.usualAmount.amount) : "";
+        food?.usualAmount != null ? String(food.usualAmount.amount) : "";
     const unitOpts = [
         `<option value="">—</option>`,
         ...FOOD_QUANTITY_UNITS.map((unit) => {
             const label = quantityUnitOptionLabel(unit);
-            const sel = food.usualAmount?.unit === unit ? " selected" : "";
+            const sel = food?.usualAmount?.unit === unit ? " selected" : "";
             return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
         }),
     ].join("");
     const storeOpts = [
         `<option value="">—</option>`,
-        ...view.stores.map((s) => {
-            const sel = food.usualStoreId === s.id ? " selected" : "";
+        ...sortStoresByName(view.stores).map((s) => {
+            const sel = food?.usualStoreId === s.id ? " selected" : "";
             return `<option value="${escapeHtml(s.id)}"${sel}>${escapeHtml(s.name)}</option>`;
         }),
     ].join("");
@@ -464,7 +468,7 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   openOnLoad: editOpen,
                   body: foodEditForm(
                       view,
-                      editFood,
+                      editOpen ? editFood : null,
                       editOpen ? errorBanner(view.error) : "",
                       editOpen && editFood
                           ? productFieldsSlot(view, editFood)

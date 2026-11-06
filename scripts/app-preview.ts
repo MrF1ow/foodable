@@ -44,11 +44,7 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import {
-    effectiveFood,
-    matchFoodsByWords,
-    usualProductRows,
-} from "../src/domain/foods.js";
+import { matchFoodsByWords, usualProductRows } from "../src/domain/foods.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -576,7 +572,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             food: eggsPlain,
             products: eggProducts,
             usualProductId: eggsPlain.usualProductId,
-            effective: effectiveFood(eggsPlain, catalogById),
+            prefillStoreId: catalogById.get("f-kirkland")!.usualStoreId,
+            prefillAmount: catalogById.get("f-kirkland")!.usualAmount,
             stores: PREVIEW_STORES,
             from: "/household/usual-products",
         } as never),

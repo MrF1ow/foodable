@@ -16,6 +16,7 @@ import {
     clearCheckedLines,
     createMemoryGroceryStore,
     groceryAllergenWarning,
+    GroceryInputError,
     listGrocery,
     pickGroceryAmount,
     pickGroceryStore,
@@ -108,6 +109,78 @@ test("pickGroceryStore precedence: chosen, usual, list, default", () => {
         pickGroceryStore({
             chosenStoreId: null,
             usualStoreId: null,
+            stores,
+            lines: [],
+            foodId: null,
+        }),
+    ).toEqual({ storeId: "a", reason: "default" });
+});
+
+test("pickGroceryStore: family list uses product line for plain food", () => {
+    const stores = [
+        { id: "a", householdId: HH, name: "A", sortOrder: 0 },
+        { id: "b", householdId: HH, name: "B", sortOrder: 1 },
+    ];
+    const eggsPlain = "food-eggs-plain";
+    const kirkland = "food-kirkland";
+    const familyById = new Map([
+        [kirkland, eggsPlain],
+        [eggsPlain, eggsPlain],
+    ]);
+    expect(
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: null,
+            stores,
+            lines: [
+                {
+                    id: "l1",
+                    householdId: HH,
+                    storeId: "b",
+                    sectionId: "s",
+                    kind: "food",
+                    displayName: "Kirkland Eggs",
+                    quantity: { amount: 1, unit: "each" },
+                    foodId: kirkland,
+                    checked: false,
+                },
+            ],
+            foodId: eggsPlain,
+            familyById,
+        }),
+    ).toEqual({ storeId: "b", reason: "list" });
+});
+
+test("pickGroceryStore: no stores throws", () => {
+    expect(() =>
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: null,
+            stores: [],
+            lines: [],
+            foodId: null,
+        }),
+    ).toThrow(GroceryInputError);
+    expect(() =>
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: null,
+            stores: [],
+            lines: [],
+            foodId: null,
+        }),
+    ).toThrow("Add a store first.");
+});
+
+test("pickGroceryStore: stale usual id falls through to default", () => {
+    const stores = [
+        { id: "a", householdId: HH, name: "A", sortOrder: 0 },
+        { id: "b", householdId: HH, name: "B", sortOrder: 1 },
+    ];
+    expect(
+        pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: "gone",
             stores,
             lines: [],
             foodId: null,
@@ -1143,4 +1216,116 @@ test("add-food dialog count does not grow with stores", () => {
     expect(reopened).toContain(
         'data-fill-template-sections="grocery-sections-st-1"',
     );
+});
+
+test("addGroceryFoodById explicit store+amount matches legacy line shape", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store, dairy } = await seedStore();
+    const food = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggs",
+            defaultUnit: "each",
+        }),
+    );
+    const line = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        foodId: food.id,
+        amount: 12,
+        unit: "each",
+    });
+    expect(line.storeId).toBe(store.id);
+    expect(line.sectionId).toBe(dairy.id);
+    expect(line.quantity).toEqual({ amount: 12, unit: "each" });
+    expect(line.foodId).toBe(food.id);
+    expect(line.displayName).toBe("Eggs");
+});
+
+test("addGroceryManualFood with bad amount creates no new food", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const before = await foods.listFoods(HH);
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            name: `Soap-${crypto.randomUUID()}`,
+            amount: 0,
+        }),
+    ).rejects.toThrow("Enter an amount greater than zero.");
+    expect(await foods.listFoods(HH)).toEqual(before);
+});
+
+test("addGroceryManualFood with NaN amount creates no new food", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const before = await foods.listFoods(HH);
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            name: `NaNy-${crypto.randomUUID()}`,
+            amount: Number.NaN,
+        }),
+    ).rejects.toThrow("Enter an amount greater than zero.");
+    expect(await foods.listFoods(HH)).toEqual(before);
+});
+
+test("addGrocerySupply with whitespace-only store id throws Unknown store", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings } = await seedStore();
+    await expect(
+        addGrocerySupply(grocery, settings, foods, {
+            householdId: HH,
+            storeId: "   ",
+            name: "Foil",
+            amount: 1,
+            unit: "roll",
+        }),
+    ).rejects.toThrow("Unknown store.");
+});
+
+test("addGrocerySupply without amount or unit and no usual pair throws Enter a unit", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store, dairy } = await seedStore();
+    await expect(
+        addGrocerySupply(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            sectionId: dairy.id,
+            name: "Sponges",
+        }),
+    ).rejects.toThrow("Enter a unit.");
+});
+
+test("addGroceryFoodById no store no amount uses usual store and name-based section", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const sections = await settings.listSections(store.id);
+    const dairy = sections.find((row) => row.name === "Dairy")!;
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggs",
+            usualStoreId: store.id,
+            usualAmount: { amount: 12, unit: "each" },
+        }),
+    );
+    const line = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        foodId: plain.id,
+    });
+    expect(line.storeId).toBe(store.id);
+    expect(line.sectionId).toBe(dairy.id);
+    expect(line.quantity).toEqual({ amount: 12, unit: "each" });
 });

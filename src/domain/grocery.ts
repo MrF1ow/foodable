@@ -516,10 +516,8 @@ export function pickGroceryAmount(input: {
     usual: UsualAmount | null;
     food: { defaultUnit: string };
 }): { quantity: GroceryQuantity; reason: GroceryAmountPickReason } {
-    const hasChosen =
-        input.amount != null &&
-        input.amount !== undefined &&
-        !(typeof input.amount === "number" && !Number.isFinite(input.amount));
+    /** Any non-nullish amount is "chosen"; non-finite values fail in parseAmount. */
+    const hasChosen = input.amount !== null && input.amount !== undefined;
     if (hasChosen) {
         return {
             quantity: {
@@ -555,6 +553,14 @@ async function requireStore(
     const store = stores.find((row) => row.id === storeId);
     if (!store) throw new GroceryInputError("Unknown store.");
     return store;
+}
+
+/** Only `undefined` / `null` means "pick a store"; whitespace still counts as an explicit (possibly invalid) id. */
+function explicitStoreId(
+    storeId: string | null | undefined,
+): string | undefined {
+    if (storeId === undefined || storeId === null) return undefined;
+    return String(storeId).trim();
 }
 
 export async function listGrocery(
@@ -639,13 +645,17 @@ export async function addGroceryFoodById(
         onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const explicit = explicitStoreId(input.storeId);
+    const hasExplicitStore = explicit !== undefined;
     const hasExplicitAmount =
         input.amount !== undefined && input.amount !== null;
 
-    if (explicitStore) {
-        await requireStore(settings, input.householdId, explicitStore);
-        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    if (hasExplicitStore) {
+        await requireStore(settings, input.householdId, explicit!);
+        await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    }
+    if (hasExplicitAmount) {
+        parseAmount(Number(input.amount));
     }
 
     try {
@@ -659,8 +669,8 @@ export async function addGroceryFoodById(
         let quantity: GroceryQuantity;
         let amountReason: GroceryAmountPickReason;
 
-        if (explicitStore && hasExplicitAmount) {
-            storeId = explicitStore;
+        if (explicit !== undefined && hasExplicitAmount) {
+            storeId = explicit!;
             storeReason = "chosen";
             const picked = pickGroceryAmount({
                 amount: input.amount,
@@ -682,8 +692,8 @@ export async function addGroceryFoodById(
             ]);
             const eff = effMap.get(food.id)!;
 
-            if (explicitStore) {
-                storeId = explicitStore;
+            if (explicit !== undefined) {
+                storeId = explicit!;
                 storeReason = "chosen";
             } else {
                 const p = pickGroceryStore({
@@ -746,13 +756,17 @@ export async function addGroceryFoodByBarcode(
         lookup: (barcode: string) => Promise<FoodResult | null>;
     },
 ): Promise<GroceryLine> {
-    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const explicit = explicitStoreId(input.storeId);
+    const hasExplicitStore = explicit !== undefined;
     const hasExplicitAmount =
         input.amount !== undefined && input.amount !== null;
 
-    if (explicitStore) {
-        await requireStore(settings, input.householdId, explicitStore);
-        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    if (hasExplicitStore) {
+        await requireStore(settings, input.householdId, explicit!);
+        await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    }
+    if (hasExplicitAmount) {
+        parseAmount(Number(input.amount));
     }
 
     try {
@@ -768,8 +782,8 @@ export async function addGroceryFoodByBarcode(
         let quantity: GroceryQuantity;
         let amountReason: GroceryAmountPickReason;
 
-        if (explicitStore && hasExplicitAmount) {
-            storeId = explicitStore;
+        if (explicit !== undefined && hasExplicitAmount) {
+            storeId = explicit!;
             storeReason = "chosen";
             const picked = pickGroceryAmount({
                 amount: input.amount,
@@ -791,8 +805,8 @@ export async function addGroceryFoodByBarcode(
             ]);
             const eff = effMap.get(food.id)!;
 
-            if (explicitStore) {
-                storeId = explicitStore;
+            if (explicit !== undefined) {
+                storeId = explicit!;
                 storeReason = "chosen";
             } else {
                 const p = pickGroceryStore({
@@ -852,13 +866,17 @@ export async function addGroceryManualFood(
         onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const explicit = explicitStoreId(input.storeId);
+    const hasExplicitStore = explicit !== undefined;
     const hasExplicitAmount =
         input.amount !== undefined && input.amount !== null;
 
-    if (explicitStore) {
-        await requireStore(settings, input.householdId, explicitStore);
-        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+    if (hasExplicitStore) {
+        await requireStore(settings, input.householdId, explicit!);
+        await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    }
+    if (hasExplicitAmount) {
+        parseAmount(Number(input.amount));
     }
 
     try {
@@ -874,8 +892,8 @@ export async function addGroceryManualFood(
         let quantity: GroceryQuantity;
         let amountReason: GroceryAmountPickReason;
 
-        if (explicitStore && hasExplicitAmount) {
-            storeId = explicitStore;
+        if (explicit !== undefined && hasExplicitAmount) {
+            storeId = explicit!;
             storeReason = "chosen";
             const picked = pickGroceryAmount({
                 amount: input.amount,
@@ -897,8 +915,8 @@ export async function addGroceryManualFood(
             ]);
             const eff = effMap.get(food.id)!;
 
-            if (explicitStore) {
-                storeId = explicitStore;
+            if (explicit !== undefined) {
+                storeId = explicit!;
                 storeReason = "chosen";
             } else {
                 const p = pickGroceryStore({
@@ -959,17 +977,19 @@ export async function addGrocerySupply(
         onPicked?: GroceryPickCallback;
     },
 ): Promise<GroceryLine> {
-    const explicitStore = input.storeId?.trim() ? input.storeId.trim() : null;
+    const explicit = explicitStoreId(input.storeId);
+    const hasExplicitStore = explicit !== undefined;
     const hasExplicitAmount =
         input.amount !== undefined && input.amount !== null;
+
+    if (hasExplicitStore) {
+        await requireStore(settings, input.householdId, explicit!);
+        await resolveGrocerySectionId(settings, explicit!, input.sectionId);
+    }
     if (hasExplicitAmount) {
         const u = input.unit?.trim() ?? "";
         if (!u) throw new GroceryInputError("Enter a unit.");
-    }
-
-    if (explicitStore) {
-        await requireStore(settings, input.householdId, explicitStore);
-        await resolveGrocerySectionId(settings, explicitStore, input.sectionId);
+        parseAmount(Number(input.amount));
     }
 
     try {
@@ -990,8 +1010,8 @@ export async function addGrocerySupply(
         let quantity: GroceryQuantity;
         let amountReason: GroceryAmountPickReason;
 
-        if (explicitStore && hasExplicitAmount) {
-            storeId = explicitStore;
+        if (explicit !== undefined && hasExplicitAmount) {
+            storeId = explicit!;
             storeReason = "chosen";
             const picked = pickGroceryAmount({
                 amount: input.amount,
@@ -1013,8 +1033,8 @@ export async function addGrocerySupply(
             ]);
             const eff = effMap.get(food.id)!;
 
-            if (explicitStore) {
-                storeId = explicitStore;
+            if (explicit !== undefined) {
+                storeId = explicit!;
                 storeReason = "chosen";
             } else {
                 const p = pickGroceryStore({
@@ -1038,6 +1058,13 @@ export async function addGrocerySupply(
             });
             quantity = picked.quantity;
             amountReason = picked.reason;
+            const givenUnit = input.unit?.trim() ?? "";
+            const usual = eff.usualAmount;
+            const usualSuppliesUnit =
+                usual != null && (!givenUnit || givenUnit === usual.unit);
+            if (!hasExplicitAmount && !usualSuppliesUnit && givenUnit === "") {
+                throw new GroceryInputError("Enter a unit.");
+            }
         }
 
         input.onPicked?.({

@@ -190,14 +190,16 @@ export async function parseUsualPurchase(
                 out.usualAmount = null;
             } else {
                 const n = typeof amt === "number" ? amt : Number(amt);
-                if (!Number.isFinite(n) || n <= 0) {
-                    throw new FoodsInputError(
-                        "The usual amount must be greater than zero.",
-                    );
-                }
+                // When both amount and unit are present, reject an unknown unit
+                // before a bad amount so compound mistakes report unit first.
                 if (!isQuantityUnit(unitRaw)) {
                     throw new FoodsInputError(
                         "Pick a known unit for the usual amount.",
+                    );
+                }
+                if (!Number.isFinite(n) || n <= 0) {
+                    throw new FoodsInputError(
+                        "The usual amount must be greater than zero.",
                     );
                 }
                 out.usualAmount = { amount: n, unit: unitRaw };

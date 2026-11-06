@@ -218,7 +218,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to the grocery list. Pass store_id and amount to choose the store and quantity explicitly. When either is omitted, the server picks the store in order: that food's usual store, else a store where the food's family already has a line, else the first household store, and the amount defaults to the food's usual amount or 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
+                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,

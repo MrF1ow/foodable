@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { effectiveFood, newFood } from "../../domain/foods.js";
+import { newFood } from "../../domain/foods.js";
 import {
     renderUsualProductsListPage,
     renderUsualProductsPickerPage,
@@ -52,7 +52,8 @@ test("picker page includes search and manual product panels", () => {
         food: eggs,
         products: [],
         usualProductId: null,
-        effective: effectiveFood(eggs, new Map([[eggs.id, eggs]])),
+        prefillStoreId: eggs.usualStoreId,
+        prefillAmount: eggs.usualAmount,
         stores: [],
         from: "/recipes/r1",
     });

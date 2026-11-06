@@ -113,6 +113,154 @@ describe("parseUsualPurchase / effectiveFood / merge usual purchase", () => {
         expect(eff.usualAmount).toEqual({ amount: 6, unit: "each" });
     });
 
+    test("effectiveFood product store and plain grams pair {6,g}", async () => {
+        const store = createMemoryFoodsStore();
+        const plain = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                usualAmount: { amount: 6, unit: "g" },
+            }),
+        );
+        const product = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Kirkland",
+                genericFoodId: plain.id,
+                usualStoreId: "s-b",
+                usualAmount: null,
+            }),
+        );
+        await store.updateFoodRow({ ...plain, usualProductId: product.id });
+        const p = (await store.getFood(HH, plain.id))!;
+        const catalog = new Map(
+            (await store.listFoods(HH)).map((f) => [f.id, f]),
+        );
+        const eff = effectiveFood(p, catalog);
+        expect(eff.usualStoreId).toBe("s-b");
+        expect(eff.usualAmount).toEqual({ amount: 6, unit: "g" });
+    });
+
+    test("effectiveFood: standalone food reads own usual fields", async () => {
+        const store = createMemoryFoodsStore();
+        const solo = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Solo",
+                usualStoreId: "s-s",
+                usualAmount: { amount: 3, unit: "L" },
+            }),
+        );
+        const catalog = new Map(
+            (await store.listFoods(HH)).map((f) => [f.id, f]),
+        );
+        const eff = effectiveFood(solo, catalog);
+        expect(eff.usualStoreId).toBe("s-s");
+        expect(eff.usualAmount).toEqual({ amount: 3, unit: "L" });
+    });
+
+    test("effectiveFood: product row reads own row only", async () => {
+        const store = createMemoryFoodsStore();
+        const plain = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                usualAmount: { amount: 1, unit: "each" },
+            }),
+        );
+        const product = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Brand",
+                genericFoodId: plain.id,
+                usualAmount: { amount: 2, unit: "each" },
+            }),
+        );
+        const catalog = new Map(
+            (await store.listFoods(HH)).map((f) => [f.id, f]),
+        );
+        const eff = effectiveFood(product, catalog);
+        expect(eff.usualAmount).toEqual({ amount: 2, unit: "each" });
+        expect(eff.usualStoreId).toBeNull();
+    });
+
+    test("archived usual product falls back to plain's own fields", async () => {
+        const store = createMemoryFoodsStore();
+        const plain = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                usualStoreId: "s-plain",
+                usualAmount: { amount: 6, unit: "g" },
+            }),
+        );
+        const product = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Old brand",
+                genericFoodId: plain.id,
+                usualStoreId: "s-arch",
+                usualAmount: { amount: 99, unit: "each" },
+            }),
+        );
+        await store.updateFoodRow({
+            ...plain,
+            usualProductId: product.id,
+        });
+        await store.updateFoodRow({
+            ...product,
+            archivedAt: new Date().toISOString(),
+        });
+        const p = (await store.getFood(HH, plain.id))!;
+        const catalog = new Map(
+            (await store.listFoods(HH)).map((f) => [f.id, f]),
+        );
+        const eff = effectiveFood(p, catalog);
+        expect(eff.usualStoreId).toBe("s-plain");
+        expect(eff.usualAmount).toEqual({ amount: 6, unit: "g" });
+    });
+
+    test("usual product of another food falls back to plain's own fields", async () => {
+        const store = createMemoryFoodsStore();
+        const otherPlain = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const alienProduct = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Alien milk",
+                genericFoodId: otherPlain.id,
+                usualAmount: { amount: 1, unit: "L" },
+            }),
+        );
+        const eggs = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                usualAmount: { amount: 6, unit: "each" },
+            }),
+        );
+        await store.updateFoodRow({
+            ...eggs,
+            usualProductId: alienProduct.id,
+        });
+        const p = (await store.getFood(HH, eggs.id))!;
+        const catalog = new Map(
+            (await store.listFoods(HH)).map((f) => [f.id, f]),
+        );
+        const eff = effectiveFood(p, catalog);
+        expect(eff.usualAmount).toEqual({ amount: 6, unit: "each" });
+    });
+
     test("invalid usual product id keeps plain food's own usual fields", async () => {
         const store = createMemoryFoodsStore();
         const plain = await store.insertFood(
@@ -285,6 +433,174 @@ describe("rejected usual purchase leaves rows unchanged", () => {
         ).rejects.toThrow(FoodsInputError);
         expect(await foods.getFood(HH, plain.id)).toEqual(beforePlain);
         expect(await foods.getFood(HH, product.id)).toEqual(beforeProd);
+    });
+});
+
+describe("parseUsualPurchase invalid unit before bad amount", () => {
+    test("unknown unit is reported before non-positive amount", async () => {
+        const settings = createMemorySettingsStore();
+        await expect(
+            parseUsualPurchase(
+                HH,
+                { usualAmount: { amount: 0, unit: "nope" } },
+                settings,
+            ),
+        ).rejects.toThrow("Pick a known unit for the usual amount.");
+        await expect(
+            parseUsualPurchase(
+                HH,
+                { usualAmount: { amount: -1, unit: "badu" } },
+                settings,
+            ),
+        ).rejects.toThrow("Pick a known unit for the usual amount.");
+    });
+});
+
+describe("usual purchase rejections: exact message and listFoods unchanged", () => {
+    async function baseline() {
+        const foods = createMemoryFoodsStore();
+        const settings = createMemorySettingsStore();
+        await settings.insertStore({
+            id: "g1",
+            householdId: HH,
+            name: "A",
+            sortOrder: 0,
+        });
+        await settings.listSections("g1");
+        const plain = await foods.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        const product = await foods.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Brand",
+                genericFoodId: plain.id,
+            }),
+        );
+        await foods.updateFoodRow({ ...plain, usualProductId: product.id });
+        return { foods, settings, plain, product };
+    }
+
+    test("buildFoodUpdate", async () => {
+        const { foods, settings, plain } = await baseline();
+        const before = await foods.listFoods(HH);
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: 1, unit: "nope" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("Pick a known unit for the usual amount.");
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: 0, unit: "g" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("The usual amount must be greater than zero.");
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: -2, unit: "g" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("The usual amount must be greater than zero.");
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: 2, unit: "" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("Enter a usual amount with its unit.");
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: null, unit: "g" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("Enter a usual amount with its unit.");
+        expect(await foods.listFoods(HH)).toEqual(before);
+    });
+
+    test("updateFood", async () => {
+        const { foods, settings, plain } = await baseline();
+        const before = await foods.listFoods(HH);
+        await expect(
+            updateFood(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: 1, unit: "nope" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("Pick a known unit for the usual amount.");
+        expect(await foods.listFoods(HH)).toEqual(before);
+    });
+
+    test("setUsualPurchase", async () => {
+        const { foods, settings, plain } = await baseline();
+        const before = await foods.listFoods(HH);
+        await expect(
+            setUsualPurchase(
+                foods,
+                HH,
+                plain.id,
+                { usualAmount: { amount: 0, unit: "g" } },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("The usual amount must be greater than zero.");
+        expect(await foods.listFoods(HH)).toEqual(before);
+    });
+
+    test("setUsualProduct with purchase", async () => {
+        const { foods, settings, plain, product } = await baseline();
+        const before = await foods.listFoods(HH);
+        await expect(
+            setUsualProduct(foods, HH, plain.id, product.id, {
+                purchase: { usualAmount: { amount: 1, unit: "nope" } },
+                stores: settings,
+            }),
+        ).rejects.toThrow("Pick a known unit for the usual amount.");
+        expect(await foods.listFoods(HH)).toEqual(before);
+        const plainRow = await foods.getFood(HH, plain.id);
+        expect(plainRow?.usualProductId).toBe(product.id);
+    });
+
+    test("unknown store in another household", async () => {
+        const foods = createMemoryFoodsStore();
+        const hh2 = "hh-other";
+        const settings = createMemorySettingsStore();
+        await settings.insertStore({
+            id: "foreign",
+            householdId: hh2,
+            name: "Far",
+            sortOrder: 0,
+        });
+        const plain = await foods.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        const before = await foods.listFoods(HH);
+        await expect(
+            buildFoodUpdate(
+                foods,
+                HH,
+                plain.id,
+                { usualStoreId: "foreign" },
+                { stores: settings },
+            ),
+        ).rejects.toThrow("Unknown store.");
+        expect(await foods.listFoods(HH)).toEqual(before);
     });
 });
 

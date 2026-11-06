@@ -45,7 +45,6 @@ import type { LinkProductPromptView } from "./components/link-product-prompt.js"
 import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
 import {
-    effectiveFood,
     effectiveFoodsByIds,
     matchFoodsByWords,
     suggestFoodFor,
@@ -605,7 +604,23 @@ export async function renderUsualProductsPickerPage(
     const from = safeReturnPath(opts.from, "/household/usual-products");
     const listed = foods;
     const catalog = new Map(listed.map((row) => [row.id, row]));
-    const eff = effectiveFood(food, catalog);
+    const usualId = food.usualProductId;
+    const usualProduct =
+        usualId != null
+            ? (products.find((row) => row.id === usualId) ??
+              catalog.get(usualId) ??
+              null)
+            : null;
+    const prefillFromProduct =
+        usualProduct != null &&
+        usualProduct.genericFoodId === food.id &&
+        !usualProduct.archivedAt;
+    const prefillStoreId = prefillFromProduct
+        ? usualProduct.usualStoreId
+        : food.usualStoreId;
+    const prefillAmount = prefillFromProduct
+        ? usualProduct.usualAmount
+        : food.usualAmount;
     const stores = await liveSettingsStore().listStores(householdId);
     return {
         status: 200,
@@ -614,7 +629,8 @@ export async function renderUsualProductsPickerPage(
             food,
             products,
             usualProductId: food.usualProductId,
-            effective: eff,
+            prefillStoreId,
+            prefillAmount,
             stores,
             from,
             error: opts.error,

@@ -581,6 +581,18 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             usualPurchasePatch,
                             settings,
                         );
+                        if (args.usual_store_id !== undefined) {
+                            patch.usualStoreId = args.usual_store_id;
+                        }
+                        if (
+                            args.usual_amount !== undefined ||
+                            args.usual_unit !== undefined
+                        ) {
+                            patch.usualAmount = {
+                                amount: args.usual_amount ?? null,
+                                unit: args.usual_unit ?? null,
+                            };
+                        }
                     }
                     // Everything that can reject runs before the first write,
                     // so a refused call leaves no new row and no barcode
@@ -703,8 +715,11 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         householdId,
                         food.id,
                         patch,
+                        usualPurchasePatch && args.food_id
+                            ? { stores: settings }
+                            : undefined,
                     );
-                    if (usualPurchasePatch) {
+                    if (usualPurchasePatch && !args.food_id) {
                         saved = await setUsualPurchase(
                             store,
                             householdId,
