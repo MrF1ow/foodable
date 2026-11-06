@@ -638,6 +638,8 @@ describe("household usual products and items routes", () => {
             sourceUrl: null,
             tags: [],
             notes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         });
         const r = await post(
             `/household/items/${solo.id}/link`,
@@ -888,6 +890,8 @@ describe("household usual products and items routes", () => {
             sourceUrl: null,
             tags: [],
             notes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         });
         const r = await post(
             `/household/items/${solo.id}/link`,

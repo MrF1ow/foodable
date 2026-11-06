@@ -32,6 +32,7 @@ function extraHousehold(id: string): Household {
             constraints: [],
             budget: null,
             shoppingCadence: null,
+            unverifiedRecipeExpiryDays: null,
         },
     };
 }
@@ -66,6 +67,7 @@ test("createHousehold inserts the owner and fails if a household exists", () => 
             constraints: [],
             budget: null,
             shoppingCadence: null,
+            unverifiedRecipeExpiryDays: null,
         },
     } satisfies Household);
     expect(listMembers(store, householdId)).toEqual([

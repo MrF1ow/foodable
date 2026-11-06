@@ -129,6 +129,7 @@ test("owner household page has add-member form on /household only", () => {
         isOwner: true,
         canManage: true,
         viewerUserId: alice.userId,
+        unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain("<h1>Household</h1>");
     expect(html).toContain('href="/household/items"');
@@ -167,6 +168,7 @@ test("member household page is read-only without add-member", () => {
         isOwner: false,
         canManage: false,
         viewerUserId: bob.userId,
+        unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain("Seattle");
     expect(html).not.toContain('action="/household"');
@@ -220,6 +222,7 @@ test("owner can make a member an admin without giving up ownership", () => {
         isOwner: true,
         canManage: true,
         viewerUserId: alice.userId,
+        unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain(
         `data-fill-action="/household/members/${bob.userId}/role"`,
@@ -247,6 +250,7 @@ test("admin manages the household but not roles, removal or the token", () => {
         isOwner: false,
         canManage: true,
         viewerUserId: admin.userId,
+        unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain('commandfor="household-add-member"');
     expect(html).toContain('action="/household/name"');
@@ -289,6 +293,7 @@ test("member edits their own rules and only their own", () => {
         isOwner: false,
         canManage: false,
         viewerUserId: bob.userId,
+        unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain(`action="/household/members/${bob.userId}/rules"`);
     expect(html).toContain(

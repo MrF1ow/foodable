@@ -688,6 +688,8 @@ export async function renderHouseholdSettingsRoute(
             error: opts.error,
             issuedToken: opts.issuedToken,
             openModalId: opts.openModalId,
+            unverifiedRecipeExpiryDays:
+                config.preferences.unverifiedRecipeExpiryDays,
         }),
     };
 }
@@ -700,6 +702,7 @@ export async function renderRecipesListPage(
         tag?: string;
         canMakeNow?: boolean;
         safeFor?: string;
+        verification?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -716,8 +719,13 @@ export async function renderRecipesListPage(
         members.some((member) => member.userId === filter.safeFor)
             ? filter.safeFor
             : "";
+    const verificationRaw = filter.verification?.trim() ?? "";
+    const verification =
+        verificationRaw === "verified" || verificationRaw === "unverified"
+            ? verificationRaw
+            : "";
     let recipes;
-    if (tag || canMakeNow || safeForId) {
+    if (tag || canMakeNow || safeForId || verification) {
         const fridge = await listFridge(liveFridgeStore(), householdId);
         const allFoods = await liveFoodsStore().listFoods(householdId);
         const foodsById = await effectiveFoodsByIds(
@@ -746,6 +754,7 @@ export async function renderRecipesListPage(
                 tag: tag || null,
                 canMakeNow,
                 safeFor,
+                verification: verification || null,
             },
         );
     } else {
@@ -765,6 +774,7 @@ export async function renderRecipesListPage(
                 tag,
                 canMakeNow,
                 safeFor: safeForId,
+                verification,
             },
             error,
             openModalId: opts.openModalId,
@@ -877,6 +887,7 @@ export async function renderRecipeDetailRoute(
             defaultUnit: effective?.defaultUnit ?? "g",
         };
     });
+    const importRow = await liveRecipesStore().getImport(householdId, recipeId);
     return {
         status: 200,
         html: renderRecipeDetailPage({
@@ -887,6 +898,8 @@ export async function renderRecipeDetailRoute(
                 from: `/recipes/${recipeId}`,
                 foods: foodsByIdForNoticeCtx,
             },
+            problems: importRow?.problems ?? [],
+            importRow,
             ingredients: ingredientRows,
             members: members.map((member) => ({
                 userId: member.userId,

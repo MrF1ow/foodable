@@ -4,8 +4,13 @@ import {
     type Recipe,
     type RecipeIngredientView,
     type RecipeMacros,
+    type RecipeVerification,
 } from "../../domain/recipes.js";
 import type { Notice } from "../../domain/notices.js";
+import type {
+    RecipeImport,
+    RecipeProblem,
+} from "../../domain/recipe-import.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderQuantityField } from "../components/quantity-field.js";
@@ -45,6 +50,7 @@ export type RecipesPageFilter = {
     tag: string;
     canMakeNow: boolean;
     safeFor: string;
+    verification: "" | RecipeVerification;
 };
 
 export type RecipesPageView = {
@@ -80,6 +86,8 @@ export type RecipeDetailView = {
     error?: string;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
+    problems?: RecipeProblem[];
+    importRow?: RecipeImport | null;
 };
 
 const NEW_RECIPE_MODAL_ID = "recipe-new";
@@ -191,6 +199,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
         tag: "",
         canMakeNow: false,
         safeFor: "",
+        verification: "",
     };
     const error = pageLevelErrorBanner(view, [NEW_RECIPE_MODAL_ID]);
     const empty =
@@ -204,6 +213,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
                 name: recipe.name,
                 yieldPortions: recipe.yieldPortions,
                 tags: recipe.tags,
+                verification: recipe.verification,
             }),
         )
         .join("");
@@ -215,7 +225,18 @@ export function renderRecipesPage(view: RecipesPageView): string {
         }),
     ].join("");
     const filtering =
-        filter.tag !== "" || filter.canMakeNow || filter.safeFor !== "";
+        filter.tag !== "" ||
+        filter.canMakeNow ||
+        filter.safeFor !== "" ||
+        filter.verification !== "";
+    const verificationSeg = (value: "" | RecipeVerification, label: string) => {
+        const active = filter.verification === value ? "true" : "false";
+        const href =
+            value === ""
+                ? "/recipes"
+                : `/recipes?verification=${encodeURIComponent(value)}`;
+        return `<a class="seg-btn" href="${href}" aria-selected="${active}">${escapeHtml(label)}</a>`;
+    };
     const list =
         view.recipes.length === 0
             ? ""
@@ -242,6 +263,11 @@ export function renderRecipesPage(view: RecipesPageView): string {
             }),
         })}
         ${error}
+        <nav class="seg recipe-verification-filter" aria-label="Verification">
+            ${verificationSeg("", "All")}
+            ${verificationSeg("verified", "Verified")}
+            ${verificationSeg("unverified", "Unverified")}
+        </nav>
         ${disclosure({
             summary: "Filter",
             open: filtering,
@@ -432,13 +458,18 @@ ${field({ id: "portion-count", label: "Your portion", control: `<input id="porti
                 `<option value="${escapeHtml(store.id)}">${escapeHtml(store.name)}</option>`,
         )
         .join("");
+    const unverified = view.recipe.verification === "unverified";
+    const blockedNote =
+        '<p class="muted">This recipe is unverified. Fix the problems, then check again.</p>';
     const grocery =
         view.stores.length === 0
             ? emptyState(
                   "Add a grocery store under Household, then add this recipe to the list.",
                   "empty-recipe-store",
               )
-            : `<form class="recipe-add-grocery" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/add-to-grocery">
+            : unverified
+              ? blockedNote
+              : `<form class="recipe-add-grocery" method="post" action="/recipes/${escapeHtml(view.recipe.id)}/add-to-grocery">
 ${renderMemberMultiSelect(view.members, [view.viewerId])}
 ${field({ id: "recipe-store", label: "Store", control: `<select id="recipe-store" name="store_id" required>${storeOptions}</select>` })}
 ${field({ id: "recipe-total-portions", label: "Total portions", control: `<input id="recipe-total-portions" name="total_portions" type="number" min="0" step="any" placeholder="${escapeHtml(String(view.recipe.yieldPortions))} for the whole recipe" />` })}
@@ -590,7 +621,9 @@ ${modalTrigger({
 
     const cookHead = panelHead(
         "Cook and log",
-        `<div class="row-actions">
+        unverified
+            ? ""
+            : `<div class="row-actions">
 ${modalTrigger({
     target: cookId,
     label: "Cooked it",
@@ -599,6 +632,33 @@ ${modalTrigger({
 </div>`,
     );
 
+    const problems = view.problems ?? [];
+    const problemList =
+        problems.length === 0
+            ? ""
+            : `<ul class="list">${problems
+                  .map((p) => `<li>${escapeHtml(p.message)}</li>`)
+                  .join("")}</ul>`;
+    const pastedText =
+        view.importRow?.sourceText != null
+            ? disclosure({
+                  summary: "Pasted text",
+                  body: `<pre class="recipe-import-text">${escapeHtml(view.importRow.sourceText)}</pre>`,
+              })
+            : "";
+    const unresolved =
+        view.importRow && view.importRow.unresolvedLines.length > 0
+            ? `<ul class="list">${view.importRow.unresolvedLines
+                  .map((line) => `<li>${escapeHtml(line)}</li>`)
+                  .join("")}</ul>`
+            : "";
+    const unverifiedPanel = unverified
+        ? panel({
+              title: "Unverified",
+              body: `${problemList}${pastedText}${unresolved}<form method="post" action="/recipes/${recipeIdEsc}/verify"><button type="submit" class="btn-primary">Check again</button></form>`,
+          })
+        : "";
+
     const body = `
         <p class="recipe-back"><a href="/recipes">← Recipes</a></p>
         ${pageHeader({
@@ -606,6 +666,7 @@ ${modalTrigger({
             actions: headerActions,
         })}
         ${error}
+        ${unverifiedPanel}
         ${allergen}
         ${dislike}
         <p class="recipe-yield muted" data-yield="${escapeHtml(String(view.recipe.yieldPortions))}">Yield ${escapeHtml(String(view.recipe.yieldPortions))}</p>
@@ -630,7 +691,10 @@ ${notes}
 </section>
         <section class="panel">
 ${cookHead}
-<form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeIdEsc}/log-portion">
+${
+    unverified
+        ? blockedNote
+        : `<form class="recipe-log-portion field-grid" method="post" action="/recipes/${recipeIdEsc}/log-portion">
                 <label>Portions
                     <input id="log-portion-count" name="portions" type="number" min="0" step="any" required value="${escapeHtml(String(view.portionCount))}" />
                 </label>
@@ -643,7 +707,8 @@ ${cookHead}
                     </select>
                 </label>
                 <button type="submit" class="btn-primary">Log a portion</button>
-            </form>
+            </form>`
+}
 </section>
         ${panel({
             title: "Groceries",

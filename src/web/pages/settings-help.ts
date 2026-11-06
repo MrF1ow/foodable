@@ -3,7 +3,8 @@ import {
     renderSettingsPage as renderSettingsShell,
     type ViewerChrome,
 } from "../shell.js";
-import { pageHeader, panel } from "../components/ui.js";
+import { pageHeader, panel, field } from "../components/ui.js";
+import { UNVERIFIED_RECIPES_PROMPT } from "../../copy/agent-prompts.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsHelpView = {
@@ -68,19 +69,32 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "Arranging the Nutrition page",
         body: "Arrange opens a modal with up and down controls for each card. Tap Save to store the order once. Order is stored on your profile only and applies to your own Nutrition page view. Arrange is not available while you are viewing someone else's data.",
     },
+    {
+        id: "unverified-recipes",
+        title: "How do I get unverified recipes verified?",
+        body: "Imports that do not pass the check stay unverified. They cannot go on the grocery list, be cooked, or be logged until the check passes. Give this prompt to your agent, or set it up as a nightly or weekly automation in your agent.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
+const PROMPT_FIELD_ID = "help-unverified-recipes-prompt";
 
 function glossaryHtml(): string {
-    return GLOSSARY.map(
-        (
-            entry,
-        ) => `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
+    return GLOSSARY.map((entry) => {
+        const promptBlock =
+            entry.id === "unverified-recipes"
+                ? `${field({
+                      id: PROMPT_FIELD_ID,
+                      label: "Prompt",
+                      control: `<textarea id="${PROMPT_FIELD_ID}" readonly rows="14">${escapeHtml(UNVERIFIED_RECIPES_PROMPT)}</textarea>`,
+                  })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}">Copy</button>`
+                : "";
+        return `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
 <h3 class="subsection-title">${escapeHtml(entry.title)}</h3>
 <p>${escapeHtml(entry.body)}</p>
-</section>`,
-    ).join("");
+${promptBlock}
+</section>`;
+    }).join("");
 }
 
 export function renderSettingsHelpPage(view: SettingsHelpView): string {

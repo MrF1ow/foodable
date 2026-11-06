@@ -35,7 +35,13 @@ import {
     type Recipe,
     recipeSteps,
     resolveTotalPortions,
+    RecipeUnverifiedError,
+    recheckRecipe,
 } from "../../domain/recipes.js";
+import type {
+    RecipeImport,
+    RecipeProblem,
+} from "../../domain/recipe-import.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
 import { QUANTITY_ITEM } from "../shared.js";
@@ -52,7 +58,56 @@ const RECIPE_FIELDS = {
     notes: z.string().nullable(),
     prep_minutes: z.number().nullable(),
     cook_minutes: z.number().nullable(),
+    verification: z.enum(["verified", "unverified"]),
 };
+
+const RECIPE_PROBLEM = z.object({
+    code: z.string(),
+    message: z.string(),
+    ingredient_id: z.string().nullable(),
+    line: z.string().nullable(),
+});
+
+export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
+    status: z.enum(["verified", "unverified", "not_found"]),
+    recipe_id: z.string(),
+    verification: z.enum(["verified", "unverified"]).nullable(),
+    problems: z.array(RECIPE_PROBLEM),
+});
+
+const RECIPE_IMPORT_WIRE = z.object({
+    source_kind: z.string(),
+    source_url: z.string().nullable(),
+    source_text: z.string().nullable(),
+    source_text_origin: z.string().nullable(),
+    transcript: z.string().nullable(),
+    credit: z.string().nullable(),
+    unresolved_lines: z.array(z.string()),
+    imported_at: z.string(),
+});
+
+function wireProblems(problems: RecipeProblem[]) {
+    return problems.map((p) => ({
+        code: p.code,
+        message: p.message,
+        ingredient_id: p.ingredientId,
+        line: p.line,
+    }));
+}
+
+function wireImport(row: RecipeImport | null) {
+    if (!row) return null;
+    return {
+        source_kind: row.sourceKind,
+        source_url: row.sourceUrl,
+        source_text: row.sourceText,
+        source_text_origin: row.sourceTextOrigin,
+        transcript: row.transcript,
+        credit: row.credit,
+        unresolved_lines: row.unresolvedLines,
+        imported_at: row.importedAt,
+    };
+}
 
 const INSTRUCTIONS_DESCRIPTION =
     'Method steps, one per line. Leave a blank line between steps to write one step over several lines. Numbering ("1.", "Step 2:") is optional and stripped on display.';
@@ -139,6 +194,7 @@ function recipeFields(recipe: Recipe) {
         notes: recipe.notes,
         prep_minutes: recipe.prepMinutes,
         cook_minutes: recipe.cookMinutes,
+        verification: recipe.verification,
     };
 }
 
@@ -165,6 +221,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 tag: z.string().optional(),
                 can_make_now: z.boolean().optional(),
                 safe_for: z.string().optional(),
+                verification: z.enum(["verified", "unverified"]).optional(),
             }),
             outputSchema: z.object({
                 recipes: z.array(z.object(RECIPE_FIELDS)),
@@ -178,7 +235,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const filterOn =
                         Boolean(args.tag?.trim()) ||
                         args.can_make_now === true ||
-                        Boolean(args.safe_for);
+                        Boolean(args.safe_for) ||
+                        Boolean(args.verification);
                     let recipes;
                     if (filterOn) {
                         const fridge = await listFridge(
@@ -216,6 +274,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 tag: args.tag,
                                 canMakeNow: args.can_make_now === true,
                                 safeFor,
+                                verification: args.verification ?? null,
                             },
                         );
                     } else {
@@ -292,6 +351,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             .nullable(),
                     }),
                 ),
+                verification: z.enum(["verified", "unverified"]),
+                problems: z.array(RECIPE_PROBLEM),
+                import: RECIPE_IMPORT_WIRE.nullable(),
             }),
         },
         async (args) =>
@@ -320,8 +382,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         catalog,
                     );
                     const wiredMacros = wireMacros(macrosPerPortion);
+                    const store = liveRecipesStore();
+                    const importRow = await store.getImport(
+                        actor.householdId,
+                        args.id,
+                    );
+                    const problems = importRow?.problems ?? [];
                     const payload = {
                         ...recipeFields(view),
+                        verification: view.verification,
+                        problems: wireProblems(problems),
+                        import: wireImport(importRow),
                         steps: recipeSteps(view.instructions),
                         portion_count: view.portionCount,
                         macros_per_portion: wiredMacros,
@@ -661,62 +732,72 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             ...fridge.items.map((item) => item.foodId),
                         ],
                     );
-                    const result = await addRecipeToGrocery({
-                        recipes,
-                        grocery: liveGroceryStore(),
-                        settings: liveSettingsStore(),
-                        fridgeItems: fridge.items.map((item) => ({
-                            quantity: item.quantity,
-                            foodId: item.foodId,
-                        })),
-                        householdId,
-                        recipeId: args.recipe_id,
-                        storeId: args.store_id,
-                        portionCounts,
-                        totalPortions: args.total_portions,
-                        foodsById: foods,
-                        foods: liveFoodsStore(),
-                    });
-                    const addedByName = new Map(
-                        result.added.map((line) => [line.displayName, line]),
-                    );
-                    const remainder = result.plan.map((line) => {
-                        const inserted = addedByName.get(line.displayName);
+                    try {
+                        const result = await addRecipeToGrocery({
+                            recipes,
+                            grocery: liveGroceryStore(),
+                            settings: liveSettingsStore(),
+                            fridgeItems: fridge.items.map((item) => ({
+                                quantity: item.quantity,
+                                foodId: item.foodId,
+                            })),
+                            householdId,
+                            recipeId: args.recipe_id,
+                            storeId: args.store_id,
+                            portionCounts,
+                            totalPortions: args.total_portions,
+                            foodsById: foods,
+                            foods: liveFoodsStore(),
+                        });
+                        const addedByName = new Map(
+                            result.added.map((line) => [
+                                line.displayName,
+                                line,
+                            ]),
+                        );
+                        const remainder = result.plan.map((line) => {
+                            const inserted = addedByName.get(line.displayName);
+                            return {
+                                display_name: line.displayName,
+                                skipped: line.skipped,
+                                unmeasured: line.unmeasured,
+                                need: line.need,
+                                remainder: line.remainder,
+                                note: inserted?.note ?? null,
+                            };
+                        });
                         return {
-                            display_name: line.displayName,
-                            skipped: line.skipped,
-                            unmeasured: line.unmeasured,
-                            need: line.need,
-                            remainder: line.remainder,
-                            note: inserted?.note ?? null,
-                        };
-                    });
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: [
-                                    `For ${result.totalPortions} portion${result.totalPortions === 1 ? "" : "s"}:`,
-                                    ...remainder.map((line) => {
-                                        if (line.unmeasured && line.note) {
-                                            return `${line.display_name} · ${line.note}${line.skipped ? " (skipped)" : ""}`;
-                                        }
-                                        if (
-                                            line.skipped ||
-                                            line.remainder == null
-                                        ) {
-                                            return `${line.display_name} skipped`;
-                                        }
-                                        return `${line.display_name} remainder ${line.remainder.amount} ${line.remainder.unit}`;
-                                    }),
-                                ].join("\n"),
+                            content: [
+                                {
+                                    type: "text",
+                                    text: [
+                                        `For ${result.totalPortions} portion${result.totalPortions === 1 ? "" : "s"}:`,
+                                        ...remainder.map((line) => {
+                                            if (line.unmeasured && line.note) {
+                                                return `${line.display_name} · ${line.note}${line.skipped ? " (skipped)" : ""}`;
+                                            }
+                                            if (
+                                                line.skipped ||
+                                                line.remainder == null
+                                            ) {
+                                                return `${line.display_name} skipped`;
+                                            }
+                                            return `${line.display_name} remainder ${line.remainder.amount} ${line.remainder.unit}`;
+                                        }),
+                                    ].join("\n"),
+                                },
+                            ],
+                            structuredContent: {
+                                total_portions: result.totalPortions,
+                                remainder,
                             },
-                        ],
-                        structuredContent: {
-                            total_portions: result.totalPortions,
-                            remainder,
-                        },
-                    };
+                        };
+                    } catch (err) {
+                        if (err instanceof RecipeUnverifiedError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
+                    }
                 },
                 analytics,
             ),
@@ -881,7 +962,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             structuredContent: payload,
                         };
                     } catch (err) {
-                        if (err instanceof StockInputError) {
+                        if (
+                            err instanceof StockInputError ||
+                            err instanceof RecipeUnverifiedError
+                        ) {
                             throw new Error(err.message);
                         }
                         throw err;
@@ -1154,6 +1238,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         url: z.string().nullable(),
                     }),
                 ),
+                verification: z.enum(["verified", "unverified"]),
+                problems: z.array(RECIPE_PROBLEM),
             }),
         },
         async (args) =>
@@ -1208,12 +1294,14 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 )?.missing ?? [],
                         })),
                         recipe_search_places: places,
+                        verification: result.verification,
+                        problems: wireProblems(result.problems),
                     };
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `Imported ${result.recipe.name} ${result.recipe.id}\n${payload.ingredients
+                                text: `Imported ${result.recipe.name} ${result.recipe.id} (${result.verification})\n${payload.ingredients
                                     .map(
                                         (row) =>
                                             `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
@@ -1223,6 +1311,84 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
                                         : ""
                                 }`,
+                            },
+                        ],
+                        structuredContent: payload,
+                    };
+                },
+                analytics,
+            ),
+    );
+
+    server.registerTool(
+        "verify_recipe",
+        {
+            title: "Verify Recipe",
+            description:
+                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                recipe_id: z.string(),
+            }),
+            outputSchema: VERIFY_RECIPE_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "verify_recipe",
+                async () => {
+                    const actor = await callerActor();
+                    const store = liveRecipesStore();
+                    const recipe = await store.getRecipe(
+                        actor.householdId,
+                        args.recipe_id,
+                    );
+                    if (!recipe) {
+                        const payload = {
+                            status: "not_found" as const,
+                            recipe_id: args.recipe_id,
+                            verification: null,
+                            problems: [] as {
+                                code: string;
+                                message: string;
+                                ingredient_id: string | null;
+                                line: string | null;
+                            }[],
+                        };
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "Unknown recipe.",
+                                },
+                            ],
+                            structuredContent: payload,
+                        };
+                    }
+                    const checked = await recheckRecipe(
+                        store,
+                        actor.householdId,
+                        args.recipe_id,
+                    );
+                    const payload = {
+                        status: checked.verified
+                            ? ("verified" as const)
+                            : ("unverified" as const),
+                        recipe_id: args.recipe_id,
+                        verification: checked.verification,
+                        problems: wireProblems(checked.problems),
+                    };
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: checked.verified
+                                    ? `${recipe.name} passed the check.`
+                                    : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}).`,
                             },
                         ],
                         structuredContent: payload,

@@ -98,6 +98,7 @@ export function renderRecipeCard(opts: {
     name: string;
     yieldPortions: number;
     tags?: string[];
+    verification?: "verified" | "unverified";
 }): string {
     const tags =
         opts.tags && opts.tags.length > 0
@@ -108,10 +109,14 @@ export function renderRecipeCard(opts: {
                   )
                   .join("")}</p>`
             : "";
+    const badge =
+        opts.verification === "unverified"
+            ? `<span class="recipe-verification pill pill-warn">Unverified</span>`
+            : "";
     return `<li class="recipe-card" data-recipe-id="${escapeHtml(opts.id)}">
 <div class="row">
 <a class="row-title" href="/recipes/${escapeHtml(opts.id)}">${escapeHtml(opts.name)}</a>
-<p class="recipe-yield row-meta">Yield ${escapeHtml(String(opts.yieldPortions))}</p>
+<p class="recipe-yield row-meta">${badge}Yield ${escapeHtml(String(opts.yieldPortions))}</p>
 </div>
 ${tags}
 </li>`;
