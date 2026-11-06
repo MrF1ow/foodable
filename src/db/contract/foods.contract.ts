@@ -108,6 +108,55 @@ export function runFoodsStoreContract(
             );
         });
 
+        test("getByNormalizedName prefers unbranded then oldest", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const normalized = "duck eggs";
+            const brandedFirst = sampleFood(c.householdId, {
+                name: "Duck eggs",
+                normalizedName: normalized,
+                brand: "Farm A",
+                createdAt: "2020-01-01T00:00:00.000Z",
+                updatedAt: "2020-01-01T00:00:00.000Z",
+            });
+            const plain = sampleFood(c.householdId, {
+                name: "Duck eggs",
+                normalizedName: normalized,
+                brand: null,
+                createdAt: "2021-01-01T00:00:00.000Z",
+                updatedAt: "2021-01-01T00:00:00.000Z",
+            });
+            await store.insertFood(brandedFirst);
+            await store.insertFood(plain);
+            const picked = await store.getByNormalizedName(
+                c.householdId,
+                "food",
+                normalized,
+            );
+            expect(picked?.id).toBe(plain.id);
+            expect(picked?.brand).toBeNull();
+
+            await store.updateFoodRow({
+                ...plain,
+                archivedAt: new Date().toISOString(),
+            });
+            const brandedSecond = sampleFood(c.householdId, {
+                name: "Duck eggs",
+                normalizedName: normalized,
+                brand: "Farm B",
+                createdAt: "2022-01-01T00:00:00.000Z",
+                updatedAt: "2022-01-01T00:00:00.000Z",
+            });
+            await store.insertFood(brandedSecond);
+            const oldestBranded = await store.getByNormalizedName(
+                c.householdId,
+                "food",
+                normalized,
+            );
+            expect(oldestBranded?.id).toBe(brandedFirst.id);
+        });
+
         test("barcode upsert retargets food_id only", async () => {
             await reset();
             const c = ctx();

@@ -40,6 +40,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         unit: z.string(),
         checked: z.boolean(),
         already_have: z.string().nullable(),
+        product: z
+            .object({
+                food_id: z.string(),
+                name: z.string(),
+            })
+            .nullable(),
     });
     server.registerTool(
         "list_grocery_lines",
@@ -108,6 +114,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             stock,
                             foods,
                         );
+                        const eff = line.foodId
+                            ? foods.get(line.foodId)
+                            : undefined;
                         return {
                             id: line.id,
                             store_id: line.storeId,
@@ -122,6 +131,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                     : tag.cover === "full"
                                       ? "already have"
                                       : `already have: have ${tag.have.amount} ${tag.have.unit}, need ${tag.need.amount} ${tag.need.unit}`,
+                            product: eff?.product
+                                ? {
+                                      food_id: eff.product.id,
+                                      name: eff.product.name,
+                                  }
+                                : null,
                         };
                     };
                     const payload = {
@@ -432,7 +447,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Put Away Grocery Lines",
             description:
-                "Move grocery lines into the fridge as a purchase. Defaults to each food's last-used location. Deletes the lines. Clear checked stays for lines you do not want stocked.",
+                "Move grocery lines into the fridge as a purchase. Defaults to each food's last-used location. Optional product_food_ids maps each grocery line id to the product actually bought (defaults to the food's usual product); line_ids stays a plain list for backward compatibility. Deletes the lines. Clear checked stays for lines you do not want stocked.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -442,6 +457,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 line_ids: z.array(z.string()).min(1),
                 location_id: z.string().optional(),
+                product_food_ids: z
+                    .record(z.string(), z.string().nullable())
+                    .optional()
+                    .describe(
+                        "Grocery line id → the product actually bought; defaults to the food's usual product.",
+                    ),
             }),
             outputSchema: z.object({
                 put_away: z.array(
@@ -449,6 +470,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         line_id: z.string(),
                         display_name: z.string(),
                         fridge_item_id: z.string().nullable(),
+                        product_food_id: z.string(),
                     }),
                 ),
             }),
@@ -468,6 +490,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 householdId,
                                 lineIds: args.line_ids,
                                 locationId: args.location_id,
+                                productFoodIds: args.product_food_ids,
                             },
                         );
                         const payload = {
@@ -475,6 +498,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 line_id: row.line.id,
                                 display_name: row.line.displayName,
                                 fridge_item_id: row.item?.id ?? null,
+                                product_food_id: row.productFoodId,
                             })),
                         };
                         return {

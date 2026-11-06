@@ -3,10 +3,12 @@ import type { FoodResult } from "../foods.js";
 import {
     catalogNutritionFromOff,
     createMemoryFoodsStore,
+    findFoodByNameAndBrand,
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     mapOffAllergenTags,
     mergeFoods,
+    newFood,
     normalizeFoodName,
     searchFoodCatalog,
     updateFood,
@@ -39,6 +41,42 @@ function off(
 test("normalizeFoodName trims, lowercases, and collapses spaces", () => {
     expect(normalizeFoodName("  Eggs  ")).toBe("eggs");
     expect(normalizeFoodName("chicken   thighs")).toBe("chicken thighs");
+});
+
+test("findFoodByNameAndBrand matches the full name and brand key", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Half and half" }),
+    );
+    const laura = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Half and half",
+            brand: "Laura Lynn",
+        }),
+    );
+    expect(
+        await findFoodByNameAndBrand(store, HH, "food", "Half and half", null),
+    ).toEqual(expect.objectContaining({ id: plain.id }));
+    expect(
+        await findFoodByNameAndBrand(
+            store,
+            HH,
+            "food",
+            "Half and half",
+            "Laura Lynn",
+        ),
+    ).toEqual(expect.objectContaining({ id: laura.id }));
+    expect(
+        await findFoodByNameAndBrand(
+            store,
+            HH,
+            "food",
+            "Half and half",
+            "Other",
+        ),
+    ).toBeNull();
 });
 
 test("manual Eggs / eggs / EGGS resolve to one food", async () => {

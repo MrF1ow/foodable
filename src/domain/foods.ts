@@ -347,14 +347,23 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             return copyFood(row);
         },
         async getByNormalizedName(householdId, kind, normalizedName) {
-            const row = foods.find(
+            const matches = foods.filter(
                 (food) =>
                     food.householdId === householdId &&
                     food.kind === kind &&
                     food.normalizedName === normalizedName &&
                     food.archivedAt == null,
             );
-            return row ? copyFood(row) : null;
+            if (matches.length === 0) return null;
+            matches.sort((a, b) => {
+                const aPlain = a.brand == null ? 1 : 0;
+                const bPlain = b.brand == null ? 1 : 0;
+                if (aPlain !== bPlain) return bPlain - aPlain;
+                const byCreated = a.createdAt.localeCompare(b.createdAt);
+                if (byCreated !== 0) return byCreated;
+                return a.id.localeCompare(b.id);
+            });
+            return copyFood(matches[0]!);
         },
         async getByOffSourceId(householdId, offSourceId) {
             const row = foods.find(
@@ -560,6 +569,138 @@ export function newFood(input: {
         createdAt: stamp,
         updatedAt: stamp,
     };
+}
+
+function normalizeFoodBrand(brand: string | null | undefined): string | null {
+    if (brand == null) return null;
+    const trimmed = brand.trim();
+    return trimmed ? trimmed : null;
+}
+
+export async function findFoodByNameAndBrand(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    brand: string | null,
+): Promise<Food | null> {
+    const normalized = normalizeFoodName(name.trim());
+    if (!normalized) return null;
+    const targetBrand = normalizeFoodBrand(brand);
+    const listed = await store.listFoods(householdId);
+    const row = listed.find(
+        (food) =>
+            food.kind === kind &&
+            food.normalizedName === normalized &&
+            normalizeFoodBrand(food.brand) === targetBrand,
+    );
+    return row ? copyFood(row) : null;
+}
+
+/**
+ * Rejects a barcode that a different live household food already holds.
+ * `targetId` is the row the caller is about to write (null when creating):
+ * a barcode it already holds is fine. Reads only, so callers run it before
+ * their first write.
+ */
+export async function assertBarcodeFree(
+    store: FoodsStore,
+    householdId: string,
+    normalized: string,
+    targetId: string | null,
+): Promise<void> {
+    const ownerId = await store.getBarcodeFoodId(householdId, normalized);
+    if (!ownerId || ownerId === targetId) return;
+    const owner = await store.getFood(householdId, ownerId);
+    if (owner && !owner.archivedAt) {
+        throw new FoodsInputError(
+            `That barcode already belongs to ${owner.name}.`,
+        );
+    }
+}
+
+/**
+ * Throws the error `updateFood` would throw for these patch values, without
+ * writing: name, grams factors, nutrients, and aliases held by another food.
+ * Lets a create-then-update caller reject before it inserts anything.
+ */
+export async function assertFoodPatchValid(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string | null,
+    patch: FoodPatch,
+): Promise<void> {
+    if (patch.name != null && !patch.name.trim()) {
+        throw new FoodsInputError("Enter a food name.");
+    }
+    parsePositiveFactor(patch.gramsPerEach);
+    parsePositiveFactor(patch.gramsPerMl);
+    for (const value of [
+        patch.calories,
+        patch.proteinG,
+        patch.carbsG,
+        patch.fatG,
+        patch.fiberG,
+        patch.sugarG,
+        patch.alcoholG,
+        patch.caffeineMg,
+    ]) {
+        parseOptionalNutrient(value);
+    }
+    for (const raw of patch.aliases ?? []) {
+        const alias = normalizeFoodName(raw);
+        if (!alias) continue;
+        const taken = await store.getAliasFoodId(householdId, alias);
+        if (taken && taken !== foodId) {
+            throw new FoodsInputError("That alias is already used.");
+        }
+    }
+}
+
+export type UpsertNameResolution =
+    | { kind: "existing"; food: Food }
+    | { kind: "create"; name: string; brand: string | null };
+
+/**
+ * How `upsert_food` without `food_id` resolves a name, without writing. The
+ * exact name-and-brand key wins. With no brand, an unbranded name or alias
+ * match is reused, but a branded row never is: the caller meant the plain
+ * food. Otherwise the caller creates a new row.
+ */
+export async function findUpsertFoodByName(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    brand: string | null | undefined,
+): Promise<UpsertNameResolution> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+        throw new FoodsInputError(
+            kind === "supply" ? "Enter a supply name." : "Enter a food name.",
+        );
+    }
+    const keyBrand = normalizeFoodBrand(brand);
+    const exact = await findFoodByNameAndBrand(
+        store,
+        householdId,
+        kind,
+        trimmed,
+        keyBrand,
+    );
+    if (exact) return { kind: "existing", food: exact };
+    if (keyBrand == null) {
+        const existing = await existingByNameOrAlias(
+            store,
+            householdId,
+            kind,
+            normalizeFoodName(trimmed),
+        );
+        if (existing && !existing.brand) {
+            return { kind: "existing", food: existing };
+        }
+    }
+    return { kind: "create", name: trimmed, brand: keyBrand };
 }
 
 async function existingByNameOrAlias(
@@ -1307,6 +1448,8 @@ export type FoodSearchHit = {
     sugar_g: number | null;
     serving: string | null;
     default_unit: string | null;
+    generic_food_id: string | null;
+    generic_food_name: string | null;
 };
 
 export async function searchFoodCatalog(
@@ -1316,6 +1459,21 @@ export async function searchFoodCatalog(
     offHits: FoodResult[],
 ): Promise<FoodSearchHit[]> {
     const household = await store.searchFoods(householdId, query);
+    const nameById = new Map(
+        (await store.listFoods(householdId)).map((row) => [row.id, row.name]),
+    );
+    const genericFields = (food: Food | null | undefined) => {
+        if (!food?.genericFoodId) {
+            return {
+                generic_food_id: null as string | null,
+                generic_food_name: null as string | null,
+            };
+        }
+        return {
+            generic_food_id: food.genericFoodId,
+            generic_food_name: nameById.get(food.genericFoodId) ?? null,
+        };
+    };
     const householdBarcodes = new Set<string>();
     const hits: FoodSearchHit[] = [];
     for (const food of household) {
@@ -1335,6 +1493,7 @@ export async function searchFoodCatalog(
             sugar_g: food.sugarG,
             serving: "100 g",
             default_unit: food.defaultUnit,
+            ...genericFields(food),
         });
     }
     for (const food of offHits) {
@@ -1343,6 +1502,10 @@ export async function searchFoodCatalog(
             householdId,
             food.barcode,
         );
+        const existing =
+            existingId != null
+                ? await store.getFood(householdId, existingId)
+                : null;
         hits.push({
             food_id: existingId,
             name: food.name,
@@ -1357,6 +1520,7 @@ export async function searchFoodCatalog(
             sugar_g: food.sugar_g,
             serving: food.serving,
             default_unit: null,
+            ...genericFields(existing),
         });
     }
     return hits;

@@ -169,7 +169,7 @@ export function liveFoodsStore(): FoodsStore {
         async getByNormalizedName(householdId, kind, normalizedName) {
             return run(async (tx) => {
                 try {
-                    const data = await maybeOne<Record<string, unknown>>(
+                    const data = await rows<Record<string, unknown>>(
                         tx,
                         tx`
                             select ${tx.unsafe(FOOD_COLS)}
@@ -178,10 +178,12 @@ export function liveFoodsStore(): FoodsStore {
                               and kind = ${kind}
                               and normalized_name = ${normalizedName}
                               and archived_at is null
+                            order by (brand is null) desc, created_at asc, id asc
+                            limit 1
                         `,
-                        "match food name",
                     );
-                    return data ? foodFromRow(data as never) : null;
+                    const row = data[0];
+                    return row ? foodFromRow(row as never) : null;
                 } catch (err) {
                     throw pgError("match food name", err);
                 }
