@@ -38,16 +38,24 @@ export function noticeHref(
     return NOTICE_ROUTES[action.to](notice, ctx);
 }
 
-const PILL_CLASS: Record<"block" | "warn" | "info", string> = {
+const PILL_CLASS: Record<"block" | "warn" | "info" | "bad" | "dim", string> = {
     block: "pill-bad",
+    bad: "pill-bad",
     warn: "pill-warn",
     info: "pill-dim",
+    dim: "pill-dim",
 };
 
-export function noticeBadge(notice: Notice): string {
-    const badge = NOTICE_COPY[notice.code].badge;
-    const cls = PILL_CLASS[notice.severity];
-    return `<span class="pill ${cls}" data-notice="${escapeHtml(notice.code)}">${escapeHtml(badge)}</span>`;
+export function noticeBadge(
+    notice: Notice,
+    opts?: { className?: string },
+): string {
+    const copy = NOTICE_COPY[notice.code];
+    const badge = copy.badge;
+    const tone = copy.badgeTone ?? notice.severity;
+    const cls = PILL_CLASS[tone];
+    const extra = opts?.className ? ` ${escapeHtml(opts.className)}` : "";
+    return `<span class="pill ${cls}${extra}" data-notice="${escapeHtml(notice.code)}">${escapeHtml(badge)}</span>`;
 }
 
 export function noticeAction(notice: Notice, ctx: NoticeRouteContext): string {
@@ -80,5 +88,8 @@ export function noticeList(
         li += "</li>";
         items.push(li);
     }
-    return `<ul class="${escapeHtml(baseClass)}">${items.join("")}</ul>`;
+    const allBlock =
+        notices.length > 0 && notices.every((n) => n.severity === "block");
+    const blockingAttr = allBlock ? ' data-blocking="true"' : "";
+    return `<ul class="${escapeHtml(baseClass)}"${blockingAttr}>${items.join("")}</ul>`;
 }

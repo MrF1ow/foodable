@@ -81,6 +81,19 @@ test("noticeList empty, className, escaping, dedupe, action with ctx", () => {
     );
 });
 
+test("noticeList adds data-blocking when every notice is block severity", () => {
+    const block: Notice = {
+        code: "grocery.allergen",
+        severity: "block",
+        subject: { kind: "grocery_line", id: "l1" },
+        related: [{ kind: "member", id: "u", name: "Pat" }],
+        params: { allergens: ["peanut"] },
+    };
+    expect(noticeList([block], { className: "allergen-warning" })).toContain(
+        'data-blocking="true"',
+    );
+});
+
 test("noticeAction builds href for plain food and for product generic id", () => {
     const plain: Notice = {
         code: "recipe.no_nutrition",
@@ -112,6 +125,36 @@ test("noticeAction builds href for plain food and for product generic id", () =>
     expect(noticeAction(product, ctxProd)).toBe(
         '<a href="/household/usual-products/f-generic?from=%2Frecipes%2Fr1">Pick usual product</a>',
     );
+});
+
+test("no hand-built allergen or expiry markup outside notices.ts", async () => {
+    const badAllergenClass = /class="[^"]*allergen-warning/g;
+    const badAllergenP = /<p\b[^>]*allergen-warning/g;
+    const badExpiryPill = /class="[^"]*expiry-pill/g;
+    const badExpiredText = />Expired</g;
+    const offenders: string[] = [];
+    for await (const path of new Glob("src/**/*.ts").scan(".")) {
+        if (
+            path.endsWith(".test.ts") ||
+            path.endsWith("components/notices.ts")
+        ) {
+            continue;
+        }
+        const src = await Bun.file(path).text();
+        for (const m of src.matchAll(badAllergenClass)) {
+            offenders.push(`${path}: ${m[0]}`);
+        }
+        for (const m of src.matchAll(badAllergenP)) {
+            offenders.push(`${path}: ${m[0]}`);
+        }
+        for (const m of src.matchAll(badExpiryPill)) {
+            offenders.push(`${path}: ${m[0]}`);
+        }
+        for (const m of src.matchAll(badExpiredText)) {
+            offenders.push(`${path}: ${m[0]}`);
+        }
+    }
+    expect(offenders).toEqual([]);
 });
 
 test("no hand-built recipe-macros-reasons lists outside notices.ts", async () => {

@@ -29,7 +29,7 @@ import {
     field,
 } from "../components/ui.js";
 import {
-    expiryLevel,
+    fridgeNotices,
     listExpiring,
     utcTodayFromDate,
 } from "../../domain/stock.js";
@@ -214,7 +214,7 @@ function itemRow(item: FridgeItem, today: string): string {
         displayName: item.displayName,
         quantityLabel: quantityLabel(item),
         expiresOn: item.expiresOn,
-        expiryLevel: expiryLevel(item.expiresOn, today),
+        notices: fridgeNotices([item], today),
         rowActions,
     });
 }

@@ -8,6 +8,10 @@ export type NoticeSubject =
     | { kind: "grocery_line"; id: string };
 
 export type NoticeCode =
+    | "fridge.expired"
+    | "fridge.expiring"
+    | "grocery.allergen"
+    | "recipe.allergen"
     | "recipe.no_food"
     | "recipe.no_nutrition"
     | "recipe.partial_nutrition"
@@ -16,6 +20,10 @@ export type NoticeCode =
     | "recipe.missing_grams_per_ml";
 
 export const NOTICE_CODES: readonly NoticeCode[] = [
+    "fridge.expired",
+    "fridge.expiring",
+    "grocery.allergen",
+    "recipe.allergen",
     "recipe.no_food",
     "recipe.no_nutrition",
     "recipe.partial_nutrition",
@@ -25,6 +33,10 @@ export const NOTICE_CODES: readonly NoticeCode[] = [
 ];
 
 export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
+    "fridge.expired": "warn",
+    "fridge.expiring": "info",
+    "grocery.allergen": "block",
+    "recipe.allergen": "block",
     "recipe.no_food": "warn",
     "recipe.no_nutrition": "warn",
     "recipe.partial_nutrition": "warn",

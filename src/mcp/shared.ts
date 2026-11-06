@@ -1114,6 +1114,7 @@ export async function groceryLineExtras(
     const allergenMembers = await Promise.all(
         members.map(async (member) => ({
             displayName: member.displayName,
+            userId: member.userId,
             allergens: await rules.listAllergens(householdId, member.userId),
         })),
     );

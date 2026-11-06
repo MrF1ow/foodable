@@ -1,6 +1,8 @@
 import { type Quantity } from "../../domain/quantity.js";
 import { formatQuantityDisplayParts } from "../display-quantity.js";
 import type { GroceryLine } from "../../domain/grocery.js";
+import type { Notice } from "../../domain/notices.js";
+import { UNKNOWN_ALLERGEN_TEXT } from "../../copy/notices.js";
 import type { GrocerySection, GroceryStore } from "../../domain/settings.js";
 import type { StoreRule } from "../../domain/rules.js";
 import type { AlreadyHaveTag } from "../../domain/linking.js";
@@ -25,6 +27,7 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
+import { noticeList } from "../components/notices.js";
 
 export type GroceryLineView = GroceryLine & {
     alreadyHave: AlreadyHaveTag | null;
@@ -56,7 +59,7 @@ export type GroceryPageView = {
     locations?: { id: string; name: string }[];
     canManage?: boolean;
     error?: string;
-    allergenWarning?: string;
+    allergenNotices?: Notice[];
     allergenRetry?: GroceryAllergenRetry;
     unknownAllergen?: boolean;
     openModalId?: string;
@@ -170,7 +173,7 @@ function allergenModalBlock(
     addFoodModalId: string,
 ): string {
     if (
-        !view.allergenWarning ||
+        !view.allergenNotices?.length ||
         view.openModalId !== addFoodModalId ||
         !view.allergenRetry ||
         view.allergenRetry.storeId !== storeId
@@ -183,7 +186,7 @@ function allergenModalBlock(
                 `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
         )
         .join("\n");
-    return `<div data-fill-transient><p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>
+    return `<div data-fill-transient>${noticeList(view.allergenNotices, { className: "allergen-warning" })}
 <form class="grocery-allergen-override" method="post" action="/grocery/lines">
 ${hidden}
 <input type="hidden" name="confirm_allergen" value="1" />
@@ -319,15 +322,17 @@ ${renderFoodPicker({
 
 export function renderGroceryPage(view: GroceryPageView): string {
     const allergenInModal =
-        view.allergenWarning != null && view.openModalId != null;
+        view.allergenNotices != null &&
+        view.allergenNotices.length > 0 &&
+        view.openModalId != null;
     const allergen = allergenInModal
         ? view.unknownAllergen
-            ? `<p class="allergen-unknown">unknown allergen data</p>`
+            ? `<p class="allergen-unknown">${escapeHtml(UNKNOWN_ALLERGEN_TEXT)}</p>`
             : ""
-        : view.allergenWarning
-          ? `<p class="allergen-warning" data-blocking="true">${escapeHtml(view.allergenWarning)}</p>`
+        : view.allergenNotices && view.allergenNotices.length > 0
+          ? noticeList(view.allergenNotices, { className: "allergen-warning" })
           : view.unknownAllergen
-            ? `<p class="allergen-unknown">unknown allergen data</p>`
+            ? `<p class="allergen-unknown">${escapeHtml(UNKNOWN_ALLERGEN_TEXT)}</p>`
             : "";
     const empty =
         view.stores.length === 0

@@ -27,6 +27,7 @@ import {
     type QuantityUnit,
 } from "./quantity.js";
 import type { RecipesStore } from "./recipes.js";
+import { NOTICE_SEVERITY, type Notice } from "./notices.js";
 
 export type StockReason = "purchase" | "cook" | "eat" | "discard" | "adjust";
 
@@ -724,6 +725,38 @@ export function listExpiring(
             if (byDate !== 0) return byDate;
             return a.displayName.localeCompare(b.displayName);
         });
+}
+
+/** One notice per fridge item based on expiry vs `today`; input order preserved. */
+export function fridgeNotices(
+    items: readonly Pick<
+        FridgeItem,
+        "id" | "displayName" | "quantity" | "expiresOn"
+    >[],
+    today: string,
+): Notice[] {
+    const out: Notice[] = [];
+    for (const item of items) {
+        const level = expiryLevel(item.expiresOn, today);
+        if (level == null) continue;
+        const expiresOn = item.expiresOn ?? "";
+        const baseParams = {
+            name: item.displayName,
+            amount: item.quantity.amount,
+            unit: item.quantity.unit,
+            expiresOn,
+            level,
+        };
+        const code = level === "expired" ? "fridge.expired" : "fridge.expiring";
+        out.push({
+            code,
+            severity: NOTICE_SEVERITY[code],
+            subject: { kind: "fridge_item", id: item.id },
+            related: [],
+            params: baseParams,
+        });
+    }
+    return out;
 }
 
 export function ledgerAmount(

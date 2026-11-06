@@ -56,8 +56,13 @@ import {
     safeReturnPath,
     usualProductsPickerHref,
 } from "./usual-products-path.js";
+import type { Notice } from "../domain/notices.js";
 import { listFridge } from "../domain/fridge.js";
-import { groceryAllergenWarning, listGrocery } from "../domain/grocery.js";
+import {
+    allergenNotices,
+    groceryAllergenWarning,
+    listGrocery,
+} from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import {
     getRecipeView,
@@ -238,7 +243,7 @@ export async function renderGroceryListPage(
     viewerUserId: string,
     opts: {
         error?: string;
-        allergenWarning?: string;
+        allergenNotices?: Notice[];
         allergenRetry?: GroceryAllergenRetry;
         openModalId?: string;
         linkProductId?: string;
@@ -257,6 +262,7 @@ export async function renderGroceryListPage(
     const memberAllergens = await Promise.all(
         members.map(async (member) => ({
             displayName: member.displayName,
+            userId: member.userId,
             allergens: await rules.listAllergens(householdId, member.userId),
         })),
     );
@@ -390,9 +396,9 @@ export async function renderGroceryListPage(
             stores,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
-            allergenWarning: opts.allergenWarning,
+            allergenNotices: opts.allergenNotices,
             allergenRetry: opts.allergenRetry,
-            unknownAllergen: unknownAllergen && !opts.allergenWarning,
+            unknownAllergen: unknownAllergen && !opts.allergenNotices?.length,
             openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({
                 id: loc.id,
@@ -409,6 +415,7 @@ export async function groceryAllergenMembers(householdId: string) {
     return Promise.all(
         members.map(async (member) => ({
             displayName: member.displayName,
+            userId: member.userId,
             allergens: await rules.listAllergens(householdId, member.userId),
         })),
     );
@@ -802,9 +809,18 @@ export async function renderRecipeDetailRoute(
     const allCatalogued = view.ingredients.every(
         (row) => row.foodId && catalog.has(row.foodId),
     );
-    const warning = groceryAllergenWarning(
+    const allergenNoticesForPage = allergenNotices(
+        { kind: "recipe", id: recipeId },
         view.ingredients.map((row) => row.displayName).join(" "),
-        person ? [{ displayName: person.displayName, allergens }] : [],
+        person
+            ? [
+                  {
+                      displayName: person.displayName,
+                      userId: person.userId,
+                      allergens,
+                  },
+              ]
+            : [],
         allCatalogued
             ? [...catalog.values()].flatMap((food) => food.allergens)
             : null,
@@ -855,7 +871,7 @@ export async function renderRecipeDetailRoute(
             portionCount: view.portionCount,
             macros,
             macrosPerPortion,
-            allergenWarning: warning?.blocking ? warning.text : undefined,
+            allergenNotices: allergenNoticesForPage,
             dislikeNote: person
                 ? (recipeDislikeNote(
                       view.ingredients.map((row) => row.displayName),

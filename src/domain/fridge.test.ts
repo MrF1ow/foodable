@@ -12,7 +12,7 @@ import {
 } from "./fridge.js";
 import { createMemoryFoodsStore } from "./foods.js";
 import { renderFridgePage } from "../web/pages/fridge.js";
-import { expiryLevel, utcTodayFromDate } from "./stock.js";
+import { fridgeNotices, utcTodayFromDate } from "./stock.js";
 
 function addUtcDays(isoDate: string, days: number): string {
     const d = new Date(`${isoDate}T00:00:00.000Z`);
@@ -241,7 +241,19 @@ test("fridge page reuses quantity field and food picker", () => {
 test("fridge rows use modals for edit and delete, with expiry badges", () => {
     const today = utcTodayFromDate();
     const expiresOn = addUtcDays(today, 2);
-    expiryLevel(expiresOn, today);
+    expect(
+        fridgeNotices(
+            [
+                {
+                    id: "it-1",
+                    displayName: "Eggs",
+                    quantity: { amount: 6, unit: "each" },
+                    expiresOn,
+                },
+            ],
+            today,
+        ).map((n) => n.code),
+    ).toEqual(["fridge.expiring"]);
     const html = renderFridgePage({
         chrome: { theme: "light" },
         locations: [
@@ -267,6 +279,8 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     expect(html).not.toContain(">Medium<");
     expect(html).not.toContain(">High<");
     expect(html).not.toContain(">Low<");
+    expect(html).not.toContain("data-notice=");
+    expect(html).not.toContain("data-expiry=");
     expect(html).toContain('class="fridge-item-edit"');
     expect(html).toContain('id="fridge-edit-food"');
     expect(html).toContain('id="fridge-delete-item"');
@@ -300,6 +314,33 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     );
     expect(html).not.toMatch(
         /<details class="more">\s*<summary>Edit<\/summary>/,
+    );
+});
+
+test("expired fridge row shows pinned Expired pill and data-expiry", () => {
+    const today = utcTodayFromDate();
+    const expiresOn = addUtcDays(today, -1);
+    const html = renderFridgePage({
+        chrome: { theme: "light" },
+        locations: [
+            { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
+        ],
+        items: [
+            {
+                id: "it-exp",
+                householdId: "hh-1",
+                locationId: "loc-1",
+                kind: "food",
+                displayName: "Milk",
+                quantity: { amount: 1, unit: "l" },
+                foodId: "f-milk",
+                expiresOn,
+            },
+        ],
+    } as never);
+    expect(html).toContain('data-expiry="expired"');
+    expect(html).toContain(
+        '<span class="pill pill-bad expiry-pill" data-notice="fridge.expired">Expired</span>',
     );
 });
 

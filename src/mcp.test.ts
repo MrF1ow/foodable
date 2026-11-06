@@ -6364,6 +6364,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(add.status).toBe(400);
         const html = await add.text();
         expect(html).toContain("allergen-warning");
+        expect(html).toContain('data-blocking="true"');
         expect(html.toLowerCase()).toContain("peanut");
         expect(html).toContain("Bob");
         expect(html).toContain('name="confirm_allergen" value="1"');
@@ -6374,6 +6375,31 @@ describe("authenticated dashboard HTTP", () => {
         expect(modal).toContain("allergen-warning");
         expect(modal).toContain(`name="store_id" value="${store.id}"`);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+    });
+
+    test("POST /grocery/lines confirm_allergen override succeeds after allergen block", async () => {
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        await addAllergen(db.rulesStore, {
+            householdId: "hh-1",
+            userId: bob,
+            allergen: "peanut",
+        });
+        const ok = await siteApp.request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: `kind=food&store_id=${store.id}&food_name=Peanut%20Butter&qty_amount=100&confirm_allergen=1`,
+        });
+        expect(ok.status).toBe(303);
+        const lines = await db.groceryStore.listLines("hh-1");
+        expect(lines).toHaveLength(1);
+        expect(lines[0]?.displayName).toBe("Peanut Butter");
     });
 
     test("GET /grocery is 403 for a non-member", async () => {
