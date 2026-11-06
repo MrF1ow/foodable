@@ -402,6 +402,22 @@ test("website failure paste step uses Paste the recipe label", () => {
     expect(html).not.toContain('name="credit"');
 });
 
+test("import paste step uses cleaned https link for open post", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light" },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importPasteStep: true,
+        importUrl: "https://instagram.com/p/abc",
+        importSourceKind: "instagram",
+        importSourceLabel: "Instagram",
+    });
+    expect(html).toContain('href="https://instagram.com/p/abc"');
+    expect(html).toContain('value="https://instagram.com/p/abc"');
+});
+
 test("no_recipe_in_text re-render keeps pasted text", () => {
     const html = renderRecipesPage({
         chrome: { theme: "light" },

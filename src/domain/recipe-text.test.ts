@@ -132,6 +132,74 @@ test("hashtags-only lines are dropped", () => {
     expect(result.ingredients.map((row) => row.name)).toEqual(["flour"]);
 });
 
+test("Serves 4 alone is not a recipe", () => {
+    const result = parseRecipeText("Serves 4");
+    expect(result.hasRecipe).toBe(false);
+    expect(result.yieldPortions).toBe(4);
+});
+
+test("caption yield line and structured headers", () => {
+    const text = [
+        "Sunday cake",
+        "Serves 8",
+        "Ingredients:",
+        "2 eggs",
+        "Method:",
+        "Mix",
+    ].join("\n");
+    const result = parseRecipeText(text);
+    expect(result.hasRecipe).toBe(true);
+    expect(result.name).toBe("Sunday cake");
+    expect(result.yieldPortions).toBe(8);
+    expect(result.ingredients.map((row) => row.name)).toEqual(["eggs"]);
+    expect(result.steps).toEqual(["Mix"]);
+});
+
+test("duration and boast lines are never ingredients", () => {
+    for (const line of ["Ready in 20 minutes", "I've made this 100 times"]) {
+        const result = parseRecipeText(`${line}\n1 cup flour\n1. Mix`);
+        expect(result.ingredients.map((row) => row.name)).toEqual(["flour"]);
+        expect(
+            result.ingredients.some((row) =>
+                row.name.toLowerCase().includes("ready"),
+            ),
+        ).toBe(false);
+    }
+});
+
+test("headers with trailing emoji are recognized", () => {
+    const text = [
+        "Cake",
+        "Ingredients 👇",
+        "1 cup flour",
+        "Method 👇",
+        "1. Bake",
+    ].join("\n");
+    const result = parseRecipeText(text);
+    expect(result.name).toBe("Cake");
+    expect(result.ingredients.map((row) => row.name)).toEqual(["flour"]);
+    expect(result.steps).toEqual(["Bake"]);
+});
+
+test("notes section after steps is not saved as instructions", () => {
+    const text = [
+        "Soup",
+        "Ingredients:",
+        "1 cup broth",
+        "Method:",
+        "Simmer",
+        "Notes:",
+        "Keeps 3 days",
+    ].join("\n");
+    const result = parseRecipeText(text);
+    expect(result.steps).toEqual(["Simmer"]);
+});
+
+test("strips emoji from ingredient names", () => {
+    const result = parseRecipeText("Dish\n2 eggs 🥚\n1. Cook");
+    expect(result.ingredients.map((row) => row.name)).toEqual(["eggs"]);
+});
+
 test("does not invent quantities", () => {
     const result = parseRecipeText(
         "Soup\nIngredients:\nsalt to taste\n1. Simmer",

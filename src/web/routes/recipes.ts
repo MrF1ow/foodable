@@ -61,7 +61,11 @@ import {
     importRecipeFromUrl,
     importReviewCount,
 } from "../../domain/recipe-import.js";
-import { recipeSource, validateRecipeLink } from "../../domain/recipe-link.js";
+import {
+    cleanRecipeLink,
+    recipeSource,
+    validateRecipeLink,
+} from "../../domain/recipe-link.js";
 import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
@@ -149,6 +153,33 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const websiteUrl = formText(body, "website_url").trim();
     const text = formText(body, "text");
     const credit = formText(body, "credit");
+    const pinValidated = validateRecipeLink(pinOrPageUrl);
+    const cleanedPinUrl = pinValidated.ok
+        ? cleanRecipeLink(pinValidated.url)
+        : pinOrPageUrl.trim();
+
+    if (pasteStep && websiteUrl !== "") {
+        const webValidated = validateRecipeLink(websiteUrl);
+        if (!webValidated.ok) {
+            const pinKind = pinValidated.ok
+                ? recipeSource(pinValidated.url).kind
+                : null;
+            if (pinKind === "pinterest") {
+                const page = await renderRecipesListPage(userId, {
+                    openModalId: IMPORT_RECIPE_MODAL_ID,
+                    importUrl: cleanedPinUrl,
+                    importPasteStep: true,
+                    importPasteText: text,
+                    importCredit: credit,
+                    importWebsiteError: "That doesn't look like a web link.",
+                    importSourceKind: "pinterest",
+                    importSourceLabel: "Pinterest",
+                });
+                return c.html(page.html, 422);
+            }
+        }
+    }
+
     const importUrl = websiteUrl || pinOrPageUrl;
 
     if (pasteStep && websiteUrl === "" && text.trim() === "") {
@@ -159,7 +190,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         if (pinKind === "pinterest") {
             const page = await renderRecipesListPage(userId, {
                 openModalId: IMPORT_RECIPE_MODAL_ID,
-                importUrl: pinOrPageUrl,
+                importUrl: cleanedPinUrl,
                 importError: "Paste the recipe website link or the recipe.",
                 importPasteStep: true,
                 importSourceKind: "pinterest",
@@ -181,7 +212,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             creatorId: userId,
             url: importUrl,
             text: websiteUrl ? undefined : text,
-            credit: websiteUrl ? undefined : credit,
+            credit: credit.trim() || undefined,
             textOrigin: "pasted",
         },
     );
@@ -216,9 +247,10 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         return c.html(page.html, 409);
     }
     const pasteRender = importOutcomeShowsPasteStep(outcome.status);
+    const pasteLinkUrl = outcome.source?.url ?? cleanedPinUrl;
     const page = await renderRecipesListPage(userId, {
         openModalId: IMPORT_RECIPE_MODAL_ID,
-        importUrl: pinOrPageUrl,
+        importUrl: pasteRender ? pasteLinkUrl : pinOrPageUrl,
         importError: importOutcomeMessage(outcome),
         importPasteStep: pasteRender,
         importPasteText: pasteRender ? text : undefined,

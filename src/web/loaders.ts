@@ -775,6 +775,7 @@ export async function renderRecipesListPage(
         importPasteStep?: boolean;
         importPasteText?: string;
         importCredit?: string;
+        importWebsiteError?: string;
         importSourceKind?: import("../domain/recipe-import.js").RecipeSourceKind;
         importSourceLabel?: string;
     } = {},
@@ -876,6 +877,7 @@ export async function renderRecipesListPage(
             importPasteStep: opts.importPasteStep,
             importPasteText: opts.importPasteText,
             importCredit: opts.importCredit,
+            importWebsiteError: opts.importWebsiteError,
             importSourceKind: opts.importSourceKind,
             importSourceLabel: opts.importSourceLabel,
         }),

@@ -726,7 +726,7 @@ async function importFromParsedCaption(
     const prepared = prepareImportedRecipe({
         name: parsedCaption.name,
         fallbackName: `${input.sourceInfo.label} recipe`,
-        yieldPortions: null,
+        yieldPortions: parsedCaption.yieldPortions,
         steps: parsedCaption.steps,
         prepMinutes: null,
         cookMinutes: null,
@@ -834,7 +834,7 @@ export async function importRecipeFromUrl(
         const preparedFromText = prepareImportedRecipe({
             name: parsedCaption.name,
             fallbackName: sourceInfo.label,
-            yieldPortions: null,
+            yieldPortions: parsedCaption.yieldPortions,
             steps: parsedCaption.steps,
             prepMinutes: null,
             cookMinutes: null,
@@ -912,7 +912,7 @@ export async function importRecipeFromUrl(
             sourceUrl: cleaned,
             sourceText: null,
             sourceTextOrigin: null,
-            credit: null,
+            credit,
         },
         sourceOutcome,
     );
