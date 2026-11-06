@@ -57,6 +57,22 @@ describeDb(pgAvailable !== null, "fetch_memory db", (getCtx) => {
         ).toBeNull();
     });
 
+    test("list keyset tie-break: same refused_at, host desc, paginate", async () => {
+        const t = new Date("2026-05-01T12:00:00.000Z");
+        const now = new Date("2026-05-05T00:00:00.000Z");
+        await store.recordRefusal(householdId, "a.tie", 403, t);
+        await store.recordRefusal(householdId, "m.tie", 401, t);
+        await store.recordRefusal(householdId, "z.tie", 429, t);
+        const p1 = await store.listRefusals(householdId, { limit: 2, now });
+        expect(p1.map((r) => r.host)).toEqual(["z.tie", "m.tie"]);
+        const p2 = await store.listRefusals(householdId, {
+            limit: 10,
+            after: { refusedAt: p1[1]!.refusedAt, host: p1[1]!.host },
+            now,
+        });
+        expect(p2.map((r) => r.host)).toEqual(["a.tie"]);
+    });
+
     test("dead link 404 to 410 upgrade in SQL", async () => {
         const now = new Date("2026-02-01T10:00:00.000Z");
         const url = "https://gone.example/path";
@@ -101,7 +117,7 @@ describeDb(pgAvailable !== null, "fetch_memory db", (getCtx) => {
         ).toBeNull();
     });
 
-    test("indexes present and lookup uses index scan", async () => {
+    test("indexes present and lookup uses expected index (no Sort)", async () => {
         const { sql } = getCtx();
         const idx = (await sql`
             select indexname
@@ -129,7 +145,9 @@ describeDb(pgAvailable !== null, "fetch_memory db", (getCtx) => {
 
         await sql`begin`;
         await sql`set local enable_seqscan = off`;
-        const plan1 = (await sql`
+        const cursorTs = now.toISOString();
+        const cursorHost = "bulk100.example";
+        const planPkey = (await sql`
             explain (format text)
             select host, status, refused_at, expires_at
             from public.fetch_host_refusals
@@ -138,22 +156,71 @@ describeDb(pgAvailable !== null, "fetch_memory db", (getCtx) => {
                 and host = ${"bulk1.example"}
                 and expires_at > ${now.toISOString()}::timestamptz
         `) as { "QUERY PLAN": string }[];
-        const plan2 = (await sql`
+        const planList = (await sql`
             explain (format text)
             select host, status, refused_at, expires_at
             from public.fetch_host_refusals
             where
                 household_id = ${householdId}
                 and expires_at > ${now.toISOString()}::timestamptz
+                and (refused_at, host) < (${cursorTs}::timestamptz, ${cursorHost})
             order by refused_at desc, host desc
             limit 20
         `) as { "QUERY PLAN": string }[];
+        const planDeadPkey = (await sql`
+            explain (format text)
+            select url_hash, url, status, seen_at, expires_at
+            from public.dead_links
+            where
+                household_id = ${householdId}
+                and url_hash = ${"0".repeat(64)}
+                and (expires_at is null or expires_at > ${now.toISOString()}::timestamptz)
+        `) as { "QUERY PLAN": string }[];
+        const planRefusalSweep = (await sql`
+            explain (format text)
+            delete from public.fetch_host_refusals
+            where ctid in (
+                select ctid
+                from public.fetch_host_refusals
+                where expires_at <= ${now.toISOString()}::timestamptz
+                limit 100
+            )
+        `) as { "QUERY PLAN": string }[];
+        const planDeadSweep = (await sql`
+            explain (format text)
+            delete from public.dead_links
+            where ctid in (
+                select ctid
+                from public.dead_links
+                where
+                    expires_at is not null
+                    and expires_at <= ${now.toISOString()}::timestamptz
+                limit 100
+            )
+        `) as { "QUERY PLAN": string }[];
         await sql`rollback`;
 
-        const t1 = plan1.map((r) => r["QUERY PLAN"]).join("\n");
-        const t2 = plan2.map((r) => r["QUERY PLAN"]).join("\n");
-        expect(t1.toLowerCase()).toContain("index");
-        expect(t2.toLowerCase()).toContain("index");
+        const join = (rows: { "QUERY PLAN": string }[]) =>
+            rows.map((r) => r["QUERY PLAN"]).join("\n");
+        const low = (s: string) => s.toLowerCase();
+        const assertNoSort = (s: string) => {
+            expect(low(s)).not.toContain("sort");
+        };
+        const tp = join(planPkey);
+        expect(low(tp)).toContain("fetch_host_refusals_pkey");
+        assertNoSort(tp);
+        const tl = join(planList);
+        expect(low(tl)).toContain("fetch_host_refusals_list_idx");
+        assertNoSort(tl);
+        const td = join(planDeadPkey);
+        expect(low(td)).toContain("dead_links_pkey");
+        assertNoSort(td);
+        const trs = join(planRefusalSweep);
+        expect(low(trs)).toContain("fetch_host_refusals_expires_idx");
+        assertNoSort(trs);
+        const tds = join(planDeadSweep);
+        expect(low(tds)).toContain("dead_links_expires_idx");
+        assertNoSort(tds);
     });
 
     test("lookup treats expired refusal as absent before sweep", async () => {

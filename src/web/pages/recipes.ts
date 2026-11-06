@@ -324,8 +324,13 @@ export function renderRecipesPage(view: RecipesPageView): string {
         view.importTextOrigin === "shared"
             ? `<input type="hidden" name="text_origin" value="shared" />`
             : "";
-    const importRetryBlock = view.importShowRetry
-        ? `<p class="recipe-import-retry"><button type="submit" name="retry" value="1"${view.importRetryDisabled ? " disabled" : ""}>Check again</button></p>`
+    const importRetryForm = view.importShowRetry
+        ? `<form class="recipe-import-retry-form" method="post" action="/recipes/import">
+<input type="hidden" name="url" value="${importUrlValue}" />
+${view.importPasteStep ? `<input type="hidden" name="import_step" value="paste" />` : ""}
+${view.importTextOrigin === "shared" ? `<input type="hidden" name="text_origin" value="shared" />` : ""}
+<p class="recipe-import-retry"><button type="submit" name="retry" value="1" formnovalidate${view.importRetryDisabled ? " disabled" : ""}>Check again</button></p>
+</form>`
         : "";
     const importPasteBody = view.importPasteStep
         ? (() => {
@@ -334,7 +339,6 @@ export function renderRecipesPage(view: RecipesPageView): string {
 <input type="hidden" name="import_step" value="paste" />
 <input type="hidden" name="text_only" value="1" />
 ${importTextOriginHidden}
-${importRetryBlock}
 ${field({
     id: "import-url-optional",
     label: "Recipe link",
@@ -346,7 +350,7 @@ ${field({
     control: `<textarea id="import-text" name="text" rows="10" required>${importPasteTextValue}</textarea>`,
 })}
 <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
-</form>`;
+</form>${importRetryForm}`;
               }
               const kind = view.importSourceKind ?? "website";
               const label = escapeHtml(view.importSourceLabel ?? "Link");
@@ -378,7 +382,6 @@ ${field({
 <input type="hidden" name="import_step" value="paste" />
 <input type="hidden" name="url" value="${importUrlValue}" />
 ${importTextOriginHidden}
-${importRetryBlock}
 <p class="recipe-import-source">${sourceIcon(kind, { label, decorative: true })} ${label}</p>
 <p class="recipe-import-open"><a href="${importUrlValue}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a></p>
 ${pinterestFields}
@@ -389,13 +392,12 @@ ${field({
 })}
 ${creditField}
 <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
-</form>`;
+</form>${importRetryForm}`;
           })()
         : `<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
                 ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
-                ${importRetryBlock}
                 <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
-            </form>`;
+            </form>${importRetryForm}`;
     const importModal = modal({
         id: IMPORT_RECIPE_MODAL_ID,
         title: "Import from link",

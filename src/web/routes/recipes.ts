@@ -77,8 +77,6 @@ import {
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 
-// TOAST_KEYS: "recipes.import.site_refused_recent" "recipes.import.not_found_recent"
-
 export const recipesRoutes = new Hono();
 
 function importOriginPrefill(origin: "shared" | "pasted") {

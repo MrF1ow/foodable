@@ -28,6 +28,7 @@ import {
     StreamableHTTPClientTransport,
     type VersionNegotiationMode,
 } from "@modelcontextprotocol/client";
+import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
@@ -44,6 +45,7 @@ import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualDbSql from "./db/sql.js";
 import * as actualDbSocialReaders from "./db/social-readers.js";
+import * as actualDbFetchMemory from "./db/fetch-memory.js";
 import * as actualRecipeUrlFetcher from "./recipe-url-fetcher.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
@@ -69,6 +71,7 @@ const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
 const realDbSql = { ...actualDbSql };
 const realDbSocialReaders = { ...actualDbSocialReaders };
+const realDbFetchMemory = { ...actualDbFetchMemory };
 const realRecipeUrlFetcher = { ...actualRecipeUrlFetcher };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
@@ -647,6 +650,11 @@ mock.module("./recipe-url-fetcher.js", () => ({
     recipeFetchMemory: () => db.fetchMemoryStore,
 }));
 
+mock.module("./db/fetch-memory.js", () => ({
+    ...actualDbFetchMemory,
+    recipeFetchMemory: () => db.fetchMemoryStore,
+}));
+
 afterAll(() => {
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
@@ -665,6 +673,7 @@ afterAll(() => {
     mock.module("./db/exports.js", () => realExports);
     mock.module("./db/sql.js", () => realDbSql);
     mock.module("./db/users.js", () => realDbUsers);
+    mock.module("./db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("./recipe-url-fetcher.js", () => realRecipeUrlFetcher);
 });
 
@@ -6910,6 +6919,50 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipesHtml).toContain("Add a recipe.");
     });
 
+    test("POST /recipes/import with retry only refetches after remembered refusal", async () => {
+        const denied = createMemoryFetchMemoryStore();
+        await denied.recordRefusal(
+            "hh-1",
+            "memroute.example",
+            403,
+            new Date("2026-06-01T00:00:00.000Z"),
+        );
+        db.fetchMemoryStore = denied;
+        let fetchCalls = 0;
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage(
+                url: string,
+                _opts: { accept: string[] },
+            ): Promise<FetchOutcome> {
+                fetchCalls += 1;
+                expect(url).toContain("memroute.example");
+                return {
+                    ok: false,
+                    reason: "site_refused",
+                    status: 403,
+                    detail: "403",
+                    url,
+                };
+            },
+        };
+        const r = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                url: "https://memroute.example/recipe",
+                retry: "1",
+            }).toString(),
+        });
+        expect(r.status).toBe(422);
+        expect(fetchCalls).toBe(1);
+    });
+
     test("shared text_origin survives import 422 retry", async () => {
         const { readFileSync } = await import("node:fs");
         const { join } = await import("node:path");
@@ -7608,6 +7661,23 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('action="/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
+    });
+
+    test("GET /household ignores invalid refusals_after cursor", async () => {
+        db.fetchMemoryStore = {
+            ...createMemoryFetchMemoryStore(),
+            async listRefusals(_hh, opts) {
+                expect(opts.after).toBeUndefined();
+                return [];
+            },
+        };
+        const r = await siteApp.request(
+            "http://x/household?refusals_after=not-a-date%7Cexample.com",
+            {
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
+        expect(r.status).toBe(200);
     });
 
     test("GET /household as a member is read-only", async () => {

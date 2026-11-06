@@ -14,7 +14,7 @@ create index fetch_host_refusals_expires_idx on public.fetch_host_refusals (expi
 create index fetch_host_refusals_list_idx on public.fetch_host_refusals (
     household_id,
     refused_at desc,
-    host
+    host desc
 );
 
 alter table public.fetch_host_refusals enable row level security;

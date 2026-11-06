@@ -47,8 +47,45 @@ export function deadLinkExpiry(status: DeadLinkStatus, now: Date): Date | null {
     return d;
 }
 
+/** Normalized hostname label for cursoring (lowercase ASCII, dotted segments). */
+const REFUSAL_CURSOR_HOST_PATTERN = /^[a-z0-9.-]{1,253}$/;
+
+/**
+ * Parse `refusals_after` cursor: `…|host` where `|` splits on the **last** pipe.
+ * Invalid raw values return `null` (first page).
+ */
+export function parseRefusalCursor(
+    raw: string | null | undefined,
+): { refusedAt: string; host: string } | null {
+    const s = raw?.trim() ?? "";
+    if (!s) return null;
+    const pipe = s.lastIndexOf("|");
+    if (pipe <= 0) return null;
+    const refusedPart = s.slice(0, pipe).trim();
+    const hostPart = s.slice(pipe + 1);
+    if (!REFUSAL_CURSOR_HOST_PATTERN.test(hostPart)) return null;
+    const t = Date.parse(refusedPart);
+    if (Number.isNaN(t)) return null;
+    const d = new Date(t);
+    const iso = d.toISOString();
+    if (Date.parse(iso) !== t) return null;
+    return { refusedAt: iso, host: hostPart };
+}
+
 function iso(d: Date): string {
     return d.toISOString();
+}
+
+/** Row is strictly after `cur` in `order by refused_at desc, host desc` (PostgreSQL `(row) < (cur)` tuple compare). */
+function refusalRowBeforeCursor(
+    row: HostRefusalRow,
+    cur: { refusedAt: string; host: string },
+): boolean {
+    const tr = new Date(row.refusedAt).getTime();
+    const tc = new Date(cur.refusedAt).getTime();
+    if (tr < tc) return true;
+    if (tr > tc) return false;
+    return row.host < cur.host;
 }
 
 function refusalActive(row: HostRefusalRow, now: Date): boolean {
@@ -135,16 +172,15 @@ export function createMemoryFetchMemoryStore(): FetchMemoryStore {
                     const ta = new Date(a.refusedAt).getTime();
                     const tb = new Date(b.refusedAt).getTime();
                     if (tb !== ta) return tb - ta;
-                    return a.host.localeCompare(b.host);
+                    return b.host.localeCompare(a.host);
                 });
             let start = 0;
             if (opts.after) {
-                const idx = rows.findIndex(
-                    (r) =>
-                        r.refusedAt === opts.after!.refusedAt &&
-                        r.host === opts.after!.host,
+                const cur = opts.after;
+                const idx = rows.findIndex((r) =>
+                    refusalRowBeforeCursor(r, cur),
                 );
-                start = idx >= 0 ? idx + 1 : 0;
+                start = idx >= 0 ? idx : rows.length;
             }
             return rows.slice(start, start + opts.limit);
         },
@@ -230,6 +266,11 @@ function deadLinkCacheUntil(
     return Math.min(now + ttlMs, rowEnd);
 }
 
+/**
+ * Read-through LRU cache over a `FetchMemoryStore`.
+ * — Per-map cap defaults to 1000 entries (2000 total across refusal + dead host/url maps).
+ * — Generation counters drop in-flight stale writes after `clear*` / `record*` / `sweepExpired`.
+ */
 export function createCachedFetchMemory(
     store: FetchMemoryStore,
     opts: {
@@ -239,11 +280,13 @@ export function createCachedFetchMemory(
     } = {},
 ): FetchMemoryStore {
     const ttlMs = opts.ttlMs ?? 5 * 60_000;
-    const maxEntries = opts.maxEntries ?? 2000;
+    const maxEntries = opts.maxEntries ?? 1000;
     const clock = opts.now ?? (() => Date.now());
 
     const refusalCache = new Map<string, CacheEntry<HostRefusalRow>>();
     const deadCache = new Map<string, CacheEntry<DeadLinkRow>>();
+    let refusalGen = 0;
+    let deadGen = 0;
 
     function touch<K, V>(map: Map<K, V>, key: K) {
         const v = map.get(key);
@@ -346,55 +389,64 @@ export function createCachedFetchMemory(
         }
     }
 
-    function invalidateRefusalListCache(householdId: string) {
-        const prefix = `${householdId}|`;
-        for (const key of refusalCache.keys()) {
-            if (String(key).startsWith(prefix)) {
-                refusalCache.delete(key);
-            }
-        }
-    }
-
     return {
         async getRefusal(householdId, host, now) {
+            const gen0 = refusalGen;
             const hit = getRefusalCached(householdId, host, now);
             if (hit !== undefined) return hit;
-            const row = await store.getRefusal(householdId, host, now);
+            let row = await store.getRefusal(householdId, host, now);
+            if (gen0 !== refusalGen) {
+                row = await store.getRefusal(householdId, host, now);
+            }
+            if (gen0 !== refusalGen) {
+                return row;
+            }
             setRefusalCache(householdId, host, row);
             return row;
         },
         async recordRefusal(householdId, host, status, now) {
             await store.recordRefusal(householdId, host, status, now);
+            refusalGen += 1;
             const row = await store.getRefusal(householdId, host, now);
             setRefusalCache(householdId, host, row);
-            invalidateRefusalListCache(householdId);
         },
         async clearRefusal(householdId, host) {
             await store.clearRefusal(householdId, host);
+            refusalGen += 1;
             setRefusalCache(householdId, host, null);
-            invalidateRefusalListCache(householdId);
         },
         async listRefusals(householdId, opts) {
             return store.listRefusals(householdId, opts);
         },
         async getDeadLink(householdId, urlHash, now) {
+            const gen0 = deadGen;
             const hit = getDeadCached(householdId, urlHash, now);
             if (hit !== undefined) return hit;
-            const row = await store.getDeadLink(householdId, urlHash, now);
+            let row = await store.getDeadLink(householdId, urlHash, now);
+            if (gen0 !== deadGen) {
+                row = await store.getDeadLink(householdId, urlHash, now);
+            }
+            if (gen0 !== deadGen) {
+                return row;
+            }
             setDeadCache(householdId, urlHash, row);
             return row;
         },
         async recordDeadLink(householdId, urlHash, url, status, now) {
             await store.recordDeadLink(householdId, urlHash, url, status, now);
+            deadGen += 1;
             const row = await store.getDeadLink(householdId, urlHash, now);
             setDeadCache(householdId, urlHash, row);
         },
         async clearDeadLink(householdId, urlHash) {
             await store.clearDeadLink(householdId, urlHash);
+            deadGen += 1;
             setDeadCache(householdId, urlHash, null);
         },
         async sweepExpired(now, batchSize) {
             const deleted = await store.sweepExpired(now, batchSize);
+            refusalGen += 1;
+            deadGen += 1;
             refusalCache.clear();
             deadCache.clear();
             return deleted;
