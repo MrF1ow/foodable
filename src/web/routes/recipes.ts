@@ -52,6 +52,15 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import {
+    importOutcomeMessage,
+    importOutcomeToastKey,
+    importRecipeFromUrl,
+    importReviewCount,
+} from "../../domain/recipe-import.js";
+import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
+import { run } from "../../db/sql.js";
+import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 
 export const recipesRoutes = new Hono();
 
@@ -125,6 +134,62 @@ recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
         verification: c.req.query("verification") ?? "",
     });
     return c.html(page.html, page.status);
+});
+
+recipesRoutes.post("/recipes/import", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const url = formText(body, "url");
+    const outcome = await importRecipeFromUrl(
+        {
+            recipes: liveRecipesStore(),
+            foods: liveFoodsStore(),
+            fetcher: recipeImportFetcher(),
+            transaction: (fn) => run(async () => fn()),
+        },
+        {
+            householdId: member.householdId,
+            creatorId: userId,
+            url,
+        },
+    );
+    if (
+        outcome.status === "imported" ||
+        outcome.status === "unverified_needs_review"
+    ) {
+        const key =
+            outcome.status === "imported"
+                ? ("recipes.import.imported" as const)
+                : importOutcomeToastKey(outcome);
+        const params: Record<string, string> = {
+            name: outcome.recipeName ?? "Recipe",
+            site: outcome.source?.label ?? "the web",
+        };
+        if (outcome.status === "unverified_needs_review") {
+            params.count = importReviewCount(outcome.problems);
+        }
+        return redirectWithToast(
+            c,
+            `/recipes/${outcome.recipeId!}`,
+            key,
+            params,
+        );
+    }
+    if (outcome.status === "duplicate") {
+        const page = await renderRecipesListPage(userId, {
+            openModalId: IMPORT_RECIPE_MODAL_ID,
+            importUrl: url,
+            importDuplicateRecipeId: outcome.recipeId ?? undefined,
+        });
+        return c.html(page.html, 409);
+    }
+    const page = await renderRecipesListPage(userId, {
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importUrl: url,
+        importError: importOutcomeMessage(outcome),
+    });
+    return c.html(page.html, 422);
 });
 
 recipesRoutes.post("/recipes", requireMember, async (c) => {

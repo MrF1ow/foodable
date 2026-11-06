@@ -1,7 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { liveFoodsStore } from "./foods.js";
+import { importRecipeFromUrl } from "../domain/recipe-import.js";
 import { createRecipe } from "../domain/recipes.js";
 import { recipeImportToRow } from "../domain/recipe-import.js";
+import type { SafeFetcher } from "../fetch-safe.js";
 import { liveRecipesStore, recipeImportSqlValues } from "./recipes.js";
+import { run } from "./sql.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -99,5 +105,89 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
         const loaded = await store.getImport(householdId, recipe.id);
         expect(loaded?.unresolvedLines).toEqual(["mystery line"]);
         expect(loaded?.problems[0]?.code).toBe("no_instructions");
+    });
+
+    test("findRecipeBySourceUrl and listImports round-trip", async () => {
+        const store = liveRecipesStore();
+        const recipe = await createRecipe(store, {
+            householdId,
+            creatorId: userId,
+            name: "Linked",
+            yieldPortions: 2,
+            sourceUrl: "https://example.com/recipe",
+        });
+        await store.upsertImport({
+            recipeId: recipe.id,
+            householdId,
+            sourceKind: "website",
+            sourceUrl: "https://example.com/recipe",
+            sourceText: null,
+            sourceTextOrigin: null,
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            importedAt: "2026-01-01T12:00:00.000Z",
+        });
+        const found = await store.findRecipeBySourceUrl(householdId, [
+            "https://example.com/recipe?utm=x",
+            "https://example.com/recipe",
+        ]);
+        expect(found?.id).toBe(recipe.id);
+        const listed = await store.listImports(householdId);
+        expect(listed.some((row) => row.recipeId === recipe.id)).toBe(true);
+    });
+
+    test("website import through live stores persists recipe import and ingredients", async () => {
+        const yoast = readFileSync(
+            join(
+                import.meta.dir,
+                "../domain/fixtures/recipe-pages/array-top-level.html",
+            ),
+            "utf8",
+        );
+        const fetcher: SafeFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true,
+                    url: "https://example.com/db-soup",
+                    status: 200,
+                    contentType: "text/html",
+                    body: yoast,
+                };
+            },
+        };
+        const recipes = liveRecipesStore();
+        const foods = liveFoodsStore();
+        let recipeId = "";
+        await run(async () => {
+            const outcome = await importRecipeFromUrl(
+                {
+                    recipes,
+                    foods,
+                    fetcher,
+                    transaction: (fn) => run(async () => fn()),
+                },
+                {
+                    householdId,
+                    creatorId: userId,
+                    url: "https://example.com/db-soup",
+                },
+            );
+            expect(outcome.status).toBe("imported");
+            recipeId = outcome.recipeId!;
+        });
+        const recipe = await recipes.getRecipe(householdId, recipeId);
+        expect(recipe?.sourceUrl).toBe("https://example.com/db-soup");
+        const ingredients = await recipes.listIngredients(
+            householdId,
+            recipeId,
+        );
+        expect(ingredients.length).toBeGreaterThan(0);
+        const imp = await recipes.getImport(householdId, recipeId);
+        expect(imp?.sourceKind).toBe("website");
     });
 });

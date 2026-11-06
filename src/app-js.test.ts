@@ -36,11 +36,13 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         "./src/web/client/modal.js",
         "./src/web/client/arrange.js",
         "./src/web/client/copy-prompt.js",
+        "./src/web/client/busy-submit.js",
     ]);
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(10);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(11);
+    expect(js).toContain("data-busy-form");
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {

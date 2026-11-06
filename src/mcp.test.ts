@@ -43,6 +43,7 @@ import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualDbSql from "./db/sql.js";
+import * as actualRecipeUrlFetcher from "./recipe-url-fetcher.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
@@ -65,6 +66,7 @@ const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
 const realDbSql = { ...actualDbSql };
+const realRecipeUrlFetcher = { ...actualRecipeUrlFetcher };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
@@ -297,6 +299,7 @@ const db = {
     barcodeFoods: {} as Record<string, FoodResult>,
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
+    recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
 };
 
 mock.module("./db/analytics.js", () => ({
@@ -611,6 +614,16 @@ mock.module("./db/sql.js", () => ({
     run: async <T>(fn: (tx: unknown) => Promise<T>) => fn({}),
 }));
 
+mock.module("./recipe-url-fetcher.js", () => ({
+    ...actualRecipeUrlFetcher,
+    recipeImportFetcher: () => {
+        if (!db.recipeImportFetcher) {
+            throw new Error("recipeImportFetcher not configured in test");
+        }
+        return db.recipeImportFetcher;
+    },
+}));
+
 afterAll(() => {
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
@@ -627,6 +640,7 @@ afterAll(() => {
     mock.module("./food-search.js", () => realFoodSearch);
     mock.module("./db/exports.js", () => realExports);
     mock.module("./db/sql.js", () => realDbSql);
+    mock.module("./recipe-url-fetcher.js", () => realRecipeUrlFetcher);
 });
 
 beforeEach(() => {
@@ -673,6 +687,7 @@ beforeEach(() => {
     db.barcodeFoods = {};
     db.foodSearchHits = [];
     db.foodSearchError = null;
+    db.recipeImportFetcher = null;
 });
 
 interface ToolResult {
@@ -5003,6 +5018,72 @@ describe("phone-app domain MCP tools", () => {
             }>;
             expect(unmeasured[0]?.display_name).toBe("Salt");
             expect(textOf(cooked)).toContain("Not deducted (no amount)");
+        });
+    });
+
+    test("import_recipe_from_url output validates and never sets isError", async () => {
+        const { IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA } =
+            await import("./mcp/tools/recipes.js");
+        const { readFileSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const yoast = readFileSync(
+            join(
+                import.meta.dir,
+                "domain/fixtures/recipe-pages/array-top-level.html",
+            ),
+            "utf8",
+        );
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true as const,
+                    url: "https://example.com/soup",
+                    status: 200,
+                    contentType: "text/html",
+                    body: yoast,
+                };
+            },
+        };
+        await withUser(alice, async (call) => {
+            const imported = await call("import_recipe_from_url", {
+                url: "https://example.com/soup",
+            });
+            expect(imported.isError).toBeUndefined();
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                imported.structuredContent,
+            );
+            expect(imported.structuredContent?.status).toBe("imported");
+
+            const paste = await call("import_recipe_from_url", {
+                url: "https://www.instagram.com/p/abc/",
+            });
+            expect(paste.isError).toBeUndefined();
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(paste.structuredContent);
+            expect(paste.structuredContent?.status).toBe("paste_needed");
+
+            const fromText = await call("import_recipe_from_text", {
+                text: "x",
+                instructions: "1. Mix",
+                name: "Dup",
+                source_url: "https://example.com/dup-recipe",
+                ingredients: [{ name: "flour", amount: 1, unit: "g" }],
+            });
+            const dupId = (fromText.structuredContent?.recipe as { id: string })
+                .id;
+            await db.recipesStore.updateRecipe({
+                ...(await db.recipesStore.getRecipe("hh-1", dupId))!,
+                sourceUrl: "https://example.com/dup-recipe",
+            });
+            const dup = await call("import_recipe_from_url", {
+                url: "https://example.com/dup-recipe?utm_source=x",
+            });
+            expect(dup.isError).toBeUndefined();
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(dup.structuredContent);
+            expect(dup.structuredContent?.status).toBe("duplicate");
+            expect(dup.structuredContent?.recipe_id).toBe(dupId);
         });
     });
 
