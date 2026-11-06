@@ -52,6 +52,9 @@ test("picker page includes search and manual product panels", () => {
         food: eggs,
         products: [],
         usualProductId: null,
+        prefillStoreId: eggs.usualStoreId,
+        prefillAmount: eggs.usualAmount,
+        stores: [],
         from: "/recipes/r1",
     });
     expect(html).toContain("Search or scan");

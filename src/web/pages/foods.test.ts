@@ -29,6 +29,7 @@ test("items nests products with Usual pill", () => {
     });
     const html = renderFoodsSettingsPage({
         chrome: { theme: "light" },
+        stores: [],
         foods: [{ ...plain, usualProductId: "k1" }, kirkland],
     });
     expect(html).toContain('class="food-products list"');
@@ -41,7 +42,50 @@ test("standalone row shows Belongs to action", () => {
     const plain = food("p1", "Eggs");
     const html = renderFoodsSettingsPage({
         chrome: { theme: "light" },
+        stores: [],
         foods: [plain, solo],
     });
     expect(html).toContain("Belongs to…");
+});
+
+test("items edit modal includes usual buy controls on a normal page load", () => {
+    const plain = food("p1", "Eggs");
+    const kirkland = food("k1", "Kirkland Large Eggs", {
+        genericFoodId: "p1",
+        brand: "Kirkland",
+    });
+    const html = renderFoodsSettingsPage({
+        chrome: { theme: "light" },
+        stores: [
+            { id: "s-z", householdId: HH, name: "Zebra", sortOrder: 1 },
+            { id: "s-a", householdId: HH, name: "Aldi", sortOrder: 0 },
+        ],
+        foods: [{ ...plain, usualProductId: "k1" }, kirkland],
+    });
+    expect(html).toContain('name="usual_amount"');
+    expect(html).toContain('name="usual_unit"');
+    expect(html).toContain('name="usual_store_id"');
+    const idx = html.indexOf('name="usual_store_id"');
+    expect(idx).toBeGreaterThan(-1);
+    const bit = html.slice(idx, idx + 500);
+    expect(bit.indexOf("Aldi")).toBeLessThan(bit.indexOf("Zebra"));
+});
+
+test("open food-edit modal shows usual field values from the food row", () => {
+    const plain = food("p1", "Eggs", {
+        usualStoreId: "s-a",
+        usualAmount: { amount: 6, unit: "g" },
+    });
+    const html = renderFoodsSettingsPage({
+        chrome: { theme: "light" },
+        stores: [{ id: "s-a", householdId: HH, name: "Aldi", sortOrder: 0 }],
+        foods: [plain],
+        openModalId: "food-edit-p1",
+    });
+    expect(html).toContain('name="usual_amount"');
+    expect(html).toMatch(/name="usual_amount"[^>]*value="6"/);
+    expect(html).toContain('name="usual_unit"');
+    expect(html).toContain('value="g" selected');
+    expect(html).toContain('name="usual_store_id"');
+    expect(html).toContain('value="s-a" selected');
 });

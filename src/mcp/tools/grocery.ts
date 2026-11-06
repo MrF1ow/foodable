@@ -18,6 +18,8 @@ import {
     checkGroceryLine,
     clearCheckedLines,
     listGrocery,
+    type GroceryAmountPickReason,
+    type GroceryStorePickReason,
 } from "../../domain/grocery.js";
 import { putAwayGroceryLines, StockInputError } from "../../domain/stock.js";
 import { getWidgetHtml } from "../../widgets.js";
@@ -216,7 +218,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to a grocery store. Omit section_id to let the server pick the section: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
+                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -224,9 +226,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 openWorldHint: false,
             },
             inputSchema: z.object({
-                store_id: z.string(),
+                store_id: z.string().optional(),
                 kind: z.enum(["food", "supply"]),
-                amount: z.coerce.number(),
+                amount: z.coerce.number().optional(),
                 name: z.string().optional(),
                 barcode: z.string().optional(),
                 food_id: z.string().optional(),
@@ -238,6 +240,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 display_name: z.string(),
                 already_have: z.string().nullable(),
                 warning: z.string().nullable(),
+                store_id: z.string(),
+                amount: z.number(),
+                unit: z.string(),
             }),
         },
         async (args) =>
@@ -248,6 +253,21 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     const grocery = liveGroceryStore();
                     const settings = liveSettingsStore();
                     const foods = liveFoodsStore();
+                    const stores = await settings.listStores(householdId);
+                    const storeNameById = new Map(
+                        stores.map((row) => [row.id, row.name]),
+                    );
+                    let storeReason: GroceryStorePickReason = "chosen";
+                    let amountReason: GroceryAmountPickReason = "chosen";
+                    const onPicked = (pick: {
+                        storeId: string;
+                        storeReason: GroceryStorePickReason;
+                        quantity: { amount: number; unit: string };
+                        amountReason: GroceryAmountPickReason;
+                    }) => {
+                        storeReason = pick.storeReason;
+                        amountReason = pick.amountReason;
+                    };
                     const line =
                         args.kind === "supply"
                             ? await addGrocerySupply(grocery, settings, foods, {
@@ -258,6 +278,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                   amount: args.amount,
                                   unit: args.unit ?? "",
                                   foodId: args.food_id,
+                                  onPicked,
                               })
                             : args.food_id
                               ? await addGroceryFoodById(
@@ -271,6 +292,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                         foodId: args.food_id,
                                         amount: args.amount,
                                         unit: args.unit,
+                                        onPicked,
                                     },
                                 )
                               : args.barcode
@@ -285,6 +307,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                           barcode: args.barcode,
                                           amount: args.amount,
                                           unit: args.unit,
+                                          onPicked,
                                       },
                                       { lookup: lookupBarcode },
                                   )
@@ -299,11 +322,35 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                           name: args.name ?? "",
                                           amount: args.amount,
                                           unit: args.unit,
+                                          onPicked,
                                       },
                                   );
                     const extras = await groceryLineExtras(householdId, line);
+                    const storeName =
+                        storeNameById.get(line.storeId) ?? line.storeId;
+                    const parenthetical: string[] = [];
+                    if (storeReason !== "chosen") {
+                        if (storeReason === "usual") {
+                            parenthetical.push("usual store");
+                        } else if (storeReason === "list") {
+                            parenthetical.push("already on the list there");
+                        } else if (storeReason === "default") {
+                            parenthetical.push("first store");
+                        }
+                    }
+                    if (amountReason !== "chosen") {
+                        if (amountReason === "usual") {
+                            parenthetical.push("usual amount");
+                        } else if (amountReason === "default") {
+                            parenthetical.push("default amount");
+                        }
+                    }
+                    const pickNote =
+                        parenthetical.length > 0
+                            ? ` (${parenthetical.join(", ")})`
+                            : "";
                     const bits = [
-                        `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit}`,
+                        `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
                     ];
                     if (extras.alreadyHave) bits.push(extras.alreadyHave);
                     if (extras.warning) bits.push(extras.warning);
@@ -314,6 +361,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             display_name: line.displayName,
                             already_have: extras.alreadyHave,
                             warning: extras.warning,
+                            store_id: line.storeId,
+                            amount: line.quantity.amount,
+                            unit: line.quantity.unit,
                         },
                     };
                 },

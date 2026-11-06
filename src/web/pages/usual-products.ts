@@ -1,5 +1,8 @@
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
+import { FOOD_QUANTITY_UNITS } from "../../domain/quantity.js";
+import type { GroceryStore } from "../../domain/settings.js";
 import type { Food, UsualProductRow } from "../../domain/foods.js";
+import { quantityUnitOptionLabel } from "../display-quantity.js";
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
@@ -42,9 +45,17 @@ export type UsualProductsPickerView = {
     food: Food;
     products: Food[];
     usualProductId: string | null;
+    /** Pre-fill for Usually buy when the usual product is set; else the plain food's own fields. */
+    prefillStoreId: string | null;
+    prefillAmount: { amount: number; unit: string } | null;
+    stores: GroceryStore[];
     from: string;
     error?: string;
 };
+
+function sortStoresByName<T extends { name: string }>(stores: T[]): T[] {
+    return [...stores].sort((a, b) => a.name.localeCompare(b.name));
+}
 
 function nutrientInput(
     id: string,
@@ -57,10 +68,19 @@ function nutrientInput(
 </label>`;
 }
 
+/**
+ * The row's own usual store and amount, which Set usual writes back to the
+ * selected row. `src/web/client/usual-buy.js` copies them into the fields
+ * when the radio changes, so one row's values never land on another.
+ */
+function usualBuyAttrs(row: Food): string {
+    return ` data-usual-amount="${row.usualAmount ? escapeHtml(String(row.usualAmount.amount)) : ""}" data-usual-unit="${row.usualAmount ? escapeHtml(row.usualAmount.unit) : ""}" data-usual-store="${escapeHtml(row.usualStoreId ?? "")}"`;
+}
+
 function productOption(product: Food, selected: boolean): string {
     const brand = product.brand ? ` · ${escapeHtml(product.brand)}` : "";
     const sel = selected ? " checked" : "";
-    return `<label class="choice-row"><input type="radio" name="product_food_id" value="${escapeHtml(product.id)}"${sel} /> ${escapeHtml(product.name)}${brand}</label>`;
+    return `<label class="choice-row"><input type="radio" name="product_food_id" value="${escapeHtml(product.id)}"${usualBuyAttrs(product)}${sel} /> ${escapeHtml(product.name)}${brand}</label>`;
 }
 
 function manualProductForm(foodId: string, from: string): string {
@@ -181,15 +201,47 @@ export function renderUsualProductsPickerPage(
         productOption(p, p.id === usualId),
     );
     const noneChecked = usualId == null ? " checked" : "";
+    const prefill = view.prefillAmount;
+    const amountVal = prefill != null ? String(prefill.amount) : "";
+    const unitOpts = [
+        `<option value="">—</option>`,
+        ...FOOD_QUANTITY_UNITS.map((unit) => {
+            const label = quantityUnitOptionLabel(unit);
+            const sel = prefill?.unit === unit ? " selected" : "";
+            return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
+        }),
+    ].join("");
+    const storeOpts = [
+        `<option value="">—</option>`,
+        ...sortStoresByName(view.stores).map((s) => {
+            const sel = view.prefillStoreId === s.id ? " selected" : "";
+            return `<option value="${escapeHtml(s.id)}"${sel}>${escapeHtml(s.name)}</option>`;
+        }),
+    ].join("");
+    const usualBuyBlock = `
+${field({
+    id: "usual-buy-amount",
+    label: "Usually buy",
+    control: `<div class="field-grid">
+<label>Amount<input id="usual-buy-amount" name="usual_amount" type="number" min="0" step="any" value="${escapeHtml(amountVal)}" /></label>
+<label>Unit<select id="usual-buy-unit" name="usual_unit">${unitOpts}</select></label>
+</div>`,
+})}
+${field({
+    id: "usual-buy-store",
+    label: "at",
+    control: `<select id="usual-buy-store" name="usual_store_id">${storeOpts}</select>`,
+})}`;
     const existingProducts =
         view.products.length === 0
             ? `<p class="muted">No products for this food yet. Search, scan or add one below.</p>`
-            : `<form method="post" action="/household/usual-products/${escapeHtml(foodId)}">
+            : `<form method="post" action="/household/usual-products/${escapeHtml(foodId)}" data-usual-buy-follow>
 <input type="hidden" name="from" value="${escapeHtml(from)}" />
 <div class="choice-col">
-<label class="choice-row"><input type="radio" name="product_food_id" value=""${noneChecked} /> None</label>
+<label class="choice-row"><input type="radio" name="product_food_id" value=""${usualBuyAttrs(view.food)}${noneChecked} /> None</label>
 ${productRadios.join("")}
 </div>
+${usualBuyBlock}
 <button type="submit" class="btn-primary">Set usual</button>
 </form>`;
     const picker = renderFoodPicker({

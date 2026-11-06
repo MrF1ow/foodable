@@ -430,7 +430,7 @@ test("every page's h1 comes from pageHeader once", async () => {
                 drinkUnit: "",
             }),
         ],
-        ["foods", renderFoodsSettingsPage({ chrome, foods: [] })],
+        ["foods", renderFoodsSettingsPage({ chrome, foods: [], stores: [] })],
         [
             "household",
             renderHouseholdSettingsPage({

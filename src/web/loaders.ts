@@ -528,11 +528,14 @@ export async function renderSettingsFoodsPage(
               opts.error,
           )
         : null;
+    const settings = liveSettingsStore();
+    const stores = await settings.listStores(householdId);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
             chrome: viewerChromeFromProfile(profile),
             foods: withAliases,
+            stores,
             error: opts.error,
             openModalId: opts.openModalId,
             linkProductPrompt,
@@ -599,6 +602,26 @@ export async function renderUsualProductsPickerPage(
         .filter((row) => row.genericFoodId === foodId && !row.archivedAt)
         .sort((a, b) => a.name.localeCompare(b.name));
     const from = safeReturnPath(opts.from, "/household/usual-products");
+    const listed = foods;
+    const catalog = new Map(listed.map((row) => [row.id, row]));
+    const usualId = food.usualProductId;
+    const usualProduct =
+        usualId != null
+            ? (products.find((row) => row.id === usualId) ??
+              catalog.get(usualId) ??
+              null)
+            : null;
+    const prefillFromProduct =
+        usualProduct != null &&
+        usualProduct.genericFoodId === food.id &&
+        !usualProduct.archivedAt;
+    const prefillStoreId = prefillFromProduct
+        ? usualProduct.usualStoreId
+        : food.usualStoreId;
+    const prefillAmount = prefillFromProduct
+        ? usualProduct.usualAmount
+        : food.usualAmount;
+    const stores = await liveSettingsStore().listStores(householdId);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
@@ -606,6 +629,9 @@ export async function renderUsualProductsPickerPage(
             food,
             products,
             usualProductId: food.usualProductId,
+            prefillStoreId,
+            prefillAmount,
+            stores,
             from,
             error: opts.error,
         }),

@@ -1,7 +1,10 @@
 import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
+import { FOOD_QUANTITY_UNITS } from "../../domain/quantity.js";
+import type { GroceryStore } from "../../domain/settings.js";
 import type { Food } from "../../domain/foods.js";
 import { suggestFoodFor } from "../../domain/foods.js";
+import { quantityUnitOptionLabel } from "../display-quantity.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
@@ -24,6 +27,7 @@ import {
 export type FoodsSettingsView = {
     chrome: ViewerChrome;
     foods: Array<Food & { aliases: string[] }>;
+    stores: GroceryStore[];
     error?: string;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
@@ -164,6 +168,10 @@ function foodFill(view: FoodsSettingsView, food: FoodRow): ModalFill {
             caffeine_mg: food.caffeineMg,
             allergens: food.allergens.join(","),
             archived: Boolean(food.archivedAt),
+            usual_amount:
+                food.usualAmount != null ? String(food.usualAmount.amount) : "",
+            usual_unit: food.usualAmount?.unit ?? "",
+            usual_store_id: food.usualStoreId ?? "",
         },
         templates: extra
             ? { product_fields: `food-edit-product-fields-${food.id}` }
@@ -241,7 +249,49 @@ function belongsSelectSlot(
     return `<div data-fill-slot="belongs_select" data-filled-template="${escapeHtml(templateId)}">${belongsSelectInner(view, product)}</div>`;
 }
 
+function sortStoresByName<T extends { name: string }>(stores: T[]): T[] {
+    return [...stores].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function usualBuyFieldsEdit(
+    view: FoodsSettingsView,
+    food: FoodRow | null,
+): string {
+    if (food?.archivedAt) return "";
+    const amountVal =
+        food?.usualAmount != null ? String(food.usualAmount.amount) : "";
+    const unitOpts = [
+        `<option value="">—</option>`,
+        ...FOOD_QUANTITY_UNITS.map((unit) => {
+            const label = quantityUnitOptionLabel(unit);
+            const sel = food?.usualAmount?.unit === unit ? " selected" : "";
+            return `<option value="${escapeHtml(unit)}"${sel}>${escapeHtml(label)}</option>`;
+        }),
+    ].join("");
+    const storeOpts = [
+        `<option value="">—</option>`,
+        ...sortStoresByName(view.stores).map((s) => {
+            const sel = food?.usualStoreId === s.id ? " selected" : "";
+            return `<option value="${escapeHtml(s.id)}"${sel}>${escapeHtml(s.name)}</option>`;
+        }),
+    ].join("");
+    return `${field({
+        id: "food-edit-usual-amount",
+        label: "Usually buy",
+        control: `<div class="field-grid">
+<label>Amount<input id="food-edit-usual-amount" name="usual_amount" type="number" min="0" step="any" value="${escapeHtml(amountVal)}" /></label>
+<label>Unit<select id="food-edit-usual-unit" name="usual_unit">${unitOpts}</select></label>
+</div>`,
+    })}
+${field({
+    id: "food-edit-usual-store",
+    label: "at",
+    control: `<select id="food-edit-usual-store" name="usual_store_id">${storeOpts}</select>`,
+})}`;
+}
+
 function foodEditForm(
+    view: FoodsSettingsView,
     food: FoodRow | null,
     modalError?: string,
     productFields?: string,
@@ -273,6 +323,7 @@ ${nutrientInput("food-edit-alc", "alcohol_g", "Alcohol g", food?.alcoholG)}
 ${nutrientInput("food-edit-caf", "caffeine_mg", "Caffeine mg", food?.caffeineMg)}
 </div>
 <fieldset class="allergens choice-row"><legend>Allergens</legend>${allergenBoxes}</fieldset>
+${usualBuyFieldsEdit(view, food)}
 ${productFields ?? `<div data-fill-slot="product_fields"></div>`}
 <label><input type="checkbox" name="archived" value="1"${archived} /> Archived</label>
 <button type="submit" class="btn-primary">Save food</button>
@@ -416,7 +467,8 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   title: editFood ? `Edit ${editFood.name}` : "Edit food",
                   openOnLoad: editOpen,
                   body: foodEditForm(
-                      editFood,
+                      view,
+                      editOpen ? editFood : null,
                       editOpen ? errorBanner(view.error) : "",
                       editOpen && editFood
                           ? productFieldsSlot(view, editFood)

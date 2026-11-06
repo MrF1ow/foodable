@@ -267,6 +267,8 @@ function food(id: string, name: string, calories: number | null) {
         offSourceId: null,
         genericFoodId: null,
         usualProductId: null,
+        usualStoreId: null,
+        usualAmount: null,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",
@@ -492,6 +494,7 @@ async function loginDocument() {
 function foodsSettingsFixture(chrome: unknown) {
     return {
         chrome,
+        stores: [{ id: "s1", householdId: H, name: "Safeway", sortOrder: 0 }],
         foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
     };
 }
