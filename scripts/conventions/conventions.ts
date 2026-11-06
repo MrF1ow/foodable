@@ -122,6 +122,10 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "public/widgets/src/templates/grocery-list.html": "grocery",
     "src/domain/recipes.ts": "recipes",
     "src/domain/recipe-import.ts": "recipes",
+    "src/domain/recipe-link.ts": "recipes",
+    "src/domain/recipe-jsonld.ts": "recipes",
+    "src/domain/ingredient-lines.ts": "recipes",
+    "src/fetch-safe.ts": "platform",
     "src/mcp/tools/recipes.ts": "recipes",
     "src/web/routes/recipes.ts": "recipes",
     "src/web/pages/recipes.ts": "recipes",
@@ -188,6 +192,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
 };
 
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
+    { prefix: "src/domain/fixtures/recipe-pages/", area: "recipes" },
     { prefix: "src/db/", area: "db" },
     { prefix: "public/app/", area: "web" },
     { prefix: "src/web/components/", area: "web" },
