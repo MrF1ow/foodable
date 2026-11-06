@@ -303,7 +303,7 @@ export function parseIngredientLines(lines: string[]): {
             if (phrase) {
                 const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                 const re = new RegExp(
-                    `[,\s]*${escaped.replace(/ /g, "\\s+")}[.\s]*`,
+                    `[,\\s]*${escaped.replace(/ /g, "\\s+")}[.\\s]*`,
                     "i",
                 );
                 name = name

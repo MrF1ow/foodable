@@ -306,3 +306,9 @@ describe("parseIngredientLines review round 2", () => {
         expect(pinch.quantity).toBeNull();
     });
 });
+
+test("stripping a not-measured phrase never eats letters of the name", () => {
+    const item = parseIngredientLines(["Peppers,to taste"]).items[0]!;
+    expect(item.name).toBe("Peppers");
+    expect(item.note).toBe("to taste");
+});

@@ -184,3 +184,8 @@ describe("readRecipeJsonLd review round 2", () => {
         expect(recipe.yieldText).toBe("4 servings");
     });
 });
+
+test("a JSON-LD block wrapped in an HTML comment ending --!> still parses", () => {
+    const html = `<script type="application/ld+json"><!-- ${JSON.stringify({ "@type": "Recipe", name: "Soup", recipeIngredient: ["1 cup stock"] })} --!></script>`;
+    expect(readRecipeJsonLd(html)?.name).toBe("Soup");
+});
