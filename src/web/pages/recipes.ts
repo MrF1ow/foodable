@@ -243,9 +243,12 @@ export function renderRecipesPage(view: RecipesPageView): string {
         filter.safeFor !== "" ||
         filter.verification !== "";
     const verificationSeg = (value: "" | RecipeVerification, label: string) => {
-        const active = filter.verification === value ? "true" : "false";
         const href = recipesListHref(value, filter);
-        return `<a class="seg-btn" href="${href}" aria-selected="${active}">${escapeHtml(label)}</a>`;
+        // Links, not tabs: the current filter is aria-current, styled by the
+        // shared .seg-btn.active rule.
+        return filter.verification === value
+            ? `<a class="seg-btn active" href="${href}" aria-current="page">${escapeHtml(label)}</a>`
+            : `<a class="seg-btn" href="${href}">${escapeHtml(label)}</a>`;
     };
     const verificationField =
         filter.verification === ""

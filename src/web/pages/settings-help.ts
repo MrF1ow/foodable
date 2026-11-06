@@ -87,7 +87,7 @@ function glossaryHtml(): string {
                       id: PROMPT_FIELD_ID,
                       label: "Prompt",
                       control: `<textarea id="${PROMPT_FIELD_ID}" readonly rows="14">${escapeHtml(UNVERIFIED_RECIPES_PROMPT)}</textarea>`,
-                  })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}">Copy</button>`
+                  })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}" data-copy-status="${PROMPT_FIELD_ID}-status" aria-label="Copy prompt">Copy</button> <span id="${PROMPT_FIELD_ID}-status" class="muted" role="status" aria-live="polite"></span>`
                 : "";
         return `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
 <h3 class="subsection-title">${escapeHtml(entry.title)}</h3>

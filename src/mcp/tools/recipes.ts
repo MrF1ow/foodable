@@ -198,6 +198,43 @@ function recipeFields(recipe: Recipe) {
     };
 }
 
+/** The model-facing text of get_recipe's verification state and import data,
+ *  so a host that shows only `content` can still follow the Help prompt. */
+function getRecipeImportText(payload: {
+    verification: "verified" | "unverified";
+    problems: { message: string }[];
+    import: {
+        source_kind: string;
+        source_url: string | null;
+        source_text: string | null;
+        credit: string | null;
+        transcript: string | null;
+        unresolved_lines: string[];
+    } | null;
+}): string {
+    const parts: string[] = [];
+    parts.push(`\nVerification: ${payload.verification}`);
+    if (payload.problems.length > 0) {
+        parts.push(
+            `Problems:\n${payload.problems.map((row) => `- ${row.message}`).join("\n")}`,
+        );
+    }
+    const row = payload.import;
+    if (row) {
+        parts.push(
+            `Import: ${row.source_kind}${row.source_url ? ` ${row.source_url}` : ""}${row.credit ? ` by ${row.credit}` : ""}`,
+        );
+        if (row.unresolved_lines.length > 0) {
+            parts.push(
+                `Unresolved lines:\n${row.unresolved_lines.map((line) => `- ${line}`).join("\n")}`,
+            );
+        }
+        if (row.source_text) parts.push(`Source text:\n${row.source_text}`);
+        if (row.transcript) parts.push(`Transcript:\n${row.transcript}`);
+    }
+    return parts.join("\n");
+}
+
 export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
     const {
         callerHouseholdId,
@@ -296,7 +333,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         : payload.recipes
                                               .map(
                                                   (recipe) =>
-                                                      `${recipe.name} yield ${recipe.yield_portions} ${recipe.id}`,
+                                                      `${recipe.name} yield ${recipe.yield_portions} ${recipe.id}${recipe.verification === "unverified" ? " (unverified)" : ""}`,
                                               )
                                               .join("\n"),
                             },
@@ -441,7 +478,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                               )
                                               .join("\n")}`
                                         : ""
-                                }`,
+                                }${getRecipeImportText(payload)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1181,7 +1218,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                "Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Optional ingredient amount means to taste. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.",
+                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.',
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1375,9 +1412,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         args.recipe_id,
                     );
                     const payload = {
-                        status: checked.verified
-                            ? ("verified" as const)
-                            : ("unverified" as const),
+                        status: checked.verification,
                         recipe_id: args.recipe_id,
                         verification: checked.verification,
                         problems: wireProblems(checked.problems),
@@ -1388,7 +1423,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 type: "text",
                                 text: checked.verified
                                     ? `${recipe.name} passed the check.`
-                                    : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}).`,
+                                    : checked.verification === "verified"
+                                      ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
+                                      : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`,
                             },
                         ],
                         structuredContent: payload,

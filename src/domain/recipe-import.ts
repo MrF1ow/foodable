@@ -55,9 +55,44 @@ export class RecipeUnverifiedError extends Error {
     }
 }
 
+/**
+ * Notes that say an ingredient is deliberately not measured. Only these count
+ * as the plan's "explicit not measured"; a prep note such as "boneless" on an
+ * ingredient with no amount does not, so the check still asks for an amount.
+ */
+export const NOT_MEASURED_PHRASES: readonly string[] = [
+    "to taste",
+    "as needed",
+    "as required",
+    "as desired",
+    "for garnish",
+    "to garnish",
+    "for serving",
+    "to serve",
+    "optional",
+    "pinch",
+    "a pinch",
+    "dash",
+    "a dash",
+    "handful",
+    "a handful",
+    "some",
+    "not measured",
+];
+
+export function isNotMeasuredNote(note: string | null | undefined): boolean {
+    const text = note?.trim().toLowerCase();
+    if (!text) return false;
+    return NOT_MEASURED_PHRASES.some((phrase) =>
+        new RegExp(`(^|[^a-z])${phrase.replace(/ /g, "\\s+")}([^a-z]|$)`).test(
+            text,
+        ),
+    );
+}
+
 function ingredientAmountOk(ingredient: RecipeIngredient): boolean {
     if (ingredient.quantity != null) return true;
-    return Boolean(ingredient.note?.trim());
+    return isNotMeasuredNote(ingredient.note);
 }
 
 export function verifyRecipe(
@@ -145,6 +180,12 @@ export async function recheckRecipe(
     const ingredients = await store.listIngredients(householdId, recipeId);
     const importRow = await store.getImport(householdId, recipeId);
     const result = verifyRecipe(recipe, ingredients, importRow);
+    // A recipe with no import row was made by a person, who is the source:
+    // the plan keeps hand-made recipes verified. The check still reports what
+    // it found, but it never demotes them.
+    if (!importRow && recipe.verification === "verified") {
+        return { ...result, verification: "verified" };
+    }
     const verification: RecipeVerification = result.verified
         ? "verified"
         : "unverified";

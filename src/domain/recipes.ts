@@ -1802,8 +1802,9 @@ function validateImportLine(line: RecipeImportIngredient): {
                   amount: parseAmount(line.amount),
                   unit: parseUnit(line.unit),
               };
-    let note = parseOptionalText(line.note, "Ingredient note", 500);
-    if (quantity == null && !note) note = "to taste";
+    // No default note here: an import only counts as "not measured" when the
+    // caller says so (note "to taste"), otherwise the check asks for an amount.
+    const note = parseOptionalText(line.note, "Ingredient note", 500);
     return { quantity, note };
 }
 
