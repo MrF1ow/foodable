@@ -84,7 +84,8 @@ export async function runMergeJob(
 }
 
 function formatFoodLabel(name: string, brand: string | null): string {
-    const quoted = `"${name.replace(/"/g, '\\"')}"`;
+    // JSON string quoting escapes quotes, backslashes and control characters.
+    const quoted = JSON.stringify(name);
     if (brand == null) return quoted;
     return `${quoted} (${brand})`;
 }
@@ -130,7 +131,9 @@ export function formatMergeJobReport(report: MergeJobReport): string {
         if (h.skipped.length > 0) {
             lines.push("Skipped");
             for (const s of h.skipped) {
-                lines.push(`"${s.keep.name}" / "${s.drop.name}": ${s.reason}`);
+                lines.push(
+                    `${formatFoodLabel(s.keep.name, s.keep.brand)} / ${formatFoodLabel(s.drop.name, s.drop.brand)}: ${s.reason}`,
+                );
             }
         }
         lines.push("");
