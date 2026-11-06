@@ -27,7 +27,41 @@ Still open, and not features:
 
 ### Usual products
 
-A plain food ("Eggs") gets products (Kirkland, Great Value, farmers' market eggs, with or without a barcode) and one usual product. Recipes, grocery lines and logged items keep pointing at the plain food and read nutrition and unit factors through the usual product, so switching brands updates every recipe while logged meals keep their snapshots. Any product counts as its food for "already have", cooking and grocery aisles. It ships after a layout change: Settings moves behind a gear in the top bar, and the bottom tab becomes Household (Members, Items, Usual products). Comes before recipe import, which needs it for macros. Full plan: [usual-products-plan.md](./usual-products-plan.md).
+Shipped 2026-11-06 (#156, #157–#160, #162–#164). A plain food ("Eggs") has products (Kirkland, Great Value, farmers' market eggs) and one usual product, whose nutrition, unit factors and allergens recipes and grocery lines read through. Logged meals keep their snapshots. Any product counts as its food for "already have", cooking and aisles. Incomplete recipes name every gap, the Usual products list starts empty, and food search matches by words. Plan: [usual-products-plan.md](./usual-products-plan.md).
+
+### Food cleanup, notices and restock
+
+Three plans, built in one order because they depend on each other:
+
+- [food-duplicates-plan.md](./food-duplicates-plan.md): merge what is certain, ask about what is likely, collect the rest as Possible duplicates;
+- [notices-plan.md](./notices-plan.md): one model for every badge and reason, shared dismissals, a Needs attention count;
+- [restock-plan.md](./restock-plan.md): usual stores and amounts, expiring food back on the grocery list.
+
+| #   | Step                                                                                        | Plan       | Needs            |
+| --- | ------------------------------------------------------------------------------------------- | ---------- | ---------------- |
+| 1   | Fix `mergeFoods`: move stock history and meal items, fill missing fields, combine allergens | duplicates | —                |
+| 2   | Duplicate cleanup job, then a reviewed dry run and apply on production                      | duplicates | 1                |
+| 3   | Notices: model, registry, web component, recipe gaps moved onto it                          | notices    | —                |
+| 4   | Notices: expiry and allergens                                                               | notices    | 3                |
+| 5   | Usual store and usual amount                                                                | restock    | —                |
+| 6   | Grocery line `source`                                                                       | restock    | —                |
+| 7   | Notices in MCP tool results                                                                 | notices    | 3, 4             |
+| 8   | Shared dismissals and Needs attention                                                       | notices    | 7                |
+| 9   | Possible duplicates                                                                         | duplicates | 2, 8             |
+| 10  | "Add to grocery list" on expired and expiring notices                                       | restock    | 4, 5, 6          |
+| 11  | "Did you mean…?" for the agent                                                              | duplicates | 9                |
+| 12  | "Did you mean…?" in the app                                                                 | duplicates | 11               |
+| 13  | Restock setting (day and time)                                                              | restock    | —                |
+| 14  | Restock run                                                                                 | restock    | 5, 6, 10, 13     |
+| 15  | Plurals opt-in                                                                              | duplicates | 2, 11            |
+| 16  | Decide the catalog page (Items)                                                             | duplicates | all of the above |
+
+- Steps 5 and 6 don't touch the notices code, so they can be built as a second stack alongside 3 and 4.
+- Decisions needed on the way:
+    - **Before 8:** does the first-day Needs attention count show the real number, or start smaller?
+    - **Before 13:** does the household get its own timezone, rather than borrowing the owner's?
+    - **Before 14:** should restock skip a food that has enough fresh stock?
+- After 8, setup prompts and notifications can be built on notices (the notices plan's "Later").
 
 ### Camera barcode scanning
 
