@@ -87,6 +87,7 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
+import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { createMemoryRecipesStore } from "./domain/recipes.js";
 import {
@@ -3850,6 +3851,78 @@ describe("phone-app domain MCP tools", () => {
             expect(textOf(listed)).toContain("Cottage Cheese");
             const groceries = await call("list_grocery_lines");
             expect(textOf(groceries)).not.toContain("Cottage Cheese");
+        });
+    });
+
+    test("get_recipe lists macro gaps for no-nutrition ingredients", async () => {
+        await withUser(alice, async (call) => {
+            const plain = await call("upsert_food", { name: "Half and half" });
+            const plainId = plain.structuredContent?.id as string;
+            await call("upsert_food", {
+                food_id: plainId,
+                grams_per_ml: 1,
+            });
+            const recipe = await call("create_recipe", {
+                name: "Coffee",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: plainId,
+                amount: 60,
+                unit: "ml",
+            });
+            const got = await call("get_recipe", { id: recipeId });
+            expect(got.isError).toBeFalsy();
+            const macros = MACROS_ITEM_OUTPUT_SCHEMA.parse(
+                got.structuredContent?.macros_per_portion,
+            );
+            expect(macros.gaps[0]?.reason).toBe("no_nutrition");
+            expect(textOf(got)).toContain(
+                "Half and half: no nutrition — add it, or pick a usual product",
+            );
+        });
+    });
+
+    test("get_recipe names gaps when some ingredients have nutrition", async () => {
+        await withUser(alice, async (call) => {
+            const oats = await call("upsert_food", {
+                name: "Rolled oats",
+                calories: 389,
+                protein_g: 17,
+                carbs_g: 66,
+                fat_g: 7,
+            });
+            const half = await call("upsert_food", {
+                name: "Half and half",
+                grams_per_ml: 1,
+            });
+            const recipe = await call("create_recipe", {
+                name: "Porridge",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            for (const [food, amount, unit] of [
+                [oats, 50, "g"],
+                [half, 60, "ml"],
+            ] as const) {
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: food.structuredContent?.id as string,
+                    amount,
+                    unit,
+                });
+            }
+            const got = await call("get_recipe", { id: recipeId });
+            const macros = MACROS_ITEM_OUTPUT_SCHEMA.parse(
+                got.structuredContent?.macros_per_portion,
+            );
+            expect(macros.calories).toBe(194.5);
+            expect(macros.incomplete).toBe(true);
+            expect(textOf(got)).toContain(
+                "Per portion: 194.5 kcal, incomplete (Half and half: no nutrition — add it, or pick a usual product)",
+            );
         });
     });
 

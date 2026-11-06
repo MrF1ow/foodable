@@ -20,6 +20,7 @@ import {
     listRecipesFiltered,
     macrosForPerson,
     perPortionAmount,
+    recipeIngredientGaps,
     RecipeForbiddenError,
     RecipeInputError,
     recipeSteps,
@@ -30,7 +31,14 @@ import {
     updateRecipe,
     updateRecipeIngredient,
 } from "./recipes.js";
-import { createMemoryFoodsStore, updateFood } from "./foods.js";
+import {
+    createMemoryFoodsStore,
+    createProduct,
+    effectiveFoodsByIds,
+    findOrCreateManualFood,
+    setUsualProduct,
+    updateFood,
+} from "./foods.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import {
     renderRecipeDetailPage,
@@ -263,6 +271,9 @@ test("each without grams_per_each marks macros incomplete with a named reason", 
     expect(macros.incomplete).toBe(true);
     expect(macros.calories).toBeNull();
     expect(macros.incompleteReasons).toEqual(["Eggs: set grams per each"]);
+    expect(macros.gaps.map((g) => g.reason)).toEqual([
+        "missing_grams_per_each",
+    ]);
     await updateFood(foods, HH, ingredient.foodId!, { gramsPerEach: 50 });
     const complete = macrosForPerson(
         view.ingredients,
@@ -480,6 +491,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
             alcohol_g: null,
             incomplete: false,
             incompleteReasons: [],
+            gaps: [],
         },
         allergenWarning: "Contains peanut — Bob.",
         dislikeNote: "Bob dislikes cilantro.",
@@ -574,6 +586,7 @@ test("recipe pages use modals for create and detail actions", async () => {
             alcohol_g: 0,
             incomplete: false,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
     } as never);
@@ -663,6 +676,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             alcohol_g: null,
             incomplete: true,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
         error: "Only the creator or household owner can delete this recipe.",
@@ -727,6 +741,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             alcohol_g: 0,
             incomplete: false,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
         error: "Amount must be positive.",
@@ -776,6 +791,7 @@ test("recipe detail shows a page banner when openModalId does not match a dialog
             alcohol_g: null,
             incomplete: true,
             incompleteReasons: [],
+            gaps: [],
         },
         isOwner: true,
         error: "Unknown ingredient.",
@@ -997,6 +1013,255 @@ test("importRecipeFromText find-or-creates foods and reports nutrition gaps", as
         { lookup: async () => null },
     );
     expect(again.ingredients[0]?.foodId).toBe(result.ingredients[0]?.foodId);
+});
+
+function sampleIngredient(
+    over: Partial<{
+        id: string;
+        displayName: string;
+        foodId: string | null;
+        amount: number;
+        unit: string;
+    }> = {},
+) {
+    return {
+        id: over.id ?? "ing-1",
+        householdId: HH,
+        recipeId: "r1",
+        kind: "food" as const,
+        displayName: over.displayName ?? "Item",
+        quantity: { amount: over.amount ?? 100, unit: over.unit ?? "g" },
+        foodId: over.foodId === undefined ? "f1" : over.foodId,
+        sortOrder: 0,
+        note: null,
+    };
+}
+
+test("recipeIngredientGaps reports every reason in order", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await findOrCreateManualFood(
+        foods,
+        HH,
+        "food",
+        "Half and half",
+    );
+    await updateFood(foods, HH, plain.id, { gramsPerMl: 1 });
+    const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const eff = catalog.get(plain.id)!;
+    const ing = sampleIngredient({
+        displayName: "Half and half",
+        foodId: plain.id,
+        amount: 60,
+        unit: "ml",
+    });
+    expect(recipeIngredientGaps(ing, undefined)).toEqual([
+        expect.objectContaining({
+            reason: "no_food",
+            message: "Half and half: not linked to a food",
+        }),
+    ]);
+    expect(recipeIngredientGaps(ing, eff).map((g) => g.reason)).toEqual([
+        "no_nutrition",
+    ]);
+    expect(recipeIngredientGaps(ing, eff)[0]?.message).toBe(
+        "Half and half: no nutrition — add it, or pick a usual product",
+    );
+
+    const product = await createProduct(foods, HH, plain.id, {
+        name: "Store Half and Half",
+        defaultUnit: "ml",
+        nutritionSource: "manual",
+    });
+    await setUsualProduct(foods, HH, plain.id, product.id);
+    const withUsual = (await effectiveFoodsByIds(foods, HH, [plain.id])).get(
+        plain.id,
+    )!;
+    expect(recipeIngredientGaps(ing, withUsual)[0]?.message).toBe(
+        "Half and half: no nutrition — its usual product, Store Half and Half, has none either",
+    );
+
+    await updateFood(foods, HH, product.id, {
+        calories: 100,
+        proteinG: 2,
+        carbsG: 3,
+        fatG: 4,
+        nutritionSource: "manual",
+    });
+    const completeCatalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    expect(recipeIngredientGaps(ing, completeCatalog.get(plain.id)!)).toEqual(
+        [],
+    );
+
+    const partial = await findOrCreateManualFood(foods, HH, "food", "Yogurt");
+    await updateFood(foods, HH, partial.id, {
+        calories: 80,
+        proteinG: null,
+        carbsG: 6,
+        fatG: null,
+        nutritionSource: "manual",
+    });
+    const partialIng = sampleIngredient({
+        displayName: "Yogurt",
+        foodId: partial.id,
+        unit: "g",
+    });
+    const partialGaps = recipeIngredientGaps(
+        partialIng,
+        (await effectiveFoodsByIds(foods, HH, [partial.id])).get(partial.id),
+    );
+    expect(partialGaps[0]).toMatchObject({
+        reason: "partial_nutrition",
+        missingNutrients: ["protein_g", "fat_g"],
+        message: "Yogurt: missing protein and fat",
+    });
+
+    const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+    const eggIng = sampleIngredient({
+        displayName: "Eggs",
+        foodId: eggs.id,
+        amount: 2,
+        unit: "each",
+    });
+    const both = recipeIngredientGaps(
+        eggIng,
+        (await effectiveFoodsByIds(foods, HH, [eggs.id])).get(eggs.id),
+    );
+    expect(both.map((g) => g.reason)).toEqual([
+        "no_nutrition",
+        "missing_grams_per_each",
+    ]);
+
+    expect(
+        recipeIngredientGaps(
+            sampleIngredient({
+                displayName: "Flour",
+                foodId: plain.id,
+                unit: "g",
+            }),
+            (await effectiveFoodsByIds(foods, HH, [plain.id])).get(plain.id),
+        ),
+    ).toEqual([]);
+
+    const badUnit = sampleIngredient({
+        displayName: "Spice",
+        foodId: plain.id,
+        unit: "pinch",
+    });
+    expect(recipeIngredientGaps(badUnit, eff).map((g) => g.reason)).toContain(
+        "unknown_unit",
+    );
+});
+
+test("macrosForPerson names Half and half nutrition gap and completes with usual product", async () => {
+    const foods = createMemoryFoodsStore();
+    const recipes = createMemoryRecipesStore();
+    const plain = await findOrCreateManualFood(
+        foods,
+        HH,
+        "food",
+        "Half and half",
+    );
+    await updateFood(foods, HH, plain.id, { gramsPerMl: 1 });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Coffee",
+        yieldPortions: 1,
+    });
+    const ingredient = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Half and half",
+        amount: 60,
+        unit: "ml",
+    });
+    let catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const incomplete = macrosForPerson([ingredient], 1, 1, catalog);
+    expect(incomplete.incomplete).toBe(true);
+    expect(incomplete.gaps[0]?.reason).toBe("no_nutrition");
+    expect(incomplete.gaps[0]?.message).toBe(
+        "Half and half: no nutrition — add it, or pick a usual product",
+    );
+
+    const product = await createProduct(foods, HH, plain.id, {
+        name: "Member's Mark Half and Half",
+        defaultUnit: "ml",
+        calories: 130,
+        proteinG: 2,
+        carbsG: 4,
+        fatG: 11,
+        nutritionSource: "manual",
+        gramsPerMl: 1,
+    });
+    await setUsualProduct(foods, HH, plain.id, product.id);
+    catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const complete = macrosForPerson([ingredient], 1, 1, catalog);
+    expect(complete.incomplete).toBe(false);
+    expect(complete.gaps).toEqual([]);
+    expect(complete.calories).toBe(78);
+});
+
+test("macrosForPerson never sets incomplete without gaps", async () => {
+    const foods = createMemoryFoodsStore();
+    const recipes = createMemoryRecipesStore();
+    const cases: Array<() => Promise<void>> = [
+        async () => {
+            const oats = await findOrCreateManualFood(
+                foods,
+                HH,
+                "food",
+                "Oats",
+            );
+            await updateFood(foods, HH, oats.id, {
+                calories: 389,
+                proteinG: 17,
+                carbsG: 66,
+                fatG: 7,
+                nutritionSource: "manual",
+            });
+            const recipe = await createRecipe(recipes, {
+                householdId: HH,
+                creatorId: ALICE,
+                name: "Porridge",
+                yieldPortions: 1,
+            });
+            const ing = await addRecipeManualIngredient(recipes, foods, {
+                householdId: HH,
+                recipeId: recipe.id,
+                name: "Oats",
+                amount: 50,
+                unit: "g",
+            });
+            const catalog = await effectiveFoodsByIds(foods, HH, [oats.id]);
+            const macros = macrosForPerson([ing], 1, 1, catalog);
+            expect(macros.incomplete).toBe(macros.gaps.length > 0);
+        },
+        async () => {
+            const plain = await findOrCreateManualFood(
+                foods,
+                HH,
+                "food",
+                "Milk",
+            );
+            const recipe = await createRecipe(recipes, {
+                householdId: HH,
+                creatorId: ALICE,
+                name: "Drink",
+                yieldPortions: 1,
+            });
+            const ing = await addRecipeManualIngredient(recipes, foods, {
+                householdId: HH,
+                recipeId: recipe.id,
+                name: "Milk",
+                amount: 200,
+                unit: "ml",
+            });
+            const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+            const macros = macrosForPerson([ing], 1, 1, catalog);
+            expect(macros.incomplete).toBe(macros.gaps.length > 0);
+        },
+    ];
+    for (const run of cases) await run();
 });
 
 test("total portions default to the members' sum and may only grow it", () => {
