@@ -460,7 +460,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Upsert Food",
             description:
-                "Create or update a household catalog food. Pass food_id to edit. Pass generic_food_id when creating to add a product (with hand-entered nutrition) under a plain food; optional barcode attaches to the new row. Nutrition is per 100 g. Edit default_unit, grams_per_each, and grams_per_ml so counts and volumes convert. When creating without food_id, an existing food matches only on the same name and brand. Manual foods and supplies use name when creating.",
+                "Create or update a household catalog food. Pass food_id to edit. Pass generic_food_id when creating to add a product (with hand-entered nutrition) under a plain food; optional barcode attaches to the new row. Nutrition is per 100 g. Edit default_unit, grams_per_each, and grams_per_ml so counts and volumes convert. When creating without food_id, an existing food matches only on the same name and brand (punctuation and case aside) and keeps its stored name; pass food_id to rename. Manual foods and supplies use name when creating.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -616,6 +616,13 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             resolved.kind === "existing"
                                 ? resolved.food.id
                                 : null;
+                        // The name found the food; it is not a rename. A
+                        // loose match ("All purpose flour" for "All-purpose
+                        // flour") keeps the stored spelling. Rename by
+                        // passing food_id.
+                        if (resolved.kind === "existing") {
+                            patch.name = undefined;
+                        }
                         await assertFoodPatchValid(
                             store,
                             householdId,

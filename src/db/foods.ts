@@ -404,6 +404,23 @@ export function liveFoodsStore(): FoodsStore {
             }
             return hits;
         },
+        async listBarcodedFoodIds(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ food_id: unknown }>(
+                        tx,
+                        tx`
+                            select distinct food_id
+                            from ${tx.unsafe(FOOD_BARCODES)}
+                            where household_id = ${householdId}
+                        `,
+                    );
+                    return new Set(data.map((row) => String(row.food_id)));
+                } catch (err) {
+                    throw pgError("list barcoded food ids", err);
+                }
+            });
+        },
         async repointFoodRefs(householdId, fromId, toId) {
             return run(async (tx) => {
                 for (const table of REF_TABLES) {

@@ -4166,6 +4166,50 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("upsert_food by name reuses a punctuation variant without renaming it", async () => {
+        await withPat(async (call) => {
+            const flour = await call("upsert_food", {
+                name: "All-purpose flour",
+            });
+            const flourId = flour.structuredContent?.id as string;
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            const again = await call("upsert_food", {
+                name: "All purpose flour",
+                calories: 364,
+            });
+            expect(again.isError).toBeFalsy();
+            expect(again.structuredContent?.id).toBe(flourId);
+            expect(again.structuredContent?.name).toBe("All-purpose flour");
+            expect(again.structuredContent?.calories).toBe(364);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+            const renamed = await call("upsert_food", {
+                food_id: flourId,
+                name: "All purpose flour",
+            });
+            expect(renamed.structuredContent?.name).toBe("All purpose flour");
+        });
+    });
+
+    test("search_food word-matches household foods across punctuation and brand", async () => {
+        await withPat(async (call) => {
+            await call("upsert_food", {
+                name: "Half & Half",
+                brand: "Members Mark",
+            });
+            const r = await call("search_food", {
+                query: "Member's Mark half and half",
+            });
+            expect(r.isError).toBeFalsy();
+            expect(r.structuredContent?.foods).toEqual([
+                expect.objectContaining({
+                    name: "Half & Half",
+                    brand: "Members Mark",
+                    source: "household",
+                }),
+            ]);
+        });
+    });
+
     test("set_usual_product links a standalone product and sets the usual", async () => {
         await withPat(async (call) => {
             const eggs = await call("upsert_food", { name: "Eggs" });

@@ -6,12 +6,16 @@ import {
     findFoodByNameAndBrand,
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
+    findUpsertFoodByName,
+    looseFoodKey,
     mapOffAllergenTags,
+    matchFoodsByWords,
     mergeFoods,
     newFood,
     normalizeFoodName,
     searchFoodCatalog,
     updateFood,
+    usualProductRows,
     gramsPerEachFromOff,
 } from "./foods.js";
 
@@ -265,6 +269,236 @@ test("gramsPerEachFromOff prefills when the serving is a count", () => {
             serving_quantity_unit: "g",
         }),
     ).toBeNull();
+});
+
+test("matchFoodsByWords ranks whole-word matches ahead of prefix matches", () => {
+    const named = (name: string) =>
+        newFood({ householdId: HH, kind: "food", name });
+    const catalog = [
+        "Eggplant",
+        "Duck eggs",
+        "Kirkland Large Eggs",
+        "Milkshake",
+        "Whole milk",
+        "Hamburger",
+        "Black forest ham",
+    ].map(named);
+    const names = (query: string) =>
+        matchFoodsByWords(query, catalog, new Map()).map((f) => f.name);
+    expect(names("eggs")).toEqual([
+        "Duck eggs",
+        "Kirkland Large Eggs",
+        "Eggplant",
+    ]);
+    expect(names("milk")).toEqual(["Whole milk", "Milkshake"]);
+    expect(names("ham")).toEqual(["Black forest ham", "Hamburger"]);
+});
+
+test("matchFoodsByWords finds foods by tokens across name, brand, and aliases", () => {
+    const half = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Half & Half",
+        brand: "Members Mark",
+    });
+    const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
+    const largeEggs = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Kirkland Large Eggs",
+    });
+    const flourA = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "All purpose flour",
+    });
+    const flourB = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "all-purpose flour",
+    });
+    const aliasFood = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Cream",
+    });
+    const foods = [half, eggs, largeEggs, flourA, flourB, aliasFood];
+    const aliases = new Map<string, string[]>([
+        [aliasFood.id, ["half and half cream"]],
+    ]);
+
+    const markHits = matchFoodsByWords(
+        "Member's Mark half and half",
+        foods,
+        aliases,
+    );
+    expect(markHits[0]?.id).toBe(half.id);
+
+    const prefixHits = matchFoodsByWords("half and ha", foods, aliases);
+    expect(prefixHits.some((row) => row.id === half.id)).toBe(true);
+
+    const eggHits = matchFoodsByWords("eggs", foods, aliases);
+    expect(eggHits[0]?.id).toBe(eggs.id);
+
+    const flourHits = matchFoodsByWords("all purpose", foods, aliases);
+    expect(flourHits.map((row) => row.id).sort()).toEqual(
+        [flourA.id, flourB.id].sort(),
+    );
+
+    expect(
+        matchFoodsByWords("half and half cream", foods, aliases).some(
+            (row) => row.id === aliasFood.id,
+        ),
+    ).toBe(true);
+
+    expect(matchFoodsByWords("zzzznotfound", foods, aliases)).toEqual([]);
+    expect(matchFoodsByWords("", foods, aliases)).toEqual([]);
+    expect(matchFoodsByWords("   ", foods, aliases)).toEqual([]);
+});
+
+test("looseFoodKey resolves punctuation variants without merging egg and eggs", async () => {
+    const store = createMemoryFoodsStore();
+    const flour = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "All purpose flour" }),
+    );
+    const half = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Half & Half",
+            brand: "Store",
+        }),
+    );
+    await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "egg" }),
+    );
+
+    const hyphenFlour = await findOrCreateManualFood(
+        store,
+        HH,
+        "food",
+        "all-purpose flour",
+    );
+    expect(hyphenFlour.id).toBe(flour.id);
+    expect(
+        (await store.listFoods(HH)).filter((f) => !f.genericFoodId),
+    ).toHaveLength(3);
+
+    const looseHalf = await findOrCreateManualFood(
+        store,
+        HH,
+        "food",
+        "half and half",
+    );
+    expect(looseHalf.id).toBe(half.id);
+
+    const eggs = await findOrCreateManualFood(store, HH, "food", "eggs");
+    expect(eggs.name).toBe("eggs");
+    expect(looseFoodKey("egg")).not.toBe(looseFoodKey("eggs"));
+
+    const supply = await store.insertFood(
+        newFood({ householdId: HH, kind: "supply", name: "Foil" }),
+    );
+    const foodFoil = await findOrCreateManualFood(store, HH, "food", "foil");
+    expect(foodFoil.id).not.toBe(supply.id);
+});
+
+test("findUpsertFoodByName loose match respects brand rules", async () => {
+    const store = createMemoryFoodsStore();
+    await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Half & Half",
+            brand: "Members Mark",
+        }),
+    );
+    const withoutBrand = await findUpsertFoodByName(
+        store,
+        HH,
+        "food",
+        "half and half",
+        null,
+    );
+    expect(withoutBrand.kind).toBe("create");
+
+    const withBrand = await findUpsertFoodByName(
+        store,
+        HH,
+        "food",
+        "half and half",
+        "Members Mark",
+    );
+    expect(withBrand.kind).toBe("existing");
+});
+
+test("usualProductRows excludes barcoded and off-linked plain foods from addable", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    const scanned = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Cage Free Grade A Large Eggs",
+            offSourceId: "070852010016",
+        }),
+    );
+    const barcoded = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    await store.setBarcode(HH, "1234567890123", barcoded.id);
+    await productRow(store, plain.id, "Kirkland Large Eggs");
+
+    const barcodedIds = await store.listBarcodedFoodIds(HH);
+    expect(barcodedIds.has(barcoded.id)).toBe(true);
+
+    const { addable } = usualProductRows({
+        foods: await store.listFoods(HH),
+        barcodedFoodIds: barcodedIds,
+    });
+    expect(addable.map((row) => row.name)).toEqual([]);
+    expect(addable.some((row) => row.id === scanned.id)).toBe(false);
+    expect(addable.some((row) => row.id === barcoded.id)).toBe(false);
+});
+
+async function productRow(
+    store: ReturnType<typeof createMemoryFoodsStore>,
+    plainId: string,
+    name: string,
+) {
+    return store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name,
+            genericFoodId: plainId,
+            calories: 100,
+            nutritionSource: "manual",
+        }),
+    );
+}
+
+test("searchFoodCatalog household hits use word matching", async () => {
+    const store = createMemoryFoodsStore();
+    await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Half & Half",
+            brand: "Members Mark",
+        }),
+    );
+    const hits = await searchFoodCatalog(
+        store,
+        HH,
+        "Member's Mark half and half",
+        [],
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.name).toBe("Half & Half");
+    expect(hits[0]?.brand).toBe("Members Mark");
 });
 
 test("updateFood writes default_unit and gram factors", async () => {
