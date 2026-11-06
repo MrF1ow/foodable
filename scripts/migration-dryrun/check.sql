@@ -353,5 +353,81 @@ begin
     exception when raise_exception then
         if sqlerrm <> 'dryrun-rollback' then raise; end if;
     end;
+
+    -- Usual store and amount: columns, index, and both checks reject bad rows.
+    if not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'foods'
+          and column_name = 'usual_store_id'
+    ) or not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'foods'
+          and column_name = 'usual_amount'
+    ) or not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'foods'
+          and column_name = 'usual_unit'
+    ) then
+        raise exception 'foods usual store and amount columns are missing';
+    end if;
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public' and indexname = 'foods_usual_store_idx'
+    ) then
+        raise exception 'foods_usual_store_idx is missing';
+    end if;
+
+    begin
+        -- A valid row saves: 24 each at the fixture store.
+        insert into public.foods (
+            id, household_id, kind, name, normalized_name,
+            usual_store_id, usual_amount, usual_unit
+        ) values (
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01',
+            '11111111-1111-1111-1111-111111111111',
+            'food', 'Dry Usual Eggs', 'dry-usual-eggs',
+            '33333333-3333-3333-3333-333333333333', 24, 'each'
+        );
+
+        -- Each bad row must fail with check_violation. The inner block
+        -- catches only check_violation, so a row that saves raises a
+        -- raise_exception that escapes it and is not 'dryrun-rollback'.
+        begin
+            update public.foods set usual_unit = null
+            where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01';
+            raise exception 'usual amount saved without a unit';
+        exception when check_violation then null;
+        end;
+        begin
+            update public.foods set usual_amount = null
+            where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01';
+            raise exception 'usual unit saved without an amount';
+        exception when check_violation then null;
+        end;
+        begin
+            update public.foods set usual_amount = 0
+            where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01';
+            raise exception 'usual amount of zero saved';
+        exception when check_violation then null;
+        end;
+        begin
+            update public.foods set usual_amount = -1
+            where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01';
+            raise exception 'negative usual amount saved';
+        exception when check_violation then null;
+        end;
+
+        -- Removing the store clears it on the food.
+        delete from public.grocery_stores
+        where id = '33333333-3333-3333-3333-333333333333';
+        if (select usual_store_id from public.foods
+            where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab01') is not null then
+            raise exception 'deleting a store did not clear usual_store_id';
+        end if;
+
+        raise exception 'dryrun-rollback';
+    exception when raise_exception then
+        if sqlerrm <> 'dryrun-rollback' then raise; end if;
+    end;
 end
 $$;
