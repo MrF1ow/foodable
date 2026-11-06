@@ -8,15 +8,28 @@ export type ParseRecipeTextResult = {
     steps: string[];
     unresolved: string[];
     hasRecipe: boolean;
+    yieldPortions: number | null;
 };
 
 const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
 const VARIATION_SELECTOR_RE = /[\uFE00-\uFE0F]/g;
 
 const INGREDIENT_HEADER_RE =
-    /^[\s\p{Extended_Pictographic}\p{Emoji_Presentation}]*?(?:ingredients|you(?:'|')ll need|you will need|what you need|shopping list)\s*:?\s*$/iu;
+    /^[\s\p{Extended_Pictographic}\p{Emoji_Presentation}]*?(?:ingredients|you(?:'|')ll need|you will need|what you need|shopping list)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
 const STEP_HEADER_RE =
-    /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:directions|instructions|method|steps|how to make(?: it)?|preparation)\s*:?\s*$/iu;
+    /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:directions|instructions|method|steps|how to make(?: it)?|preparation)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
+const POST_STEP_HEADER_RE =
+    /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*?(?:notes|tips|storage|nutrition)\s*:?\s*[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F?\u20E3.,!?⬇️👇]*$/iu;
+
+const YIELD_LINE_START_RE = /^(?:serves|servings?|yield|makes)\b/i;
+const DURATION_PHRASE_RE =
+    /\b(?:ready in|prep(?:aration)? time|cook(?:ing)? time|total time)\b/i;
+const META_QUANTITY_UNIT_RE =
+    /\b\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|hours?|hrs?|times|days|people|portions)\b/i;
+const PROSE_LEAD_RE =
+    /^(?:i(?:'ve|\s)?|we(?:'ve|\s)?|you(?:'ve|\s)?|this|made|ready)\b/i;
+
+const PICTograph_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu;
 
 const BULLET_PREFIX_RE =
     /^[\s\p{Extended_Pictographic}\uFE0F?\u20E3]*(?:[•\-\*▪️✅✔️👉🔸]|\u2022)\s*/u;
@@ -69,6 +82,44 @@ function isStepHeader(line: string): boolean {
     return STEP_HEADER_RE.test(line.trim());
 }
 
+function isPostStepHeader(line: string): boolean {
+    return POST_STEP_HEADER_RE.test(line.trim());
+}
+
+function parseYieldPortionsFromLine(line: string): number | null {
+    const trimmed = line.trim();
+    const match = trimmed.match(
+        /^(?:serves|servings?|yield|makes)\s*:?\s*(\d+(?:\.\d+)?)/i,
+    );
+    if (!match) return null;
+    const n = Number(match[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function isYieldDurationOrProseMetaLine(line: string): boolean {
+    const trimmed = stripTrailingTags(stripBullet(line)).trim();
+    if (!trimmed) return false;
+    if (YIELD_LINE_START_RE.test(trimmed)) return true;
+    if (DURATION_PHRASE_RE.test(trimmed)) return true;
+    if (META_QUANTITY_UNIT_RE.test(trimmed)) return true;
+    if (PROSE_LEAD_RE.test(trimmed)) return true;
+    return false;
+}
+
+function stripPictographsFromName(name: string): string {
+    return name.replace(PICTograph_RE, "").replace(/\s+/g, " ").trim();
+}
+
+function collectYieldPortions(lines: string[]): number | null {
+    let yieldPortions: number | null = null;
+    for (const raw of lines) {
+        const line = stripTrailingTags(stripBullet(raw)).trim();
+        const parsed = parseYieldPortionsFromLine(line);
+        if (parsed != null) yieldPortions = parsed;
+    }
+    return yieldPortions;
+}
+
 export function stripStepPrefix(line: string): string {
     const keycap = line.match(KEYCAP_STEP_RE);
     if (keycap) {
@@ -85,6 +136,7 @@ export function isNumberedStepLine(line: string): boolean {
 }
 
 function lineHasStrictIngredientSignal(line: string): boolean {
+    if (isYieldDurationOrProseMetaLine(line)) return false;
     const { items, unresolved } = parseIngredientLines([line]);
     if (unresolved.length > 0) return true;
     for (const item of items) {
@@ -101,6 +153,7 @@ function isIngredientBlockSubheader(line: string): boolean {
 function isProseLine(line: string): boolean {
     const trimmed = stripTrailingTags(stripBullet(line)).trim();
     if (!trimmed) return false;
+    if (isYieldDurationOrProseMetaLine(trimmed)) return true;
     if (isIngredientHeader(trimmed) || isStepHeader(trimmed)) return false;
     if (isNumberedStepLine(trimmed)) return false;
     if (lineHasStrictIngredientSignal(trimmed)) return false;
@@ -115,6 +168,7 @@ function pickName(candidates: string[], fallbackName?: string): string | null {
         let line = stripTrailingTags(stripBullet(raw)).trim();
         if (!line || isHashtagMentionOnlyLine(line)) continue;
         if (isIngredientHeader(line) || isStepHeader(line)) continue;
+        if (isYieldDurationOrProseMetaLine(line)) continue;
         if (isNumberedStepLine(line)) continue;
         if (lineHasStrictIngredientSignal(line)) continue;
         line = line
@@ -161,7 +215,7 @@ function parseStructured(lines: string[]): {
     ingredientLines: string[];
     stepLines: string[];
 } {
-    let mode: "scan" | "ingredients" | "steps" = "scan";
+    let mode: "scan" | "ingredients" | "steps" | "after_steps" = "scan";
     const nameCandidates: string[] = [];
     const ingredientLines: string[] = [];
     const stepLines: string[] = [];
@@ -178,13 +232,26 @@ function parseStructured(lines: string[]): {
             mode = "steps";
             continue;
         }
+        if (isPostStepHeader(line)) {
+            mode = "after_steps";
+            continue;
+        }
         if (isIngredientBlockSubheader(line)) {
             mode = "ingredients";
-            ingredientLines.push(raw);
+            if (!isYieldDurationOrProseMetaLine(line)) {
+                ingredientLines.push(raw);
+            }
+            continue;
+        }
+
+        if (mode === "after_steps") {
             continue;
         }
 
         if (mode === "scan") {
+            if (isYieldDurationOrProseMetaLine(line)) {
+                continue;
+            }
             if (lineHasStrictIngredientSignal(line)) {
                 mode = "ingredients";
                 ingredientLines.push(raw);
@@ -196,7 +263,9 @@ function parseStructured(lines: string[]): {
             continue;
         }
         if (mode === "ingredients") {
-            ingredientLines.push(raw);
+            if (!isYieldDurationOrProseMetaLine(line)) {
+                ingredientLines.push(raw);
+            }
             continue;
         }
         if (isNumberedStepLine(line)) {
@@ -301,20 +370,27 @@ export function parseRecipeText(
         ingredientRaw.map((l) => stripTrailingTags(stripBullet(l)).trim()),
     );
 
+    const ingredients = parsed.items.map((item) => ({
+        ...item,
+        name: stripPictographsFromName(item.name),
+    }));
+
     const steps = stepLines.map((s) => s.trim()).filter((s) => s.length > 0);
 
-    const ingredientLikeCount = parsed.items.length + parsed.unresolved.length;
+    const ingredientLikeCount = ingredients.length + parsed.unresolved.length;
     const hasRecipe = ingredientLikeCount > 0;
 
     const unresolved = [...parsed.unresolved];
 
     const name = pickName(nameCandidates, opts.fallbackName);
+    const yieldPortions = collectYieldPortions(lines);
 
     return {
         name,
-        ingredients: parsed.items,
+        ingredients,
         steps,
         unresolved,
         hasRecipe,
+        yieldPortions,
     };
 }

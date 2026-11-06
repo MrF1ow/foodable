@@ -6824,9 +6824,35 @@ describe("authenticated dashboard HTTP", () => {
                 import_step: "paste",
                 url: "https://www.pinterest.com/pin/site-only/",
                 website_url: "https://example.com/pin-target",
+                credit: "Pin Chef",
             }).toString(),
         });
         expect(pinSite.status).toBe(303);
+        const pinRecipeId = (pinSite.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        const pinImport = await db.recipesStore.getImport("hh-1", pinRecipeId);
+        expect(pinImport?.credit).toBe("Pin Chef");
+
+        const pinBadSite = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/bad-site/",
+                website_url: "javascript:alert(1)",
+                text: "Saved caption text",
+                credit: "Still Here",
+            }).toString(),
+        });
+        expect(pinBadSite.status).toBe(422);
+        const pinBadHtml = await pinBadSite.text();
+        expect(pinBadHtml).toContain("That doesn't look like a web link.");
+        expect(pinBadHtml).toContain("Saved caption text");
+        expect(pinBadHtml).toContain('value="Still Here"');
 
         const pinEmpty = await siteApp.request("http://x/recipes/import", {
             method: "POST",

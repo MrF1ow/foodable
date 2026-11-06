@@ -93,6 +93,7 @@ export type RecipesPageView = {
     importPasteStep?: boolean;
     importPasteText?: string;
     importCredit?: string;
+    importWebsiteError?: string;
     importSourceKind?: RecipeSourceKind;
     importSourceLabel?: string;
 };
@@ -326,12 +327,15 @@ export function renderRecipesPage(view: RecipesPageView): string {
                             label: "Creator",
                             control: `<input id="import-credit" name="credit" type="text" maxlength="120" autocomplete="off" value="${importCreditValue}" />`,
                         });
+              const websiteError = view.importWebsiteError
+                  ? `<span class="field-error">${escapeHtml(view.importWebsiteError)}</span>`
+                  : "";
               const pinterestFields =
                   kind === "pinterest"
                       ? `${field({
                             id: "import-website-url",
                             label: "Recipe website link",
-                            control: `<input id="import-website-url" name="website_url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="https://…" />`,
+                            control: `<input id="import-website-url" name="website_url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="https://…" />${websiteError}`,
                         })}<p class="muted recipe-import-pin-hint">Pins usually lead to the recipe's website. Paste that link here.</p><h3 class="recipe-import-or">Or paste the recipe</h3>`
                       : "";
               const textRequired = kind === "pinterest" ? "" : " required";

@@ -165,6 +165,7 @@ function isPinterestHost(host: string): boolean {
 function isYoutubeHost(host: string): boolean {
     const h = host.toLowerCase();
     if (hostMatches(h, "youtube.com")) return true;
+    if (hostMatches(h, "youtube-nocookie.com")) return true;
     if (hostMatches(h, "m.youtube.com")) return true;
     if (hostMatches(h, "music.youtube.com")) return true;
     if (hostMatches(h, "youtu.be")) return true;
@@ -189,6 +190,14 @@ export function recipeSource(url: URL): RecipeSourceInfo {
     const host = url.hostname.toLowerCase();
     const pasteOnly = hostOnPasteOnlyList(host);
 
+    if (hostMatches(host, "ig.me")) {
+        return {
+            kind: "instagram",
+            label: "Instagram",
+            shortLink: true,
+            pasteOnly,
+        };
+    }
     if (hostMatches(host, "instagram.com") || hostMatches(host, "instagr.am")) {
         return {
             kind: "instagram",

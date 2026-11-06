@@ -806,6 +806,110 @@ describe("importRecipeFromUrl", () => {
         expect(await recipes.listRecipes(HH)).toHaveLength(0);
     });
 
+    test("yield-only caption returns no_recipe_in_text", async () => {
+        const recipes = createMemoryRecipesStore();
+        const fetcher = fakeFetcher({});
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/yield-only/",
+                text: "Serves 4",
+            },
+        );
+        expect(result.status).toBe("no_recipe_in_text");
+        expect(await recipes.listRecipes(HH)).toHaveLength(0);
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("caption yield is stored on imported recipe", async () => {
+        const recipes = createMemoryRecipesStore();
+        const text = [
+            "Sunday cake",
+            "Serves 8",
+            "Ingredients:",
+            "2 eggs",
+            "Method:",
+            "Mix",
+        ].join("\n");
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/yield/",
+                text,
+            },
+        );
+        expect(result.status).toBe("imported");
+        const recipe = await recipes.getRecipe(HH, result.recipeId!);
+        expect(recipe?.yieldPortions).toBe(8);
+        expect(recipe?.name).toBe("Sunday cake");
+    });
+
+    test("ig.me and youtube-nocookie links never call fetcher without text", async () => {
+        const fetcher = fakeFetcher({});
+        for (const url of [
+            "https://ig.me/ReelABC",
+            "https://www.youtube-nocookie.com/embed/abc123",
+        ]) {
+            const result = await importRecipeFromUrl(
+                {
+                    recipes: createMemoryRecipesStore(),
+                    foods: createMemoryFoodsStore(),
+                    fetcher,
+                },
+                {
+                    householdId: HH,
+                    creatorId: USER,
+                    url,
+                },
+            );
+            expect(result.status).toBe("paste_needed");
+        }
+        expect(fetcher.calls.fetch).toBe(0);
+        expect(fetcher.calls.robots).toBe(0);
+    });
+
+    test("website JSON-LD import stores credit", async () => {
+        const recipes = createMemoryRecipesStore();
+        const fetcher = fakeFetcher({
+            robots: true,
+            fetch: () => ({
+                ok: true as const,
+                body: loadFixture("array-top-level"),
+            }),
+        });
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/from-pin",
+                credit: "Pin Creator",
+            },
+        );
+        expect(result.status).toBe("imported");
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.credit).toBe("Pin Creator");
+        expect(fetcher.calls.fetch).toBe(1);
+    });
+
     test("website link with pasted text skips fetch and stores source text", async () => {
         const fetcher = fakeFetcher({});
         const recipes = createMemoryRecipesStore();

@@ -165,9 +165,21 @@ describe("recipeSource", () => {
             shortLink: true,
         },
         {
+            url: "https://www.youtube-nocookie.com/embed/abc",
+            kind: "youtube",
+            label: "YouTube",
+            shortLink: false,
+        },
+        {
             url: "https://youtu.be/abc",
             kind: "youtube",
             label: "YouTube",
+            shortLink: true,
+        },
+        {
+            url: "https://ig.me/abc",
+            kind: "instagram",
+            label: "Instagram",
             shortLink: true,
         },
         {
