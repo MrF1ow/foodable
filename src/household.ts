@@ -30,11 +30,22 @@ export type RecipeSearchPlace = {
     url: string | null;
 };
 
+export type SocialReadersPreferences = {
+    tiktok: boolean;
+    facebook: boolean;
+};
+
+export const DEFAULT_SOCIAL_READERS: SocialReadersPreferences = {
+    tiktok: false,
+    facebook: false,
+};
+
 export type HouseholdPreferences = {
     constraints: string[];
     budget: string | null;
     shoppingCadence: string | null;
     unverifiedRecipeExpiryDays: number | null;
+    socialReaders: SocialReadersPreferences;
 };
 
 export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
@@ -42,6 +53,7 @@ export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     budget: null,
     shoppingCadence: null,
     unverifiedRecipeExpiryDays: null,
+    socialReaders: { ...DEFAULT_SOCIAL_READERS },
 };
 
 export type HouseholdConfig = {
@@ -70,6 +82,10 @@ export type HouseholdConfigWire = {
         budget: string | null;
         shopping_cadence: string | null;
         unverified_recipe_expiry_days: number | null;
+        social_readers: {
+            tiktok: boolean;
+            facebook: boolean;
+        };
     };
 };
 
@@ -150,6 +166,9 @@ function copyHousehold(household: Household): Household {
             shoppingCadence: household.preferences.shoppingCadence,
             unverifiedRecipeExpiryDays:
                 household.preferences.unverifiedRecipeExpiryDays,
+            socialReaders: {
+                ...household.preferences.socialReaders,
+            },
         },
     };
 }
@@ -518,6 +537,12 @@ export function householdConfigFromRow(row: {
     );
     if (!unverifiedRecipeExpiryDays.ok) return unverifiedRecipeExpiryDays;
 
+    const socialRaw =
+        (prefs as { socialReaders?: unknown; social_readers?: unknown })
+            .socialReaders ??
+        (prefs as { social_readers?: unknown }).social_readers;
+    const socialReaders = parseSocialReadersPrefs(socialRaw);
+
     return {
         ok: true,
         value: {
@@ -528,6 +553,40 @@ export function householdConfigFromRow(row: {
                 budget,
                 shoppingCadence,
                 unverifiedRecipeExpiryDays: unverifiedRecipeExpiryDays.value,
+                socialReaders,
+            },
+        },
+    };
+}
+
+function parseSocialReadersPrefs(value: unknown): SocialReadersPreferences {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ...DEFAULT_SOCIAL_READERS };
+    }
+    const record = value as {
+        tiktok?: unknown;
+        facebook?: unknown;
+    };
+    return {
+        tiktok: record.tiktok === true,
+        facebook: record.facebook === true,
+    };
+}
+
+export type SocialReaderToggle = "tiktok" | "facebook";
+
+export function setSocialReaderEnabled(
+    config: HouseholdConfig,
+    reader: SocialReaderToggle,
+    enabled: boolean,
+): HouseholdConfig {
+    return {
+        ...config,
+        preferences: {
+            ...config.preferences,
+            socialReaders: {
+                ...config.preferences.socialReaders,
+                [reader]: enabled,
             },
         },
     };
@@ -587,6 +646,10 @@ export function householdConfigToWire(
             shopping_cadence: config.preferences.shoppingCadence,
             unverified_recipe_expiry_days:
                 config.preferences.unverifiedRecipeExpiryDays,
+            social_readers: {
+                tiktok: config.preferences.socialReaders.tiktok,
+                facebook: config.preferences.socialReaders.facebook,
+            },
         },
     };
 }
@@ -729,6 +792,7 @@ export function mergeHouseholdConfig(
                 patch.preferences?.unverifiedRecipeExpiryDays !== undefined
                     ? patch.preferences.unverifiedRecipeExpiryDays
                     : current.preferences.unverifiedRecipeExpiryDays,
+            socialReaders: current.preferences.socialReaders,
         },
     };
 }

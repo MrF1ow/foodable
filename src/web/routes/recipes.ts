@@ -27,7 +27,11 @@ import {
     updateRecipeIngredient,
     resolveTotalPortions,
 } from "../../domain/recipes.js";
-import { listHouseholdMembers } from "../../db/household.js";
+import {
+    getHouseholdConfig,
+    listHouseholdMembers,
+} from "../../db/household.js";
+import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import {
@@ -70,6 +74,18 @@ import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 
 export const recipesRoutes = new Hono();
+
+async function recipeImportDeps(householdId: string) {
+    const config = await getHouseholdConfig(householdId);
+    return {
+        recipes: liveRecipesStore(),
+        foods: liveFoodsStore(),
+        fetcher: recipeImportFetcher(),
+        transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
+        readers: config.preferences.socialReaders,
+        readerStatus: liveSocialReaderStatusStore(),
+    };
+}
 
 function redirectIfUnverified(
     c: Parameters<typeof redirectWithToast>[0],
@@ -199,12 +215,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         }
     }
 
-    const importDeps = {
-        recipes: liveRecipesStore(),
-        foods: liveFoodsStore(),
-        fetcher: recipeImportFetcher(),
-        transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
-    };
+    const importDeps = await recipeImportDeps(member.householdId);
     let outcome = await importRecipeFromUrl(importDeps, {
         householdId: member.householdId,
         creatorId: userId,

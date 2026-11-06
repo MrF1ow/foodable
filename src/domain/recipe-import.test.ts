@@ -26,6 +26,8 @@ import {
     type Recipe,
     type RecipeIngredient,
 } from "./recipes.js";
+import { createMemorySocialReaderStatusStore } from "./social-readers.js";
+import { readerFailureSentence } from "../copy/social-readers.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "fixtures/recipe-pages");
 const CAPTION_DIR = join(import.meta.dir, "fixtures/captions");
@@ -559,6 +561,137 @@ describe("importRecipeFromUrl", () => {
             expect(fetcher.calls.fetch).toBe(0);
         },
     );
+
+    test("tiktok reader off leaves vm.tiktok.com unexpanded", async () => {
+        const fetcher = fakeFetcher({});
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                readers: { tiktok: false, facebook: false },
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://vm.tiktok.com/ZM1/",
+            },
+        );
+        expect(result.status).toBe("paste_needed");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("tiktok reader on imports with read origin and records success", async () => {
+        const tiktokHtml = readFileSync(
+            join(import.meta.dir, "fixtures/social/tiktok-no-subtitles.html"),
+            "utf8",
+        );
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: true, body: tiktokHtml }),
+        });
+        const status = createMemorySocialReaderStatusStore();
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                readers: { tiktok: true, facebook: false },
+                readerStatus: status,
+                now: () => new Date("2026-11-05T12:00:00.000Z"),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.tiktok.com/@chef/video/123",
+            },
+        );
+        expect(result.status).toMatch(/imported|unverified_needs_review/);
+        expect(fetcher.calls.fetch).toBeGreaterThan(0);
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceTextOrigin).toBe("read");
+        const rows = await status.get(HH);
+        expect(rows.find((r) => r.reader === "tiktok")?.lastSuccessAt).toBe(
+            "2026-11-05T12:00:00.000Z",
+        );
+    });
+
+    test("tiktok reader failure falls through with readerFailure sentence", async () => {
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: true, body: "<html></html>" }),
+        });
+        const status = createMemorySocialReaderStatusStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                readers: { tiktok: true, facebook: false },
+                readerStatus: status,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.tiktok.com/@chef/video/123",
+            },
+        );
+        expect(result.status).toBe("paste_needed");
+        expect(result.readerFailure).toBe(
+            readerFailureSentence("tiktok", "format_changed"),
+        );
+        const rows = await status.get(HH);
+        expect(rows.find((r) => r.reader === "tiktok")?.lastFailureReason).toBe(
+            "format_changed",
+        );
+    });
+
+    test("text given skips reader even when enabled", async () => {
+        const fetcher = fakeFetcher({
+            fetch: () => {
+                throw new Error("reader should not run");
+            },
+        });
+        const caption = loadCaption("clean-headers");
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                readers: { tiktok: true, facebook: true },
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.tiktok.com/@chef/video/123",
+                text: caption,
+            },
+        );
+        expect(result.status).toMatch(/imported|unverified_needs_review/);
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("instagram never reads when flags are set", async () => {
+        const fetcher = fakeFetcher({
+            fetch: () => {
+                throw new Error("reader should not run");
+            },
+        });
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                readers: { tiktok: true, facebook: true },
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/abc/",
+            },
+        );
+        expect(result.status).toBe("paste_needed");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
 
     test("paste-only site list is paste_needed without fetch", async () => {
         const fetcher = fakeFetcher({});

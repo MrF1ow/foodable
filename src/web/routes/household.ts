@@ -45,6 +45,7 @@ import {
     setHouseholdMemberRole,
     transferHouseholdOwnership,
     updateHouseholdConfig,
+    updateSocialReaderEnabled,
 } from "../../db/household.js";
 import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
@@ -79,7 +80,10 @@ import {
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
+    HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
+    HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
 } from "../pages/household.js";
+import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
@@ -468,6 +472,43 @@ householdRoutes.post("/household/name", requireManager, async (c) => {
     const config = await getHouseholdConfig(manager.householdId);
     await updateHouseholdConfig(manager.householdId, { ...config, name });
     return redirectWithToast(c, "/household", "settings.household.name.saved");
+});
+
+householdRoutes.post("/household/social-readers", requireOwner, async (c) => {
+    const userId = c.get("userId");
+    const owner = siteMember(c);
+    const body = await c.req.parseBody();
+    const readerRaw = formText(body, "reader").trim();
+    const enabledRaw = formText(body, "enabled").trim();
+    const reader =
+        readerRaw === "tiktok" || readerRaw === "facebook" ? readerRaw : null;
+    const enabled = enabledRaw === "1";
+    const modalId =
+        reader === "tiktok"
+            ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
+            : reader === "facebook"
+              ? HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID
+              : undefined;
+    if (!reader || (enabledRaw !== "1" && enabledRaw !== "0")) {
+        const page = await renderHouseholdSettingsRoute(userId, {
+            error: "Unknown reader.",
+        });
+        return c.html(page.html, 400);
+    }
+    if (enabled && formText(body, "confirm").trim() !== "1") {
+        const page = await renderHouseholdSettingsRoute(userId, {
+            error: "Confirm you understand the terms before turning this on.",
+            openModalId: modalId,
+        });
+        return c.html(page.html, 400);
+    }
+    await updateSocialReaderEnabled(owner.householdId, reader, enabled);
+    return redirectWithToast(
+        c,
+        "/household",
+        enabled ? "household.social-reader.on" : "household.social-reader.off",
+        { platform: SOCIAL_READER_LABELS[reader] },
+    );
 });
 
 householdRoutes.post(

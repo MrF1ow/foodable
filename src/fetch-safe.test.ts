@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import pkg from "../package.json" with { type: "json" };
 import {
@@ -26,6 +28,11 @@ describe("FOODABLE_USER_AGENT", () => {
         expect(FOODABLE_USER_AGENT).toBe(
             `Mozilla/5.0 (compatible; Foodable/${pkg.version}; +https://github.com/MrF1ow/foodable/blob/main/docs/fetcher.md)`,
         );
+    });
+
+    test("links to docs/fetcher.md in the repo", () => {
+        const doc = join(import.meta.dir, "..", "docs", "fetcher.md");
+        expect(existsSync(doc)).toBe(true);
     });
 });
 

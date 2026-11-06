@@ -4,6 +4,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { getHouseholdConfig } from "../../db/household.js";
+import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { insertMeal } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveRulesStore } from "../../db/rules.js";
@@ -110,6 +111,7 @@ export const IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA = z.object({
         })
         .nullable(),
     unresolved_lines: z.array(z.string()),
+    reader_failure: z.string().nullable(),
     message: z.string(),
 });
 
@@ -1478,7 +1480,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From URL",
             description:
-                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
+                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. The household may have turned on an opt-in TikTok or Facebook reader; if status is still paste_needed, reader_failure explains why and you should ask for the caption. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1509,12 +1511,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "import_recipe_from_url",
                 async () => {
                     const actor = await callerActor();
+                    const household = await getHouseholdConfig(
+                        actor.householdId,
+                    );
                     const outcome = await importRecipeFromUrl(
                         {
                             recipes: liveRecipesStore(),
                             foods: liveFoodsStore(),
                             fetcher: recipeImportFetcher(),
                             transaction: (fn) => run(async () => fn()),
+                            readers: household.preferences.socialReaders,
+                            readerStatus: liveSocialReaderStatusStore(),
                         },
                         {
                             householdId: actor.householdId,
@@ -1539,6 +1546,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                               }
                             : null,
                         unresolved_lines: outcome.unresolvedLines,
+                        reader_failure: outcome.readerFailure,
                         message: importOutcomeMessage(outcome),
                     };
                     IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);

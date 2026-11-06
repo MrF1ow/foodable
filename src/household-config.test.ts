@@ -17,6 +17,7 @@ const current: HouseholdConfig = {
         budget: "tight",
         shoppingCadence: "weekly",
         unverifiedRecipeExpiryDays: null,
+        socialReaders: { tiktok: false, facebook: false },
     },
 };
 
@@ -46,8 +47,27 @@ test("preference merge keeps unspecified fields", () => {
             budget: "ok",
             shoppingCadence: "monthly",
             unverifiedRecipeExpiryDays: null,
+            socialReaders: { tiktok: false, facebook: false },
         },
     });
+});
+
+test("preferences patch ignores socialReaders", () => {
+    const parsed = parseHouseholdConfigPatch({
+        preferences: {
+            social_readers: { tiktok: true, facebook: true },
+            budget: "low",
+        },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(
+        (parsed.value.preferences as { socialReaders?: unknown } | undefined)
+            ?.socialReaders,
+    ).toBeUndefined();
+    expect(
+        mergeHouseholdConfig(current, parsed.value).preferences.socialReaders,
+    ).toEqual({ tiktok: false, facebook: false });
 });
 
 test("unverified recipe expiry defaults null and validates range", () => {
