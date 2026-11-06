@@ -50,12 +50,14 @@ import { liveSettingsStore } from "../../db/settings.js";
 import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import {
     buildFoodUpdate,
+    addProduct,
     createProduct,
     findFoodById,
     findOrCreateFoodByBarcode,
     FoodsInputError,
     linkProduct,
     parseUsualPurchase,
+    removeProduct,
     setUsualProduct,
     updateFood,
 } from "../../domain/foods.js";
@@ -68,7 +70,10 @@ import {
     renderUsualProductsListPage,
     renderUsualProductsPickerPage,
 } from "../loaders.js";
-import { safeReturnPath } from "../usual-products-path.js";
+import {
+    safeReturnPath,
+    usualProductsPickerHref,
+} from "../usual-products-path.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
@@ -262,24 +267,13 @@ householdRoutes.post(
             if (!picked) {
                 throw new FoodsInputError("Pick a food or scan a barcode.");
             }
-            await setUsualProduct(
-                store,
-                member.householdId,
-                foodId,
-                picked.id,
-                {
-                    stores: liveSettingsStore(),
-                },
-            );
+            await addProduct(store, member.householdId, foodId, picked.id);
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
             return c.html(page.html, page.status);
         }
-        // toast: none (return path after pick)
-        return c.redirect(
-            safeReturnPath(from, "/household/usual-products"),
-            303,
-        );
+        // toast: none. Back to the list, which now shows the product.
+        return c.redirect(usualProductsPickerHref(foodId, from), 303);
     },
 );
 
@@ -294,7 +288,9 @@ householdRoutes.post(
         const asText = body as Record<string, string | File>;
         const from = formText(asText, "from");
         try {
-            await createProduct(liveFoodsStore(), member.householdId, foodId, {
+            const store = liveFoodsStore();
+            const plain = await findFoodById(store, member.householdId, foodId);
+            await createProduct(store, member.householdId, foodId, {
                 name: formText(asText, "name"),
                 brand: formText(asText, "brand"),
                 gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
@@ -308,17 +304,40 @@ householdRoutes.post(
                 alcoholG: formOptionalNutrient(asText, "alcohol_g"),
                 caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
                 allergens: formAllergens(body),
-                makeUsual: true,
+                // Same rule as addProduct: the first product is usual.
+                makeUsual: !plain.usualProductId,
             });
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
             return c.html(page.html, page.status);
         }
-        // toast: none (return path after add product)
-        return c.redirect(
-            safeReturnPath(from, "/household/usual-products"),
-            303,
-        );
+        // toast: none. Back to the list, which now shows the product.
+        return c.redirect(usualProductsPickerHref(foodId, from), 303);
+    },
+);
+
+householdRoutes.post(
+    "/household/usual-products/:foodId/products/:productId/remove",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("foodId");
+        const body = await c.req.parseBody();
+        const from = formText(body, "from");
+        try {
+            await removeProduct(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+                c.req.param("productId"),
+            );
+        } catch (err) {
+            const page = await usualPickerFormError(userId, foodId, err, from);
+            return c.html(page.html, page.status);
+        }
+        // toast: none. The list shows the product is gone.
+        return c.redirect(usualProductsPickerHref(foodId, from), 303);
     },
 );
 

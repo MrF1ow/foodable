@@ -1631,6 +1631,43 @@ export async function setUsualPurchase(
     return saveFood(store, next);
 }
 
+/**
+ * Adds a product to a plain food's list. Any product counts as the food; only
+ * the usual one sets its nutrition, store and amount. So adding a product
+ * leaves the current usual alone, and makes the new one usual only when the
+ * food has none yet (the first product a food gets is the one it reads).
+ */
+export async function addProduct(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    productId: string,
+): Promise<{ product: Food; madeUsual: boolean }> {
+    const food = await requireLiveFood(store, householdId, foodId);
+    if (food.genericFoodId) {
+        throw new FoodsInputError("That food is a product of another food.");
+    }
+    const product = await linkProduct(store, householdId, productId, foodId);
+    const refreshed = await requireLiveFood(store, householdId, foodId);
+    if (refreshed.usualProductId) return { product, madeUsual: false };
+    await setUsualProduct(store, householdId, foodId, productId);
+    return { product, madeUsual: true };
+}
+
+/** Takes a product off a plain food's list; it stays in Items as its own food. */
+export async function removeProduct(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    productId: string,
+): Promise<Food> {
+    const product = await requireLiveFood(store, householdId, productId);
+    if (product.genericFoodId !== foodId) {
+        throw new FoodsInputError("That product is not on this food's list.");
+    }
+    return linkProduct(store, householdId, productId, null);
+}
+
 export async function setUsualProduct(
     store: FoodsStore,
     householdId: string,

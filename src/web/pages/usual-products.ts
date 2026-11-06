@@ -77,10 +77,25 @@ function usualBuyAttrs(row: Food): string {
     return ` data-usual-amount="${row.usualAmount ? escapeHtml(String(row.usualAmount.amount)) : ""}" data-usual-unit="${row.usualAmount ? escapeHtml(row.usualAmount.unit) : ""}" data-usual-store="${escapeHtml(row.usualStoreId ?? "")}"`;
 }
 
+function removeFormId(productId: string): string {
+    return `remove-product-${productId}`;
+}
+
+// Remove sits inside the Set usual form visually but submits its own form
+// (the `form` attribute), so Enter in the amount field still means Set usual.
 function productOption(product: Food, selected: boolean): string {
     const brand = product.brand ? ` · ${escapeHtml(product.brand)}` : "";
     const sel = selected ? " checked" : "";
-    return `<label class="choice-row"><input type="radio" name="product_food_id" value="${escapeHtml(product.id)}"${usualBuyAttrs(product)}${sel} /> ${escapeHtml(product.name)}${brand}</label>`;
+    return `<div class="product-choice"><label class="choice-row"><input type="radio" name="product_food_id" value="${escapeHtml(product.id)}"${usualBuyAttrs(product)}${sel} /> ${escapeHtml(product.name)}${brand}</label>
+<button type="submit" class="btn-sm" form="${escapeHtml(removeFormId(product.id))}">Remove</button></div>`;
+}
+
+function removeProductForm(
+    foodId: string,
+    product: Food,
+    from: string,
+): string {
+    return `<form id="${escapeHtml(removeFormId(product.id))}" method="post" action="/household/usual-products/${escapeHtml(foodId)}/products/${escapeHtml(product.id)}/remove" hidden><input type="hidden" name="from" value="${escapeHtml(from)}" /></form>`;
 }
 
 function manualProductForm(foodId: string, from: string): string {
@@ -235,7 +250,8 @@ ${field({
     const existingProducts =
         view.products.length === 0
             ? `<p class="muted">No products for this food yet. Search, scan or add one below.</p>`
-            : `<form method="post" action="/household/usual-products/${escapeHtml(foodId)}" data-usual-buy-follow>
+            : `<p class="muted">Any of these counts as ${escapeHtml(view.food.name)} in the fridge, recipes and the grocery list. The usual one sets its nutrition, store and amount.</p>
+<form method="post" action="/household/usual-products/${escapeHtml(foodId)}" data-usual-buy-follow>
 <input type="hidden" name="from" value="${escapeHtml(from)}" />
 <div class="choice-col">
 <label class="choice-row"><input type="radio" name="product_food_id" value=""${usualBuyAttrs(view.food)}${noneChecked} /> None</label>
@@ -243,7 +259,8 @@ ${productRadios.join("")}
 </div>
 ${usualBuyBlock}
 <button type="submit" class="btn-primary">Set usual</button>
-</form>`;
+</form>
+${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
     const picker = renderFoodPicker({
         id: "usual-product-picker",
         action: `/household/usual-products/${foodId}/pick`,
@@ -254,13 +271,13 @@ ${usualBuyBlock}
     });
     const body = `
         ${pageHeader({
-            title: `Usual product for ${view.food.name}`,
+            title: `Products of ${view.food.name}`,
             sub: `<p class="muted"><a href="${escapeHtml(backHref)}">Back</a></p>`,
         })}
         ${renderHouseholdNav("usual-products")}
         ${view.error ? errorBanner(view.error) : ""}
-        ${panel({ title: "Your products", body: existingProducts })}
-        ${panel({ title: "Search or scan", body: picker })}
+        ${panel({ title: "Products", body: existingProducts })}
+        ${panel({ title: "Add a product", body: picker })}
         ${panel({
             title: "Add product by hand",
             body: manualProductForm(foodId, from),

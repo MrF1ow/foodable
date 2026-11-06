@@ -706,6 +706,14 @@ details.more > summary .count {
     width: 100%;
 }
 
+/* A usual-product choice with its Remove button on the right. */
+.product-choice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 /* ---- lists and rows ---- */
 
 .list {
