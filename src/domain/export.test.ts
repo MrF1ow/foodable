@@ -404,7 +404,6 @@ function profile(overrides: Partial<Profile> = {}): Profile {
         widgets_enabled: true,
         alcohol_tracking_enabled: false,
         preferred_drink_unit: "us",
-        locale: null,
         theme: null,
         nutrition_layout: null,
         created_at: "2026-01-02T14:30:00.000Z",

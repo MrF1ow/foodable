@@ -10,7 +10,7 @@ export async function seedHousehold(sql: SQL): Promise<SeededHousehold> {
     const householdId = crypto.randomUUID();
     const email = `test-${userId}@foodable.test`;
     await sql`
-        insert into auth.users (id, email)
+        insert into public.users (id, email)
         values (${userId}, ${email})
     `;
     await sql`

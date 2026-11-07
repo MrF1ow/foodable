@@ -188,7 +188,7 @@ Expand, backfill, switch, contract, with the code switch between the third and f
 - Error parity: a wrong password still raises `SignInError` with status `400` and code `invalid_credentials`, so the login page's wrong-password vs. outage logic in `src/oauth.ts` is unchanged. A duplicate email (unique violation `23505`) maps to `alreadyRegistered: true`.
 - Replace `signUpUser`, `signInUser`, `authUserCount`, `liveAuthAdmin` and the `auth.admin.deleteUser` in `deleteAllUserData`.
 
-**3.5 Contract.** A later migration drops the sync trigger and its function. `auth.users` on Supabase is left alone: it belongs to Supabase and nothing reads it.
+**3.5 Contract.** Shipped in `20261108110000_drop_users_sync_trigger.sql`: drops the sync trigger and its function. `auth.users` on Supabase is left alone: it belongs to Supabase and nothing reads it.
 
 Verification: a test signs in with a bcrypt `$2a$` hash and checks it was rewritten as argon2id; the dry run asserts every `auth.users` row has a `public.users` row; deleting a member removes their rows in every cascading table.
 

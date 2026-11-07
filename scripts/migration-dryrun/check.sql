@@ -130,6 +130,18 @@ begin
         raise exception 'public.users does not mirror auth.users';
     end if;
 
+    if exists (
+        select 1
+        from pg_trigger
+        where tgname = 'sync_auth_users_to_public_users'
+    ) then
+        raise exception 'sync_auth_users_to_public_users trigger still exists';
+    end if;
+
+    if to_regprocedure('public.sync_auth_user_to_public_users()') is not null then
+        raise exception 'sync_auth_user_to_public_users() still exists';
+    end if;
+
     if has_function_privilege('anon', 'public.add_household_member(uuid,uuid,text)', 'execute')
        or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute') then
         raise exception 'household RPCs are still executable by client roles';
@@ -169,12 +181,12 @@ begin
     end;
 
     begin
-        -- C joined last but holds the oldest Auth account, so C inherits.
-        insert into auth.users (id, email, created_at) values
+        -- C joined last but holds the oldest account (public.users.created_at), so C inherits.
+        insert into public.users (id, email, created_at) values
             ('00000000-0000-0000-0000-0000000000c3', 'c@example.com', now() - interval '1 year');
         insert into public.household_members (household_id, user_id, role, display_name) values
             ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-0000000000c3', 'member', 'C');
-        delete from auth.users where id = '00000000-0000-0000-0000-0000000000a1';
+        delete from public.users where id = '00000000-0000-0000-0000-0000000000a1';
         if (select display_name from public.household_members where role = 'owner') is distinct from 'C' then
             raise exception 'owner leaving did not promote the oldest account: %',
                 (select display_name from public.household_members where role = 'owner');
@@ -652,6 +664,36 @@ begin
               and subject_id = '22222222-2222-2222-2222-222222222222';
         end;
     end;
+
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'profiles'
+          and column_name = 'locale'
+    ) then
+        raise exception 'profiles.locale still exists';
+    end if;
+
+    if to_regclass('public.idx_meals_user_id') is not null then
+        raise exception 'idx_meals_user_id still exists';
+    end if;
+    if to_regclass('public.idx_water_log_user_id') is not null then
+        raise exception 'idx_water_log_user_id still exists';
+    end if;
+    if to_regclass('public.idx_weight_log_user_id') is not null then
+        raise exception 'idx_weight_log_user_id still exists';
+    end if;
+
+    if to_regclass('public.meals_user_logged_idx') is null then
+        raise exception 'meals_user_logged_idx missing';
+    end if;
+    if to_regclass('public.water_log_user_logged_idx') is null then
+        raise exception 'water_log_user_logged_idx missing';
+    end if;
+    if to_regclass('public.weight_log_user_logged_idx') is null then
+        raise exception 'weight_log_user_logged_idx missing';
+    end if;
 
 end;
 $$;
