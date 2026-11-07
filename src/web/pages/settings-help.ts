@@ -71,7 +71,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "needs-attention",
         title: "Needs attention",
-        body: "The number beside Settings counts every open warning and suggestion across the household (not allergen blocks). Dismiss hides a suggestion until that thing changes or goes away. Undo dismissed notices under Show dismissed on the Needs attention page.",
+        body: "The number beside Settings counts every open warning and suggestion across the household (not allergen blocks). Dismiss hides a suggestion for good, until that thing is removed or merged away. Undo dismissed notices under Show dismissed on the Needs attention page.",
     },
 ];
 
