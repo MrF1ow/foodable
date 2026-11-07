@@ -481,6 +481,86 @@ export function runFoodsStoreContract(
             ).toEqual(["1234567890123"]);
         });
 
+        test("listBarcodesForFoods and getBarcodeFoodIds batch paths", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const otherHousehold = c.otherHouseholdId;
+            const a = sampleFood(c.householdId, {
+                name: "Batch A",
+                normalizedName: "batch-a",
+            });
+            const b = sampleFood(c.householdId, {
+                name: "Batch B",
+                normalizedName: "batch-b",
+            });
+            const bare = sampleFood(c.householdId, {
+                name: "Batch bare",
+                normalizedName: "batch-bare",
+            });
+            await store.insertFood(a);
+            await store.insertFood(b);
+            await store.insertFood(bare);
+            await store.setBarcode(c.householdId, "bc-a1", a.id);
+            await store.setBarcode(c.householdId, "bc-a2", a.id);
+            await store.setBarcode(c.householdId, "bc-b1", b.id);
+            expect(await store.listBarcodesForFoods(c.householdId, [])).toEqual(
+                new Map(),
+            );
+            expect(await store.getBarcodeFoodIds(c.householdId, [])).toEqual(
+                new Map(),
+            );
+            const unknownId = crypto.randomUUID();
+            const batched = await store.listBarcodesForFoods(c.householdId, [
+                a.id,
+                b.id,
+                bare.id,
+                unknownId,
+                a.id,
+            ]);
+            expect(batched.get(a.id)).toEqual(
+                await store.listBarcodes(c.householdId, a.id),
+            );
+            expect(batched.get(b.id)).toEqual(
+                await store.listBarcodes(c.householdId, b.id),
+            );
+            expect(batched.has(bare.id)).toBe(false);
+            expect(batched.has(unknownId)).toBe(false);
+            const byBarcode = await store.getBarcodeFoodIds(c.householdId, [
+                "bc-a1",
+                "bc-b1",
+                "bc-missing",
+                "bc-a1",
+            ]);
+            expect(byBarcode.get("bc-a1")).toBe(a.id);
+            expect(byBarcode.get("bc-b1")).toBe(b.id);
+            expect(byBarcode.has("bc-missing")).toBe(false);
+            expect(
+                await store.getBarcodeFoodIds(otherHousehold, ["bc-a1"]),
+            ).toEqual(new Map());
+            if ("trackRef" in store) {
+                const foreign = sampleFood(otherHousehold, {
+                    name: "Foreign",
+                    normalizedName: "foreign",
+                });
+                await store.insertFood(foreign);
+                await store.setBarcode(otherHousehold, "bc-other", foreign.id);
+                expect(
+                    (
+                        await store.getBarcodeFoodIds(otherHousehold, [
+                            "bc-other",
+                        ])
+                    ).get("bc-other"),
+                ).toBe(foreign.id);
+                expect(
+                    await store.getBarcodeFoodIds(c.householdId, ["bc-other"]),
+                ).toEqual(new Map());
+            }
+            expect(
+                await store.getBarcodeFoodIds(c.householdId, ["bc-a1"]),
+            ).toEqual(new Map([["bc-a1", a.id]]));
+        });
+
         test("alias upsert, listAliases, listAllAliases, delete paths", async () => {
             await reset();
             const c = ctx();
