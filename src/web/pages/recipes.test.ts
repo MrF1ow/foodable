@@ -347,6 +347,92 @@ test("import modal keeps url and shows error on 422 re-render", () => {
     expect(html).toContain("That doesn't look like a web link.");
 });
 
+test("import paste step shows caption field and creator for Instagram", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importPasteStep: true,
+        importUrl: "https://www.instagram.com/p/abc/",
+        importSourceKind: "instagram",
+        importSourceLabel: "Instagram",
+        importError: "Paste the Instagram caption below.",
+    });
+    expect(html).toContain("Paste the Instagram caption below.");
+    expect(html).toContain("Open the post");
+    expect(html).toContain('name="text"');
+    expect(html).toContain('name="credit"');
+    expect(html).toContain('name="import_step"');
+    expect(html).toContain("recipe-import-paste");
+});
+
+test("import paste step for Pinterest lists website link first", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        importPasteStep: true,
+        importUrl: "https://www.pinterest.com/pin/1/",
+        importSourceKind: "pinterest",
+        importSourceLabel: "Pinterest",
+    });
+    expect(html).toContain("Recipe website link");
+    expect(html).toContain('name="website_url"');
+    expect(html).toContain("Or paste the recipe");
+});
+
+test("website failure paste step uses Paste the recipe label", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        importPasteStep: true,
+        importUrl: "https://example.com/no-json",
+        importSourceKind: "website",
+        importSourceLabel: "example.com",
+        importError:
+            "This page doesn't publish its recipe in a form we can read. Paste the recipe instead.",
+    });
+    expect(html).toContain("Paste the recipe");
+    expect(html).toContain("Open the page");
+    expect(html).not.toContain('name="credit"');
+});
+
+test("import paste step uses cleaned https link for open post", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importPasteStep: true,
+        importUrl: "https://instagram.com/p/abc",
+        importSourceKind: "instagram",
+        importSourceLabel: "Instagram",
+    });
+    expect(html).toContain('href="https://instagram.com/p/abc"');
+    expect(html).toContain('value="https://instagram.com/p/abc"');
+});
+
+test("no_recipe_in_text re-render keeps pasted text", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        importPasteStep: true,
+        importUrl: "https://www.instagram.com/p/x/",
+        importSourceKind: "instagram",
+        importSourceLabel: "Instagram",
+        importPasteText: "Still empty caption",
+    });
+    expect(html).toContain("Still empty caption");
+});
+
 test("duplicate import shows open link in modal", () => {
     const html = renderRecipesPage({
         chrome: { theme: "light", attention: { count: 0, tabs: {} } },

@@ -14,6 +14,7 @@ import {
     validateRecipeLink,
 } from "./recipe-link.js";
 import { readRecipeJsonLd } from "./recipe-jsonld.js";
+import { parseRecipeText } from "./recipe-text.js";
 export { NOT_MEASURED_PHRASES, isNotMeasuredNote } from "./not-measured.js";
 import { isNotMeasuredNote } from "./not-measured.js";
 import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
@@ -537,6 +538,20 @@ export function safeSourceUrl(raw: string | null | undefined): URL | null {
     return null;
 }
 
+const PASTE_STEP_STATUSES = new Set<RecipeImportStatus>([
+    "paste_needed",
+    "no_recipe_in_text",
+    "no_recipe_on_page",
+    "robots_disallowed",
+    "site_refused",
+]);
+
+export function importOutcomeShowsPasteStep(
+    status: RecipeImportStatus,
+): boolean {
+    return PASTE_STEP_STATUSES.has(status);
+}
+
 export function recipeDisplaySource(
     recipe: Pick<Recipe, "sourceUrl">,
     importRow: Pick<RecipeImport, "sourceKind" | "sourceUrl"> | null,
@@ -551,6 +566,194 @@ export function recipeDisplaySource(
     };
 }
 
+function normalizeImportText(text: string | null | undefined): string | null {
+    const trimmed = text?.trim() ?? "";
+    if (!trimmed) return null;
+    return clip(trimmed, IMPORT_LIMITS.sourceText);
+}
+
+function normalizeImportCredit(
+    credit: string | null | undefined,
+): string | null {
+    const trimmed = credit?.trim() ?? "";
+    if (!trimmed) return null;
+    return clip(trimmed, IMPORT_LIMITS.credit);
+}
+
+async function saveImportedRecipe(
+    deps: {
+        recipes: RecipesStore;
+        foods: FoodsStore;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+    },
+    input: { householdId: string; creatorId: string },
+    prepared: ReturnType<typeof prepareImportedRecipe>,
+    meta: {
+        sourceKind: RecipeSourceKind;
+        sourceUrl: string;
+        sourceText: string | null;
+        sourceTextOrigin: RecipeTextOrigin | null;
+        credit: string | null;
+    },
+    sourceForOutcome: RecipeImportOutcome["source"],
+): Promise<RecipeImportOutcome> {
+    const parsed = prepared.parsed;
+    const runTx = deps.transaction ?? ((fn) => fn());
+
+    try {
+        return await runTx(async () => {
+            const resolved: {
+                item: (typeof parsed.items)[number];
+                food: Awaited<ReturnType<typeof findOrCreateManualFood>>;
+            }[] = [];
+
+            for (const item of parsed.items) {
+                const food = await findOrCreateManualFood(
+                    deps.foods,
+                    input.householdId,
+                    "food",
+                    item.name,
+                );
+                resolved.push({ item, food });
+            }
+
+            const recipe = await createRecipe(deps.recipes, {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+                name: prepared.name,
+                yieldPortions: prepared.yieldPortions,
+                instructions: prepared.instructions,
+                sourceUrl: meta.sourceUrl,
+                prepMinutes: prepared.prepMinutes,
+                cookMinutes: prepared.cookMinutes,
+                verification: "unverified",
+            });
+
+            const importedAt = new Date().toISOString();
+            await deps.recipes.upsertImport({
+                recipeId: recipe.id,
+                householdId: input.householdId,
+                sourceKind: meta.sourceKind,
+                sourceUrl: meta.sourceUrl,
+                sourceText: meta.sourceText,
+                sourceTextOrigin: meta.sourceTextOrigin,
+                transcript: null,
+                credit: meta.credit,
+                unresolvedLines: parsed.unresolved,
+                problems: [],
+                importedAt,
+            });
+
+            for (const [index, row] of resolved.entries()) {
+                const storedQuantity =
+                    row.item.quantity == null
+                        ? null
+                        : {
+                              amount: row.item.quantity.amount,
+                              unit: storedFoodUnit(
+                                  row.item.quantity.unit,
+                                  row.food,
+                              ),
+                          };
+                await deps.recipes.insertIngredient({
+                    id: crypto.randomUUID(),
+                    householdId: input.householdId,
+                    recipeId: recipe.id,
+                    kind: "food",
+                    displayName: row.food.name,
+                    quantity: storedQuantity,
+                    foodId: row.food.id,
+                    sortOrder: index,
+                    note: row.item.note,
+                });
+            }
+
+            const checked = await recheckRecipe(
+                deps.recipes,
+                input.householdId,
+                recipe.id,
+            );
+
+            const status: RecipeImportStatus = checked.verified
+                ? "imported"
+                : "unverified_needs_review";
+
+            return emptyOutcome(status, {
+                recipeId: recipe.id,
+                recipeName: recipe.name,
+                verification: checked.verification,
+                problems: checked.problems,
+                source: sourceForOutcome,
+                unresolvedLines: parsed.unresolved,
+            });
+        });
+    } catch (err) {
+        if (err instanceof RecipeInputError || err instanceof FoodsInputError) {
+            return emptyOutcome("no_recipe_on_page", {
+                source: sourceForOutcome,
+            });
+        }
+        throw err;
+    }
+}
+
+async function importFromParsedCaption(
+    deps: {
+        recipes: RecipesStore;
+        foods: FoodsStore;
+        fetcher: SafeFetcher;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+    },
+    input: {
+        householdId: string;
+        creatorId: string;
+        cleaned: string;
+        sourceInfo: ReturnType<typeof recipeSource>;
+        sourceText: string;
+        sourceTextOrigin: RecipeTextOrigin;
+        credit: string | null;
+    },
+): Promise<RecipeImportOutcome> {
+    const parsedCaption = parseRecipeText(input.sourceText, {
+        fallbackName: `${input.sourceInfo.label} recipe`,
+    });
+    if (!parsedCaption.hasRecipe) {
+        return emptyOutcome("no_recipe_in_text", {
+            source: sourceFromInfo(input.sourceInfo, input.cleaned),
+        });
+    }
+
+    const prepared = prepareImportedRecipe({
+        name: parsedCaption.name,
+        fallbackName: `${input.sourceInfo.label} recipe`,
+        yieldPortions: parsedCaption.yieldPortions,
+        steps: parsedCaption.steps,
+        prepMinutes: null,
+        cookMinutes: null,
+        parsed: {
+            items: parsedCaption.ingredients,
+            unresolved: parsedCaption.unresolved,
+        },
+    });
+
+    return saveImportedRecipe(
+        deps,
+        {
+            householdId: input.householdId,
+            creatorId: input.creatorId,
+        },
+        prepared,
+        {
+            sourceKind: input.sourceInfo.kind,
+            sourceUrl: input.cleaned,
+            sourceText: input.sourceText,
+            sourceTextOrigin: input.sourceTextOrigin,
+            credit: input.credit,
+        },
+        sourceFromInfo(input.sourceInfo, input.cleaned),
+    );
+}
+
 export async function importRecipeFromUrl(
     deps: {
         recipes: RecipesStore;
@@ -559,7 +762,14 @@ export async function importRecipeFromUrl(
         transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
         pasteOnlySites?: readonly string[];
     },
-    input: { householdId: string; creatorId: string; url: string },
+    input: {
+        householdId: string;
+        creatorId: string;
+        url: string;
+        text?: string | null;
+        credit?: string | null;
+        textOrigin?: RecipeTextOrigin;
+    },
 ): Promise<RecipeImportOutcome> {
     const validated = validateRecipeLink(input.url);
     if (!validated.ok) {
@@ -595,9 +805,65 @@ export async function importRecipeFromUrl(
             return host === e || host.endsWith(`.${e}`);
         });
 
+    const sourceText = normalizeImportText(input.text);
+    const credit = normalizeImportCredit(input.credit);
+    const textOrigin: RecipeTextOrigin = input.textOrigin ?? "pasted";
+    const sourceOutcome = sourceFromInfo(sourceInfo, cleaned);
+
+    if (sourceText) {
+        if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
+            return importFromParsedCaption(deps, {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+                cleaned,
+                sourceInfo,
+                sourceText,
+                sourceTextOrigin: textOrigin,
+                credit,
+            });
+        }
+
+        const parsedCaption = parseRecipeText(sourceText, {
+            fallbackName: sourceInfo.label,
+        });
+        if (!parsedCaption.hasRecipe) {
+            return emptyOutcome("no_recipe_in_text", {
+                source: sourceOutcome,
+            });
+        }
+        const preparedFromText = prepareImportedRecipe({
+            name: parsedCaption.name,
+            fallbackName: sourceInfo.label,
+            yieldPortions: parsedCaption.yieldPortions,
+            steps: parsedCaption.steps,
+            prepMinutes: null,
+            cookMinutes: null,
+            parsed: {
+                items: parsedCaption.ingredients,
+                unresolved: parsedCaption.unresolved,
+            },
+        });
+        return saveImportedRecipe(
+            deps,
+            {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+            },
+            preparedFromText,
+            {
+                sourceKind: "website",
+                sourceUrl: cleaned,
+                sourceText,
+                sourceTextOrigin: textOrigin,
+                credit,
+            },
+            sourceOutcome,
+        );
+    }
+
     if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
         return emptyOutcome("paste_needed", {
-            source: sourceFromInfo(sourceInfo, cleaned),
+            source: sourceOutcome,
         });
     }
 
@@ -633,112 +899,23 @@ export async function importRecipeFromUrl(
         cookMinutes: jsonld.cookMinutes,
         parsed: parseIngredientLines(jsonld.ingredients),
     });
-    const parsed = prepared.parsed;
-    const instructions = prepared.instructions;
-    const recipeName = prepared.name;
 
-    const runTx = deps.transaction ?? ((fn) => fn());
-
-    // Values were clamped above, so an input error here is unexpected; it
-    // still becomes an outcome rather than a 500 or an MCP isError.
-    try {
-        return await runTx(async () => {
-            const resolved: {
-                item: (typeof parsed.items)[number];
-                food: Awaited<ReturnType<typeof findOrCreateManualFood>>;
-            }[] = [];
-
-            for (const item of parsed.items) {
-                const food = await findOrCreateManualFood(
-                    deps.foods,
-                    input.householdId,
-                    "food",
-                    item.name,
-                );
-                resolved.push({ item, food });
-            }
-
-            const recipe = await createRecipe(deps.recipes, {
-                householdId: input.householdId,
-                creatorId: input.creatorId,
-                name: recipeName,
-                yieldPortions: prepared.yieldPortions,
-                instructions,
-                sourceUrl: cleaned,
-                prepMinutes: prepared.prepMinutes,
-                cookMinutes: prepared.cookMinutes,
-                verification: "unverified",
-            });
-
-            const importedAt = new Date().toISOString();
-            await deps.recipes.upsertImport({
-                recipeId: recipe.id,
-                householdId: input.householdId,
-                sourceKind: "website",
-                sourceUrl: cleaned,
-                sourceText: null,
-                sourceTextOrigin: null,
-                transcript: null,
-                credit: null,
-                unresolvedLines: parsed.unresolved,
-                problems: [],
-                importedAt,
-            });
-
-            const ingredients: RecipeIngredient[] = [];
-            for (const [index, row] of resolved.entries()) {
-                const storedQuantity =
-                    row.item.quantity == null
-                        ? null
-                        : {
-                              amount: row.item.quantity.amount,
-                              unit: storedFoodUnit(
-                                  row.item.quantity.unit,
-                                  row.food,
-                              ),
-                          };
-                ingredients.push(
-                    await deps.recipes.insertIngredient({
-                        id: crypto.randomUUID(),
-                        householdId: input.householdId,
-                        recipeId: recipe.id,
-                        kind: "food",
-                        displayName: row.food.name,
-                        quantity: storedQuantity,
-                        foodId: row.food.id,
-                        sortOrder: index,
-                        note: row.item.note,
-                    }),
-                );
-            }
-
-            const checked = await recheckRecipe(
-                deps.recipes,
-                input.householdId,
-                recipe.id,
-            );
-
-            const status: RecipeImportStatus = checked.verified
-                ? "imported"
-                : "unverified_needs_review";
-
-            return emptyOutcome(status, {
-                recipeId: recipe.id,
-                recipeName: recipe.name,
-                verification: checked.verification,
-                problems: checked.problems,
-                source: sourceFromInfo(sourceInfo, cleaned),
-                unresolvedLines: parsed.unresolved,
-            });
-        });
-    } catch (err) {
-        if (err instanceof RecipeInputError || err instanceof FoodsInputError) {
-            return emptyOutcome("no_recipe_on_page", {
-                source: sourceFromInfo(sourceInfo, cleaned),
-            });
-        }
-        throw err;
-    }
+    return saveImportedRecipe(
+        deps,
+        {
+            householdId: input.householdId,
+            creatorId: input.creatorId,
+        },
+        prepared,
+        {
+            sourceKind: "website",
+            sourceUrl: cleaned,
+            sourceText: null,
+            sourceTextOrigin: null,
+            credit,
+        },
+        sourceOutcome,
+    );
 }
 
 /** Limits shared with the editors, so an imported recipe can always be
@@ -748,6 +925,8 @@ export const IMPORT_LIMITS = {
     foodName: 120,
     note: 500,
     instructions: 20_000,
+    sourceText: 20_000,
+    credit: 120,
     maxYield: 1000,
     maxMinutes: 10_080,
 } as const;
