@@ -5731,6 +5731,7 @@ describe("phone-app domain MCP tools", () => {
                 checked: false,
                 source: "restock",
                 sourceFridgeItemId: itemId,
+                note: null,
             });
             const listed = await call("list_grocery_lines");
             const lines = (

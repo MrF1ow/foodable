@@ -299,6 +299,7 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
             checked: false,
             source: "restock",
             sourceFridgeItemId: soonest.id,
+            note: null,
         };
         planned.push({
             line,

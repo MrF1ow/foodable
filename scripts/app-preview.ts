@@ -198,6 +198,7 @@ function restockLine() {
         checked: false,
         source: "restock" as const,
         sourceFridgeItemId: "i-milk-restock",
+        note: null,
     };
     const notices = groceryRestockNotices(
         [row],

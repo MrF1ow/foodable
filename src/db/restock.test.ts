@@ -37,6 +37,7 @@ function sampleLine(
         checked: false,
         source: "restock",
         sourceFridgeItemId: null,
+        note: null,
     };
 }
 

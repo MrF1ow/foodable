@@ -225,6 +225,7 @@ test("restockPlan skips family with unchecked grocery line", async () => {
         checked: false,
         source: "manual",
         sourceFridgeItemId: null,
+        note: null,
     };
     const item = fridgeFood({
         id: "due-k",
@@ -788,6 +789,7 @@ test("groceryRestockNotices sentences and filtering", async () => {
         checked: false,
         source: "restock",
         sourceFridgeItemId: "fi",
+        note: null,
     };
     const item = fridgeFood({
         id: "fi",
@@ -901,6 +903,7 @@ test("noticesFor and dismissNotice accept grocery.restocked", async () => {
         checked: false,
         source: "restock",
         sourceFridgeItemId: null,
+        note: null,
     };
     await grocery.insertLine(line);
     const open = await noticesFor(deps, HH, { today: TODAY });
@@ -931,6 +934,7 @@ test("grocery page renders Restocked badge via notices component", () => {
                 checked: false,
                 source: "restock",
                 sourceFridgeItemId: "fi",
+                note: null,
             },
         ],
         [
@@ -976,6 +980,7 @@ test("grocery page renders Restocked badge via notices component", () => {
                                 checked: false,
                                 source: "restock",
                                 sourceFridgeItemId: "fi",
+                                note: null,
                                 notices: [notice],
                                 alreadyHave: null,
                             },
