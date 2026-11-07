@@ -90,6 +90,16 @@ export type FoodsStore = {
         barcode: string,
     ): Promise<string | null>;
     listBarcodes(householdId: string, foodId: string): Promise<string[]>;
+    /** Barcodes per food id, in the same order as `listBarcodes` for each food. */
+    listBarcodesForFoods(
+        householdId: string,
+        foodIds: readonly string[],
+    ): Promise<Map<string, string[]>>;
+    /** Household food id per barcode that exists in the household (one entry per barcode). */
+    getBarcodeFoodIds(
+        householdId: string,
+        barcodes: readonly string[],
+    ): Promise<Map<string, string>>;
     setBarcode(
         householdId: string,
         barcode: string,
@@ -544,6 +554,32 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                         row.foodId === foodId,
                 )
                 .map((row) => row.barcode);
+        },
+        async listBarcodesForFoods(householdId, foodIds) {
+            if (foodIds.length === 0) return new Map();
+            const want = new Set(foodIds);
+            const grouped = new Map<string, string[]>();
+            for (const row of barcodes) {
+                if (row.householdId !== householdId || !want.has(row.foodId)) {
+                    continue;
+                }
+                const list = grouped.get(row.foodId);
+                if (list) list.push(row.barcode);
+                else grouped.set(row.foodId, [row.barcode]);
+            }
+            return grouped;
+        },
+        async getBarcodeFoodIds(householdId, barcodesIn) {
+            if (barcodesIn.length === 0) return new Map();
+            const want = new Set(barcodesIn);
+            const out = new Map<string, string>();
+            for (const row of barcodes) {
+                if (row.householdId !== householdId || !want.has(row.barcode)) {
+                    continue;
+                }
+                if (!out.has(row.barcode)) out.set(row.barcode, row.foodId);
+            }
+            return out;
         },
         async setBarcode(householdId, barcode, foodId) {
             const idx = barcodes.findIndex(
@@ -3058,10 +3094,15 @@ export async function searchFoodCatalog(
             generic_food_name: nameById.get(food.genericFoodId) ?? null,
         };
     };
+    const barcodesByFood = await store.listBarcodesForFoods(
+        householdId,
+        household.map((f) => f.id),
+    );
+    const listedById = new Map(listed.map((row) => [row.id, row]));
     const householdBarcodes = new Set<string>();
     const hits: FoodSearchHit[] = [];
     for (const food of household) {
-        const barcodes = await store.listBarcodes(householdId, food.id);
+        const barcodes = barcodesByFood.get(food.id) ?? [];
         for (const barcode of barcodes) householdBarcodes.add(barcode);
         hits.push({
             food_id: food.id,
@@ -3080,15 +3121,35 @@ export async function searchFoodCatalog(
             ...genericFields(food),
         });
     }
+    const offToResolve: FoodResult[] = [];
     for (const food of offHits) {
         if (householdBarcodes.has(food.barcode)) continue;
-        const existingId = await store.getBarcodeFoodId(
-            householdId,
-            food.barcode,
-        );
+        offToResolve.push(food);
+    }
+    const barcodeToFoodId = await store.getBarcodeFoodIds(
+        householdId,
+        offToResolve.map((f) => f.barcode),
+    );
+    const missingFoodIds = new Set<string>();
+    for (const food of offToResolve) {
+        const existingId = barcodeToFoodId.get(food.barcode);
+        if (existingId != null && !listedById.has(existingId)) {
+            missingFoodIds.add(existingId);
+        }
+    }
+    const loadedOffFoods = new Map<string, Food | null>();
+    await Promise.all(
+        [...missingFoodIds].map(async (id) => {
+            loadedOffFoods.set(id, await store.getFood(householdId, id));
+        }),
+    );
+    for (const food of offToResolve) {
+        const existingId = barcodeToFoodId.get(food.barcode) ?? null;
         const existing =
             existingId != null
-                ? await store.getFood(householdId, existingId)
+                ? (listedById.get(existingId) ??
+                  loadedOffFoods.get(existingId) ??
+                  null)
                 : null;
         hits.push({
             food_id: existingId,
