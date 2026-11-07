@@ -51,6 +51,7 @@ export type HouseholdPreferences = {
     shoppingCadence: string | null;
     timezone: string | null;
     restock: RestockPreferences;
+    unverifiedRecipeExpiryDays: number | null;
 };
 
 export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
@@ -59,6 +60,7 @@ export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     shoppingCadence: null,
     timezone: null,
     restock: { ...DEFAULT_RESTOCK },
+    unverifiedRecipeExpiryDays: null,
 };
 
 export const HOUSEHOLD_TZ_ERROR = "Enter a valid IANA timezone.";
@@ -92,6 +94,7 @@ export type HouseholdConfigWire = {
         constraints: string[];
         budget: string | null;
         shopping_cadence: string | null;
+        unverified_recipe_expiry_days: number | null;
     };
     timezone: string | null;
     effective_timezone: string;
@@ -114,6 +117,7 @@ export type HouseholdPreferencesPatch = {
         weekday?: number;
         time?: string;
     };
+    unverifiedRecipeExpiryDays?: number | null;
 };
 
 export type HouseholdConfigPatch = {
@@ -183,6 +187,8 @@ function copyHousehold(household: Household): Household {
             shoppingCadence: household.preferences.shoppingCadence,
             timezone: household.preferences.timezone,
             restock: { ...household.preferences.restock },
+            unverifiedRecipeExpiryDays:
+                household.preferences.unverifiedRecipeExpiryDays,
         },
     };
 }
@@ -585,6 +591,9 @@ export function householdConfigFromRow(row: {
         shoppingCadence?: unknown;
         timezone?: unknown;
         restock?: unknown;
+        shopping_cadence?: unknown;
+        unverifiedRecipeExpiryDays?: unknown;
+        unverified_recipe_expiry_days?: unknown;
     };
     const constraints =
         prefs.constraints === undefined ? [] : asStringArray(prefs.constraints);
@@ -593,10 +602,12 @@ export function householdConfigFromRow(row: {
     }
     const budget =
         prefs.budget === undefined ? null : optionalText(prefs.budget);
+    const cadenceSource =
+        prefs.shoppingCadence !== undefined
+            ? prefs.shoppingCadence
+            : prefs.shopping_cadence;
     const shoppingCadence =
-        prefs.shoppingCadence === undefined
-            ? null
-            : optionalText(prefs.shoppingCadence);
+        cadenceSource === undefined ? null : optionalText(cadenceSource);
     if (budget === undefined || shoppingCadence === undefined) {
         return {
             ok: false,
@@ -608,6 +619,15 @@ export function householdConfigFromRow(row: {
             ? null
             : parseStoredTimezone(prefs.timezone);
     const restock = parseRestockFromStorage(prefs.restock);
+    const expiryRaw =
+        prefs.unverifiedRecipeExpiryDays !== undefined
+            ? prefs.unverifiedRecipeExpiryDays
+            : prefs.unverified_recipe_expiry_days;
+    const unverifiedRecipeExpiryDays = parseUnverifiedRecipeExpiryDays(
+        expiryRaw === undefined ? null : expiryRaw,
+        true,
+    );
+    if (!unverifiedRecipeExpiryDays.ok) return unverifiedRecipeExpiryDays;
 
     return {
         ok: true,
@@ -620,9 +640,38 @@ export function householdConfigFromRow(row: {
                 shoppingCadence,
                 timezone,
                 restock,
+                unverifiedRecipeExpiryDays: unverifiedRecipeExpiryDays.value,
             },
         },
     };
+}
+
+export function parseUnverifiedRecipeExpiryDays(
+    value: unknown,
+    allowUndefinedAsNull: boolean,
+): ParseResult<number | null> {
+    if (value === undefined || value === null || value === "") {
+        if (allowUndefinedAsNull || value === "" || value === null) {
+            return { ok: true, value: null };
+        }
+        return {
+            ok: false,
+            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
+        };
+    }
+    const n =
+        typeof value === "number"
+            ? value
+            : typeof value === "string"
+              ? Number(value.trim())
+              : NaN;
+    if (!Number.isInteger(n) || n < 1 || n > 3650) {
+        return {
+            ok: false,
+            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
+        };
+    }
+    return { ok: true, value: n };
 }
 
 export function householdConfigToColumns(
@@ -656,6 +705,8 @@ export function householdConfigToWire(
             constraints: config.preferences.constraints,
             budget: config.preferences.budget,
             shopping_cadence: config.preferences.shoppingCadence,
+            unverified_recipe_expiry_days:
+                config.preferences.unverifiedRecipeExpiryDays,
         },
         timezone: config.preferences.timezone,
         effective_timezone: effectiveTimezone,
@@ -764,6 +815,8 @@ function parseHouseholdPreferencesPatch(
         shopping_cadence?: unknown;
         timezone?: unknown;
         restock?: unknown;
+        unverifiedRecipeExpiryDays?: unknown;
+        unverified_recipe_expiry_days?: unknown;
     };
     const patch: HouseholdPreferencesPatch = {};
     if (prefs.constraints !== undefined) {
@@ -810,6 +863,15 @@ function parseHouseholdPreferencesPatch(
     if (!restockFields.ok) return restockFields;
     if (Object.keys(restockFields.value).length > 0) {
         patch.restock = restockFields.value;
+    }
+    const expiryRaw =
+        prefs.unverifiedRecipeExpiryDays !== undefined
+            ? prefs.unverifiedRecipeExpiryDays
+            : prefs.unverified_recipe_expiry_days;
+    if (expiryRaw !== undefined) {
+        const parsed = parseUnverifiedRecipeExpiryDays(expiryRaw, false);
+        if (!parsed.ok) return parsed;
+        patch.unverifiedRecipeExpiryDays = parsed.value;
     }
     return { ok: true, value: patch };
 }
@@ -928,6 +990,10 @@ export function mergeHouseholdConfig(
                         : current.preferences.restock.time,
                 lastRunOn: current.preferences.restock.lastRunOn,
             },
+            unverifiedRecipeExpiryDays:
+                patch.preferences?.unverifiedRecipeExpiryDays !== undefined
+                    ? patch.preferences.unverifiedRecipeExpiryDays
+                    : current.preferences.unverifiedRecipeExpiryDays,
         },
     };
 }

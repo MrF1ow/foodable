@@ -545,6 +545,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "tag", required: false },
             { name: "can_make_now", required: false },
             { name: "safe_for", required: false },
+            { name: "verification", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -700,6 +701,16 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "verify_recipe",
+        category: "recipes",
+        badges: ["edit"],
+        params: [
+            { name: "recipe_id", required: true },
+            { name: "resolved_lines", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
         name: "get_household_rules",
         category: "rules",
         badges: ["view"],
@@ -838,6 +849,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "remove_recipe_ingredient",
     "reorder_recipe_ingredients",
     "import_recipe_from_text",
+    "verify_recipe",
     "get_household_rules",
     "set_household_rules",
     "search_food",

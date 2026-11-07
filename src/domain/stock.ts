@@ -32,6 +32,7 @@ import {
 } from "./quantity.js";
 import type { RecipesStore } from "./recipes.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
+import { assertRecipeVerified } from "./recipe-import.js";
 
 export type StockReason = "purchase" | "cook" | "eat" | "discard" | "adjust";
 
@@ -999,6 +1000,9 @@ export async function cookRecipe(
 ): Promise<CookRecipeResult> {
     const recipe = await recipes.getRecipe(input.householdId, input.recipeId);
     if (!recipe) throw new StockInputError("Unknown recipe.");
+    if (recipe.verification === "unverified") {
+        await assertRecipeVerified(recipes, input.householdId, input.recipeId);
+    }
     const totalPortions = input.totalPortions;
     if (!Number.isFinite(totalPortions) || totalPortions <= 0) {
         throw new StockInputError("Enter portions greater than zero.");

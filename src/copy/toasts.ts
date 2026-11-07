@@ -88,6 +88,27 @@ export const TOASTS = {
         kind: "success",
         text: "Added to the grocery list ({count})",
     },
+    "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
+    "recipes.unresolved.cleared": {
+        kind: "success",
+        text: "Line marked as handled",
+    },
+    "recipes.verify.failed": {
+        kind: "info",
+        text: "Still unverified: {count} problems",
+    },
+    "recipes.unverified.blocked": {
+        kind: "info",
+        text: "This recipe is unverified. Fix the problems, then check again.",
+    },
+    "recipes.not_found": {
+        kind: "info",
+        text: "That recipe was not found.",
+    },
+    "household.recipe-settings.saved": {
+        kind: "success",
+        text: "Recipe settings saved",
+    },
     "recipes.add-to-grocery.nothing": {
         kind: "info",
         text: "Nothing to add — everything is in stock",

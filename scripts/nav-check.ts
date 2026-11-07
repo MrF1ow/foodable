@@ -620,7 +620,8 @@ try {
             open: !!dialog?.open,
             action: form?.getAttribute("action") ?? null,
             note: form?.querySelector("input[name='note']")?.value ?? null,
-            amount: form?.querySelector("input[name='amount']")?.value ?? null,
+            amount:
+                form?.querySelector("input[name='ing_amount']")?.value ?? null,
             title: dialog?.querySelector(".modal-title")?.textContent ?? null,
         };
     })()`);
@@ -679,7 +680,8 @@ try {
             open: !!dialog?.open,
             action: form?.getAttribute("action") ?? null,
             note: form?.querySelector("input[name='note']")?.value ?? null,
-            amount: form?.querySelector("input[name='amount']")?.value ?? null,
+            amount:
+                form?.querySelector("input[name='ing_amount']")?.value ?? null,
             title: dialog?.querySelector(".modal-title")?.textContent ?? null,
             banners: document.querySelectorAll(".error-banner").length,
             error: dialog?.querySelector(".error-banner")?.textContent ?? null,

@@ -463,6 +463,7 @@ test("every page's h1 comes from pageHeader once", async () => {
                 isOwner: true,
                 canManage: true,
                 viewerUserId: "u1",
+                unverifiedRecipeExpiryDays: null,
             }),
         ],
         ["help", renderSettingsHelpPage({ chrome, backHref: "/" })],

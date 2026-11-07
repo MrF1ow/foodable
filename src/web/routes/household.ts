@@ -14,6 +14,8 @@ import {
     checkManagedMember,
     type HouseholdMember,
     parseMemberInput,
+    parseUnverifiedRecipeExpiryDays,
+    mergeHouseholdConfig,
 } from "../../household.js";
 import {
     generateHouseholdToken,
@@ -467,6 +469,39 @@ householdRoutes.post("/household/name", requireManager, async (c) => {
     await updateHouseholdConfig(manager.householdId, { ...config, name });
     return redirectWithToast(c, "/household", "settings.household.name.saved");
 });
+
+householdRoutes.post(
+    "/household/recipe-settings",
+    requireManager,
+    async (c) => {
+        const userId = c.get("userId");
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        const raw = formText(body, "unverified_recipe_expiry_days").trim();
+        const parsed = parseUnverifiedRecipeExpiryDays(
+            raw === "" ? null : raw,
+            false,
+        );
+        if (!parsed.ok) {
+            const page = await renderHouseholdSettingsRoute(userId, {
+                error: parsed.error,
+            });
+            return c.html(page.html, 400);
+        }
+        const config = await getHouseholdConfig(manager.householdId);
+        await updateHouseholdConfig(
+            manager.householdId,
+            mergeHouseholdConfig(config, {
+                preferences: { unverifiedRecipeExpiryDays: parsed.value },
+            }),
+        );
+        return redirectWithToast(
+            c,
+            "/household",
+            "household.recipe-settings.saved",
+        );
+    },
+);
 
 householdRoutes.post("/household/location", requireManager, async (c) => {
     const manager = siteMember(c);

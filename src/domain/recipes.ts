@@ -36,6 +36,20 @@ import {
     type MemoryNoticeDismissalsHolder,
     type NoticeDismissalsStore,
 } from "./notice-dismissals.js";
+import {
+    recheckRecipe,
+    type RecipeImport,
+    type RecipeProblem,
+    type RecipeVerification,
+} from "./recipe-import.js";
+import { assertRecipeVerified } from "./recipe-import.js";
+
+export type { RecipeVerification, RecipeImport, RecipeProblem };
+export {
+    recheckRecipe,
+    RecipeUnverifiedError,
+    resolveUnresolvedLines,
+} from "./recipe-import.js";
 
 export type Recipe = {
     id: string;
@@ -49,6 +63,8 @@ export type Recipe = {
     notes: string | null;
     prepMinutes: number | null;
     cookMinutes: number | null;
+    verification: RecipeVerification;
+    updatedAt: string;
 };
 
 export type IngredientNutrition = {
@@ -152,6 +168,18 @@ export type RecipesStore = {
     ): Promise<RecipePortion | null>;
     upsertPortion(row: RecipePortion): Promise<RecipePortion>;
     recipeActivityMsById?(householdId: string): Promise<Map<string, number>>;
+    getImport(
+        householdId: string,
+        recipeId: string,
+    ): Promise<RecipeImport | null>;
+    upsertImport(row: RecipeImport): Promise<RecipeImport>;
+    setVerification(
+        householdId: string,
+        recipeId: string,
+        verification: RecipeVerification,
+        problems: RecipeProblem[],
+    ): Promise<void>;
+    deleteStaleUnverified(householdId: string, before: Date): Promise<number>;
 };
 
 export type RecipePatch = {
@@ -175,6 +203,7 @@ export type RecipeIngredientPatch = {
 export type RecipeListFilter = {
     tag?: string | null;
     canMakeNow?: boolean;
+    verification?: RecipeVerification | null;
     safeFor?: {
         allergens: MemberAllergen[];
         dislikes: { displayName: string }[];
@@ -239,6 +268,14 @@ function quantityForNewIngredient(
         amount: parseAmount(amount),
         unit: storedFoodUnit(unit, food),
     };
+}
+
+function noteForUnmeasuredIngredient(
+    quantity: RecipeIngredient["quantity"],
+    note: string | null,
+): string | null {
+    if (quantity != null) return note;
+    return note?.trim() ? note : "to taste";
 }
 
 function parseYield(yieldPortions: number): number {
@@ -692,6 +729,21 @@ export function macrosForPerson(
     return sum;
 }
 
+function nowIso(): string {
+    return new Date().toISOString();
+}
+
+async function maybeRecheckUnverified(
+    store: RecipesStore,
+    householdId: string,
+    recipeId: string,
+    wasUnverified: boolean,
+): Promise<void> {
+    if (wasUnverified) {
+        await recheckRecipe(store, householdId, recipeId);
+    }
+}
+
 export type MemoryRecipesStore = RecipesStore &
     MemoryNoticeDismissalsHolder & {
         __paritySetRecipeActivityAt?(id: string, activityAt: string): void;
@@ -704,6 +756,17 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
     const ingredients: RecipeIngredient[] = [];
     const portions: RecipePortion[] = [];
     let linkedDismissals: NoticeDismissalsStore | undefined;
+    const imports = new Map<string, RecipeImport>();
+
+    function bumpRecipe(householdId: string, recipeId: string): void {
+        const idx = recipes.findIndex(
+            (row) => row.householdId === householdId && row.id === recipeId,
+        );
+        if (idx >= 0) {
+            recipes[idx] = { ...recipes[idx]!, updatedAt: nowIso() };
+        }
+    }
+
     return {
         linkDismissals(s) {
             linkedDismissals = s;
@@ -740,11 +803,11 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             );
             if (idx < 0) return null;
             const updated: MemoryRecipeRow = {
-                ...cloneRecipe(row),
+                ...cloneRecipe({ ...row, updatedAt: nowIso() }),
                 activityAt: new Date().toISOString(),
             };
             recipes[idx] = updated;
-            return cloneRecipe(row);
+            return cloneRecipe(updated);
         },
         async recipeActivityMsById(householdId) {
             const map = new Map<string, number>();
@@ -818,6 +881,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
         async insertIngredient(row) {
             const saved = cloneIngredient(row);
             ingredients.push(saved);
+            bumpRecipe(row.householdId, row.recipeId);
             return cloneIngredient(saved);
         },
         async updateIngredient(row) {
@@ -828,9 +892,14 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             );
             if (idx < 0) return null;
             ingredients[idx] = cloneIngredient(row);
+            bumpRecipe(row.householdId, row.recipeId);
             return cloneIngredient(row);
         },
         async deleteIngredient(householdId, ingredientId) {
+            const target = ingredients.find(
+                (row) =>
+                    row.householdId === householdId && row.id === ingredientId,
+            );
             const before = ingredients.length;
             const next = ingredients.filter(
                 (row) =>
@@ -849,6 +918,9 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     "recipe_ingredient",
                     ingredientId,
                 );
+            }
+            if (removed && target) {
+                bumpRecipe(householdId, target.recipeId);
             }
             return removed;
         },
@@ -871,6 +943,78 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             if (idx >= 0) portions[idx] = { ...row };
             else portions.push({ ...row });
             return { ...row };
+        },
+        async getImport(householdId, recipeId) {
+            const row = imports.get(recipeId);
+            if (!row || row.householdId !== householdId) return null;
+            return {
+                ...row,
+                unresolvedLines: [...row.unresolvedLines],
+                problems: [...row.problems],
+            };
+        },
+        async upsertImport(row) {
+            const saved = {
+                ...row,
+                unresolvedLines: [...row.unresolvedLines],
+                problems: [...row.problems],
+            };
+            imports.set(row.recipeId, saved);
+            return { ...saved };
+        },
+        async setVerification(householdId, recipeId, verification, problems) {
+            const idx = recipes.findIndex(
+                (row) => row.householdId === householdId && row.id === recipeId,
+            );
+            if (idx >= 0) {
+                recipes[idx] = { ...recipes[idx]!, verification };
+            }
+            const imp = imports.get(recipeId);
+            if (imp && imp.householdId === householdId) {
+                imports.set(recipeId, {
+                    ...imp,
+                    problems: problems.map((p) => ({ ...p })),
+                });
+            }
+        },
+        async deleteStaleUnverified(householdId, before) {
+            const cutoff = before.toISOString();
+            const staleIds = recipes
+                .filter(
+                    (row) =>
+                        row.householdId === householdId &&
+                        row.verification === "unverified" &&
+                        row.updatedAt < cutoff,
+                )
+                .map((row) => row.id);
+            for (const id of staleIds) {
+                imports.delete(id);
+                const nextRecipes = recipes.filter(
+                    (row) =>
+                        !(row.householdId === householdId && row.id === id),
+                );
+                recipes.length = 0;
+                recipes.push(...nextRecipes);
+                const keepIng = ingredients.filter(
+                    (row) =>
+                        !(
+                            row.householdId === householdId &&
+                            row.recipeId === id
+                        ),
+                );
+                ingredients.length = 0;
+                ingredients.push(...keepIng);
+                const keepPortions = portions.filter(
+                    (row) =>
+                        !(
+                            row.householdId === householdId &&
+                            row.recipeId === id
+                        ),
+                );
+                portions.length = 0;
+                portions.push(...keepPortions);
+            }
+            return staleIds.length;
         },
     };
 }
@@ -895,11 +1039,13 @@ export async function createRecipe(
         notes?: string | null;
         prepMinutes?: number | null;
         cookMinutes?: number | null;
+        verification?: RecipeVerification;
     },
 ): Promise<Recipe> {
     const name = input.name.trim();
     if (!name) throw new RecipeInputError("Enter a recipe name.");
     const yieldPortions = parseYield(input.yieldPortions);
+    const stamp = nowIso();
     return store.insertRecipe({
         id: crypto.randomUUID(),
         householdId: input.householdId,
@@ -916,6 +1062,8 @@ export async function createRecipe(
         notes: parseOptionalText(input.notes, "Notes", 5_000),
         prepMinutes: parseOptionalMinutes(input.prepMinutes, "prep time"),
         cookMinutes: parseOptionalMinutes(input.cookMinutes, "cook time"),
+        verification: input.verification ?? "verified",
+        updatedAt: stamp,
     });
 }
 
@@ -975,9 +1123,11 @@ export async function updateRecipe(
                 : parseOptionalMinutes(patch.cookMinutes, "cook time"),
     };
     if (!next.name) throw new RecipeInputError("Enter a recipe name.");
+    const wasUnverified = recipe.verification === "unverified";
     const saved = await store.updateRecipe(next);
     if (!saved) throw new RecipeInputError("Unknown recipe.");
-    return saved;
+    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
+    return (await store.getRecipe(householdId, recipeId)) ?? saved;
 }
 
 async function requireIngredient(
@@ -1001,6 +1151,8 @@ export async function updateRecipeIngredient(
     patch: RecipeIngredientPatch,
     foods?: FoodsStore,
 ): Promise<RecipeIngredient> {
+    const recipe = await requireRecipe(store, householdId, recipeId);
+    const wasUnverified = recipe.verification === "unverified";
     const ingredient = await requireIngredient(
         store,
         householdId,
@@ -1048,9 +1200,10 @@ export async function updateRecipeIngredient(
     const saved = await store.updateIngredient({
         ...ingredient,
         quantity,
-        note,
+        note: noteForUnmeasuredIngredient(quantity, note),
     });
     if (!saved) throw new RecipeInputError("Unknown ingredient.");
+    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
     return saved;
 }
 
@@ -1060,8 +1213,19 @@ export async function removeRecipeIngredient(
     recipeId: string,
     ingredientId: string,
 ): Promise<boolean> {
+    const recipe = await requireRecipe(store, householdId, recipeId);
+    const wasUnverified = recipe.verification === "unverified";
     await requireIngredient(store, householdId, recipeId, ingredientId);
-    return store.deleteIngredient(householdId, ingredientId);
+    const removed = await store.deleteIngredient(householdId, ingredientId);
+    if (removed) {
+        await maybeRecheckUnverified(
+            store,
+            householdId,
+            recipeId,
+            wasUnverified,
+        );
+    }
+    return removed;
 }
 
 export async function reorderRecipeIngredients(
@@ -1070,6 +1234,8 @@ export async function reorderRecipeIngredients(
     recipeId: string,
     orderedIds: string[],
 ): Promise<RecipeIngredient[]> {
+    const recipe = await requireRecipe(store, householdId, recipeId);
+    const wasUnverified = recipe.verification === "unverified";
     const ingredients = await store.listIngredients(householdId, recipeId);
     if (orderedIds.length !== ingredients.length) {
         throw new RecipeInputError(
@@ -1095,6 +1261,7 @@ export async function reorderRecipeIngredients(
         });
         if (saved) next.push(saved);
     }
+    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
     return next;
 }
 
@@ -1131,23 +1298,36 @@ export async function addRecipeIngredientById(
         input.householdId,
         input.recipeId,
     );
+    const wasUnverified = recipe.verification === "unverified";
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findFoodById(foods, input.householdId, input.foodId);
         if (food.kind !== "food") {
             throw new RecipeInputError("That catalog item is a supply.");
         }
-        return store.insertIngredient({
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
+        const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
+        await maybeRecheckUnverified(
+            store,
+            input.householdId,
+            recipe.id,
+            wasUnverified,
+        );
+        return saved;
     } catch (err) {
         wrapFoodsError(err);
     }
@@ -1172,6 +1352,7 @@ export async function addRecipeIngredientByBarcode(
         input.householdId,
         input.recipeId,
     );
+    const wasUnverified = recipe.verification === "unverified";
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findOrCreateFoodByBarcode(
@@ -1180,17 +1361,29 @@ export async function addRecipeIngredientByBarcode(
             input.barcode,
             opts.lookup,
         );
-        return store.insertIngredient({
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
+        const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
+        await maybeRecheckUnverified(
+            store,
+            input.householdId,
+            recipe.id,
+            wasUnverified,
+        );
+        return saved;
     } catch (err) {
         wrapFoodsError(err);
     }
@@ -1212,6 +1405,7 @@ export async function addRecipeManualIngredient(
         input.householdId,
         input.recipeId,
     );
+    const wasUnverified = recipe.verification === "unverified";
     const existing = await store.listIngredients(input.householdId, recipe.id);
     try {
         const food = await findOrCreateManualFood(
@@ -1220,17 +1414,29 @@ export async function addRecipeManualIngredient(
             "food",
             input.name,
         );
-        return store.insertIngredient({
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
+        const saved = await store.insertIngredient({
             id: crypto.randomUUID(),
             householdId: input.householdId,
             recipeId: recipe.id,
             kind: "food",
             displayName: food.name,
-            quantity: quantityForNewIngredient(input.amount, input.unit, food),
+            quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: null,
+            note: noteForUnmeasuredIngredient(quantity, null),
         });
+        await maybeRecheckUnverified(
+            store,
+            input.householdId,
+            recipe.id,
+            wasUnverified,
+        );
+        return saved;
     } catch (err) {
         wrapFoodsError(err);
     }
@@ -1353,6 +1559,7 @@ export async function addRecipeToGrocery(opts: {
         opts.householdId,
         opts.recipeId,
     );
+    await assertRecipeVerified(opts.recipes, opts.householdId, opts.recipeId);
     const ingredients = await opts.recipes.listIngredients(
         opts.householdId,
         opts.recipeId,
@@ -1537,10 +1744,12 @@ export function ingredientGaps(
 }
 
 export function recipeCanMakeNow(
+    recipe: Recipe,
     ingredients: RecipeIngredient[],
     fridgeStock: LinkedNeed[],
     foodsById: ReadonlyMap<string, Food> = new Map(),
 ): boolean {
+    if (recipe.verification === "unverified") return false;
     if (ingredients.length === 0) return false;
     return ingredients.every((ingredient) => {
         const tag = alreadyHaveTag(
@@ -1609,9 +1818,12 @@ export function recipeMatchesFilter(
         const tag = filter.tag.trim().toLowerCase();
         if (tag && !recipe.tags.includes(tag)) return false;
     }
+    if (filter.verification && recipe.verification !== filter.verification) {
+        return false;
+    }
     if (
         filter.canMakeNow &&
-        !recipeCanMakeNow(ingredients, fridgeStock, foodsById)
+        !recipeCanMakeNow(recipe, ingredients, fridgeStock, foodsById)
     ) {
         return false;
     }
@@ -1673,8 +1885,9 @@ function validateImportLine(line: RecipeImportIngredient): {
                   amount: parseAmount(line.amount),
                   unit: parseUnit(line.unit),
               };
-    let note = parseOptionalText(line.note, "Ingredient note", 500);
-    if (quantity == null && !note) note = "to taste";
+    // No default note here: an import only counts as "not measured" when the
+    // caller says so (note "to taste"), otherwise the check asks for an amount.
+    const note = parseOptionalText(line.note, "Ingredient note", 500);
     return { quantity, note };
 }
 
@@ -1703,6 +1916,8 @@ export async function importRecipeFromText(
     recipe: Recipe;
     ingredients: RecipeIngredient[];
     gaps: IngredientGap[];
+    verification: RecipeVerification;
+    problems: RecipeProblem[];
 }> {
     const rawText = parseOptionalText(input.text, "Recipe text", 20_000);
     if (!rawText) throw new RecipeInputError("Enter recipe text.");
@@ -1795,7 +2010,7 @@ export async function importRecipeFromText(
         const instructionBody =
             input.instructions !== undefined
                 ? parseOptionalText(input.instructions, "Instructions", 20_000)
-                : input.text;
+                : null;
         const recipe = await createRecipe(store, {
             householdId: input.householdId,
             creatorId: input.creatorId,
@@ -1807,6 +2022,21 @@ export async function importRecipeFromText(
             notes: input.notes,
             prepMinutes: input.prepMinutes,
             cookMinutes: input.cookMinutes,
+            verification: "unverified",
+        });
+        const importedAt = nowIso();
+        await store.upsertImport({
+            recipeId: recipe.id,
+            householdId: input.householdId,
+            sourceKind: "text",
+            sourceUrl: parseOptionalText(input.sourceUrl, "Source URL", 2_000),
+            sourceText: rawText,
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            importedAt,
         });
         const imported: RecipeIngredient[] = [];
         for (const row of barcodeResolved) {
@@ -1838,7 +2068,20 @@ export async function importRecipeFromText(
                 ingredient.foodId ? catalog.get(ingredient.foodId) : undefined,
             ),
         }));
-        return { recipe, ingredients: imported, gaps };
+        const checked = await recheckRecipe(
+            store,
+            input.householdId,
+            recipe.id,
+        );
+        const saved =
+            (await store.getRecipe(input.householdId, recipe.id)) ?? recipe;
+        return {
+            recipe: saved,
+            ingredients: imported,
+            gaps,
+            verification: checked.verification,
+            problems: checked.problems,
+        };
     });
 }
 
@@ -1869,6 +2112,8 @@ export function recipeFromRow(row: {
     notes?: unknown;
     prep_minutes?: unknown;
     cook_minutes?: unknown;
+    verification?: unknown;
+    updated_at?: unknown;
 }): Recipe {
     return {
         id: String(row.id),
@@ -1894,6 +2139,12 @@ export function recipeFromRow(row: {
             row.cook_minutes == null || row.cook_minutes === ""
                 ? null
                 : Number(row.cook_minutes),
+        verification:
+            row.verification === "unverified" ? "unverified" : "verified",
+        updatedAt:
+            row.updated_at == null || row.updated_at === ""
+                ? new Date().toISOString()
+                : String(row.updated_at),
     };
 }
 
@@ -1910,6 +2161,8 @@ export function recipeToRow(row: Recipe) {
         notes: row.notes,
         prep_minutes: row.prepMinutes,
         cook_minutes: row.cookMinutes,
+        verification: row.verification,
+        updated_at: row.updatedAt,
     };
 }
 

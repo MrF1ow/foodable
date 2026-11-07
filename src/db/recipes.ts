@@ -12,6 +12,10 @@ import {
     cleanupDismissalsForSubjectTx,
 } from "./notice-dismissals.js";
 import {
+    recipeImportFromRow,
+    recipeImportToRow,
+} from "../domain/recipe-import.js";
+import {
     definedColumns,
     insertReturning,
     maybeOne,
@@ -25,11 +29,23 @@ import {
 const RECIPES = "recipes";
 const RECIPE_INGREDIENTS = "recipe_ingredients";
 const RECIPE_PORTIONS = "recipe_portions";
+const RECIPE_IMPORTS = "recipe_imports";
 const RECIPE_COLS =
-    "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes";
+    "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes, verification, updated_at";
 const RECIPE_INGREDIENT_COLS =
     "id, household_id, recipe_id, kind, display_name, amount, unit, food_id, sort_order, note";
 const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
+const RECIPE_IMPORT_COLS =
+    "recipe_id, household_id, source_kind, source_url, source_text, source_text_origin, transcript, credit, unresolved_lines, problems, imported_at";
+
+export function recipeImportSqlValues(
+    row: ReturnType<typeof recipeImportToRow>,
+) {
+    return {
+        unresolvedLinesJson: JSON.stringify(row.unresolved_lines),
+        problemsJson: JSON.stringify(row.problems),
+    };
+}
 
 function patchKeys(keys: string[]): [string, ...string[]] {
     return keys as [string, ...string[]];
@@ -43,6 +59,23 @@ function recipeRowForWrite(
         ...row,
         tags: tx.array(Array.isArray(row.tags) ? row.tags : [], "text"),
     };
+}
+
+async function touchRecipeUpdatedAt(
+    tx: Tx,
+    householdId: string,
+    recipeId: string,
+): Promise<void> {
+    await rows(
+        tx,
+        tx`
+            update ${tx.unsafe(RECIPES)}
+            set updated_at = now()
+            where id = ${recipeId}
+              and household_id = ${householdId}
+            returning id
+        `,
+    );
 }
 
 export function liveRecipesStore(): RecipesStore {
@@ -189,6 +222,7 @@ export function liveRecipesStore(): RecipesStore {
                     RECIPE_INGREDIENT_COLS,
                     "add recipe ingredient",
                 );
+                await touchRecipeUpdatedAt(tx, row.householdId, row.recipeId);
                 return recipeIngredientFromRow(data as never);
             });
         },
@@ -208,6 +242,11 @@ export function liveRecipesStore(): RecipesStore {
                         `,
                         "update recipe ingredient",
                     );
+                    await touchRecipeUpdatedAt(
+                        tx,
+                        row.householdId,
+                        row.recipeId,
+                    );
                     return data ? recipeIngredientFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("update recipe ingredient", err);
@@ -217,6 +256,18 @@ export function liveRecipesStore(): RecipesStore {
         async deleteIngredient(householdId, ingredientId) {
             return run(async (tx) => {
                 try {
+                    const target = await maybeOne<{
+                        recipe_id: string;
+                    }>(
+                        tx,
+                        tx`
+                            select recipe_id
+                            from ${tx.unsafe(RECIPE_INGREDIENTS)}
+                            where id = ${ingredientId}
+                              and household_id = ${householdId}
+                        `,
+                        "load recipe ingredient",
+                    );
                     const data = await rows<{ id: string }>(
                         tx,
                         tx`
@@ -232,6 +283,13 @@ export function liveRecipesStore(): RecipesStore {
                             householdId,
                             "recipe_ingredient",
                             ingredientId,
+                        );
+                    }
+                    if (data.length > 0 && target) {
+                        await touchRecipeUpdatedAt(
+                            tx,
+                            householdId,
+                            String(target.recipe_id),
                         );
                     }
                     return data.length > 0;
@@ -303,6 +361,128 @@ export function liveRecipesStore(): RecipesStore {
                     return map;
                 } catch (err) {
                     throw pgError("list recipe activity", err);
+                }
+            });
+        },
+        async getImport(householdId, recipeId) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_IMPORT_COLS)}
+                            from ${tx.unsafe(RECIPE_IMPORTS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                        `,
+                        "load recipe import",
+                    );
+                    return data ? recipeImportFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("load recipe import", err);
+                }
+            });
+        },
+        async upsertImport(row) {
+            return run(async (tx) => {
+                try {
+                    const payload = recipeImportToRow(row);
+                    const { unresolvedLinesJson, problemsJson } =
+                        recipeImportSqlValues(payload);
+                    const data = await one<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            insert into ${tx.unsafe(RECIPE_IMPORTS)} (
+                                recipe_id,
+                                household_id,
+                                source_kind,
+                                source_url,
+                                source_text,
+                                source_text_origin,
+                                transcript,
+                                credit,
+                                unresolved_lines,
+                                problems,
+                                imported_at
+                            )
+                            values (
+                                ${payload.recipe_id},
+                                ${payload.household_id},
+                                ${payload.source_kind},
+                                ${payload.source_url},
+                                ${payload.source_text},
+                                ${payload.source_text_origin},
+                                ${payload.transcript},
+                                ${payload.credit},
+                                ${unresolvedLinesJson}::jsonb,
+                                ${problemsJson}::jsonb,
+                                ${payload.imported_at}
+                            )
+                            on conflict (recipe_id) do update set
+                                household_id = excluded.household_id,
+                                source_kind = excluded.source_kind,
+                                source_url = excluded.source_url,
+                                source_text = excluded.source_text,
+                                source_text_origin = excluded.source_text_origin,
+                                transcript = excluded.transcript,
+                                credit = excluded.credit,
+                                unresolved_lines = excluded.unresolved_lines,
+                                problems = excluded.problems,
+                                imported_at = excluded.imported_at
+                            returning ${tx.unsafe(RECIPE_IMPORT_COLS)}
+                        `,
+                        "save recipe import",
+                    );
+                    return recipeImportFromRow(data as never);
+                } catch (err) {
+                    throw pgError("save recipe import", err);
+                }
+            });
+        },
+        async setVerification(householdId, recipeId, verification, problems) {
+            return run(async (tx) => {
+                try {
+                    await rows(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPES)}
+                            set verification = ${verification}
+                            where id = ${recipeId}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    await rows(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPE_IMPORTS)}
+                            set problems = ${JSON.stringify(problems)}::jsonb
+                            where recipe_id = ${recipeId}
+                              and household_id = ${householdId}
+                            returning recipe_id
+                        `,
+                    );
+                } catch (err) {
+                    throw pgError("set recipe verification", err);
+                }
+            });
+        },
+        async deleteStaleUnverified(householdId, before) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                              and verification = 'unverified'
+                              and updated_at < ${before.toISOString()}
+                            returning id
+                        `,
+                    );
+                    return data.length;
+                } catch (err) {
+                    throw pgError("delete stale unverified recipes", err);
                 }
             });
         },

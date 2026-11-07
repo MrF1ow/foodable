@@ -127,6 +127,8 @@ test("fridge page and grocery page import the same quantity-field and food-picke
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
+            verification: "verified",
+            updatedAt: "2026-01-01T00:00:00.000Z",
         },
         notices: [],
         noticeContext: { from: "/recipes/r1", foods: new Map() },

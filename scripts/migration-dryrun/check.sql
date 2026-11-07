@@ -257,6 +257,25 @@ begin
         raise exception 'usual product is not a product of its food (rule 3)';
     end if;
 
+    if (select count(*) from public.recipes) < 1 then
+        raise exception 'expected at least one recipe in fixture';
+    end if;
+    if exists (
+        select 1 from public.recipes where verification is distinct from 'verified'
+    ) then
+        raise exception 'every recipe in fixture should be verified after backfill';
+    end if;
+    if not exists (
+        select 1
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public'
+          and c.relname = 'recipe_imports'
+          and c.relrowsecurity
+    ) then
+        raise exception 'recipe_imports missing or RLS not enabled';
+    end if;
+
     begin
         update public.foods
         set generic_food_id = id
