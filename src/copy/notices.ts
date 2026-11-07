@@ -89,6 +89,13 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
         help: "usual-products",
         dismissible: false,
     },
+    "recipe.no_amount": {
+        badge: "No amount",
+        sentence: (notice) =>
+            `${String(notice.params.name)} has no amount (${String(notice.params.taste ?? "to taste")}), so it isn't counted.`,
+        help: "recipe-portions",
+        dismissible: false,
+    },
     "recipe.no_nutrition": {
         badge: "No nutrition",
         sentence: (notice) => {

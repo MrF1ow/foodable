@@ -1,5 +1,10 @@
 import { test, expect } from "bun:test";
-import { addLocation, createMemoryFridgeStore, listFridge } from "./fridge.js";
+import {
+    addFoodById,
+    addLocation,
+    createMemoryFridgeStore,
+    listFridge,
+} from "./fridge.js";
 import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
@@ -163,6 +168,130 @@ test("cook deducts oldest-expiry first and reports a shortfall", async () => {
             eggsFood,
         ),
     ).toBe(true);
+});
+
+test("cookRecipe skips unmeasured ingredients and lists them", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: "Soup",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const loc = await addLocation(fridge, HH, "Pantry");
+    await applyMovement(fridge, stock, foods, {
+        householdId: HH,
+        foodId: salt.id,
+        delta: 100,
+        unit: "g",
+        reason: "purchase",
+        locationId: loc.id,
+    });
+    const movementsBefore = await stock.listMovements(HH);
+    const cooked = await cookRecipe(recipes, fridge, stock, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        totalPortions: 1,
+    });
+    expect(cooked.unmeasured).toEqual([
+        { foodId: salt.id, displayName: salt.name },
+    ]);
+    const listed = await listFridge(fridge, HH);
+    const item = listed.items.find((row) => row.foodId === salt.id);
+    expect(item?.quantity.amount).toBe(100);
+    expect(await stock.listMovements(HH)).toHaveLength(movementsBefore.length);
+    expect(
+        ledgerMatchesStock(listed.items, await stock.listMovements(HH), salt),
+    ).toBe(true);
+});
+
+test("cookRecipe with deductStock false still lists unmeasured ingredients", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: "Soup",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const cooked = await cookRecipe(recipes, fridge, stock, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        totalPortions: 1,
+        deductStock: false,
+    });
+    expect(cooked.unmeasured).toEqual([
+        { foodId: salt.id, displayName: salt.name },
+    ]);
+});
+
+test("putAwayGroceryLines requires an amount for to-taste lines", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const sections = await settings.listSections(store.id);
+    const line = await grocery.insertLine({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        storeId: store.id,
+        sectionId: sections[0]!.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: { amount: 1, unit: "g" },
+        foodId: salt.id,
+        checked: false,
+        note: "to taste",
+    });
+    await expect(
+        putAwayGroceryLines(grocery, fridge, stock, foods, {
+            householdId: HH,
+            lineIds: [line.id],
+        }),
+    ).rejects.toThrow(/to taste/);
+    for (const amount of [0, -500, Number.NaN]) {
+        await expect(
+            putAwayGroceryLines(grocery, fridge, stock, foods, {
+                householdId: HH,
+                lineIds: [line.id],
+                amountOverrides: { [line.id]: { amount } },
+            }),
+        ).rejects.toThrow(/greater than zero/);
+    }
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+    expect(await stock.listMovements(HH, salt.id)).toHaveLength(0);
 });
 
 test("ledger sum equals current state across purchases and cooks", async () => {

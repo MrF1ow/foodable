@@ -12,10 +12,23 @@ export function cookRecipeToastFlash(
     deductStock: boolean,
     logMeals: boolean,
     shortfallCount: number,
+    unmeasuredNames: string[] = [],
 ): ToastFlashChoice | null {
     if (!deductStock && !logMeals) return null;
+    if (shortfallCount > 0 && unmeasuredNames.length > 0) {
+        return {
+            key: "recipes.cooked.shortfall.unmeasured",
+            params: { names: unmeasuredNames.join(", ") },
+        };
+    }
     if (shortfallCount > 0) {
         return { key: "recipes.cooked.shortfall" };
+    }
+    if (unmeasuredNames.length > 0) {
+        return {
+            key: "recipes.cooked.unmeasured",
+            params: { names: unmeasuredNames.join(", ") },
+        };
     }
     return { key: "recipes.cooked" };
 }

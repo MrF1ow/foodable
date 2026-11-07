@@ -14,7 +14,7 @@ import {
 export type LinkedQuantity = { amount: number; unit: string };
 
 export type LinkedNeed = {
-    quantity: LinkedQuantity;
+    quantity: LinkedQuantity | null;
     foodId?: string | null;
 };
 
@@ -83,11 +83,28 @@ export function sameFood(
     return familyIdOf(a.foodId, foodsById) === familyIdOf(b.foodId, foodsById);
 }
 
+function unmeasuredAlreadyHave(
+    need: LinkedNeed,
+    stock: LinkedNeed[],
+    foodsById: ReadonlyMap<string, FoodQuantityFactors>,
+): AlreadyHaveTag | null {
+    const matches = stock.filter((row) => sameFood(need, row, foodsById));
+    if (matches.length === 0) return null;
+    for (const row of matches) {
+        if (!row.quantity || !(row.quantity.amount > 0)) continue;
+        return { cover: "full" };
+    }
+    return null;
+}
+
 export function alreadyHaveTag(
     need: LinkedNeed,
     stock: LinkedNeed[],
     foodsById: ReadonlyMap<string, FoodQuantityFactors> = new Map(),
 ): AlreadyHaveTag | null {
+    if (need.quantity == null) {
+        return unmeasuredAlreadyHave(need, stock, foodsById);
+    }
     const matches = stock.filter((row) => sameFood(need, row, foodsById));
     if (matches.length === 0) return null;
     const targetUnit = need.quantity.unit;
@@ -95,6 +112,7 @@ export function alreadyHaveTag(
     let have = 0;
     let converted = 0;
     for (const row of matches) {
+        if (!row.quantity) continue;
         const rowFood = row.foodId ? foodsById.get(row.foodId) : undefined;
         const amount = amountInUnit(
             row.quantity,
@@ -120,15 +138,16 @@ export function alreadyHaveTag(
 
 export type RecipeGroceryIngredient = {
     displayName: string;
-    quantity: LinkedQuantity;
+    quantity: LinkedQuantity | null;
     foodId?: string | null;
 };
 
 export type RecipeGroceryRemainderLine = {
     displayName: string;
-    need: LinkedQuantity;
+    need: LinkedQuantity | null;
     remainder: LinkedQuantity | null;
     skipped: boolean;
+    unmeasured: boolean;
     tag: AlreadyHaveTag | null;
     foodId?: string | null;
 };
@@ -149,6 +168,26 @@ export function recipeToGroceryRemainder(input: {
     const scale = portionSum / input.yieldPortions;
     const foodsById = input.foodsById ?? new Map();
     return input.ingredients.map((ingredient) => {
+        if (ingredient.quantity == null) {
+            const tag = alreadyHaveTag(
+                {
+                    quantity: null,
+                    foodId: ingredient.foodId,
+                },
+                input.stock,
+                foodsById,
+            );
+            const skipped = tag?.cover === "full";
+            return {
+                displayName: ingredient.displayName,
+                need: null,
+                remainder: null,
+                skipped,
+                unmeasured: true,
+                tag,
+                foodId: ingredient.foodId ?? null,
+            };
+        }
         const need: LinkedQuantity = {
             amount: roundAmount(ingredient.quantity.amount * scale),
             unit: ingredient.quantity.unit,
@@ -167,6 +206,7 @@ export function recipeToGroceryRemainder(input: {
                 need,
                 remainder: null,
                 skipped: true,
+                unmeasured: false,
                 tag,
                 foodId: ingredient.foodId ?? null,
             };
@@ -177,6 +217,7 @@ export function recipeToGroceryRemainder(input: {
                 need,
                 remainder: tag.need,
                 skipped: false,
+                unmeasured: false,
                 tag,
                 foodId: ingredient.foodId ?? null,
             };
@@ -186,6 +227,7 @@ export function recipeToGroceryRemainder(input: {
             need,
             remainder: need,
             skipped: false,
+            unmeasured: false,
             tag: null,
             foodId: ingredient.foodId ?? null,
         };

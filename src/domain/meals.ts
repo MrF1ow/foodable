@@ -183,6 +183,7 @@ function recipeCaffeine(
             ? foodsById.get(ingredient.foodId)
             : undefined;
         if (!food || food.caffeineMg == null) continue;
+        if (ingredient.quantity == null) continue;
         const eaten = ingredient.quantity.amount * (portions / yieldPortions);
         const grams = toGrams(
             { amount: eaten, unit: ingredient.quantity.unit },

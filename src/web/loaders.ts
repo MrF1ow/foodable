@@ -871,7 +871,11 @@ export async function renderRecipeDetailRoute(
         if (effective?.product) {
             displayName = `${row.displayName} · ${effective.product.name}`;
         }
-        return { ...row, displayName };
+        return {
+            ...row,
+            displayName,
+            defaultUnit: effective?.defaultUnit ?? "g",
+        };
     });
     return {
         status: 200,

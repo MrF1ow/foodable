@@ -43,6 +43,7 @@ export type GroceryLine = {
     quantity: GroceryQuantity;
     foodId: string | null;
     checked: boolean;
+    note: string | null;
 };
 
 export type GrocerySnapshot = {
@@ -622,6 +623,7 @@ async function insertFromFood(
         quantity: { amount: input.amount, unit: input.unit },
         foodId: input.food.id,
         checked: false,
+        note: null,
     });
 }
 
@@ -1288,6 +1290,7 @@ export function groceryLineFromRow(row: {
     unit: unknown;
     checked: unknown;
     food_id?: unknown;
+    note?: unknown;
 }): GroceryLine {
     const kind = row.kind === "supply" ? "supply" : "food";
     return {
@@ -1306,6 +1309,7 @@ export function groceryLineFromRow(row: {
                 ? null
                 : String(row.food_id),
         checked: Boolean(row.checked),
+        note: row.note == null || row.note === "" ? null : String(row.note),
     };
 }
 
@@ -1321,5 +1325,6 @@ export function groceryLineToRow(row: GroceryLine) {
         unit: row.quantity.unit,
         food_id: row.foodId,
         checked: row.checked,
+        note: row.note,
     };
 }

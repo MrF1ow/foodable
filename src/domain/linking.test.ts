@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { alreadyHaveTag, recipeToGroceryRemainder } from "./linking.js";
+import { recipeCanMakeNow, recipeIngredientFromRow } from "./recipes.js";
 
 // Matching is by food_id alone. Two foods can share a display name (two
 // cottage cheeses, say), and those must never net against each other.
@@ -256,4 +257,44 @@ test("recipe grocery remainder: total portions override the members' sum", () =>
         stock: [],
     });
     expect(wholeLoaf[0]?.need).toEqual({ amount: 500, unit: "g" });
+});
+
+const SALT = "food-salt";
+
+test("recipe grocery remainder marks unmeasured ingredients", () => {
+    const plan = recipeToGroceryRemainder({
+        ingredients: [
+            {
+                displayName: "Salt",
+                quantity: null,
+                foodId: SALT,
+            },
+        ],
+        yieldPortions: 1,
+        portionCounts: [1],
+        stock: [],
+    });
+    expect(plan[0]?.unmeasured).toBe(true);
+    expect(plan[0]?.need).toBeNull();
+});
+
+test("recipeCanMakeNow treats unmeasured as covered with any stock", () => {
+    const salt = recipeIngredientFromRow({
+        id: "i1",
+        household_id: "h1",
+        recipe_id: "r1",
+        kind: "food",
+        display_name: "Salt",
+        amount: null,
+        unit: null,
+        sort_order: 0,
+        food_id: SALT,
+    });
+    expect(
+        recipeCanMakeNow(
+            [salt],
+            [{ quantity: { amount: 1, unit: "g" }, foodId: SALT }],
+        ),
+    ).toBe(true);
+    expect(recipeCanMakeNow([salt], [])).toBe(false);
 });

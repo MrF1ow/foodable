@@ -1,5 +1,8 @@
 import { type Quantity } from "../../domain/quantity.js";
-import { formatQuantityDisplayParts } from "../display-quantity.js";
+import {
+    formatQuantityDisplayParts,
+    quantityUnitOptionLabel,
+} from "../display-quantity.js";
 import type { GroceryLine } from "../../domain/grocery.js";
 import type { Notice } from "../../domain/notices.js";
 import { UNKNOWN_ALLERGEN_TEXT } from "../../copy/notices.js";
@@ -75,6 +78,9 @@ const GROCERY_FOOD_PICKER_ID = "grocery-food-picker";
 const GROCERY_SECTION_SELECT_ID = "grocery-add-section";
 
 function quantityLabel(line: GroceryLine): string {
+    if (line.note?.trim()) {
+        return line.note.trim();
+    }
     return formatQuantityDisplayParts(line.quantity.amount, line.quantity.unit);
 }
 
@@ -230,10 +236,20 @@ function lineRow(
                       })
                       .join("")}</select>`
                 : "";
+        const noteHint = line.note?.trim()
+            ? `<p class="muted grocery-put-away-note">${escapeHtml(line.note.trim())} — enter the amount you bought</p>`
+            : "";
+        const amountField = line.note?.trim()
+            ? `<label class="visually-hidden" for="put-away-amt-${escapeHtml(line.id)}">Amount</label>
+<input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" inputmode="decimal" value="1" required />
+<span class="muted grocery-put-away-unit">${escapeHtml(quantityUnitOptionLabel(line.quantity.unit))}</span>`
+            : "";
         putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
 ${productSelect}
+${amountField}
+${noteHint}
 <button type="submit" class="btn-sm btn-primary">Put away</button>
 </form>`;
     }

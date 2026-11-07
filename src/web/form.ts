@@ -28,6 +28,16 @@ export function formOptionalNumber(
     return raw === "" ? undefined : Number(raw);
 }
 
+/** Recipe ingredient amount: blank means unmeasured (null), not zero. */
+export function formRecipeIngredientAmount(
+    body: Record<string, string | File | (string | File)[]>,
+    key: string,
+): number | null {
+    const raw = formText(body, key).trim();
+    if (raw === "") return null;
+    return Number(raw);
+}
+
 function asStringList(value: unknown): string[] {
     if (Array.isArray(value)) {
         return value.filter((item): item is string => typeof item === "string");

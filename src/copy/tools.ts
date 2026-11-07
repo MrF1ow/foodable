@@ -505,6 +505,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "line_ids", required: true },
             { name: "location_id", required: false },
             { name: "product_food_ids", required: false },
+            { name: "amounts", required: false },
         ],
         hasPhotoHint: false,
     },
