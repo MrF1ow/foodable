@@ -432,6 +432,97 @@ describe("household usual products and items routes", () => {
         expect(kirkland.id).not.toBe(solo.id);
     });
 
+    test("POST pick adds a product to the list and keeps the current usual", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...eggs,
+            usualProductId: kirkland.id,
+        });
+        const solo = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Farm eggs" }),
+        );
+        const r = await post(
+            `/household/usual-products/${eggs.id}/pick`,
+            `food_id=${solo.id}&from=%2Fgrocery`,
+        );
+        expect(r.status).toBe(303);
+        // Back to the list, with the return path kept.
+        expect(r.headers.get("location")).toBe(
+            `/household/usual-products/${eggs.id}?from=%2Fgrocery`,
+        );
+        expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
+            eggs.id,
+        );
+        expect((await db.foodsStore.getFood(HH, eggs.id))?.usualProductId).toBe(
+            kirkland.id,
+        );
+    });
+
+    test("POST add product by hand keeps the current usual", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...eggs,
+            usualProductId: kirkland.id,
+        });
+        const r = await post(
+            `/household/usual-products/${eggs.id}/products`,
+            "name=Farm+eggs",
+        );
+        expect(r.status).toBe(303);
+        const foods = await db.foodsStore.listFoods(HH);
+        expect(
+            foods.some(
+                (row) =>
+                    row.genericFoodId === eggs.id && row.name === "Farm eggs",
+            ),
+        ).toBe(true);
+        expect((await db.foodsStore.getFood(HH, eggs.id))?.usualProductId).toBe(
+            kirkland.id,
+        );
+    });
+
+    test("POST remove takes the product off the list, keeps it as a food, and clears it as usual", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...eggs,
+            usualProductId: kirkland.id,
+        });
+        const r = await post(
+            `/household/usual-products/${eggs.id}/products/${kirkland.id}/remove`,
+            "from=%2Fgrocery",
+        );
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe(
+            `/household/usual-products/${eggs.id}?from=%2Fgrocery`,
+        );
+        const product = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(product?.genericFoodId).toBeNull();
+        expect(product?.archivedAt).toBeNull();
+        expect(
+            (await db.foodsStore.getFood(HH, eggs.id))?.usualProductId,
+        ).toBeNull();
+    });
+
+    test("POST remove a product of another food returns 400 and changes nothing", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        const flour = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Flour" }),
+        );
+        const before = await db.foodsStore.listFoods(HH);
+        const r = await post(
+            `/household/usual-products/${flour.id}/products/${kirkland.id}/remove`,
+            "",
+        );
+        expect(r.status).toBe(400);
+        expect(await r.text()).toContain(
+            "That product is not on this food's list.",
+        );
+        expect(await db.foodsStore.listFoods(HH)).toEqual(before);
+        expect(
+            (await db.foodsStore.getFood(HH, kirkland.id))?.genericFoodId,
+        ).toBe(eggs.id);
+    });
+
     test("POST pick with barcode creates from OFF stub", async () => {
         const { eggs } = await seedEggsCatalog();
         db.barcodeFoods["012345678905"] = {
