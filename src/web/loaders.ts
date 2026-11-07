@@ -784,6 +784,10 @@ export async function renderRecipesListPage(
         importWebsiteError?: string;
         importSourceKind?: import("../domain/recipe-import.js").RecipeSourceKind;
         importSourceLabel?: string;
+        importTextOrigin?: "shared" | "pasted";
+        importTextOnly?: boolean;
+        shareArrived?: import("../domain/share.js").ReadShareResult;
+        shareArrivedOpen?: boolean;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -886,6 +890,10 @@ export async function renderRecipesListPage(
             importWebsiteError: opts.importWebsiteError,
             importSourceKind: opts.importSourceKind,
             importSourceLabel: opts.importSourceLabel,
+            importTextOrigin: opts.importTextOrigin,
+            importTextOnly: opts.importTextOnly,
+            shareArrived: opts.shareArrived,
+            shareArrivedOpen: opts.shareArrivedOpen,
         }),
     };
 }

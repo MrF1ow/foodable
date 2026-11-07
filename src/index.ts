@@ -32,6 +32,8 @@ import { fridgeRoutes } from "./web/routes/fridge.js";
 import { groceryRoutes } from "./web/routes/grocery.js";
 import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
+import { shareRoutes } from "./web/routes/share.js";
+import { manifestJson } from "./web/manifest.js";
 import { householdRoutes } from "./web/routes/household.js";
 import { settingsRoutes } from "./web/routes/settings.js";
 import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
@@ -138,7 +140,7 @@ app.use("*", async (c, next) => {
         // their own documents with their own copy (frame-ancestors 'self').
         c.header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
         );
     }
     c.header("Referrer-Policy", "no-referrer");
@@ -274,6 +276,7 @@ app.route("/", foodsRoutes);
 app.route("/", fridgeRoutes);
 app.route("/", groceryRoutes);
 app.route("/", recipesRoutes);
+app.route("/", shareRoutes);
 app.route("/", householdRoutes);
 app.route("/", settingsRoutes);
 app.route("/", needsAttentionRoutes);
@@ -360,6 +363,30 @@ app.get("/apple-touch-icon.png", async (c) => {
     if (!(await file.exists())) return c.notFound();
     return c.body(await file.arrayBuffer(), 200, {
         "Content-Type": "image/png",
+    });
+});
+for (const icon of ["icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
+    app.get(`/${icon}`, async (c) => {
+        const file = Bun.file(`./public/${icon}`);
+        if (!(await file.exists())) return c.notFound();
+        return c.body(await file.arrayBuffer(), 200, {
+            "Content-Type": "image/png",
+        });
+    });
+}
+app.get("/manifest.webmanifest", async (c) => {
+    const href = "/manifest.webmanifest";
+    return c.body(manifestJson(), 200, {
+        "Content-Type": "application/manifest+json; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
+    });
+});
+app.get("/sw.js", async (c) => {
+    const file = Bun.file("./src/web/client/sw.js");
+    return c.body(await file.text(), 200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Service-Worker-Allowed": "/",
+        "Cache-Control": "no-cache",
     });
 });
 // Rendered from src/brand.ts, the source the committed public/brand/ files

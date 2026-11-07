@@ -29,11 +29,14 @@ afterAll(() => {
 const {
     OAUTH_PATHS,
     beginSiteLogin,
+    MAX_SITE_LOGIN_SESSIONS,
+    siteLoginSessionCount,
     createOAuthRouter,
     renderLoginPage,
     resolveApproveUser,
     classifySignInFailure,
     logRejectedRedirect,
+    siteLoginReturnPath,
 } = await import("./oauth.js");
 const { _resetBuckets } = await import("./rate-limit.js");
 
@@ -549,6 +552,26 @@ test("/token authorization_code requires redirect_uri and code_verifier", async 
     expect(noVerifier.status).toBe(400);
 });
 
+test("siteLoginReturnPath keeps /share query and refuses external next", () => {
+    const app = new Hono();
+    app.get("/share", (c) => c.text(siteLoginReturnPath(c)));
+    app.get("/login-next", (c) => c.text(siteLoginReturnPath(c)));
+    const share = app.request("http://localhost/share?text=hello&url=");
+    const badNext = app.request(
+        "http://localhost/login-next?next=" +
+            encodeURIComponent("https://evil.com/share"),
+    );
+    const traversal = app.request(
+        "http://localhost/login-next?next=" +
+            encodeURIComponent("/share/../logout"),
+    );
+    return Promise.all([share, badNext, traversal]).then(async ([s, n, t]) => {
+        expect(await s.text()).toBe("/share?text=hello&url=");
+        expect(await n.text()).toBe("/");
+        expect(await t.text()).toBe("/");
+    });
+});
+
 test("beginSiteLogin still renders login without MCP connect hint", async () => {
     const app = new Hono();
     app.get("/", (c) => beginSiteLogin(c));
@@ -564,4 +587,16 @@ test("beginSiteLogin still renders login without MCP connect hint", async () => 
     expect(html).toContain('<input type="text" id="email" name="email"');
     expect(html).toContain("Email or username");
     expect(html).not.toContain("Signing in to connect");
+});
+
+test("signed-out site logins are capped so long shares can't fill memory", async () => {
+    const app = new Hono();
+    app.get("/share", (c) => beginSiteLogin(c));
+    const caption = "x".repeat(20_000);
+    for (let i = 0; i < MAX_SITE_LOGIN_SESSIONS + 10; i++) {
+        await app.request(`http://localhost/share?text=${caption}${i}`);
+    }
+    expect(siteLoginSessionCount()).toBeLessThanOrEqual(
+        MAX_SITE_LOGIN_SESSIONS,
+    );
 });

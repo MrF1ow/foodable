@@ -602,7 +602,7 @@ async function saveImportedRecipe(
     prepared: ReturnType<typeof prepareImportedRecipe>,
     meta: {
         sourceKind: RecipeSourceKind;
-        sourceUrl: string;
+        sourceUrl: string | null;
         sourceText: string | null;
         sourceTextOrigin: RecipeTextOrigin | null;
         transcript: string | null;
@@ -1057,6 +1057,71 @@ export async function importRecipeFromUrl(
             credit,
         },
         sourceOutcome,
+    );
+}
+
+export async function importRecipeFromSharedText(
+    deps: {
+        recipes: RecipesStore;
+        foods: FoodsStore;
+        fetcher: SafeFetcher;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+    },
+    input: {
+        householdId: string;
+        creatorId: string;
+        text: string;
+        credit?: string | null;
+        textOrigin?: RecipeTextOrigin;
+    },
+): Promise<RecipeImportOutcome> {
+    const sourceText = normalizeImportText(input.text);
+    const credit = normalizeImportCredit(input.credit);
+    const textOrigin: RecipeTextOrigin = input.textOrigin ?? "shared";
+    if (!sourceText) {
+        return emptyOutcome("no_recipe_in_text");
+    }
+
+    const parsed = parseRecipeText(sourceText, {
+        fallbackName: "Shared recipe",
+    });
+    if (!parsed.hasRecipe) {
+        return emptyOutcome("no_recipe_in_text");
+    }
+
+    const prepared = prepareImportedRecipe({
+        name: parsed.name,
+        fallbackName: "Shared recipe",
+        yieldPortions: parsed.yieldPortions,
+        steps: parsed.steps,
+        prepMinutes: null,
+        cookMinutes: null,
+        parsed: {
+            items: parsed.ingredients,
+            unresolved: parsed.unresolved,
+        },
+    });
+
+    return saveImportedRecipe(
+        deps,
+        {
+            householdId: input.householdId,
+            creatorId: input.creatorId,
+        },
+        prepared,
+        {
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText,
+            sourceTextOrigin: textOrigin,
+            transcript: null,
+            credit,
+        },
+        {
+            kind: "text",
+            url: null,
+            label: "Recipe text",
+        },
     );
 }
 

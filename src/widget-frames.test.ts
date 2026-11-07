@@ -9,8 +9,10 @@ process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
 const { app } = await import("./index.js");
 
+const WIDGET_FRAME_CSP =
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'self'";
 const APP_CSP =
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'";
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'";
 
 describe("GET /app/widgets/:key", () => {
     test("serves an allowlisted widget unauthenticated and 404s anything else", async () => {
@@ -52,7 +54,7 @@ describe("GET /app/widgets/:key", () => {
         );
         expect(widget.headers.get("x-frame-options")).toBe("SAMEORIGIN");
         const widgetCsp = widget.headers.get("content-security-policy") ?? "";
-        expect(widgetCsp).toBe(APP_CSP.replace("'none'", "'self'"));
+        expect(widgetCsp).toBe(WIDGET_FRAME_CSP);
         expect(widgetCsp).toContain("frame-ancestors 'self'");
         expect(widgetCsp).toContain("script-src 'self' 'unsafe-inline'");
         expect(widgetCsp).toContain("style-src 'self' 'unsafe-inline'");

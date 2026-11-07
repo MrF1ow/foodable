@@ -26,8 +26,11 @@ import {
     getAppCss,
     getAppJs,
 } from "./widgets.js";
+import { isSafeShareReturnPath } from "./domain/share.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
+/** Bounds memory held by signed-out site logins (each up to 64 KiB). */
+export const MAX_SITE_LOGIN_SESSIONS = 32;
 
 interface OAuthSession {
     state: string;
@@ -51,6 +54,15 @@ function cleanExpiredSessions() {
 }
 
 setInterval(cleanExpiredSessions, 60 * 1000);
+
+/** Test hook: how many site-login sessions are held. */
+export function siteLoginSessionCount(): number {
+    let count = 0;
+    for (const value of sessions.values()) {
+        if (value.session.purpose === "site") count += 1;
+    }
+    return count;
+}
 
 function base64URLEncode(buffer: Buffer): string {
     return buffer
@@ -104,7 +116,8 @@ async function finishAuthorization(
             "Set-Cookie",
             siteCookieHeader(mintSiteSession(userId), secure),
         );
-        return c.redirect("/");
+        const dest = isSafeShareReturnPath(session.redirectUri) ?? "/";
+        return c.redirect(dest);
     }
 
     const authCode = crypto.randomUUID();
@@ -495,6 +508,17 @@ export function createOAuthRouter() {
     return oauth;
 }
 
+export function siteLoginReturnPath(c: Context): string {
+    const reqUrl = new URL(c.req.url);
+    const fromRequest = reqUrl.pathname + reqUrl.search;
+    const fromShare = isSafeShareReturnPath(fromRequest);
+    if (fromShare) return fromShare;
+    const next = c.req.query("next")?.trim();
+    const fromNext = next ? isSafeShareReturnPath(next) : null;
+    if (fromNext) return fromNext;
+    return "/";
+}
+
 export async function beginSiteLogin(
     c: Context,
     _localeQuery?: string,
@@ -503,10 +527,25 @@ export async function beginSiteLogin(
     const sessionId = crypto.randomUUID();
     const session: OAuthSession = {
         state: "site",
-        redirectUri: "/",
+        redirectUri: siteLoginReturnPath(c),
         clientId: process.env.OAUTH_CLIENT_ID ?? "site",
         purpose: "site",
     };
+    // A signed-out share keeps up to 64 KiB of return path in memory, and
+    // GET /share is not rate limited, so site-login sessions are capped: the
+    // oldest one goes first. MCP authorization sessions are never evicted.
+    let siteSessions = 0;
+    for (const value of sessions.values()) {
+        if (value.session.purpose === "site") siteSessions += 1;
+    }
+    if (siteSessions >= MAX_SITE_LOGIN_SESSIONS) {
+        for (const [key, value] of sessions) {
+            if (value.session.purpose === "site") {
+                sessions.delete(key);
+                break;
+            }
+        }
+    }
     sessions.set(sessionId, {
         session,
         expiresAt: Date.now() + SESSION_TTL_MS,
