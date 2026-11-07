@@ -7,6 +7,7 @@ import {
     findManualFood,
     findOrCreateManualFood,
     FoodsInputError,
+    type OnSimilar,
     normalizeFoodName,
     type Food,
     type FoodsStore,
@@ -1111,6 +1112,7 @@ export async function addGroceryManualFood(
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
         fridge?: Pick<FridgeStore, "listItems">;
+        onSimilar?: OnSimilar;
     },
 ): Promise<GroceryLine> {
     const explicit = explicitStoreId(input.storeId);
@@ -1142,6 +1144,7 @@ export async function addGroceryManualFood(
             input.householdId,
             "food",
             input.name,
+            { onSimilar: input.onSimilar },
         );
 
         let storeId: string;
@@ -1237,6 +1240,7 @@ export async function addGrocerySupply(
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
         fridge?: Pick<FridgeStore, "listItems">;
+        onSimilar?: OnSimilar;
     },
 ): Promise<GroceryLine> {
     const explicit = explicitStoreId(input.storeId);
@@ -1285,6 +1289,7 @@ export async function addGrocerySupply(
                   input.householdId,
                   "supply",
                   input.name,
+                  { onSimilar: input.onSimilar },
               );
         if (food.kind !== "supply") {
             throw new GroceryInputError("That catalog item is a food.");

@@ -175,6 +175,7 @@ export interface WidgetStrings {
     mealLogged: {
         titleLogged: string;
         titleUpdated: string;
+        titleNotLogged: string;
         /** Template. Placeholder: {kcal} (pre-formatted). */
         addedKcal: string;
     };
@@ -476,6 +477,7 @@ export const WIDGET_STRINGS_EN: WidgetStrings = {
     mealLogged: {
         titleLogged: "Meal logged",
         titleUpdated: "Meal updated",
+        titleNotLogged: "Not logged yet",
         addedKcal: "+{kcal} kcal",
     },
     trends: {

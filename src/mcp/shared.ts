@@ -69,7 +69,7 @@ import {
 } from "../domain/grocery.js";
 import { listRecipes } from "../domain/recipes.js";
 import { effectiveFoodsByIds } from "../domain/foods.js";
-import type { Food } from "../domain/foods.js";
+import type { Food, OnSimilar, SimilarFoodsEntry } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
 import { noticeActionFor, noticeSentence } from "../copy/notices.js";
@@ -577,32 +577,98 @@ export const TRENDS_DAY_ITEM = TOTALS_ITEM.extend({
 // widget hides the stat line entirely rather than picking a default.
 export const DRINK_UNIT_FIELD = z.enum(["us", "uk"]).nullable();
 
+// "Did you mean…?" (docs/food-duplicates-plan.md › 3): the six tools that
+// create a food by name answer status "similar_foods" instead of writing.
+export const SIMILAR_FOOD_CANDIDATE = z.object({
+    food_id: z.string(),
+    name: z.string(),
+    brand: z.string().nullable(),
+    why: z.enum(["same_words", "contains_words", "word_match"]),
+});
+
+export const SIMILAR_FOODS_ENTRY = z.object({
+    name: z.string(),
+    candidates: z.array(SIMILAR_FOOD_CANDIDATE),
+});
+
+export const WRITE_STATUS = z.enum(["ok", "similar_foods"]);
+
+export const ON_SIMILAR_INPUT = z
+    .enum(["ask", "create"])
+    .optional()
+    .describe(
+        'What to do when a new name is probably an existing food. "ask" (default) writes nothing and returns status "similar_foods" with the candidates so you can ask the person. "create" creates the new food anyway; use it only in unattended or scheduled runs, where the pair then shows up under Possible duplicates.',
+    );
+
+export const NEW_FOOD_INPUT = z
+    .boolean()
+    .optional()
+    .describe(
+        "true after the person confirmed this is a new food, not one of the similar_foods candidates. Creates it without asking again.",
+    );
+
+export function similarFoodsWire(
+    entries: SimilarFoodsEntry[],
+): z.infer<typeof SIMILAR_FOODS_ENTRY>[] {
+    return entries.map((entry) => ({
+        name: entry.name,
+        candidates: entry.candidates.map((c) => ({
+            food_id: c.food.id,
+            name: c.food.name,
+            brand: c.food.brand,
+            why: c.why,
+        })),
+    }));
+}
+
+export function similarFoodsText(entries: SimilarFoodsEntry[]): string {
+    const parts = entries.map((entry) => {
+        const names = entry.candidates
+            .map((c) => `${c.food.name} (${c.food.id})`)
+            .join(", ");
+        return `"${entry.name}" → ${names}`;
+    });
+    return `Nothing saved. Did you mean: ${parts.join("; ")}? Ask the person, then call again with that food_id, or with new_food: true if it is a new food.`;
+}
+
+export function onSimilarFor(args: {
+    on_similar?: "ask" | "create";
+    new_food?: boolean;
+}): OnSimilar {
+    if (args.new_food === true) return "create";
+    return args.on_similar ?? "ask";
+}
+
 // log_meal and update_meal share the same MCP Apps widget
 // (public/widgets/meal-logged.html). Both declare this identical output shape
 // and both build their payload via buildMealProgress() below, so the widget can
 // render either result; `action` only changes the header wording.
 export const MEAL_PROGRESS_OUTPUT_SCHEMA = z.object({
     action: z.enum(["logged", "updated"]),
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
     date: z.string(),
     drink_unit: DRINK_UNIT_FIELD,
     // The widget's UI language — see the identical field on
     // get_nutrition_summary's outputSchema for why this is z.string() and
     // Widgets are English-only; always the literal "en".
     locale: z.string(),
-    logged_meal: z.object({
-        description: z.string(),
-        meal_type: z.string().nullable(),
-        calories: z.number().nullable(),
-        protein_g: z.number().nullable(),
-        carbs_g: z.number().nullable(),
-        fat_g: z.number().nullable(),
-        fiber_g: z.number().nullable(),
-        sugar_g: z.number().nullable(),
-        alcohol_g: z.number().nullable(),
-        // Milligrams, and null whenever this meal carried no caffeine figure —
-        // which is most meals, and is not the same as a measured zero.
-        caffeine_mg: z.number().nullable(),
-    }),
+    logged_meal: z
+        .object({
+            description: z.string(),
+            meal_type: z.string().nullable(),
+            calories: z.number().nullable(),
+            protein_g: z.number().nullable(),
+            carbs_g: z.number().nullable(),
+            fat_g: z.number().nullable(),
+            fiber_g: z.number().nullable(),
+            sugar_g: z.number().nullable(),
+            alcohol_g: z.number().nullable(),
+            // Milligrams, and null whenever this meal carried no caffeine figure —
+            // which is most meals, and is not the same as a measured zero.
+            caffeine_mg: z.number().nullable(),
+        })
+        .nullable(),
     has_goals: z.boolean(),
     goals: GOALS_ITEM.nullable(),
     totals: TOTALS_ITEM,

@@ -58,6 +58,9 @@
 
             // ---- Sample data so the file renders on its own (browser preview) ----
             const SAMPLE = {
+                action: "logged",
+                status: "ok",
+                similar_foods: [],
                 date: "2026-07-11",
                 locale: "en",
                 logged_meal: {
@@ -235,9 +238,11 @@
                 // Same widget for log_meal and update_meal — the action only
                 // changes the header wording.
                 const title =
-                    data.action === "updated"
-                        ? T.mealLogged.titleUpdated
-                        : T.mealLogged.titleLogged;
+                    data.status === "similar_foods"
+                        ? T.mealLogged.titleNotLogged
+                        : data.action === "updated"
+                          ? T.mealLogged.titleUpdated
+                          : T.mealLogged.titleLogged;
 
                 root.innerHTML = `
           <div class="panel">
