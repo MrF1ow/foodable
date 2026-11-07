@@ -764,7 +764,7 @@ test("grocery allergen warning uses catalog allergens before the name", async ()
 
 test("grocery page groups by store then section and shows already-have", () => {
     const html = renderGroceryPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [
             {
                 id: "st-1",
@@ -827,6 +827,7 @@ test("grocery page groups by store then section and shows already-have", () => {
 
 const groceryChrome = {
     theme: "light" as const,
+    attention: { count: 0, tabs: {} },
 };
 
 test("owner grocery page has a short add-store form and no add-supply", () => {
@@ -899,7 +900,7 @@ test("empty store name error re-renders groceries with the banner", () => {
 
 test("grocery lines are rows with a labelled round check button", () => {
     const html = renderGroceryPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         canManage: true,
         locations: [{ id: "l1", name: "Fridge" }],
         stores: [

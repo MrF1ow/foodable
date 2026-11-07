@@ -4,6 +4,7 @@ import {
     type GroceryLine,
     type GroceryListStore,
 } from "../domain/grocery.js";
+import { cleanupDismissalsForSubjectTx } from "./notice-dismissals.js";
 import {
     definedColumns,
     insertReturning,
@@ -93,6 +94,14 @@ export function liveGroceryStore(): GroceryListStore {
                             returning id
                         `,
                     );
+                    if (data.length > 0) {
+                        await cleanupDismissalsForSubjectTx(
+                            tx,
+                            householdId,
+                            "grocery_line",
+                            id,
+                        );
+                    }
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete grocery line", err);

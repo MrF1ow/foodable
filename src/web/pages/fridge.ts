@@ -4,7 +4,8 @@ import type {
     FridgeLocation,
     FridgeSnapshot,
 } from "../../domain/fridge.js";
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
+import { escapeHtml, renderAppShell } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderQuantityField } from "../components/quantity-field.js";
 import {
@@ -50,7 +51,7 @@ const SUPPLY_UNITS = [
 ] as const;
 
 export type FridgePageView = FridgeSnapshot & {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     error?: string;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
@@ -517,9 +518,9 @@ ${field({ id: "location_name", label: "Location name", control: `<input id="loca
         ${renderLinkProductPrompt(view.linkProductPrompt ?? null)}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Fridge",
         active: "fridge",
-        theme: view.chrome.theme,
         body,
     });
 }

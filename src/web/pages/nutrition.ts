@@ -18,6 +18,7 @@ import {
 } from "../../domain/meals.js";
 import { isWeightUnit, toGrams, type WeightUnit } from "../../domain/units.js";
 import { getEmbedWidgetHtml } from "../../widgets.js";
+import type { AppChromeBase } from "../attention.js";
 import {
     escapeHtml,
     renderAppShell,
@@ -56,7 +57,7 @@ export type NutritionView = {
     goals: unknown;
     trends: unknown;
     weight: unknown;
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     cardOrder: NutritionCard[];
     viewMemberId?: string;
     error?: string;
@@ -500,9 +501,9 @@ export async function renderNutritionPage(
         ${logModals(view)}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Nutrition",
         active: "nutrition",
-        theme: view.chrome.theme,
         body,
     });
 }

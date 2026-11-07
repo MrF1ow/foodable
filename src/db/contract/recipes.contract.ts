@@ -132,5 +132,26 @@ export function runRecipesStoreContract(
             await store.insertRecipe(sampleRecipe(c));
             expect(await store.listRecipes(c.otherHouseholdId)).toEqual([]);
         });
+
+        test("listIngredientsForHousehold returns every ingredient in one call", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const alpha = sampleRecipe(c, { name: "Alpha" });
+            const beta = sampleRecipe(c, { name: "Beta" });
+            await store.insertRecipe(alpha);
+            await store.insertRecipe(beta);
+            const ingA = sampleIngredient(c, alpha.id, { displayName: "A" });
+            const ingB = sampleIngredient(c, beta.id, { displayName: "B" });
+            await store.insertIngredient(ingA);
+            await store.insertIngredient(ingB);
+            const all = await store.listIngredientsForHousehold(c.householdId);
+            expect(all.map((row) => row.id).sort()).toEqual(
+                [ingA.id, ingB.id].sort(),
+            );
+            expect(
+                await store.listIngredientsForHousehold(c.otherHouseholdId),
+            ).toEqual([]);
+        });
     });
 }

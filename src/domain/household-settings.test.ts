@@ -7,7 +7,10 @@ import {
     renderHouseholdSettingsPage,
 } from "../web/pages/household.js";
 
-const chrome = { theme: "light" as const };
+const chrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+};
 const alice: HouseholdMember = {
     householdId: "hh-1",
     userId: "u1",

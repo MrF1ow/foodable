@@ -6,6 +6,10 @@ import {
     type FridgeStore,
 } from "../domain/fridge.js";
 import {
+    cleanupDismissalsForFridgeLocationTx,
+    cleanupDismissalsForSubjectTx,
+} from "./notice-dismissals.js";
+import {
     definedColumns,
     insertReturning,
     maybeOne,
@@ -87,6 +91,11 @@ export function liveFridgeStore(): FridgeStore {
         async deleteLocation(householdId, id) {
             return run(async (tx) => {
                 try {
+                    await cleanupDismissalsForFridgeLocationTx(
+                        tx,
+                        householdId,
+                        id,
+                    );
                     const data = await rows<{ id: string }>(
                         tx,
                         tx`
@@ -99,6 +108,30 @@ export function liveFridgeStore(): FridgeStore {
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete fridge location", err);
+                }
+            });
+        },
+        async itemActivityMsById(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        id: string;
+                        activity_at: string;
+                    }>(
+                        tx,
+                        tx`
+                            select id, coalesce(updated_at, created_at) as activity_at
+                            from ${tx.unsafe(FRIDGE_ITEMS)}
+                            where household_id = ${householdId}
+                        `,
+                    );
+                    const map = new Map<string, number>();
+                    for (const row of data) {
+                        map.set(String(row.id), Date.parse(row.activity_at));
+                    }
+                    return map;
+                } catch (err) {
+                    throw pgError("list fridge item activity", err);
                 }
             });
         },
@@ -168,6 +201,14 @@ export function liveFridgeStore(): FridgeStore {
                             returning id
                         `,
                     );
+                    if (data.length > 0) {
+                        await cleanupDismissalsForSubjectTx(
+                            tx,
+                            householdId,
+                            "fridge_item",
+                            id,
+                        );
+                    }
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete fridge item", err);

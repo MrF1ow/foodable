@@ -6,7 +6,8 @@ import {
     type RecipeMacros,
 } from "../../domain/recipes.js";
 import type { Notice } from "../../domain/notices.js";
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
+import { escapeHtml, renderAppShell } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderMemberMultiSelect } from "../components/member-multi-select.js";
 import {
@@ -47,7 +48,7 @@ export type RecipesPageFilter = {
 };
 
 export type RecipesPageView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     recipes: Recipe[];
     members: RecipeMember[];
     viewerId: string;
@@ -59,7 +60,7 @@ export type RecipesPageView = {
 export type RecipeIngredientRow = RecipeIngredientView;
 
 export type RecipeDetailView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     recipe: Recipe;
     ingredients: RecipeIngredientRow[];
     notices: Notice[];
@@ -242,9 +243,9 @@ export function renderRecipesPage(view: RecipesPageView): string {
         ${newRecipeModal}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Recipes",
         active: "recipes",
-        theme: view.chrome.theme,
         body,
     });
 }
@@ -624,9 +625,9 @@ ${cookHead}
         ${renderLinkProductPrompt(view.linkProductPrompt ?? null)}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: view.recipe.name,
         active: "recipes",
-        theme: view.chrome.theme,
         body,
     });
 }

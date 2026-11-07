@@ -25,7 +25,10 @@ const bob: HouseholdMember = {
     displayName: "Bob",
 };
 
-const lightChrome = { theme: "light" as const };
+const lightChrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+};
 
 test("withWidgetData seeds the existing script, not a second tag", () => {
     const html = "<html><script>initWidget({})</script></html>";
@@ -142,7 +145,7 @@ test("dashboard frames round-trip widget data and cannot break out of the attrib
         goals,
         trends,
         weight,
-        chrome: { theme: "system" },
+        chrome: { theme: "system", attention: { count: 0, tabs: {} } },
         cardOrder: defaultCardOrder,
     });
     for (const key of NUTRITION_CARDS) {

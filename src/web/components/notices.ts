@@ -4,6 +4,7 @@ import type { NoticeRoute } from "../../copy/notices.js";
 import {
     NOTICE_COPY,
     noticeActionFor,
+    noticeDismissLabel,
     noticeSentence,
 } from "../../copy/notices.js";
 import { escapeHtml } from "../shell.js";
@@ -77,9 +78,18 @@ export function noticeAction(notice: Notice, ctx: NoticeRouteContext): string {
     return `<a href="${escapeHtml(href)}">${escapeHtml(action.label)}</a>`;
 }
 
+export type NoticeListDismissOpts = {
+    action: string;
+    hidden: Record<string, string>;
+};
+
 export function noticeList(
     notices: readonly Notice[],
-    opts?: { className?: string; ctx?: NoticeRouteContext },
+    opts?: {
+        className?: string;
+        ctx?: NoticeRouteContext;
+        dismiss?: (notice: Notice) => NoticeListDismissOpts | null;
+    },
 ): string {
     if (notices.length === 0) return "";
     const baseClass = opts?.className
@@ -93,8 +103,18 @@ export function noticeList(
         if (seen.has(sentence)) continue;
         seen.add(sentence);
         const action = ctx ? noticeAction(notice, ctx) : "";
-        let li = `<li>${escapeHtml(sentence)}`;
+        const dismiss = opts?.dismiss?.(notice);
+        let li = `<li class="notice-row">${escapeHtml(sentence)}`;
         if (action) li += ` ${action}`;
+        if (dismiss) {
+            const hidden = Object.entries(dismiss.hidden)
+                .map(
+                    ([k, v]) =>
+                        `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}" />`,
+                )
+                .join("");
+            li += `<form method="post" action="${escapeHtml(dismiss.action)}" class="notice-dismiss-form">${hidden}<button type="submit" class="btn-sm">${escapeHtml(noticeDismissLabel(notice.code))}</button></form>`;
+        }
         li += "</li>";
         items.push(li);
     }

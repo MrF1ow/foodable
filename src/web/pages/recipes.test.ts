@@ -24,7 +24,7 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
         ...recipe,
     };
     return {
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipe: mergedRecipe,
         ingredients: [],
         notices: [],

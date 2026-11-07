@@ -64,6 +64,8 @@
     "merge_foods",
     "link_product",
     "set_usual_product",
+    "list_notices",
+    "dismiss_notice",
     "list_members",
     "get_household_config",
     "update_household_config",

@@ -12,7 +12,8 @@ export type CategoryId =
     | "fridge"
     | "grocery"
     | "recipes"
-    | "rules";
+    | "rules"
+    | "notices";
 
 export type BadgeKind =
     | "log"
@@ -338,6 +339,29 @@ const TOOLS_BASE: ToolIdentity[] = [
         params: [
             { name: "enabled", required: true },
             { name: "drink_unit", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "list_notices",
+        category: "notices",
+        badges: ["view"],
+        params: [
+            { name: "code", required: false },
+            { name: "severity", required: false },
+            { name: "subject_kind", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "dismiss_notice",
+        category: "notices",
+        badges: ["edit"],
+        params: [
+            { name: "code", required: true },
+            { name: "subject_kind", required: true },
+            { name: "subject_id", required: true },
+            { name: "related_id", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -776,6 +800,8 @@ const TOOLS_BASE: ToolIdentity[] = [
 ];
 
 export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
+    "dismiss_notice",
+    "list_notices",
     "list_members",
     "get_household_config",
     "update_household_config",

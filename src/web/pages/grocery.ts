@@ -6,7 +6,8 @@ import { UNKNOWN_ALLERGEN_TEXT } from "../../copy/notices.js";
 import type { GrocerySection, GroceryStore } from "../../domain/settings.js";
 import type { StoreRule } from "../../domain/rules.js";
 import type { AlreadyHaveTag } from "../../domain/linking.js";
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
+import { escapeHtml, renderAppShell } from "../shell.js";
 import { renderAlreadyHaveTag } from "../components/already-have-tag.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderGroceryLineRow } from "../components/page-markup.js";
@@ -54,7 +55,7 @@ export type GroceryAllergenRetry = {
 };
 
 export type GroceryPageView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     stores: GroceryStoreView[];
     locations?: { id: string; name: string }[];
     canManage?: boolean;
@@ -422,9 +423,9 @@ ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id=
         ${linkPrompt}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Groceries",
         active: "grocery",
-        theme: view.chrome.theme,
         body,
     });
 }

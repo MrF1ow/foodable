@@ -553,5 +553,86 @@ begin
     exception when raise_exception then
         if sqlerrm <> 'dryrun-rollback' then raise; end if;
     end;
+    if not exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'public'
+          and table_name = 'notice_dismissals'
+    ) then
+        raise exception 'notice_dismissals table missing';
+    end if;
+
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'notice_dismissals_key'
+    ) then
+        raise exception 'notice_dismissals_key index missing';
+    end if;
+
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'notice_dismissals_subject_idx'
+    ) then
+        raise exception 'notice_dismissals_subject_idx index missing';
+    end if;
+
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'notice_dismissals_related_key_idx'
+    ) then
+        raise exception 'notice_dismissals_related_key_idx index missing';
+    end if;
+
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'notice_dismissals_household_created_idx'
+    ) then
+        raise exception 'notice_dismissals_household_created_idx index missing';
+    end if;
+
+    if not exists (
+        select 1
+        from pg_tables
+        where schemaname = 'public'
+          and tablename = 'notice_dismissals'
+          and rowsecurity
+    ) then
+        raise exception 'notice_dismissals RLS not enabled';
+    end if;
+
+    begin
+        insert into public.notice_dismissals (
+            household_id, code, subject_kind, subject_id
+        )
+        values (
+            '11111111-1111-1111-1111-111111111111',
+            'fridge.expiring',
+            'fridge_item',
+            '22222222-2222-2222-2222-222222222222'
+        );
+        begin
+            insert into public.notice_dismissals (
+                household_id, code, subject_kind, subject_id
+            )
+            values (
+                '11111111-1111-1111-1111-111111111111',
+                'fridge.expiring',
+                'fridge_item',
+                '22222222-2222-2222-2222-222222222222'
+            );
+            raise exception 'duplicate dismissal accepted';
+        exception when unique_violation then
+            delete from public.notice_dismissals
+            where household_id = '11111111-1111-1111-1111-111111111111'
+              and code = 'fridge.expiring'
+              and subject_kind = 'fridge_item'
+              and subject_id = '22222222-2222-2222-2222-222222222222';
+        end;
+    end;
+
 end;
 $$;

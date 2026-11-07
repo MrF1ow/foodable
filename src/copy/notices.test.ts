@@ -21,10 +21,12 @@ import {
     NOTICE_COPY,
     formatMissingNutrientList,
     noticeActionFor,
+    noticeDismissLabel,
     noticeSentence,
     ON_GROCERY_LIST_TEXT,
     UNKNOWN_ALLERGEN_TEXT,
 } from "./notices.js";
+import { NOTICE_SEVERITY } from "../domain/notices.js";
 import { addAllergen, createMemoryRulesStore } from "../domain/rules.js";
 import {
     allergenNotices,
@@ -83,7 +85,15 @@ test("NOTICE_COPY is complete and well-formed", () => {
         expect(entry.badge.length).toBeGreaterThan(0);
         expect(typeof entry.sentence).toBe("function");
         expect(HELP_IDS).toContain(entry.help);
-        expect(entry.dismissible).toBe(false);
+        if (entry.dismissible) {
+            expect(NOTICE_SEVERITY[code]).toBe("info");
+            expect(noticeDismissLabel(code).length).toBeGreaterThan(0);
+            if (entry.dismissPair) {
+                expect(entry.dismissible).toBe(true);
+            }
+        } else {
+            expect(entry.dismissible).toBe(false);
+        }
     }
 });
 

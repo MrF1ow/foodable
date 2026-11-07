@@ -1,6 +1,11 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
 import { isQuantityUnit } from "./quantity.js";
+import {
+    cleanupDismissalsForFood,
+    type MemoryNoticeDismissalsHolder,
+    type NoticeDismissalsStore,
+} from "./notice-dismissals.js";
 
 export type FoodKind = "food" | "supply";
 
@@ -395,15 +400,16 @@ export type MemoryFoodRefHolder = {
     countFoodRefs?(householdId: string): Map<string, number>;
 };
 
-export type MemoryFoodsStore = FoodsStore & {
-    refs: MemoryFoodRefRow[];
-    trackRef(
-        foodId: string,
-        householdId?: string,
-        extra?: Record<string, unknown>,
-    ): MemoryFoodRefRow;
-    linkRefs(holder: MemoryFoodRefHolder): void;
-};
+export type MemoryFoodsStore = FoodsStore &
+    MemoryNoticeDismissalsHolder & {
+        refs: MemoryFoodRefRow[];
+        trackRef(
+            foodId: string,
+            householdId?: string,
+            extra?: Record<string, unknown>,
+        ): MemoryFoodRefRow;
+        linkRefs(holder: MemoryFoodRefHolder): void;
+    };
 
 export function createMemoryFoodsStore(): MemoryFoodsStore {
     const foods: Food[] = [];
@@ -413,9 +419,16 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
         [];
     const refs: MemoryFoodRefRow[] = [];
     const refHolders: MemoryFoodRefHolder[] = [];
+    let linkedDismissals: NoticeDismissalsStore | undefined;
 
     const store: MemoryFoodsStore = {
         refs,
+        linkDismissals(s) {
+            linkedDismissals = s;
+        },
+        dismissalsStore() {
+            return linkedDismissals;
+        },
         trackRef(foodId, householdId, extra) {
             const row: MemoryFoodRefRow = {
                 foodId,
@@ -464,6 +477,7 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                     food.id === row.id && food.householdId === row.householdId,
             );
             if (idx < 0) return null;
+            const prior = foods[idx]!;
             const key = foodKey(row);
             if (
                 key &&
@@ -474,6 +488,13 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 throw new FoodsInputError("That food already exists.");
             }
             foods[idx] = copyFood(row);
+            if (prior.archivedAt == null && row.archivedAt != null) {
+                await cleanupDismissalsForFood(
+                    linkedDismissals,
+                    row.householdId,
+                    row.id,
+                );
+            }
             return copyFood(row);
         },
         async getByNormalizedName(householdId, kind, normalizedName) {

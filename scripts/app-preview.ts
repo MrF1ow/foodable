@@ -14,7 +14,13 @@
  * dark as different bytes.
  * The server never imports this file.
  */
-import { utcTodayFromDate } from "../src/domain/stock.js";
+import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
+import {
+    needsAttentionCount,
+    sortNotices,
+    tabDotsFromNotices,
+    type Notice,
+} from "../src/domain/notices.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
@@ -32,6 +38,7 @@ import {
 } from "../src/web/pages/usual-products.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
+import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
 import {
     NUTRITION_LOG_MEAL_MODAL_ID,
     NUTRITION_LOG_WATER_MODAL_ID,
@@ -383,8 +390,50 @@ function previewFoodCatalog() {
     return { catalog, usual };
 }
 
+/** The household-wide notices the preview pages share: the real fridge
+ *  producer over the fridge fixture, plus one recipe gap. The top-bar count
+ *  and the tab dots are computed from them, as the loaders do. */
+function previewNotices(): Notice[] {
+    const recipeGap: Notice = {
+        code: "recipe.no_nutrition",
+        severity: "warn",
+        subject: { kind: "recipe_ingredient", id: "ing0", recipeId: RECIPE.id },
+        related: [],
+        params: { name: "Buttermilk", foodId: "f-buttermilk" },
+    };
+    return sortNotices([
+        recipeGap,
+        ...(() => {
+            const items = fridgeView(null).items;
+            // Nothing is on the grocery list, so each food item offers
+            // "Add to grocery list", as on the fridge page.
+            const foodsById = new Map(
+                items.map((row) => [
+                    row.foodId,
+                    { id: row.foodId, genericFoodId: null },
+                ]),
+            );
+            return fridgeNotices(items as never, utcTodayFromDate(), {
+                lines: [],
+                foodsById,
+            });
+        })(),
+    ]);
+}
+
+function previewAttention() {
+    const notices = previewNotices();
+    return {
+        count: needsAttentionCount(notices),
+        tabs: tabDotsFromNotices(notices),
+    };
+}
+
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = viewerChromeFromProfile({ theme });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme }),
+        attention: previewAttention(),
+    };
     const { catalog, usual } = previewFoodCatalog();
     const catalogById = new Map(catalog.map((row) => [row.id, row]));
     const eggsPlain = catalog.find((row) => row.id === "f-eggs")!;
@@ -622,6 +671,46 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             },
         } as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        "needs-attention": (() => {
+            const fridgeItems = fridgeView(null).items;
+            return renderNeedsAttentionPage({
+                chrome,
+                result: {
+                    notices: previewNotices(),
+                    dismissals: [],
+                    subjectNames: new Map([
+                        ...fridgeItems.map(
+                            (row) =>
+                                [`fridge_item:${row.id}`, row.displayName] as [
+                                    string,
+                                    string,
+                                ],
+                        ),
+                        [`recipe:${RECIPE.id}`, RECIPE.name],
+                    ]),
+                    subjectTimes: new Map([
+                        ...fridgeItems.map(
+                            (row, i) =>
+                                [
+                                    `fridge_item:${row.id}`,
+                                    Date.parse("2026-01-01T00:00:00.000Z") +
+                                        i * 60_000,
+                                ] as [string, number],
+                        ),
+                        [
+                            `recipe:${RECIPE.id}`,
+                            Date.parse("2026-02-01T00:00:00.000Z"),
+                        ],
+                    ]),
+                    noticeFoods: new Map(
+                        catalog.map((f) => [
+                            f.id,
+                            { genericFoodId: f.genericFoodId },
+                        ]),
+                    ),
+                },
+            } as never);
+        })(),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -656,7 +745,10 @@ async function nutritionWithModal(
     theme: "light" | "dark",
     openModalId: string,
 ): Promise<string> {
-    const chrome = viewerChromeFromProfile({ theme });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme }),
+        attention: previewAttention(),
+    };
     return renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],

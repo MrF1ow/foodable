@@ -1,6 +1,7 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
+import type { AttentionChrome } from "./attention.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut, iconSettings } from "./components/icons.js";
 
@@ -27,8 +28,9 @@ export type ViewerChrome = {
 
 export type AppChrome = ViewerChrome & {
     title: string;
-    active: AppTabId;
+    active: AppTabId | "none";
     body: string;
+    attention: AttentionChrome;
 };
 
 export function resolveTheme(theme: string | null | undefined): ThemePref {
@@ -65,11 +67,18 @@ export type AppBarVariant = "app" | "settings" | "gate";
 // merge replaces a theme-color meta whose colour differs, and iOS Safari only
 // retints its toolbar on a page load, so every link between the two (the gear,
 // Back, and the Settings logo) opts out of Turbo.
-export function appBar(variant: AppBarVariant): string {
+export function appBar(
+    variant: AppBarVariant,
+    attention?: AttentionChrome,
+): string {
     const logoTurbo = variant === "settings" ? ' data-turbo="false"' : "";
+    const countBadge =
+        variant === "app" && attention && attention.count > 0
+            ? `<a class="pill app-bar-attention" href="/needs-attention" aria-label="Needs attention: ${attention.count}">${attention.count}</a>`
+            : "";
     const action =
         variant === "app"
-            ? `<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
+            ? `${countBadge}<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
             : variant === "gate"
               ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
               : "";
@@ -104,9 +113,9 @@ ${htmlOpen(chrome.theme)}
 ${appHead(chrome.title, chrome.theme)}
 </head>
 <body class="has-bottom-nav">
-${appBar("app")}
+${appBar("app", chrome.attention)}
 <main class="app-main native">${chrome.body}</main>
-${bottomNav(chrome.active)}
+${bottomNav(chrome.active, chrome.attention.tabs)}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

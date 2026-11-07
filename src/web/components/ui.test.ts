@@ -30,7 +30,13 @@ function shellPage(
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Settings";
-    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+    return renderAppShell({
+        title,
+        active,
+        theme,
+        body: `<h1>${title}</h1>`,
+        attention: { count: 0, tabs: {} },
+    });
 }
 
 /** Fails when any `<form>` opens before its parent form closes. */
@@ -378,6 +384,10 @@ test("no page module contains a raw <h1", () => {
 
 test("every page's h1 comes from pageHeader once", async () => {
     const chrome = { theme: "light" as const };
+    const appChrome = {
+        theme: "light" as const,
+        attention: { count: 0, tabs: {} },
+    };
     const member = {
         householdId: "hh",
         userId: "u1",
@@ -396,7 +406,7 @@ test("every page's h1 comes from pageHeader once", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome,
+        chrome: appChrome,
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -406,12 +416,15 @@ test("every page's h1 comes from pageHeader once", async () => {
     });
     const pages: Array<[string, string]> = [
         ["nutrition", nutrition],
-        ["fridge", renderFridgePage({ locations: [], items: [], chrome })],
-        ["grocery", renderGroceryPage({ chrome, stores: [] })],
+        [
+            "fridge",
+            renderFridgePage({ locations: [], items: [], chrome: appChrome }),
+        ],
+        ["grocery", renderGroceryPage({ chrome: appChrome, stores: [] })],
         [
             "recipes",
             renderRecipesPage({
-                chrome,
+                chrome: appChrome,
                 recipes: [],
                 members: [],
                 viewerId: "u1",
@@ -430,11 +443,18 @@ test("every page's h1 comes from pageHeader once", async () => {
                 drinkUnit: "",
             }),
         ],
-        ["foods", renderFoodsSettingsPage({ chrome, foods: [], stores: [] })],
+        [
+            "foods",
+            renderFoodsSettingsPage({
+                chrome: appChrome,
+                foods: [],
+                stores: [],
+            }),
+        ],
         [
             "household",
             renderHouseholdSettingsPage({
-                chrome,
+                chrome: appChrome,
                 householdName: "House",
                 location: "",
                 members: [],
@@ -468,7 +488,7 @@ test("every page's h1 comes from pageHeader once", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome,
+        chrome: appChrome,
         cardOrder: [
             "nutrition-summary",
             "goal-progress",

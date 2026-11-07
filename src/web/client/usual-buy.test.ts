@@ -89,7 +89,7 @@ test("picker radios carry each row's own usual store and amount", () => {
         usualAmount: { amount: 50, unit: "lb" },
     };
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: null },
+        chrome: { theme: null, attention: { count: 0, tabs: {} } },
         food: { ...flour, usualProductId: almonds.id },
         products: [almonds],
         usualProductId: almonds.id,
