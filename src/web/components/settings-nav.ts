@@ -54,12 +54,29 @@ const HOUSEHOLD_SECTIONS = [
     },
 ] as const;
 
-export type HouseholdSection = (typeof HOUSEHOLD_SECTIONS)[number]["id"];
+export type HouseholdSection =
+    (typeof HOUSEHOLD_SECTIONS)[number]["id"] | "possible-duplicates";
 
-export function renderHouseholdNav(active: HouseholdSection): string {
+export function renderHouseholdNav(
+    active: HouseholdSection,
+    opts?: { possibleDuplicates?: number },
+): string {
+    const count = opts?.possibleDuplicates ?? 0;
+    const sections: { id: string; href: string; label: string }[] = [
+        ...HOUSEHOLD_SECTIONS,
+    ];
+    if (count > 0) {
+        const badge =
+            count > 0 ? ` <span class="pill pill-dim">${count}</span>` : "";
+        sections.push({
+            id: "possible-duplicates",
+            href: "/household/possible-duplicates",
+            label: `Possible duplicates${badge}`,
+        });
+    }
     return subnav({
         label: "Household sections",
-        sections: HOUSEHOLD_SECTIONS,
+        sections,
         active,
     });
 }

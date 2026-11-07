@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { mergeFoods, type FoodsStore } from "../domain/foods.js";
-import { liveFoodsStore, mergeLiveFoods } from "./foods.js";
+import { liveFoodsStore, mergeLiveFoodPair, mergeLiveFoods } from "./foods.js";
 import { describeDb } from "./testing/pg.js";
 import { seedFood, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -92,6 +92,27 @@ describeDb(pgAvailable !== null, "mergeLiveFoods transaction", (getCtx) => {
         expect(await mergeState(sql, dropId)).toEqual({
             barcodeFoodId: keepId,
             movementFoodId: keepId,
+            dropArchived: false,
+        });
+    });
+
+    test("mergeLiveFoodPair failure rolls back like mergeLiveFoods", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId, keepId, dropId } = await seedMerge(sql);
+
+        await expect(
+            mergeLiveFoodPair(
+                householdId,
+                { keepId, dropId, picks: {} },
+                failingOnArchive(),
+            ),
+        ).rejects.toThrow("connection lost");
+
+        expect(await mergeState(sql, dropId)).toEqual({
+            barcodeFoodId: dropId,
+            movementFoodId: dropId,
             dropArchived: false,
         });
     });

@@ -31,7 +31,7 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
-import { noticeList } from "../components/notices.js";
+import { noticeInlineLink, noticeList } from "../components/notices.js";
 
 export type GroceryLineView = GroceryLine & {
     alreadyHave: AlreadyHaveTag | null;
@@ -64,6 +64,7 @@ export type GroceryPageView = {
     canManage?: boolean;
     error?: string;
     allergenNotices?: Notice[];
+    foodDuplicateNotices?: ReadonlyMap<string, Notice[]>;
     allergenRetry?: GroceryAllergenRetry;
     unknownAllergen?: boolean;
     openModalId?: string;
@@ -214,6 +215,7 @@ function alreadyHaveHtml(tag: AlreadyHaveTag | null): string {
 function lineRow(
     line: GroceryLineView,
     locations: { id: string; name: string }[],
+    view: GroceryPageView,
 ): string {
     let putAwayHtml = "";
     if (line.checked && locations.length > 0) {
@@ -258,6 +260,20 @@ ${noteHint}
         line.usualPickerHref && line.foodId
             ? `<a class="btn-sm" href="${escapeHtml(line.usualPickerHref)}">Usual product</a>`
             : "";
+    const dupNotices = line.foodId
+        ? (view.foodDuplicateNotices?.get(line.foodId) ?? [])
+        : [];
+    const duplicateNoticeHtml =
+        dupNotices.length > 0 && line.foodId
+            ? dupNotices
+                  .map((n) =>
+                      noticeInlineLink(n, line.foodId!, {
+                          from: "/grocery",
+                          foods: new Map(),
+                      }),
+                  )
+                  .join(" ")
+            : undefined;
     return renderGroceryLineRow({
         id: line.id,
         kind: line.kind,
@@ -268,12 +284,14 @@ ${noteHint}
         putAwayHtml,
         usualProductName: line.usualProductName,
         extraActionsHtml: usualAction,
+        duplicateNoticeHtml,
     });
 }
 
 function storeSection(
     store: GroceryStoreView,
     locations: { id: string; name: string }[],
+    view: GroceryPageView,
 ): string {
     const rules = store.rules
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
@@ -282,7 +300,7 @@ function storeSection(
         .filter((section) => section.lines.length > 0)
         .map((section) => {
             const rows = section.lines
-                .map((line) => lineRow(line, locations))
+                .map((line) => lineRow(line, locations, view))
                 .join("");
             return `<section class="grocery-section psec" data-section-id="${escapeHtml(section.id)}" data-section-name="${escapeHtml(section.name)}">
 <h3>${escapeHtml(section.name)}</h3>
@@ -358,7 +376,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
             : "";
     const locations = view.locations ?? [];
     const stores = view.stores
-        .map((store) => storeSection(store, locations))
+        .map((store) => storeSection(store, locations, view))
         .join("");
     const addFoodMatch = sharedDialogItem({
         openModalId: view.openModalId,

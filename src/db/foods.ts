@@ -2,6 +2,8 @@ import {
     foodFromRow,
     foodToRow,
     mergeFoods,
+    mergeFoodPair,
+    type MergeFoodPairInput,
     type Food,
     type FoodsStore,
 } from "../domain/foods.js";
@@ -523,4 +525,12 @@ export function mergeLiveFoods(
     store: FoodsStore = liveFoodsStore(),
 ): Promise<Food> {
     return run(() => mergeFoods(store, householdId, keepId, dropId));
+}
+
+export function mergeLiveFoodPair(
+    householdId: string,
+    input: MergeFoodPairInput,
+    store: FoodsStore = liveFoodsStore(),
+): Promise<Food> {
+    return run(() => mergeFoodPair(store, householdId, input));
 }

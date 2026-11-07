@@ -1,7 +1,14 @@
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import type { RecipeGapNutrient } from "../domain/recipes.js";
 
-export type NoticeRoute = "usualProductPicker" | "addFridgeItemToGrocery";
+export type NoticeRoute =
+    "usualProductPicker" | "addFridgeItemToGrocery" | "possibleDuplicatePair";
+
+export const POSSIBLE_DUPLICATE_OF_PREFIX = "Possible duplicate of";
+
+export function possibleDuplicateOfText(otherName: string): string {
+    return `${POSSIBLE_DUPLICATE_OF_PREFIX} ${otherName}`;
+}
 
 export type NoticeCopy = {
     badge: string;
@@ -194,6 +201,19 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
             `${String(notice.params.name)}: set grams per millilitre`,
         help: "recipe-portions",
         dismissible: false,
+    },
+    "food.possible_duplicate": {
+        badge: "Possible duplicate",
+        sentence: (notice) => {
+            const subject = String(notice.params.name);
+            const related = notice.related[0]?.name ?? "another food";
+            return `${subject} may be the same as ${related}`;
+        },
+        action: { label: "Review", to: "possibleDuplicatePair" },
+        help: "possible-duplicates",
+        dismissible: true,
+        dismissLabel: "Keep separate",
+        dismissPair: true,
     },
 };
 

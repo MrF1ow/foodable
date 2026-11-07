@@ -3,6 +3,8 @@ import { normalizeBarcode, type FoodResult } from "../foods.js";
 import { isQuantityUnit } from "./quantity.js";
 import {
     cleanupDismissalsForFood,
+    dismissalKeyString,
+    lookupDismissalKey,
     type MemoryNoticeDismissalsHolder,
     type NoticeDismissalsStore,
 } from "./notice-dismissals.js";
@@ -2053,18 +2055,37 @@ export async function updateFood(
     return saved;
 }
 
-export async function mergeFoods(
-    store: FoodsStore,
-    householdId: string,
-    keepId: string,
-    dropId: string,
-): Promise<Food> {
-    if (keepId === dropId) {
+/** Same keep ordering as {@link duplicatePairs} (more refs, then older, then id). */
+export function compareFoodsForMergeKeep(
+    a: Food,
+    b: Food,
+    refCounts: ReadonlyMap<string, number>,
+): number {
+    const ra = refCounts.get(a.id) ?? 0;
+    const rb = refCounts.get(b.id) ?? 0;
+    if (rb !== ra) return rb - ra;
+    const byCreated = a.createdAt.localeCompare(b.createdAt);
+    if (byCreated !== 0) return byCreated;
+    return a.id.localeCompare(b.id);
+}
+
+export function defaultMergeKeepId(
+    a: Food,
+    b: Food,
+    refCounts: ReadonlyMap<string, number>,
+): string {
+    return compareFoodsForMergeKeep(a, b, refCounts) > 0 ? b.id : a.id;
+}
+
+export function assertMergeable(
+    keep: Food,
+    drop: Food,
+    listed: readonly Food[],
+): void {
+    if (keep.id === drop.id) {
         throw new FoodsInputError("Pick two different foods to merge.");
     }
-    const keep = await findFoodById(store, householdId, keepId);
-    const drop = await store.getFood(householdId, dropId);
-    if (!drop || drop.archivedAt) {
+    if (drop.archivedAt) {
         throw new FoodsInputError("Unknown food.");
     }
     if (drop.kind !== keep.kind) {
@@ -2080,9 +2101,8 @@ export async function mergeFoods(
             "Those belong to different foods. Unlink one first.",
         );
     }
-    const listed = await store.listFoods(householdId);
-    const dropProducts = listed.filter((row) => row.genericFoodId === dropId);
-    const keepProducts = listed.filter((row) => row.genericFoodId === keepId);
+    const dropProducts = listed.filter((row) => row.genericFoodId === drop.id);
+    const keepProducts = listed.filter((row) => row.genericFoodId === keep.id);
     const mergedGenericId = keep.genericFoodId ?? drop.genericFoodId;
     const mergedUsualId = keep.usualProductId ?? drop.usualProductId ?? null;
     const liveProductsAfter = keepProducts.length + dropProducts.length;
@@ -2091,6 +2111,25 @@ export async function mergeFoods(
             "Merging those would nest products two deep.",
         );
     }
+}
+
+export async function mergeFoods(
+    store: FoodsStore,
+    householdId: string,
+    keepId: string,
+    dropId: string,
+): Promise<Food> {
+    const keep = await findFoodById(store, householdId, keepId);
+    const drop = await store.getFood(householdId, dropId);
+    if (!drop) {
+        throw new FoodsInputError("Unknown food.");
+    }
+    const listed = await store.listFoods(householdId);
+    assertMergeable(keep, drop, listed);
+    const dropProducts = listed.filter((row) => row.genericFoodId === dropId);
+    const keepProducts = listed.filter((row) => row.genericFoodId === keepId);
+    const mergedGenericId = keep.genericFoodId ?? drop.genericFoodId;
+    const mergedUsualId = keep.usualProductId ?? drop.usualProductId ?? null;
     const mergedFields = mergedFoodFields(keep, drop);
     const keepNext: Food = {
         ...keep,
@@ -2600,6 +2639,401 @@ export function duplicatePairs(
     }
 
     return { merges, skipped };
+}
+
+/** A food's name with its brand, as lists show it: "Milk (Horizon)". */
+export function foodDisplayName(food: Pick<Food, "name" | "brand">): string {
+    const brand = food.brand?.trim();
+    return brand ? `${food.name} (${brand})` : food.name;
+}
+
+export type PossibleDuplicateRule = "same_words" | "contains_words";
+
+export type PossibleDuplicatePair = {
+    subject: Food;
+    related: Food;
+    rule: PossibleDuplicateRule;
+};
+
+/** Wire names for merge-pair pick radios (Items-style snake_case). */
+export const MERGE_PAIR_PICK_FIELDS = [
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "fiber_g",
+    "sugar_g",
+    "alcohol_g",
+    "caffeine_mg",
+    "grams_per_each",
+    "grams_per_ml",
+    "default_unit",
+] as const;
+
+export type MergePairPickField = (typeof MERGE_PAIR_PICK_FIELDS)[number];
+
+const MERGE_PICK_TO_FOOD_KEY: Record<
+    MergePairPickField,
+    keyof Food | "ledgerDefaultUnit"
+> = {
+    calories: "calories",
+    protein_g: "proteinG",
+    carbs_g: "carbsG",
+    fat_g: "fatG",
+    fiber_g: "fiberG",
+    sugar_g: "sugarG",
+    alcohol_g: "alcoholG",
+    caffeine_mg: "caffeineMg",
+    grams_per_each: "gramsPerEach",
+    grams_per_ml: "gramsPerMl",
+    default_unit: "ledgerDefaultUnit",
+};
+
+function foodFieldForMergePick(
+    food: Food,
+    field: MergePairPickField,
+): string | number | null {
+    if (field === "default_unit") return ledgerDefaultUnit(food);
+    const key = MERGE_PICK_TO_FOOD_KEY[field];
+    if (key === "ledgerDefaultUnit") return ledgerDefaultUnit(food);
+    return food[key as keyof Food] as number | null;
+}
+
+const MERGE_PICK_NUTRITION_WIRES = new Set<MergePairPickField>([
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "fiber_g",
+    "sugar_g",
+    "alcohol_g",
+    "caffeine_mg",
+]);
+
+function mergePickFieldsConflict(a: Food, b: Food): MergePairPickField[] {
+    const out: MergePairPickField[] = [];
+    const bothHaveNutrition = usualHasAnyNutrient(a) && usualHasAnyNutrient(b);
+    for (const wire of MERGE_PAIR_PICK_FIELDS) {
+        if (wire === "default_unit") {
+            const ua = ledgerDefaultUnit(a);
+            const ub = ledgerDefaultUnit(b);
+            if (ua !== ub) out.push(wire);
+            continue;
+        }
+        const key = MERGE_PICK_TO_FOOD_KEY[wire] as keyof Food;
+        const va = a[key];
+        const vb = b[key];
+        if (MERGE_PICK_NUTRITION_WIRES.has(wire)) {
+            if (bothHaveNutrition && va !== vb) out.push(wire);
+            continue;
+        }
+        if (va != null && vb != null && va !== vb) out.push(wire);
+    }
+    return out;
+}
+
+export function foodPairMergeConflicts(a: Food, b: Food): MergePairPickField[] {
+    return mergePickFieldsConflict(a, b);
+}
+
+function brandKeyForDuplicate(brand: string | null | undefined): string | null {
+    return brand?.trim() ? brand.trim() : null;
+}
+
+function brandsConflict(a: Food, b: Food): boolean {
+    const ba = brandKeyForDuplicate(a.brand);
+    const bb = brandKeyForDuplicate(b.brand);
+    return ba != null && bb != null && ba !== bb;
+}
+
+function tokenSetOf(food: Food): Set<string> {
+    return new Set(foodNameTokens(food.name));
+}
+
+function isStrictSubset(small: Set<string>, large: Set<string>): boolean {
+    if (small.size >= large.size) return false;
+    for (const t of small) {
+        if (!large.has(t)) return false;
+    }
+    return true;
+}
+
+function pairRule(
+    a: Food,
+    b: Food,
+    setA: Set<string>,
+    setB: Set<string>,
+): PossibleDuplicateRule | null {
+    if (setA.size === setB.size && setA.size > 0) {
+        for (const t of setA) {
+            if (!setB.has(t)) return null;
+        }
+        return "same_words";
+    }
+    const largeFood = setA.size > setB.size ? a : b;
+    const smallSet = setA.size < setB.size ? setA : setB;
+    const largeSet = setA.size < setB.size ? setB : setA;
+    if (!isStrictSubset(smallSet, largeSet)) return null;
+    if (brandKeyForDuplicate(largeFood.brand) != null) return null;
+    return "contains_words";
+}
+
+/** Ordered pair key for deduping (`normalizePairIds` order). */
+function possibleDuplicatePairKey(idA: string, idB: string): string {
+    const { subjectId, relatedKey } =
+        idA < idB
+            ? { subjectId: idA, relatedKey: idB }
+            : { subjectId: idB, relatedKey: idA };
+    return `${subjectId}\0${relatedKey}`;
+}
+
+/**
+ * True when some loose-key group of the merge job has 2+ rows, so the job's
+ * outcome can depend on which row it keeps (reference counts): with 3+ rows the
+ * kept row's accumulated fields decide later skips, and with 2 the alias check
+ * looks only at the dropped row's name. Live rows with the same normalized name
+ * and brand can't coexist, so every such group has differing names. These groups
+ * exist only until the merge job runs, so most page loads skip `countFoodRefs`.
+ */
+export function duplicatesNeedRefCounts(foods: readonly Food[]): boolean {
+    const livePlain = foods.filter(
+        (row) => row.archivedAt == null && row.genericFoodId == null,
+    );
+    const sizes = new Map<string, number>();
+    for (const row of livePlain) {
+        const loose = looseFoodKey(row.name);
+        if (!loose) continue;
+        const brand = duplicateBrandKey(row.brand);
+        const key = `${row.householdId}\0${row.kind}\0${loose}\0${brand === null ? "" : brand}`;
+        const next = (sizes.get(key) ?? 0) + 1;
+        sizes.set(key, next);
+        if (next >= 2) return true;
+    }
+    return false;
+}
+
+/** Pairs the merge job would auto-merge for the given reference counts. */
+function jobAutoMergedPairKeys(
+    foods: readonly Food[],
+    refCounts: ReadonlyMap<string, number>,
+    aliases: ReadonlyMap<string, string[]>,
+): Set<string> {
+    const { merges } = duplicatePairs(foods, refCounts, aliases);
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+        let p = parent.get(id) ?? id;
+        if (p !== id) {
+            p = find(p);
+            parent.set(id, p);
+        }
+        return p;
+    };
+    const union = (a: string, b: string) => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) parent.set(rb, ra);
+    };
+    for (const m of merges) {
+        union(m.keep.id, m.drop.id);
+    }
+    const clusterIds = new Map<string, string[]>();
+    for (const m of merges) {
+        for (const id of [m.keep.id, m.drop.id]) {
+            const root = find(id);
+            const list = clusterIds.get(root) ?? [];
+            if (!list.includes(id)) list.push(id);
+            clusterIds.set(root, list);
+        }
+    }
+    const keys = new Set<string>();
+    for (const ids of clusterIds.values()) {
+        for (let i = 0; i < ids.length; i++) {
+            for (let j = i + 1; j < ids.length; j++) {
+                keys.add(possibleDuplicatePairKey(ids[i]!, ids[j]!));
+            }
+        }
+    }
+    return keys;
+}
+
+function pairDismissed(
+    idA: string,
+    idB: string,
+    dismissed: ReadonlySet<string>,
+): boolean {
+    const key = lookupDismissalKey("food.possible_duplicate", "food", idA, idB);
+    return dismissed.has(dismissalKeyString(key));
+}
+
+export function possibleDuplicates(
+    foods: readonly Food[],
+    aliases: ReadonlyMap<string, string[]>,
+    barcodedIds: ReadonlySet<string>,
+    dismissed: ReadonlySet<string>,
+    refCounts: ReadonlyMap<string, number> = new Map(),
+): PossibleDuplicatePair[] {
+    const jobMerged = jobAutoMergedPairKeys(foods, refCounts, aliases);
+    const tokenSets = new Map<string, Set<string>>();
+    for (const row of foods) {
+        if (row.archivedAt == null) {
+            tokenSets.set(row.id, tokenSetOf(row));
+        }
+    }
+    const candidates = foods.filter(
+        (row) =>
+            row.archivedAt == null &&
+            row.genericFoodId == null &&
+            !barcodedIds.has(row.id) &&
+            !row.offSourceId &&
+            (tokenSets.get(row.id)?.size ?? 0) > 0,
+    );
+
+    const buckets = new Map<string, Food[]>();
+    for (const food of candidates) {
+        const tokens = tokenSets.get(food.id)!;
+        for (const token of tokens) {
+            const key = `${food.householdId}\0${food.kind}\0${token}`;
+            const list = buckets.get(key);
+            if (list) list.push(food);
+            else buckets.set(key, [food]);
+        }
+    }
+
+    const seen = new Set<string>();
+    const pairs: PossibleDuplicatePair[] = [];
+
+    for (const b of candidates) {
+        const bTokens = tokenSets.get(b.id)!;
+        let rarestToken: string | null = null;
+        let rarestSize = Number.POSITIVE_INFINITY;
+        for (const token of bTokens) {
+            const key = `${b.householdId}\0${b.kind}\0${token}`;
+            const size = buckets.get(key)?.length ?? 0;
+            if (size < rarestSize) {
+                rarestSize = size;
+                rarestToken = token;
+            }
+        }
+        if (rarestToken == null) continue;
+        const bucket =
+            buckets.get(`${b.householdId}\0${b.kind}\0${rarestToken}`) ?? [];
+        for (const a of bucket) {
+            if (a.id === b.id) continue;
+            if (a.kind !== b.kind || a.householdId !== b.householdId) continue;
+            const aTokens = tokenSets.get(a.id)!;
+            if (![...bTokens].every((t) => aTokens.has(t))) continue;
+            const rule = pairRule(a, b, aTokens, bTokens);
+            if (!rule) continue;
+            if (brandsConflict(a, b)) continue;
+            const subjectId = a.id < b.id ? a.id : b.id;
+            const relatedId = a.id < b.id ? b.id : a.id;
+            const key = possibleDuplicatePairKey(subjectId, relatedId);
+            if (seen.has(key)) continue;
+            if (jobMerged.has(key)) continue;
+            if (pairDismissed(subjectId, relatedId, dismissed)) continue;
+            seen.add(key);
+            const subject = subjectId === a.id ? a : b;
+            const related = relatedId === a.id ? a : b;
+            pairs.push({ subject, related, rule });
+        }
+    }
+
+    pairs.sort((p, q) => {
+        const bySub = p.subject.name.localeCompare(q.subject.name);
+        if (bySub !== 0) return bySub;
+        const byRel = p.related.name.localeCompare(q.related.name);
+        if (byRel !== 0) return byRel;
+        const byIds = p.subject.id.localeCompare(q.subject.id);
+        if (byIds !== 0) return byIds;
+        return p.related.id.localeCompare(q.related.id);
+    });
+    return pairs;
+}
+
+export type MergeFoodPairInput = {
+    keepId: string;
+    dropId: string;
+    picks?: Partial<Record<MergePairPickField, string>>;
+};
+
+function pickFoodValue(
+    field: MergePairPickField,
+    food: Food,
+): string | number | null {
+    return foodFieldForMergePick(food, field);
+}
+
+function buildMergePairPatch(
+    keep: Food,
+    drop: Food,
+    picks: Partial<Record<MergePairPickField, string>>,
+): FoodPatch {
+    const patch: FoodPatch = {};
+    const conflicts = mergePickFieldsConflict(keep, drop);
+    const bothHaveNutrition =
+        usualHasAnyNutrient(keep) && usualHasAnyNutrient(drop);
+    const nutritionConflicts = conflicts.filter((wire) =>
+        MERGE_PICK_NUTRITION_WIRES.has(wire),
+    );
+    for (const wire of conflicts) {
+        const pickId = picks[wire];
+        const source =
+            pickId === drop.id ? drop : pickId === keep.id ? keep : keep;
+        if (pickId != null && pickId !== keep.id && pickId !== drop.id) {
+            throw new FoodsInputError("Invalid field pick.");
+        }
+        const val = pickFoodValue(wire, source);
+        if (wire === "default_unit") {
+            patch.defaultUnit = String(val);
+        } else if (wire === "calories") patch.calories = val as number | null;
+        else if (wire === "protein_g") patch.proteinG = val as number | null;
+        else if (wire === "carbs_g") patch.carbsG = val as number | null;
+        else if (wire === "fat_g") patch.fatG = val as number | null;
+        else if (wire === "fiber_g") patch.fiberG = val as number | null;
+        else if (wire === "sugar_g") patch.sugarG = val as number | null;
+        else if (wire === "alcohol_g") patch.alcoholG = val as number | null;
+        else if (wire === "caffeine_mg")
+            patch.caffeineMg = val as number | null;
+        else if (wire === "grams_per_each")
+            patch.gramsPerEach = val as number | null;
+        else if (wire === "grams_per_ml")
+            patch.gramsPerMl = val as number | null;
+    }
+    if (
+        bothHaveNutrition &&
+        nutritionConflicts.length > 0 &&
+        nutritionConflicts.every((wire) => picks[wire] === drop.id)
+    ) {
+        patch.nutritionSource = drop.nutritionSource;
+    }
+    return patch;
+}
+
+export async function mergeFoodPair(
+    store: FoodsStore,
+    householdId: string,
+    input: MergeFoodPairInput,
+): Promise<Food> {
+    const { keepId, dropId, picks = {} } = input;
+    if (keepId === dropId) {
+        throw new FoodsInputError("Pick two different foods to merge.");
+    }
+    const actualKeep = await findFoodById(store, householdId, keepId);
+    const actualDrop = await store.getFood(householdId, dropId);
+    if (!actualDrop || actualDrop.archivedAt) {
+        throw new FoodsInputError("Unknown food.");
+    }
+    const listed = await store.listFoods(householdId);
+    assertMergeable(actualKeep, actualDrop, listed);
+    const patch = buildMergePairPatch(actualKeep, actualDrop, picks);
+    const next = await buildFoodUpdate(
+        store,
+        householdId,
+        actualKeep.id,
+        patch,
+    );
+    await store.updateFoodRow(next);
+    return mergeFoods(store, householdId, actualKeep.id, actualDrop.id);
 }
 
 export async function searchFoodCatalog(

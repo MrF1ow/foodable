@@ -529,7 +529,9 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
     const body = `
         ${pageHeader({ title: "Items", actions: headerActions })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderHouseholdNav("items")}
+        ${renderHouseholdNav("items", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${list || emptyState("No foods in the catalog yet.")}
         ${editModal}
         ${belongsModal}

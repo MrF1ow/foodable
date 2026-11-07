@@ -89,6 +89,11 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "Share recipes from your phone",
         body: "Install Foodable to your home screen (Android Chrome: menu › Install app, or Add to home screen; iOS Safari: Share › Add to Home Screen — iPhone does not list web apps in the share sheet, so on iPhone paste the link instead). Then use Share › Foodable from TikTok, Instagram, Facebook or the browser. Captions that come through are filled in; if only a link arrives you may be asked to paste the caption.",
     },
+    {
+        id: "possible-duplicates",
+        title: "Possible duplicates",
+        body: "Household › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Merge… keeps one name, lets you choose conflicting nutrition or unit values, and combines allergens; the other name becomes another name for it. Keep separate hides the pair until a food is merged away. Undo a Keep separate from Needs attention › Show dismissed.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);

@@ -9,7 +9,12 @@ import {
 } from "../../foods.js";
 import { searchFoodsByName } from "../../food-search.js";
 import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
+import { liveFridgeStore } from "../../db/fridge.js";
+import { liveGroceryStore } from "../../db/grocery.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
+import { noticesFor } from "../../domain/notices-for.js";
 import {
     assertBarcodeFree,
     assertFoodPatchValid,
@@ -33,6 +38,7 @@ import {
 import {
     householdFoodNames,
     NOTICE_SCHEMA,
+    noticeToWire,
     type WireNotice,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
@@ -226,7 +232,7 @@ const EFFECTIVE_FOOD = z.object({
 export const GET_FOOD_OUTPUT = FOOD_OUTPUT.extend({
     products: z.array(FOOD_PRODUCT_ITEM),
     effective: EFFECTIVE_FOOD,
-    /** Reserved for notice producers (e.g. possible duplicates); always [] until then. */
+    /** Open `food.possible_duplicate` notices with this food on either side. */
     notices: z.array(NOTICE_SCHEMA),
 });
 
@@ -423,7 +429,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Food",
             description:
-                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Returns stored usual store and usual amount on the row plus effective usual store/amount (read through the usual product for plain foods). Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product). `notices` is reserved for future attention items; it is empty today.",
+                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Returns stored usual store and usual amount on the row plus effective usual store/amount (read through the usual product for plain foods). Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product). `notices` includes open food.possible_duplicate notices when this food is one side of a suggested duplicate pair.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -457,11 +463,31 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                     const eff =
                         effectiveMap.get(food.id) ??
                         effectiveFood(food, catalog);
+                    const { notices: householdNotices } = await noticesFor(
+                        {
+                            foods: store,
+                            fridge: liveFridgeStore(),
+                            recipes: liveRecipesStore(),
+                            dismissals: liveNoticeDismissalsStore(),
+                            grocery: liveGroceryStore(),
+                        },
+                        householdId,
+                    );
+                    const foodNotices = householdNotices.filter(
+                        (n) =>
+                            n.code === "food.possible_duplicate" &&
+                            n.subject.kind === "food" &&
+                            (n.subject.id === food.id ||
+                                n.related.some(
+                                    (r) =>
+                                        r.kind === "food" && r.id === food.id,
+                                )),
+                    );
                     const payload = {
                         ...foodPayload(food, aliases, barcodes),
                         products: familyProducts(food, listed),
                         effective: effectivePayload(eff),
-                        notices: [] as WireNotice[],
+                        notices: foodNotices.map((n) => noticeToWire(n)),
                     };
                     return {
                         content: [
@@ -757,7 +783,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Merge Foods",
             description:
-                "Merge two household catalog foods. keep_id stays; drop_id is archived and its barcodes, aliases, and item references move to keep_id.",
+                "Merge two household catalog foods. keep_id stays; drop_id is archived and its barcodes, aliases, and item references move to keep_id. Also resolves a possible-duplicate notice when the pair was listed under Household › Possible duplicates.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: true,

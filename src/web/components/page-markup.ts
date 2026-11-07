@@ -38,6 +38,7 @@ export function renderGroceryLineRow(opts: {
     putAwayHtml?: string;
     usualProductName?: string | null;
     extraActionsHtml?: string;
+    duplicateNoticeHtml?: string;
 }): string {
     const checked = opts.checked ? "true" : "false";
     const next = opts.checked ? "0" : "1";
@@ -56,6 +57,7 @@ export function renderGroceryLineRow(opts: {
 <div class="list-row-main">
 <p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
 ${opts.usualProductName ? `<p class="grocery-line-usual muted">${escapeHtml(opts.usualProductName)}</p>` : ""}
+${opts.duplicateNoticeHtml ? `<p class="grocery-line-notice muted">${opts.duplicateNoticeHtml}</p>` : ""}
 <p class="grocery-line-meta row-meta">${meta}</p>
 ${opts.extraActionsHtml || opts.putAwayHtml ? `<div class="grocery-line-put-away row-actions">${opts.extraActionsHtml ?? ""}${opts.putAwayHtml ?? ""}</div>` : ""}
 </div>
@@ -160,12 +162,16 @@ export function renderRecipeIngredientRow(opts: {
     editFill?: ModalFill;
     deleteFill?: ModalFill;
     usualProductActionHtml?: string;
+    duplicateNoticeHtml?: string;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
         : "";
     const pickUsual = opts.usualProductActionHtml
         ? `<p class="recipe-ingredient-usual">${opts.usualProductActionHtml}</p>`
+        : "";
+    const dupLink = opts.duplicateNoticeHtml
+        ? `<p class="recipe-ingredient-dup">${opts.duplicateNoticeHtml}</p>`
         : "";
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);
@@ -205,7 +211,7 @@ ${modalTrigger({
 })}
 </div>
 </div>
-${pickUsual}
+${pickUsual}${dupLink}
 ${note}
 </li>`;
 }

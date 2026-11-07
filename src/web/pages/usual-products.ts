@@ -194,7 +194,9 @@ ${searchOutcome}`,
     const body = `
         ${pageHeader({ title: "Usual products", actions: addTrigger })}
         ${pageLevelErrorBanner(view, view.openFoodId ? [`picker-${view.openFoodId}`] : [])}
-        ${renderHouseholdNav("usual-products")}
+        ${renderHouseholdNav("usual-products", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${mainPanel}
         ${addModal}
     `;
@@ -275,7 +277,9 @@ ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
             title: `Products of ${view.food.name}`,
             sub: `<p class="muted"><a href="${escapeHtml(backHref)}">Back</a></p>`,
         })}
-        ${renderHouseholdNav("usual-products")}
+        ${renderHouseholdNav("usual-products", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${view.error ? errorBanner(view.error) : ""}
         ${panel({ title: "Products", body: existingProducts })}
         ${panel({ title: "Add a product", body: picker })}
