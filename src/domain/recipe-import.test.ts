@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, describe } from "bun:test";
 import { TOASTS } from "../copy/toasts.js";
@@ -14,6 +13,8 @@ import {
     outcomeFromFetchFailure,
     recheckRecipe,
     resolveUnresolvedLines,
+    safeSourceUrl,
+    recipeDisplaySource,
     recipeImportFromRow,
     recipeImportToRow,
     sweepUnverifiedRecipes,
@@ -24,13 +25,22 @@ import {
 } from "./recipe-import.js";
 import {
     createMemoryRecipesStore,
+    createRecipe,
+    RecipeInputError,
+    updateRecipe,
     type Recipe,
     type RecipeIngredient,
 } from "./recipes.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "fixtures/recipe-pages");
+const FIXTURES = new Map<string, string>();
+for await (const file of new Bun.Glob("*.html").scan(FIXTURE_DIR)) {
+    FIXTURES.set(file, await Bun.file(join(FIXTURE_DIR, file)).text());
+}
 function loadFixture(name: string): string {
-    return readFileSync(join(FIXTURE_DIR, `${name}.html`), "utf8");
+    const html = FIXTURES.get(`${name}.html`);
+    if (html == null) throw new Error(`Missing fixture ${name}.html`);
+    return html;
 }
 
 function fakeFetcher(opts: {
@@ -891,4 +901,86 @@ test("handled unresolved lines can be cleared so a fixed recipe verifies", async
     expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
         "verified",
     );
+});
+
+describe("source links", () => {
+    test.each([
+        "javascript:alert(1)",
+        " JavaScript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+        "mailto:a@example.com",
+        "",
+        "   ",
+    ])("safeSourceUrl refuses %p", (raw) => {
+        expect(safeSourceUrl(raw)).toBeNull();
+        expect(recipeDisplaySource({ sourceUrl: raw }, null)).toBeNull();
+    });
+
+    test("an import row's javascript: link is not displayed", () => {
+        expect(
+            recipeDisplaySource(
+                { sourceUrl: null },
+                { sourceKind: "website", sourceUrl: "javascript:alert(1)" },
+            ),
+        ).toBeNull();
+    });
+
+    test("a bare host gets https and an http(s) link is kept", () => {
+        expect(safeSourceUrl("example.com/soup")?.href).toBe(
+            "https://example.com/soup",
+        );
+        expect(
+            recipeDisplaySource({ sourceUrl: "http://example.com/a" }, null)
+                ?.url,
+        ).toBe("http://example.com/a");
+    });
+
+    test("create and update refuse a javascript: source", async () => {
+        const store = createMemoryRecipesStore();
+        await expect(
+            createRecipe(store, {
+                householdId: HH,
+                creatorId: USER,
+                name: "Soup",
+                yieldPortions: 2,
+                sourceUrl: "javascript:alert(1)",
+            }),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+        const recipe = await createRecipe(store, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Soup",
+            yieldPortions: 2,
+            sourceUrl: "example.com/soup",
+        });
+        expect(recipe.sourceUrl).toBe("example.com/soup");
+        await expect(
+            updateRecipe(store, HH, recipe.id, {
+                sourceUrl: "javascript:alert(1)",
+            }),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+    });
+
+    test("a bare stored source still reports a duplicate import", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const recipe = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Soup",
+            yieldPortions: 2,
+            sourceUrl: "example.com/soup",
+        });
+        const fetcher = fakeFetcher({});
+        const dup = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            { householdId: HH, creatorId: USER, url: "example.com/soup" },
+        );
+        expect(dup.status).toBe("duplicate");
+        expect(dup.recipeId).toBe(recipe.id);
+        expect(dup.recipeName).toBe("Soup");
+        expect(dup.source?.url).toBe("https://example.com/soup");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
 });

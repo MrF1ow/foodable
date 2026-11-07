@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { liveFoodsStore } from "./foods.js";
@@ -139,13 +138,12 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
     });
 
     test("website import through live stores persists recipe import and ingredients", async () => {
-        const yoast = readFileSync(
+        const yoast = await Bun.file(
             join(
                 import.meta.dir,
                 "../domain/fixtures/recipe-pages/array-top-level.html",
             ),
-            "utf8",
-        );
+        ).text();
         const fetcher: SafeFetcher = {
             async robotsAllows() {
                 return true;
@@ -193,13 +191,12 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
 
     test("importRecipeFromUrl rolls back recipe ingredients import row and new foods on failure", async () => {
         const { sql } = getCtx();
-        const yoast = readFileSync(
+        const yoast = await Bun.file(
             join(
                 import.meta.dir,
                 "../domain/fixtures/recipe-pages/yoast-graph.html",
             ),
-            "utf8",
-        );
+        ).text();
         const fetcher: SafeFetcher = {
             async robotsAllows() {
                 return true;

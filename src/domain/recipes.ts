@@ -290,6 +290,28 @@ function parseYield(yieldPortions: number): number {
     return yieldPortions;
 }
 
+/**
+ * A recipe's source link: optional, and if it names a scheme it must be a
+ * web link. Rejecting `javascript:` / `data:` here keeps a stored source from
+ * ever becoming a script link (the page renders it as an href).
+ */
+function parseSourceUrl(value: string | null | undefined): string | null {
+    const text = parseOptionalText(value, "Source URL", 2_000);
+    if (text == null) return null;
+    let parsed: URL | null = null;
+    try {
+        parsed = new URL(text);
+    } catch {
+        parsed = null;
+    }
+    if (parsed && parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        throw new RecipeInputError(
+            "Enter a web link for the source (https://…).",
+        );
+    }
+    return text;
+}
+
 function parseOptionalText(
     value: string | null | undefined,
     label: string,
@@ -1088,7 +1110,7 @@ export async function createRecipe(
             "Instructions",
             20_000,
         ),
-        sourceUrl: parseOptionalText(input.sourceUrl, "Source URL", 2_000),
+        sourceUrl: parseSourceUrl(input.sourceUrl),
         tags: normalizeRecipeTags(input.tags ?? []),
         notes: parseOptionalText(input.notes, "Notes", 5_000),
         prepMinutes: parseOptionalMinutes(input.prepMinutes, "prep time"),
@@ -1135,7 +1157,7 @@ export async function updateRecipe(
         sourceUrl:
             patch.sourceUrl === undefined
                 ? recipe.sourceUrl
-                : parseOptionalText(patch.sourceUrl, "Source URL", 2_000),
+                : parseSourceUrl(patch.sourceUrl),
         tags:
             patch.tags === undefined
                 ? recipe.tags
@@ -2060,7 +2082,7 @@ export async function importRecipeFromText(
             recipeId: recipe.id,
             householdId: input.householdId,
             sourceKind: "text",
-            sourceUrl: parseOptionalText(input.sourceUrl, "Source URL", 2_000),
+            sourceUrl: parseSourceUrl(input.sourceUrl),
             sourceText: rawText,
             sourceTextOrigin: "pasted",
             transcript: null,

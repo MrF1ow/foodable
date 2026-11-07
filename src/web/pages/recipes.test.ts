@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
@@ -423,7 +422,7 @@ test("recipe detail links source with credit", () => {
     expect(html).toContain("by Chef Pat");
 });
 
-test("recipe list source icon is labelled and does not capture clicks above the title link", () => {
+test("recipe list source icon is labelled and does not capture clicks above the title link", async () => {
     const html = renderRecipesPage({
         chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [
@@ -455,10 +454,9 @@ test("recipe list source icon is labelled and does not capture clicks above the 
     });
     expect(html).toContain("recipe-source-icon-wrap");
     expect(html).toContain('aria-label="example.com"');
-    const css = readFileSync(
+    const css = await Bun.file(
         join(import.meta.dir, "../../../public/app/app.css"),
-        "utf8",
-    );
+    ).text();
     const wrapRule =
         css.match(/\.recipe-source-icon-wrap\s*\{[^}]+\}/)?.[0] ?? "";
     expect(wrapRule).toContain("pointer-events: none");
@@ -511,4 +509,13 @@ test("each unresolved import line can be marked handled", () => {
         '<input type="hidden" name="line" value="1 x 400g &quot;tin&quot; tomatoes" />',
     );
     expect(html).toContain(">Handled</button>");
+});
+
+test("a stored javascript: source never renders as a link", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({ sourceUrl: "javascript:alert(document.cookie)" }),
+        importRow: null,
+    });
+    expect(html).not.toMatch(/href="javascript:/i);
+    expect(html).not.toContain("recipe-source-line");
 });

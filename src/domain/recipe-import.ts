@@ -505,22 +505,50 @@ function isSocialSource(kind: RecipeSourceKind): boolean {
     return SOCIAL_KINDS.has(kind);
 }
 
+/**
+ * A stored source link as a safe web URL, or null. Only http(s) ever comes
+ * back, so a saved `javascript:` or `data:` link can never become an href;
+ * a bare `example.com/soup` (allowed by the recipe editor) reads as https.
+ */
+export function safeSourceUrl(raw: string | null | undefined): URL | null {
+    const text = raw?.trim();
+    if (!text) return null;
+    // Any other scheme (javascript:, data:, mailto:) is refused outright;
+    // "host:port/…" is still a bare link.
+    if (
+        !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) &&
+        /^[a-z][a-z0-9+.-]*:(?!\d)/i.test(text)
+    ) {
+        return null;
+    }
+    const candidates = /^[a-z][a-z0-9+.-]*:\/\//i.test(text)
+        ? [text]
+        : [text, `https://${text}`];
+    for (const candidate of candidates) {
+        try {
+            const url = new URL(candidate);
+            if (url.protocol === "https:" || url.protocol === "http:") {
+                return url.hostname ? url : null;
+            }
+        } catch {
+            // try the next form
+        }
+    }
+    return null;
+}
+
 export function recipeDisplaySource(
     recipe: Pick<Recipe, "sourceUrl">,
     importRow: Pick<RecipeImport, "sourceKind" | "sourceUrl"> | null,
 ): { kind: RecipeSourceKind; label: string; url: string } | null {
-    const url = importRow?.sourceUrl ?? recipe.sourceUrl;
+    const url = safeSourceUrl(importRow?.sourceUrl ?? recipe.sourceUrl);
     if (!url) return null;
-    try {
-        const info = recipeSource(new URL(url));
-        return {
-            kind: importRow?.sourceKind ?? info.kind,
-            label: info.label,
-            url,
-        };
-    } catch {
-        return null;
-    }
+    const info = recipeSource(url);
+    return {
+        kind: importRow?.sourceKind ?? info.kind,
+        label: info.label,
+        url: url.href,
+    };
 }
 
 export async function importRecipeFromUrl(
@@ -548,12 +576,12 @@ export async function importRecipeFromUrl(
         return emptyOutcome("duplicate", {
             recipeId: duplicate.id,
             recipeName: duplicate.name,
-            source: duplicate.sourceUrl
-                ? sourceFromInfo(
-                      recipeSource(new URL(duplicate.sourceUrl)),
-                      duplicate.sourceUrl,
-                  )
-                : null,
+            // A stored source can be a bare host or any text the editor
+            // accepted; never let it throw here.
+            source: (() => {
+                const url = safeSourceUrl(duplicate.sourceUrl);
+                return url ? sourceFromInfo(recipeSource(url), url.href) : null;
+            })(),
         });
     }
 

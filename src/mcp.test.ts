@@ -5203,15 +5203,13 @@ describe("phone-app domain MCP tools", () => {
     test("import_recipe_from_url output validates and never sets isError", async () => {
         const { IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA } =
             await import("./mcp/tools/recipes.js");
-        const { readFileSync } = await import("node:fs");
         const { join } = await import("node:path");
-        const yoast = readFileSync(
+        const yoast = await Bun.file(
             join(
                 import.meta.dir,
                 "domain/fixtures/recipe-pages/array-top-level.html",
             ),
-            "utf8",
-        );
+        ).text();
         db.recipeImportFetcher = {
             async robotsAllows() {
                 return true;
