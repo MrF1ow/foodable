@@ -90,6 +90,10 @@ export const TOASTS = {
         text: "Nutrition preferences saved",
     },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
+    "settings.household-settings.saved": {
+        kind: "success",
+        text: "Household settings saved",
+    },
     "settings.household.created": {
         kind: "success",
         text: "Household created",

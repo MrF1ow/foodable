@@ -26,6 +26,11 @@ import { renderSettingsPage } from "../src/web/pages/settings.js";
 import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
+import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
+import {
+    DEFAULT_RESTOCK,
+    EMPTY_HOUSEHOLD_PREFERENCES,
+} from "../src/household.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -369,6 +374,16 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        "settings-household": renderHouseholdSettingsPrefsPage({
+            chrome,
+            backHref: "/fridge",
+            member: { ...ME, role: "owner" },
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                restock: { ...DEFAULT_RESTOCK, enabled: true },
+            },
+            ownerTimezoneLabel: "America/Los_Angeles",
+        }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -423,6 +438,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes": "recipes",
     "/settings": "settings",
     "/settings/help": "help",
+    "/settings/household-settings": "settings-household",
     "/household": "household",
     "/household/items": "foods",
     "/create-household": "create-household",

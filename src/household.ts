@@ -1,5 +1,6 @@
 import type { AuthContext } from "./auth-context.js";
 import { MIN_PASSWORD_LENGTH } from "./domain/auth.js";
+import { validateTz } from "./domain/tz.js";
 
 /** `admin` is an elevated member: they manage the household (settings,
  * stores, everyone's rules, adding people) alongside the owner. Ownership
@@ -30,17 +31,41 @@ export type RecipeSearchPlace = {
     url: string | null;
 };
 
+export type RestockPreferences = {
+    enabled: boolean;
+    weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+    time: string;
+    lastRunOn: string | null;
+};
+
+export const DEFAULT_RESTOCK: RestockPreferences = {
+    enabled: false,
+    weekday: 6,
+    time: "07:00",
+    lastRunOn: null,
+};
+
 export type HouseholdPreferences = {
     constraints: string[];
     budget: string | null;
     shoppingCadence: string | null;
+    timezone: string | null;
+    restock: RestockPreferences;
 };
 
 export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     constraints: [],
     budget: null,
     shoppingCadence: null,
+    timezone: null,
+    restock: { ...DEFAULT_RESTOCK },
 };
+
+export const HOUSEHOLD_TZ_ERROR = "Enter a valid IANA timezone.";
+export const RESTOCK_WEEKDAY_ERROR = "Pick a day from Sunday to Saturday.";
+export const RESTOCK_ENABLED_ERROR =
+    "Restock must be on or off (true or false).";
+export const RESTOCK_TIME_ERROR = "Enter a time as HH:MM, 24-hour.";
 
 export type HouseholdConfig = {
     name: string;
@@ -68,6 +93,12 @@ export type HouseholdConfigWire = {
         budget: string | null;
         shopping_cadence: string | null;
     };
+    timezone: string | null;
+    effective_timezone: string;
+    restock_enabled: boolean;
+    restock_weekday: number;
+    restock_time: string;
+    restock_last_run_on: string | null;
 };
 
 export type ParseResult<T> =
@@ -77,6 +108,12 @@ export type HouseholdPreferencesPatch = {
     constraints?: string[];
     budget?: string | null;
     shoppingCadence?: string | null;
+    timezone?: string | null;
+    restock?: {
+        enabled?: boolean;
+        weekday?: number;
+        time?: string;
+    };
 };
 
 export type HouseholdConfigPatch = {
@@ -144,8 +181,71 @@ function copyHousehold(household: Household): Household {
             constraints: [...household.preferences.constraints],
             budget: household.preferences.budget,
             shoppingCadence: household.preferences.shoppingCadence,
+            timezone: household.preferences.timezone,
+            restock: { ...household.preferences.restock },
         },
     };
+}
+
+export function isRestockWeekday(
+    value: unknown,
+): value is 0 | 1 | 2 | 3 | 4 | 5 | 6 {
+    return (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        value >= 0 &&
+        value <= 6
+    );
+}
+
+const RESTOCK_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export function isRestockTime(value: unknown): value is string {
+    return typeof value === "string" && RESTOCK_TIME_RE.test(value);
+}
+
+const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseStoredTimezone(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "string" || !value.trim()) return null;
+    const trimmed = value.trim();
+    if (!validateTz(trimmed)) return null;
+    return trimmed;
+}
+
+function parseRestockFromStorage(value: unknown): RestockPreferences {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ...DEFAULT_RESTOCK };
+    }
+    const raw = value as Record<string, unknown>;
+    return {
+        enabled:
+            typeof raw.enabled === "boolean"
+                ? raw.enabled
+                : DEFAULT_RESTOCK.enabled,
+        weekday: isRestockWeekday(raw.weekday)
+            ? raw.weekday
+            : DEFAULT_RESTOCK.weekday,
+        time: isRestockTime(raw.time) ? raw.time : DEFAULT_RESTOCK.time,
+        lastRunOn:
+            typeof raw.lastRunOn === "string" &&
+            LOCAL_DATE_RE.test(raw.lastRunOn)
+                ? raw.lastRunOn
+                : null,
+    };
+}
+
+/** The household's local clock: restock runs, notice wording, future notifications. */
+export function householdTimezone(
+    prefs: Pick<HouseholdPreferences, "timezone">,
+    ownerProfile: { timezone: string | null } | null | undefined,
+): string {
+    const stored = prefs.timezone;
+    if (stored != null && validateTz(stored)) return stored;
+    const owner = ownerProfile?.timezone;
+    if (owner != null && validateTz(owner)) return owner;
+    return "UTC";
 }
 
 export function createMemoryHouseholdStore(): HouseholdStore {
@@ -386,7 +486,11 @@ export function createHousehold(
         id: householdId,
         name,
         recipeSearchPlaces: [],
-        preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
+        preferences: {
+            ...EMPTY_HOUSEHOLD_PREFERENCES,
+            constraints: [],
+            restock: { ...DEFAULT_RESTOCK },
+        },
     });
     store.insertMember({
         householdId,
@@ -479,6 +583,8 @@ export function householdConfigFromRow(row: {
         constraints?: unknown;
         budget?: unknown;
         shoppingCadence?: unknown;
+        timezone?: unknown;
+        restock?: unknown;
     };
     const constraints =
         prefs.constraints === undefined ? [] : asStringArray(prefs.constraints);
@@ -497,6 +603,11 @@ export function householdConfigFromRow(row: {
             error: "Budget and shopping cadence must be text.",
         };
     }
+    const timezone =
+        prefs.timezone === undefined
+            ? null
+            : parseStoredTimezone(prefs.timezone);
+    const restock = parseRestockFromStorage(prefs.restock);
 
     return {
         ok: true,
@@ -507,6 +618,8 @@ export function householdConfigFromRow(row: {
                 constraints,
                 budget,
                 shoppingCadence,
+                timezone,
+                restock,
             },
         },
     };
@@ -522,21 +635,34 @@ export function householdConfigToColumns(
     };
 }
 
+export function recipePlacesToWire(
+    places: RecipeSearchPlace[],
+): HouseholdConfigWire["recipe_search_places"] {
+    return places.map((place) => ({
+        name: place.name,
+        kind: place.kind,
+        url: place.url,
+    }));
+}
+
 export function householdConfigToWire(
     config: HouseholdConfig,
+    effectiveTimezone: string,
 ): HouseholdConfigWire {
     return {
         name: config.name,
-        recipe_search_places: config.recipeSearchPlaces.map((place) => ({
-            name: place.name,
-            kind: place.kind,
-            url: place.url,
-        })),
+        recipe_search_places: recipePlacesToWire(config.recipeSearchPlaces),
         preferences: {
             constraints: config.preferences.constraints,
             budget: config.preferences.budget,
             shopping_cadence: config.preferences.shoppingCadence,
         },
+        timezone: config.preferences.timezone,
+        effective_timezone: effectiveTimezone,
+        restock_enabled: config.preferences.restock.enabled,
+        restock_weekday: config.preferences.restock.weekday,
+        restock_time: config.preferences.restock.time,
+        restock_last_run_on: config.preferences.restock.lastRunOn,
     };
 }
 
@@ -551,6 +677,80 @@ function parseNameList(value: unknown, error: string): ParseResult<string[]> {
     return { ok: true, value: items };
 }
 
+function parseTimezonePatch(value: unknown): ParseResult<string | null> {
+    if (value === null) return { ok: true, value: null };
+    if (typeof value !== "string") {
+        return { ok: false, error: HOUSEHOLD_TZ_ERROR };
+    }
+    const trimmed = value.trim();
+    if (!trimmed) return { ok: true, value: null };
+    if (!validateTz(trimmed)) {
+        return { ok: false, error: HOUSEHOLD_TZ_ERROR };
+    }
+    return { ok: true, value: trimmed };
+}
+
+function parseRestockPatchFields(input: {
+    restock_enabled?: unknown;
+    restock_weekday?: unknown;
+    restock_time?: unknown;
+    restock?: unknown;
+}): ParseResult<NonNullable<HouseholdPreferencesPatch["restock"]>> {
+    const patch: NonNullable<HouseholdPreferencesPatch["restock"]> = {};
+    let any = false;
+
+    const enabledRaw =
+        input.restock_enabled !== undefined
+            ? input.restock_enabled
+            : input.restock &&
+                typeof input.restock === "object" &&
+                !Array.isArray(input.restock)
+              ? (input.restock as { enabled?: unknown }).enabled
+              : undefined;
+    if (enabledRaw !== undefined) {
+        if (typeof enabledRaw !== "boolean") {
+            return { ok: false, error: RESTOCK_ENABLED_ERROR };
+        }
+        patch.enabled = enabledRaw;
+        any = true;
+    }
+
+    const weekdayRaw =
+        input.restock_weekday !== undefined
+            ? input.restock_weekday
+            : input.restock &&
+                typeof input.restock === "object" &&
+                !Array.isArray(input.restock)
+              ? (input.restock as { weekday?: unknown }).weekday
+              : undefined;
+    if (weekdayRaw !== undefined) {
+        if (!isRestockWeekday(weekdayRaw)) {
+            return { ok: false, error: RESTOCK_WEEKDAY_ERROR };
+        }
+        patch.weekday = weekdayRaw;
+        any = true;
+    }
+
+    const timeRaw =
+        input.restock_time !== undefined
+            ? input.restock_time
+            : input.restock &&
+                typeof input.restock === "object" &&
+                !Array.isArray(input.restock)
+              ? (input.restock as { time?: unknown }).time
+              : undefined;
+    if (timeRaw !== undefined) {
+        if (!isRestockTime(timeRaw)) {
+            return { ok: false, error: RESTOCK_TIME_ERROR };
+        }
+        patch.time = timeRaw;
+        any = true;
+    }
+
+    if (!any) return { ok: true, value: {} };
+    return { ok: true, value: patch };
+}
+
 function parseHouseholdPreferencesPatch(
     value: unknown,
 ): ParseResult<HouseholdPreferencesPatch> {
@@ -562,6 +762,8 @@ function parseHouseholdPreferencesPatch(
         budget?: unknown;
         shoppingCadence?: unknown;
         shopping_cadence?: unknown;
+        timezone?: unknown;
+        restock?: unknown;
     };
     const patch: HouseholdPreferencesPatch = {};
     if (prefs.constraints !== undefined) {
@@ -597,6 +799,18 @@ function parseHouseholdPreferencesPatch(
         }
         patch.shoppingCadence = shoppingCadence;
     }
+    if (prefs.timezone !== undefined) {
+        const tz = parseTimezonePatch(prefs.timezone);
+        if (!tz.ok) return tz;
+        patch.timezone = tz.value;
+    }
+    const restockFields = parseRestockPatchFields({
+        restock: prefs.restock,
+    });
+    if (!restockFields.ok) return restockFields;
+    if (Object.keys(restockFields.value).length > 0) {
+        patch.restock = restockFields.value;
+    }
     return { ok: true, value: patch };
 }
 
@@ -611,6 +825,11 @@ export function parseHouseholdConfigPatch(
         recipeSearchPlaces?: unknown;
         recipe_search_places?: unknown;
         preferences?: unknown;
+        timezone?: unknown;
+        restock_enabled?: unknown;
+        restock_weekday?: unknown;
+        restock_time?: unknown;
+        restock_last_run_on?: unknown;
     };
     const patch: HouseholdConfigPatch = {};
     if (record.name !== undefined) {
@@ -640,6 +859,32 @@ export function parseHouseholdConfigPatch(
         if (!preferences.ok) return preferences;
         patch.preferences = preferences.value;
     }
+    const prefPatch: HouseholdPreferencesPatch = {
+        ...(patch.preferences ?? {}),
+    };
+    let prefTouched = patch.preferences != null;
+    if (record.timezone !== undefined) {
+        const tz = parseTimezonePatch(record.timezone);
+        if (!tz.ok) return tz;
+        prefPatch.timezone = tz.value;
+        prefTouched = true;
+    }
+    const restockTop = parseRestockPatchFields({
+        restock_enabled: record.restock_enabled,
+        restock_weekday: record.restock_weekday,
+        restock_time: record.restock_time,
+    });
+    if (!restockTop.ok) return restockTop;
+    if (Object.keys(restockTop.value).length > 0) {
+        prefPatch.restock = {
+            ...(prefPatch.restock ?? {}),
+            ...restockTop.value,
+        };
+        prefTouched = true;
+    }
+    if (prefTouched) {
+        patch.preferences = prefPatch;
+    }
     return { ok: true, value: patch };
 }
 
@@ -663,6 +908,26 @@ export function mergeHouseholdConfig(
                 patch.preferences?.shoppingCadence !== undefined
                     ? patch.preferences.shoppingCadence
                     : current.preferences.shoppingCadence,
+            timezone:
+                patch.preferences?.timezone !== undefined
+                    ? patch.preferences.timezone
+                    : current.preferences.timezone,
+            restock: {
+                enabled:
+                    patch.preferences?.restock?.enabled !== undefined
+                        ? patch.preferences.restock.enabled
+                        : current.preferences.restock.enabled,
+                weekday:
+                    patch.preferences?.restock?.weekday !== undefined
+                        ? (patch.preferences.restock
+                              .weekday as RestockPreferences["weekday"])
+                        : current.preferences.restock.weekday,
+                time:
+                    patch.preferences?.restock?.time !== undefined
+                        ? patch.preferences.restock.time
+                        : current.preferences.restock.time,
+                lastRunOn: current.preferences.restock.lastRunOn,
+            },
         },
     };
 }

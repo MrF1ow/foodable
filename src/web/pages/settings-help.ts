@@ -73,6 +73,11 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "Needs attention",
         body: "The number beside Settings counts every open warning and suggestion across the household (not allergen blocks). Dismiss hides a suggestion for good, until that thing is removed or merged away. Undo dismissed notices under Show dismissed on the Needs attention page.",
     },
+    {
+        id: "restock",
+        title: "Restock",
+        body: "Restock adds food that's about to expire to the grocery list for you, once a week. Turn it on under Settings › Household and pick the day and time; food in the fridge that expires within 7 days goes on the list at its usual amount and store. Nothing is added until it's on.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);

@@ -13,7 +13,7 @@ import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import { effectiveFoodsByIds } from "../../domain/foods.js";
 import { listFridge } from "../../domain/fridge.js";
-import { householdConfigToWire } from "../../household.js";
+import { recipePlacesToWire } from "../../household.js";
 import {
     addRecipeIngredientByBarcode,
     addRecipeIngredientById,
@@ -1193,9 +1193,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         },
                         { lookup: lookupBarcode },
                     );
-                    const places = householdConfigToWire(
-                        await getHouseholdConfig(actor.householdId),
-                    ).recipe_search_places;
+                    const household = await getHouseholdConfig(
+                        actor.householdId,
+                    );
+                    const places = recipePlacesToWire(
+                        household.recipeSearchPlaces,
+                    );
                     const payload = {
                         recipe: recipeFields(result.recipe),
                         ingredients: result.ingredients.map((ingredient) => ({

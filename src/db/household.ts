@@ -12,6 +12,7 @@ import {
 } from "../household.js";
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
 import { liveAuthStore } from "./users.js";
+import { getProfile, type Profile } from "./profiles.js";
 import { maybeOne, rows, run } from "./sql.js";
 
 export type HouseholdMembership = {
@@ -147,6 +148,15 @@ export async function listHouseholdMembers(
             throw new Error(`Failed to list household members: ${message}`);
         }
     });
+}
+
+export async function getHouseholdOwnerProfile(
+    householdId: string,
+): Promise<Profile | null> {
+    const members = await listHouseholdMembers(householdId);
+    const owner = members.find((member) => member.role === "owner");
+    if (!owner) return null;
+    return getProfile(owner.userId);
 }
 
 function alreadyRegistered(message: string): boolean {

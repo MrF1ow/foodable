@@ -22,6 +22,11 @@ export function subnav(input: {
 
 const SETTINGS_SECTIONS = [
     { id: "account", href: "/settings", label: "Account" },
+    {
+        id: "household",
+        href: "/settings/household-settings",
+        label: "Household",
+    },
     { id: "help", href: "/settings/help", label: "Help" },
 ] as const;
 
