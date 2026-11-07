@@ -18,9 +18,6 @@ export interface Profile {
     widgets_enabled: boolean;
     alcohol_tracking_enabled: boolean;
     preferred_drink_unit: DrinkUnit | null;
-    // Locale is unused: widgets and login are English-only. The column stays
-    // until a later contract phase; do not read it to pick UI language.
-    locale: string | null;
     theme: "light" | "dark" | null;
     /** Null means default nutrition dashboard card order. */
     nutrition_layout: string[] | null;
@@ -164,7 +161,6 @@ export async function upsertProfile(
         widgets_enabled?: boolean;
         alcohol_tracking_enabled?: boolean;
         preferred_drink_unit?: DrinkUnit | null;
-        locale?: string;
         theme?: "light" | "dark" | null;
         nutrition_layout?: string[] | null;
     },
@@ -184,7 +180,6 @@ export async function upsertProfile(
     // null is meaningful here too (clears the preference).
     if (patch.preferred_drink_unit !== undefined)
         payload.preferred_drink_unit = patch.preferred_drink_unit;
-    if (patch.locale !== undefined) payload.locale = patch.locale;
     if (patch.theme !== undefined) payload.theme = patch.theme;
     if (patch.nutrition_layout !== undefined)
         payload.nutrition_layout = patch.nutrition_layout;

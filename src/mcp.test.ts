@@ -247,7 +247,6 @@ const PROFILE_BASE: actualProfiles.Profile = {
     widgets_enabled: true,
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
-    locale: null,
     theme: null,
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
@@ -2032,19 +2031,9 @@ describe("get_nutrition_summary discloses its logged-day denominator", () => {
     });
 
     // Widgets are English-only; structuredContent.locale stays "en".
-    test("structuredContent locale stays English even if a profile locale is set", async () => {
+    test("structuredContent locale is English", async () => {
         stage(1);
-        db.profile = { ...PROFILE_BASE, locale: "de" };
-        await withTools(null, async (call) => {
-            const sc = (await summarize(call))
-                .structuredContent as unknown as SummaryPayload;
-            expect(sc.locale).toBe("en");
-        });
-    });
-
-    test("structuredContent defaults locale to English when never set", async () => {
-        stage(1);
-        db.profile = { ...PROFILE_BASE, locale: null };
+        db.profile = PROFILE_BASE;
         await withTools(null, async (call) => {
             const sc = (await summarize(call))
                 .structuredContent as unknown as SummaryPayload;
@@ -2683,7 +2672,7 @@ describe("current-time disclosure", () => {
     });
 
     test("get_profile does not report a widget language", async () => {
-        db.profile = { ...PROFILE_BASE, locale: "fr" };
+        db.profile = PROFILE_BASE;
         await withTools(null, async (call) => {
             const text = textOf(await call("get_profile"));
             expect(text).not.toContain("Language:");

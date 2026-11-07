@@ -26,7 +26,7 @@ const pgAvailable = await findPgBin();
 async function seedUser(sql: import("bun").SQL): Promise<string> {
     const id = crypto.randomUUID();
     await sql`
-        insert into auth.users (id, email)
+        insert into public.users (id, email)
         values (${id}, ${`u-${id}@foodable.test`})
     `;
     return id;
@@ -122,7 +122,7 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         const newUserId = crypto.randomUUID();
         const { sql } = getCtx();
         await sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${newUserId}, ${`new-${newUserId}@foodable.test`})
         `;
         const result = await addHouseholdMemberForHousehold(
