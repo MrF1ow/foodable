@@ -1,3 +1,4 @@
+import { liveGroceryStore } from "../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveFridgeStore } from "../db/fridge.js";
@@ -34,6 +35,7 @@ export async function loadHouseholdNotices(
             fridge: liveFridgeStore(),
             recipes: liveRecipesStore(),
             dismissals: liveNoticeDismissalsStore(),
+            grocery: liveGroceryStore(),
         },
         householdId,
     );

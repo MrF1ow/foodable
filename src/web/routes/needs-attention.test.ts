@@ -217,6 +217,7 @@ function noticeDeps() {
         fridge: db.fridgeStore,
         recipes: db.recipesStore,
         dismissals: db.dismissalsStore,
+        grocery: db.groceryStore,
     };
 }
 
@@ -546,6 +547,20 @@ describe("needs-attention routes", () => {
         const html = await dismissed.text();
         expect(html).toContain("Soon yogurt");
         expect(html).not.toContain("Removed item");
+    });
+
+    test("an expiring item offers Add to grocery list, returning here", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        expect(html).toContain(
+            `action="/fridge/items/${yogurt.id}/add-to-grocery"`,
+        );
+        expect(html).toContain(
+            '<input type="hidden" name="from" value="/needs-attention" />',
+        );
     });
 
     test("show dismissed opens the disclosure", async () => {

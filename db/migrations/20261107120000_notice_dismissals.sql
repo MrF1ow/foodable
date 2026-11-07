@@ -5,11 +5,11 @@
 -- (nulls are distinct and would allow duplicate single-subject dismissals).
 --
 -- Needs attention count (noticesFor: dismissals, recipes, every ingredient,
--- the effective food catalog and fridge items, then the filter), measured on
--- a bench copy of the dev data:
---   1 household, 10 recipes, 44 ingredients, 20 fridge items    5.1 ms median
+-- the effective food catalog, fridge items, grocery lines and foods, then the
+-- filter), measured on a bench copy of the dev data:
+--   1 household, 10 recipes, 44 ingredients, 20 fridge items    5.3 ms median
 --   same, inflated to 510 recipes, 4,488 ingredients, 1,020 fridge items and
---   2,000 dismissals                                              33 ms median
+--   2,000 dismissals                                              35 ms median
 -- so the count is computed per page load and not stored.
 
 create table public.notice_dismissals (

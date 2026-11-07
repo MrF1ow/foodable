@@ -15,6 +15,7 @@ import type { Notice } from "./notices.js";
 import type { NoticeSubjectKind } from "./notice-dismissals.js";
 import { sortNotices } from "./notices.js";
 import { listRecipes, recipeNotices, type RecipesStore } from "./recipes.js";
+import type { GroceryListStore } from "./grocery.js";
 import { fridgeNotices, utcTodayFromDate } from "./stock.js";
 
 export type NoticesForDeps = {
@@ -22,6 +23,10 @@ export type NoticesForDeps = {
     fridge: FridgeStore;
     recipes: RecipesStore;
     dismissals: NoticeDismissalsStore;
+    /** When given, fridge notices learn whether their food is already on the
+     *  grocery list, as the fridge page does, so their "Add to grocery list"
+     *  action shows the same way. Optional: the count does not depend on it. */
+    grocery?: GroceryListStore;
 };
 
 export type NoticesForResult = {
@@ -106,12 +111,26 @@ export async function noticesFor(
     const dismissals = await deps.dismissals.listForHousehold(householdId);
     const dismissed = dismissedKeySet(dismissals);
 
-    const [recipes, fridgeItems, allIngredients, subjectTimes] =
+    const [recipes, fridgeItems, allIngredients, subjectTimes, grocery] =
         await Promise.all([
             listRecipes(deps.recipes, householdId),
             deps.fridge.listItems(householdId),
             deps.recipes.listIngredientsForHousehold(householdId),
             buildSubjectTimes(deps, householdId),
+            deps.grocery
+                ? Promise.all([
+                      deps.grocery.listLines(householdId),
+                      deps.foods.listFoods(householdId),
+                  ]).then(([lines, foods]) => ({
+                      lines,
+                      foodsById: new Map(
+                          foods.map((row) => [
+                              row.id,
+                              { id: row.id, genericFoodId: row.genericFoodId },
+                          ]),
+                      ),
+                  }))
+                : Promise.resolve(undefined),
         ]);
 
     const foodIds = new Set<string>();
@@ -169,7 +188,7 @@ export async function noticesFor(
             });
         }
     }
-    raw.push(...fridgeNotices(fridgeItems, today));
+    raw.push(...fridgeNotices(fridgeItems, today, grocery));
 
     let filtered = raw;
     if (!opts?.includeDismissed) {

@@ -1,3 +1,4 @@
+import { liveGroceryStore } from "../../db/grocery.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { withAnalytics } from "../../analytics.js";
@@ -37,6 +38,7 @@ function noticeDeps(): NoticesForDeps {
         fridge: liveFridgeStore(),
         recipes: liveRecipesStore(),
         dismissals: liveNoticeDismissalsStore(),
+        grocery: liveGroceryStore(),
     };
 }
 

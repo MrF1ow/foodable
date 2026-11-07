@@ -945,6 +945,7 @@ function noticeDeps(): NoticesForDeps {
         fridge: liveFridgeStore(),
         recipes: liveRecipesStore(),
         dismissals: liveNoticeDismissalsStore(),
+        grocery: liveGroceryStore(),
     };
 }
 

@@ -403,7 +403,21 @@ function previewNotices(): Notice[] {
     };
     return sortNotices([
         recipeGap,
-        ...fridgeNotices(fridgeView(null).items as never, utcTodayFromDate()),
+        ...(() => {
+            const items = fridgeView(null).items;
+            // Nothing is on the grocery list, so each food item offers
+            // "Add to grocery list", as on the fridge page.
+            const foodsById = new Map(
+                items.map((row) => [
+                    row.foodId,
+                    { id: row.foodId, genericFoodId: null },
+                ]),
+            );
+            return fridgeNotices(items as never, utcTodayFromDate(), {
+                lines: [],
+                foodsById,
+            });
+        })(),
     ]);
 }
 

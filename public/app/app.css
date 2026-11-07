@@ -208,10 +208,14 @@ html:has(dialog.modal[open]) {
 .bottom-nav a {
     position: relative;
 }
-/* The Dismiss form sits in the notice line, after the sentence and action. */
-.notice-dismiss-form {
-    display: inline;
-    margin-inline-start: 8px;
+/* A notice's action and Dismiss forms sit in its line, after the sentence. */
+.notice-list :is(.notice-action, .notice-dismiss-form) {
+    display: inline-flex;
+    margin: 4px 0 0 8px;
+    vertical-align: baseline;
+}
+.notice-list :is(.notice-action, .notice-dismiss-form) > button {
+    width: auto;
 }
 .tab-dot {
     position: absolute;
