@@ -39,6 +39,11 @@ import {
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
+import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
+import {
+    DEFAULT_RESTOCK,
+    EMPTY_HOUSEHOLD_PREFERENCES,
+} from "../src/household.js";
 import {
     NUTRITION_LOG_MEAL_MODAL_ID,
     NUTRITION_LOG_WATER_MODAL_ID,
@@ -711,6 +716,27 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
+        "settings-household": renderHouseholdSettingsPrefsPage({
+            chrome,
+            backHref: "/fridge",
+            member: { ...ME, role: "owner" },
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                timezone: null,
+                restock: { ...DEFAULT_RESTOCK, enabled: true },
+            },
+            ownerTimezoneLabel: "America/Los_Angeles",
+        }),
+        "settings-household-member": renderHouseholdSettingsPrefsPage({
+            chrome,
+            backHref: "/fridge",
+            member: { ...SAM, role: "member" },
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                restock: { ...DEFAULT_RESTOCK, enabled: true },
+            },
+            ownerTimezoneLabel: "America/Los_Angeles",
+        }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };

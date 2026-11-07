@@ -4,6 +4,7 @@ import { HOUSEHOLD_CANNOT_DELETE_ACCOUNT } from "../../auth-context.js";
 import {
     MEMBER_ROLES,
     householdConfigToWire,
+    householdTimezone,
     mergeHouseholdConfig,
     parseHouseholdConfigPatch,
 } from "../../household.js";
@@ -11,6 +12,7 @@ import { deleteAllUserData } from "../../db/nutrition.js";
 import {
     listHouseholdMembers,
     getHouseholdConfig,
+    getHouseholdOwnerProfile,
     updateHouseholdConfig,
 } from "../../db/household.js";
 import {
@@ -18,6 +20,16 @@ import {
     withAnalytics,
 } from "../../analytics.js";
 import type { ToolContext } from "../shared.js";
+
+const RESTOCK_DAY_NAMES = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
 
 export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
     const {
@@ -106,14 +118,29 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
             budget: z.string().nullable(),
             shopping_cadence: z.string().nullable(),
         }),
+        timezone: z.string().nullable(),
+        effective_timezone: z.string(),
+        restock_enabled: z.boolean(),
+        restock_weekday: z.number(),
+        restock_time: z.string(),
+        restock_last_run_on: z.string().nullable(),
     });
+
+    async function householdConfigWire(
+        householdId: string,
+        config: Awaited<ReturnType<typeof getHouseholdConfig>>,
+    ) {
+        const ownerProfile = await getHouseholdOwnerProfile(householdId);
+        const effective = householdTimezone(config.preferences, ownerProfile);
+        return householdConfigToWire(config, effective);
+    }
 
     server.registerTool(
         "get_household_config",
         {
             title: "Get Household Config",
             description:
-                "Read the household name, recipe search places, and shared preferences. A household bot token and any household member may call this. Writes are household-scoped, not a person user_id.",
+                "Read the household name, recipe search places, shared preferences, IANA timezone, effective timezone, and restock schedule (enabled, weekday, local time, last run date). A household bot token and any household member may call this. Writes are household-scoped, not a person user_id.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -127,14 +154,19 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                 "get_household_config",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const config = householdConfigToWire(
-                        await getHouseholdConfig(householdId),
+                    const loaded = await getHouseholdConfig(householdId);
+                    const config = await householdConfigWire(
+                        householdId,
+                        loaded,
                     );
+                    const restockLine = config.restock_enabled
+                        ? `Restock: on, ${RESTOCK_DAY_NAMES[config.restock_weekday] ?? config.restock_weekday} at ${config.restock_time} (${config.effective_timezone})`
+                        : "Restock: off";
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `${config.name}\nPlaces: ${config.recipe_search_places.map((place) => place.name).join(", ") || "(none)"}`,
+                                text: `${config.name}\nTimezone: ${config.effective_timezone}\n${restockLine}\nPlaces: ${config.recipe_search_places.map((place) => place.name).join(", ") || "(none)"}`,
                             },
                         ],
                         structuredContent: config,
@@ -150,7 +182,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Update Household Config",
             description:
-                "Merge household name, recipe search places, or shared preferences. Only the household owner, an admin, or the household bot may call this. Places are labels only, not a recipe table.",
+                "Merge household name, recipe search places, shared preferences, timezone, or restock schedule (restock_enabled, restock_weekday 0–6, restock_time HH:MM). Only the household owner, an admin, or the household bot may call this. Places are labels only, not a recipe table.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -175,6 +207,19 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                         shopping_cadence: z.string().nullable().optional(),
                     })
                     .optional(),
+                timezone: z
+                    .string()
+                    .nullable()
+                    .optional()
+                    .describe(
+                        "IANA timezone for the household, e.g. Europe/Kyiv. null means same as the owner.",
+                    ),
+                restock_enabled: z.boolean().optional(),
+                restock_weekday: z.number().optional(),
+                restock_time: z
+                    .string()
+                    .optional()
+                    .describe("HH:MM, 24-hour, household local time"),
             }),
             outputSchema: HOUSEHOLD_CONFIG_OUTPUT_SCHEMA,
         },
@@ -186,17 +231,22 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                     if (!parsed.ok) throw new Error(parsed.error);
                     const householdId = await callerManagerHouseholdId();
                     const current = await getHouseholdConfig(householdId);
-                    const config = householdConfigToWire(
-                        await updateHouseholdConfig(
-                            householdId,
-                            mergeHouseholdConfig(current, parsed.value),
-                        ),
+                    const updated = await updateHouseholdConfig(
+                        householdId,
+                        mergeHouseholdConfig(current, parsed.value),
                     );
+                    const config = await householdConfigWire(
+                        householdId,
+                        updated,
+                    );
+                    const restockLine = config.restock_enabled
+                        ? `Restock on (${config.effective_timezone})`
+                        : "Restock off";
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `Updated ${config.name}`,
+                                text: `Updated ${config.name}. Timezone: ${config.effective_timezone}. ${restockLine}.`,
                             },
                         ],
                         structuredContent: config,

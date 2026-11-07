@@ -3,13 +3,13 @@ import { renderHouseholdNav, renderSettingsNav } from "./settings-nav.js";
 
 test("settings nav omits from query when back is home", () => {
     expect(renderSettingsNav("account", "/")).toBe(
-        '<nav class="subnav" aria-label="Settings sections"><a href="/settings" aria-current="page">Account</a><a href="/settings/help">Help</a></nav>',
+        '<nav class="subnav" aria-label="Settings sections"><a href="/settings" aria-current="page">Account</a><a href="/settings/household-settings">Household</a><a href="/settings/help">Help</a></nav>',
     );
 });
 
 test("settings nav carries from on each link", () => {
     expect(renderSettingsNav("help", "/fridge")).toBe(
-        '<nav class="subnav" aria-label="Settings sections"><a href="/settings?from=%2Ffridge">Account</a><a href="/settings/help?from=%2Ffridge" aria-current="page">Help</a></nav>',
+        '<nav class="subnav" aria-label="Settings sections"><a href="/settings?from=%2Ffridge">Account</a><a href="/settings/household-settings?from=%2Ffridge">Household</a><a href="/settings/help?from=%2Ffridge" aria-current="page">Help</a></nav>',
     );
 });
 

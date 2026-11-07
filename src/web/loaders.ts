@@ -20,6 +20,7 @@ import {
 import {
     getHouseholdConfig,
     getHouseholdMembership,
+    getHouseholdOwnerProfile,
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
@@ -44,6 +45,10 @@ import {
 import type { LinkProductPromptView } from "./components/link-product-prompt.js";
 import { renderHouseholdSettingsPage } from "./pages/household.js";
 import { renderSettingsHelpPage as renderSettingsHelpPageHtml } from "./pages/settings-help.js";
+import {
+    ownerTimezoneLabelForSelect,
+    renderHouseholdSettingsPrefsPage,
+} from "./pages/settings-household.js";
 import {
     effectiveFoodsByIds,
     matchFoodsByWords,
@@ -483,6 +488,41 @@ export async function renderSettingsHelpRoute(
         html: renderSettingsHelpPageHtml({
             chrome: viewerChromeFromProfile(profile),
             backHref: opts.backHref ?? "/",
+        }),
+    };
+}
+
+export async function renderSettingsHouseholdRoute(
+    viewerUserId: string,
+    opts: {
+        backHref?: string;
+        error?: string;
+        draft?: {
+            timezone: string | null;
+            restockEnabled: boolean;
+            restockWeekday: string;
+            restockTime: string;
+        };
+    } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const [config, ownerProfile] = await Promise.all([
+        getHouseholdConfig(householdId),
+        getHouseholdOwnerProfile(householdId),
+    ]);
+    return {
+        status: 200,
+        html: renderHouseholdSettingsPrefsPage({
+            chrome: viewerChromeFromProfile(profile),
+            backHref: opts.backHref ?? "/",
+            member: gate.viewer,
+            preferences: config.preferences,
+            ownerTimezoneLabel: ownerTimezoneLabelForSelect(ownerProfile),
+            draft: opts.draft,
+            error: opts.error,
         }),
     };
 }

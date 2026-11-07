@@ -26,6 +26,12 @@ import { createMemorySettingsStore } from "../../domain/settings.js";
 import { createMemoryStockStore } from "../../domain/stock.js";
 import type { FoodResult } from "../../foods.js";
 import { LINK_PRODUCT_MODAL_ID } from "../components/link-product-prompt.js";
+import {
+    DEFAULT_RESTOCK,
+    EMPTY_HOUSEHOLD_PREFERENCES,
+    type HouseholdConfig,
+    type HouseholdMember,
+} from "../../household.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -64,18 +70,19 @@ const db = {
         {
             householdId: HH,
             userId: ALICE,
-            role: "owner" as const,
+            role: "owner",
             displayName: "Alice",
         },
-    ],
+    ] as HouseholdMember[],
     household: {
         name: "Home",
-        recipeSearchPlaces: [] as string[],
+        recipeSearchPlaces: [],
         preferences: {
-            drink_unit: null,
-            grocery_default_store_id: null,
+            ...EMPTY_HOUSEHOLD_PREFERENCES,
+            restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
         },
-    },
+    } as HouseholdConfig,
+    configWrites: 0,
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     fridgeStore: createMemoryFridgeStore(),
@@ -125,6 +132,15 @@ mock.module("../../db/household.js", () => ({
         db.members.find((member) => member.userId === userId) ?? null,
     householdExists: async () => db.household != null,
     getHouseholdConfig: async () => structuredClone(db.household),
+    getHouseholdOwnerProfile: async () => db.profile,
+    updateHouseholdConfig: async (
+        _householdId: string,
+        config: HouseholdConfig,
+    ) => {
+        db.configWrites += 1;
+        db.household = structuredClone(config);
+        return structuredClone(db.household);
+    },
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
 }));
@@ -152,6 +168,7 @@ afterAll(() => {
 });
 
 const { legacyHouseholdPath, householdRoutes } = await import("./household.js");
+const { settingsRoutes } = await import("./settings.js");
 const { groceryRoutes } = await import("./grocery.js");
 const { fridgeRoutes } = await import("./fridge.js");
 const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
@@ -243,8 +260,212 @@ describe("legacyHouseholdPath", () => {
     test("non-matches", () => {
         expect(legacyHouseholdPath("/settings")).toBeNull();
         expect(legacyHouseholdPath("/settings/help")).toBeNull();
+        expect(legacyHouseholdPath("/settings/household-settings")).toBeNull();
         expect(legacyHouseholdPath("/settings/householdx")).toBeNull();
         expect(legacyHouseholdPath("/settings/foodsy")).toBeNull();
+    });
+});
+
+describe("settings household routes", () => {
+    function settingsApp() {
+        const hono = new Hono();
+        hono.route("/", householdRoutes);
+        hono.route("/", settingsRoutes);
+        return hono;
+    }
+
+    beforeEach(() => {
+        db.configWrites = 0;
+        db.household = {
+            name: "Home",
+            recipeSearchPlaces: [],
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
+            },
+        };
+    });
+
+    test("GET /settings/household-settings is not a legacy redirect", async () => {
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain('aria-current="page">Household</a>');
+    });
+
+    test("member GET is read-only", async () => {
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "member",
+                displayName: "Alice",
+            },
+        ] as HouseholdMember[];
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).not.toContain("<form");
+        expect(html).not.toContain('name="restock_enabled"');
+    });
+
+    test("member POST is forbidden", async () => {
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "member",
+                displayName: "Alice",
+            },
+        ] as HouseholdMember[];
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "restock_enabled=true&restock_weekday=6&restock_time=07:00&timezone=",
+            },
+        );
+        expect(r.status).toBe(403);
+        expect(db.configWrites).toBe(0);
+    });
+
+    test("owner save preserves lastRunOn", async () => {
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "restock_enabled=true&restock_weekday=1&restock_time=08:00&timezone=Europe%2FKyiv&from=%2F",
+            },
+        );
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/settings/household-settings");
+        expect(db.configWrites).toBe(1);
+        expect(db.household.preferences.restock.lastRunOn).toBe("2026-09-15");
+        expect(db.household.preferences.restock.enabled).toBe(true);
+        expect(db.household.preferences.timezone).toBe("Europe/Kyiv");
+    });
+
+    test("admin can save", async () => {
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "admin",
+                displayName: "Alice",
+            },
+        ] as HouseholdMember[];
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "restock_enabled=true&restock_weekday=0&restock_time=09:00&timezone=",
+            },
+        );
+        expect(r.status).toBe(303);
+        expect(db.configWrites).toBe(1);
+    });
+
+    test("invalid POST re-renders with error and does not write", async () => {
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "timezone=&restock_enabled=true&restock_weekday=6&restock_time=24%3A00",
+            },
+        );
+        expect(r.status).toBe(400);
+        expect(db.configWrites).toBe(0);
+        const html = await r.text();
+        expect(html).toContain("Enter a time as HH:MM");
+        expect(html).toContain('value="24:00"');
+        // A time input would blank "24:00"; text keeps it visible and re-posted.
+        expect(html).toMatch(
+            /<input type="text" id="restock_time"[^>]*value="24:00"/,
+        );
+    });
+
+    test("blank or missing weekday POST returns 400 without write", async () => {
+        for (const body of [
+            "timezone=&restock_enabled=true&restock_time=07%3A00",
+            "timezone=&restock_enabled=true&restock_weekday=&restock_time=07%3A00",
+            "timezone=&restock_enabled=true&restock_weekday=%20%20&restock_time=07%3A00",
+        ]) {
+            db.configWrites = 0;
+            const r = await settingsApp().request(
+                "http://x/settings/household-settings",
+                {
+                    method: "POST",
+                    headers: {
+                        cookie: cookieFor(ALICE),
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    body,
+                },
+            );
+            expect(r.status).toBe(400);
+            expect(db.configWrites).toBe(0);
+            const html = await r.text();
+            expect(html).toContain("Pick a day from Sunday to Saturday");
+        }
+    });
+
+    test("invalid timezone POST keeps submitted timezone selected", async () => {
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "timezone=Mars%2FPhobos&restock_enabled=true&restock_weekday=1&restock_time=07%3A00",
+            },
+        );
+        expect(r.status).toBe(400);
+        expect(db.configWrites).toBe(0);
+        const html = await r.text();
+        expect(html).toContain('value="Mars/Phobos" selected');
+    });
+
+    test("invalid weekday POST keeps submitted weekday selected, not Sunday", async () => {
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "timezone=&restock_enabled=true&restock_weekday=9&restock_time=07%3A00",
+            },
+        );
+        expect(r.status).toBe(400);
+        expect(db.configWrites).toBe(0);
+        const html = await r.text();
+        expect(html).toContain('value="9" selected');
+        expect(html).not.toMatch(/value="0"[^>]*selected/);
     });
 });
 

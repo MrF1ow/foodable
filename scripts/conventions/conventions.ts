@@ -138,6 +138,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/routes/settings.ts": "settings",
     "src/web/pages/settings.ts": "settings",
     "src/web/pages/settings-help.ts": "settings",
+    "src/web/pages/settings-household.ts": "settings",
     "src/web/settings-back.ts": "web",
     "src/web/settings-back.test.ts": "web",
     "src/mcp/tools/household.ts": "household",

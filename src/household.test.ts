@@ -7,6 +7,8 @@ import {
     addHouseholdMember,
     createHousehold,
     createMemoryHouseholdStore,
+    DEFAULT_RESTOCK,
+    EMPTY_HOUSEHOLD_PREFERENCES,
     getHouseholdId,
     HouseholdAlreadyExistsError,
     listMembers,
@@ -29,9 +31,8 @@ function extraHousehold(id: string): Household {
         name: "Second kitchen",
         recipeSearchPlaces: [],
         preferences: {
-            constraints: [],
-            budget: null,
-            shoppingCadence: null,
+            ...EMPTY_HOUSEHOLD_PREFERENCES,
+            restock: { ...DEFAULT_RESTOCK },
         },
     };
 }
@@ -63,9 +64,8 @@ test("createHousehold inserts the owner and fails if a household exists", () => 
         name: "Home",
         recipeSearchPlaces: [],
         preferences: {
-            constraints: [],
-            budget: null,
-            shoppingCadence: null,
+            ...EMPTY_HOUSEHOLD_PREFERENCES,
+            restock: { ...DEFAULT_RESTOCK },
         },
     } satisfies Household);
     expect(listMembers(store, householdId)).toEqual([

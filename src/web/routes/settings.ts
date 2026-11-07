@@ -7,19 +7,37 @@ import {
     forbiddenDashboardHtml,
     renderSettingsAccountPage,
     renderSettingsHelpRoute,
+    renderSettingsHouseholdRoute,
 } from "../loaders.js";
 import { formText } from "../form.js";
-import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
-import { HouseholdAlreadyExistsError } from "../../household.js";
+import {
+    requireManager,
+    requireMember,
+    requireSiteUser,
+    siteMember,
+} from "../middleware.js";
+import {
+    HouseholdAlreadyExistsError,
+    isRestockWeekday,
+    mergeHouseholdConfig,
+    parseHouseholdConfigPatch,
+    RESTOCK_WEEKDAY_ERROR,
+} from "../../household.js";
 import {
     createHouseholdForCaller,
+    getHouseholdConfig,
+    updateHouseholdConfig,
     updateMemberDisplayName,
 } from "../../db/household.js";
 import { upsertProfile } from "../../db/profiles.js";
 import { validateTz } from "../../domain/tz.js";
 import { redirectWithToast } from "../components/toast.js";
 import { getBaseUrl } from "../../url.js";
-import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
+import {
+    householdSettingsUrlWithBack,
+    settingsBackHref,
+    settingsUrlWithBack,
+} from "../settings-back.js";
 
 export const settingsRoutes = new Hono();
 
@@ -44,6 +62,86 @@ settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
     const page = await renderSettingsHelpRoute(c.get("userId"), { backHref });
     return c.html(page.html, page.status);
 });
+
+settingsRoutes.get("/settings/household-settings", requireMember, async (c) => {
+    const backHref = resolveBackHref(c);
+    const page = await renderSettingsHouseholdRoute(c.get("userId"), {
+        backHref,
+    });
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.post(
+    "/settings/household-settings",
+    requireManager,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const origin = getBaseUrl(c);
+        const backHref = settingsBackHref({
+            from: formText(body, "from"),
+            referer: undefined,
+            origin,
+        });
+        const redirectTo = householdSettingsUrlWithBack(backHref);
+        const timezoneRaw = formText(body, "timezone");
+        const restockWeekdayRaw = formText(body, "restock_weekday");
+        const restockTime = formText(body, "restock_time");
+        const restockEnabled = formText(body, "restock_enabled") === "true";
+        const draft = {
+            timezone: timezoneRaw === "" ? null : timezoneRaw,
+            restockEnabled,
+            restockWeekday: restockWeekdayRaw,
+            restockTime,
+        };
+
+        const weekdayTrimmed = restockWeekdayRaw.trim();
+        if (weekdayTrimmed === "" || !/^\d+$/.test(weekdayTrimmed)) {
+            const page = await renderSettingsHouseholdRoute(userId, {
+                backHref,
+                error: RESTOCK_WEEKDAY_ERROR,
+                draft,
+            });
+            return c.html(page.html, 400);
+        }
+        const restockWeekday = Number(weekdayTrimmed);
+        if (!isRestockWeekday(restockWeekday)) {
+            const page = await renderSettingsHouseholdRoute(userId, {
+                backHref,
+                error: RESTOCK_WEEKDAY_ERROR,
+                draft,
+            });
+            return c.html(page.html, 400);
+        }
+
+        const patchInput = {
+            timezone: timezoneRaw === "" ? null : timezoneRaw,
+            restock_enabled: restockEnabled,
+            restock_weekday: restockWeekday,
+            restock_time: restockTime,
+        };
+        const parsed = parseHouseholdConfigPatch(patchInput);
+        if (!parsed.ok) {
+            const page = await renderSettingsHouseholdRoute(userId, {
+                backHref,
+                error: parsed.error,
+                draft,
+            });
+            return c.html(page.html, 400);
+        }
+        const current = await getHouseholdConfig(member.householdId);
+        await updateHouseholdConfig(
+            member.householdId,
+            mergeHouseholdConfig(current, parsed.value),
+        );
+        return redirectWithToast(
+            c,
+            redirectTo,
+            "settings.household-settings.saved",
+        );
+    },
+);
 
 settingsRoutes.post("/settings", requireMember, async (c) => {
     const userId = c.get("userId");

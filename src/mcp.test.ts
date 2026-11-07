@@ -75,6 +75,7 @@ import {
 } from "./auth-context.js";
 import { HOUSEHOLD_TOKEN_PREFIX } from "./household-token.js";
 import {
+    DEFAULT_RESTOCK,
     EMPTY_HOUSEHOLD_PREFERENCES,
     HouseholdAlreadyExistsError,
     type HouseholdConfig,
@@ -517,6 +518,7 @@ mock.module("./db/household.js", () => ({
         }
         return structuredClone(db.household);
     },
+    getHouseholdOwnerProfile: async () => db.profile,
     updateHouseholdConfig: async (
         _householdId: string,
         config: HouseholdConfig,
@@ -3361,6 +3363,12 @@ describe("household config tools", () => {
                     budget: null,
                     shopping_cadence: null,
                 },
+                timezone: null,
+                effective_timezone: "UTC",
+                restock_enabled: false,
+                restock_weekday: 6,
+                restock_time: "07:00",
+                restock_last_run_on: null,
             });
         });
     });
@@ -3528,6 +3536,102 @@ describe("household config tools", () => {
             expect(names).toContain("update_household_config");
             expect(names).not.toContain("update_fridge_locations");
         });
+    });
+
+    test("PAT restock and timezone fields round-trip", async () => {
+        await withHousehold(async (call) => {
+            const written = await call("update_household_config", {
+                timezone: "Europe/Kyiv",
+                restock_enabled: true,
+                restock_weekday: 3,
+                restock_time: "08:30",
+            });
+            expect(written.isError).toBeFalsy();
+            expect(written.structuredContent).toMatchObject({
+                timezone: "Europe/Kyiv",
+                effective_timezone: "Europe/Kyiv",
+                restock_enabled: true,
+                restock_weekday: 3,
+                restock_time: "08:30",
+            });
+        });
+    });
+
+    test("invalid timezone weekday and time error without write", async () => {
+        await withHousehold(async (call) => {
+            const before = structuredClone(db.household);
+            for (const args of [
+                { timezone: "Mars/Phobos" },
+                { restock_weekday: 7 },
+                { restock_weekday: 1.5 },
+                { restock_time: "24:00" },
+            ]) {
+                const r = await call("update_household_config", args);
+                expect(r.isError).toBe(true);
+                if (
+                    args.restock_weekday === 7 ||
+                    args.restock_weekday === 1.5
+                ) {
+                    expect(textOf(r)).toContain(
+                        "Pick a day from Sunday to Saturday",
+                    );
+                }
+                expect(db.household).toEqual(before);
+            }
+            expect(db.household?.preferences.restock.enabled).toBe(false);
+        });
+    });
+
+    test("restock_last_run_on in input is ignored", async () => {
+        db.household = {
+            name: "Home",
+            recipeSearchPlaces: [],
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                restock: {
+                    ...DEFAULT_RESTOCK,
+                    lastRunOn: "2026-10-01",
+                },
+            },
+        };
+        await withHousehold(async (call) => {
+            await call("update_household_config", {
+                restock_enabled: true,
+                restock_last_run_on: "2026-12-01",
+            });
+            const got = await call("get_household_config");
+            expect(got.structuredContent?.restock_last_run_on).toBe(
+                "2026-10-01",
+            );
+        });
+    });
+
+    test("get effective_timezone uses owner when household timezone null", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "America/Los_Angeles" };
+        await withHousehold(async (call) => {
+            const r = await call("get_household_config");
+            expect(r.structuredContent?.effective_timezone).toBe(
+                "America/Los_Angeles",
+            );
+        });
+    });
+
+    test("member update of restock settings is refused", async () => {
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "member",
+                displayName: "U1",
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("update_household_config", {
+                restock_enabled: true,
+            });
+            expect(r.isError).toBe(true);
+        });
+        expect(db.household?.preferences.restock.enabled).toBe(false);
     });
 
     test("TOOLS names match the registered tool set", async () => {
