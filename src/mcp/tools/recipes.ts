@@ -28,6 +28,7 @@ import {
     macrosForPerson,
     removeRecipeIngredient,
     reorderRecipeIngredients,
+    recipeNotices,
     setPersonPortion,
     updateRecipe,
     updateRecipeIngredient,
@@ -35,9 +36,16 @@ import {
     recipeSteps,
     resolveTotalPortions,
 } from "../../domain/recipes.js";
+import { sortNotices } from "../../domain/notices.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
-import { QUANTITY_ITEM } from "../shared.js";
+import { noticeSentence } from "../../copy/notices.js";
+import {
+    NOTICE_SCHEMA,
+    noticeToWire,
+    QUANTITY_ITEM,
+    recipeAllergenNoticesForView,
+} from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
 const RECIPE_FIELDS = {
@@ -74,6 +82,9 @@ const MACROS_ITEM = z.object({
     sugar_g: z.number().nullable(),
     alcohol_g: z.number().nullable(),
     incomplete: z.boolean(),
+    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
+    incompleteReasons: z.array(z.string()),
+    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
     gaps: z.array(
         z.object({
             ingredient_id: z.string(),
@@ -127,6 +138,22 @@ function recipeFields(recipe: Recipe) {
         prep_minutes: recipe.prepMinutes,
         cook_minutes: recipe.cookMinutes,
     };
+}
+
+function ingredientLinesForRecipeText(
+    rows: {
+        display_name: string;
+        person_amount: number;
+        unit: string;
+        note: string | null;
+    }[],
+): string {
+    return rows
+        .map(
+            (ingredient) =>
+                `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,
+        )
+        .join("\n");
 }
 
 export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
@@ -241,7 +268,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Recipe",
             description:
-                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. When macros are incomplete, `macros_per_portion.gaps` lists one entry per missing piece (nutrition, unit conversion, and so on).",
+                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place. When macros are incomplete, `macros_per_portion.gaps` lists one entry per missing piece (nutrition, unit conversion, and so on).",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -261,6 +288,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     ),
                 portion_count: z.number(),
                 macros_per_portion: MACROS_ITEM,
+                notices: z.array(NOTICE_SCHEMA),
                 ingredients: z.array(
                     z.object({
                         id: z.string(),
@@ -300,6 +328,22 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         actor.householdId,
                         view.ingredients.map((row) => row.foodId),
                     );
+                    const recipeGapNotices = recipeNotices(
+                        args.id,
+                        view.ingredients,
+                        catalog,
+                    );
+                    const recipeAllergen = await recipeAllergenNoticesForView({
+                        householdId: actor.householdId,
+                        recipeId: args.id,
+                        ingredients: view.ingredients,
+                        catalog,
+                        viewingMemberId: memberId,
+                    });
+                    const noticesWire = sortNotices([
+                        ...recipeAllergen,
+                        ...recipeGapNotices,
+                    ]).map(noticeToWire);
                     const macrosPerPortion = macrosForPerson(
                         view.ingredients,
                         view.yieldPortions,
@@ -307,11 +351,33 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         catalog,
                     );
                     const wiredMacros = wireMacros(macrosPerPortion);
+                    const gapReasonTexts: string[] = [];
+                    const seenGapMsg = new Set<string>();
+                    for (const n of recipeGapNotices) {
+                        const m = noticeSentence(n);
+                        if (seenGapMsg.has(m)) continue;
+                        seenGapMsg.add(m);
+                        gapReasonTexts.push(m);
+                    }
+                    const perPortionReasonTail =
+                        gapReasonTexts.length > 0
+                            ? ` (${gapReasonTexts.join("; ")})`
+                            : "";
+                    const perPortionLine = `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${perPortionReasonTail}`;
+                    const allergenBlockLines = recipeAllergen
+                        .filter((n) => n.severity === "block")
+                        .map((n) => `Allergen: ${noticeSentence(n)}`);
+                    const allergenBlock =
+                        allergenBlockLines.length > 0
+                            ? `\n${allergenBlockLines.join("\n")}`
+                            : "";
+                    const steps = recipeSteps(view.instructions);
                     const payload = {
                         ...recipeFields(view),
-                        steps: recipeSteps(view.instructions),
+                        steps,
                         portion_count: view.portionCount,
                         macros_per_portion: wiredMacros,
+                        notices: noticesWire,
                         ingredients: view.ingredients.map((ingredient) => {
                             const eff = ingredient.foodId
                                 ? catalog.get(ingredient.foodId)
@@ -334,25 +400,20 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             };
                         }),
                     };
+                    const ingredientBlock = ingredientLinesForRecipeText(
+                        payload.ingredients,
+                    );
+                    const stepsLines =
+                        steps.length > 0
+                            ? `\nMethod:\n${steps
+                                  .map((step, index) => `${index + 1}. ${step}`)
+                                  .join("\n")}`
+                            : "";
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${wiredMacros.incompleteReasons.length > 0 ? ` (${wiredMacros.incompleteReasons.join("; ")})` : ""}\n${payload.ingredients
-                                    .map(
-                                        (ingredient) =>
-                                            `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`,
-                                    )
-                                    .join("\n")}${
-                                    payload.steps.length > 0
-                                        ? `\nMethod:\n${payload.steps
-                                              .map(
-                                                  (step, index) =>
-                                                      `${index + 1}. ${step}`,
-                                              )
-                                              .join("\n")}`
-                                        : ""
-                                }`,
+                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}`,
                             },
                         ],
                         structuredContent: payload,

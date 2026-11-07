@@ -68,6 +68,8 @@ Member targeting — nutrition is per person. On an OAuth user token, omit user_
 
 Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools warn on allergen matches; treat a warning as blocking unless the user overrides it explicitly.
 
+Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them.
+
 Knowing what time it is — some hosts put the current date and time in your context and some do not, but this server always knows both the clock and the user's timezone. Never ask the user what time it is.
 - Logging something that just happened: omit logged_at entirely. The server stamps the entry with the current time, which is more accurate than any time you could reconstruct.
 - Resolving a relative time ("this morning", "an hour ago", "last Monday") or working out what "today" means: call get_current_time, then pass the resolved local time as logged_at.

@@ -22,10 +22,13 @@ import {
     discardFridgeItem,
     eatFridgeItem,
     fridgeEatLogsMeal,
+    fridgeNotices,
     listExpiring,
     StockInputError,
     updateFridgeItemQuantityAdjust,
+    utcTodayFromDate,
 } from "../../domain/stock.js";
+import { sortNotices } from "../../domain/notices.js";
 import { fridgeExpiryLine } from "../../copy/notices.js";
 import { findFoodById } from "../../domain/foods.js";
 import {
@@ -41,6 +44,8 @@ import { WIDGET_LOCALE } from "../../routes.js";
 import {
     APP_UI_MIME_TYPE,
     FRIDGE_WIDGET_URI,
+    NOTICE_SCHEMA,
+    noticeToWire,
     type ToolContext,
 } from "../shared.js";
 
@@ -73,13 +78,14 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         amount: z.number(),
         unit: z.string(),
         expires_on: z.string().nullable(),
+        notices: z.array(NOTICE_SCHEMA),
     });
     server.registerTool(
         "get_fridge",
         {
             title: "Get Fridge",
             description:
-                "List household fridge and pantry locations with the items filed in each. Use the location ids for add_fridge_item.",
+                "List household fridge and pantry locations with the items filed in each. Use the location ids for add_fridge_item. Each item includes `notices` for expiry when dated.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -108,6 +114,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                         liveFridgeStore(),
                         householdId,
                     );
+                    const today = utcTodayFromDate();
                     const payload = {
                         locale: WIDGET_LOCALE,
                         locations: locations.map((row) => ({
@@ -124,6 +131,9 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                     amount: item.quantity.amount,
                                     unit: item.quantity.unit,
                                     expires_on: item.expiresOn ?? null,
+                                    notices: sortNotices(
+                                        fridgeNotices([item], today),
+                                    ).map(noticeToWire),
                                 })),
                         })),
                     };

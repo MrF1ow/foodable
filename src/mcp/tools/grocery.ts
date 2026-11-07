@@ -15,17 +15,22 @@ import {
     addGroceryFoodById,
     addGroceryManualFood,
     addGrocerySupply,
+    allergenNotices,
     checkGroceryLine,
     clearCheckedLines,
     listGrocery,
     type GroceryAmountPickReason,
     type GroceryStorePickReason,
 } from "../../domain/grocery.js";
+import { sortNotices } from "../../domain/notices.js";
 import { putAwayGroceryLines, StockInputError } from "../../domain/stock.js";
 import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
     groceryLineExtras,
+    householdAllergenMembers,
+    NOTICE_SCHEMA,
+    noticeToWire,
     APP_UI_MIME_TYPE,
     GROCERY_LIST_WIDGET_URI,
 } from "../shared.js";
@@ -48,13 +53,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 name: z.string(),
             })
             .nullable(),
+        notices: z.array(NOTICE_SCHEMA),
     });
     server.registerTool(
         "list_grocery_lines",
         {
             title: "List Grocery Lines",
             description:
-                "List grocery lines grouped by store and section, with already-have against the fridge.",
+                "List grocery lines grouped by store and section, with already-have against the fridge. Each line includes `notices` (e.g. allergens).",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -101,6 +107,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             ...fridge.items.map((item) => item.foodId),
                         ],
                     );
+                    const allergenMembers =
+                        await householdAllergenMembers(householdId);
                     const stock = fridge.items.map((item) => ({
                         quantity: item.quantity,
                         foodId: item.foodId,
@@ -119,6 +127,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         const eff = line.foodId
                             ? foods.get(line.foodId)
                             : undefined;
+                        const notices = sortNotices(
+                            allergenNotices(
+                                { kind: "grocery_line", id: line.id },
+                                line.displayName,
+                                allergenMembers,
+                                eff ? eff.allergens : null,
+                            ),
+                        ).map(noticeToWire);
                         return {
                             id: line.id,
                             store_id: line.storeId,
@@ -139,6 +155,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                       name: eff.product.name,
                                   }
                                 : null,
+                            notices,
                         };
                     };
                     const payload = {
@@ -178,7 +195,19 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                                   const tag = line.already_have
                                                       ? ` [${line.already_have}]`
                                                       : "";
-                                                  return `${line.display_name} ${line.amount} ${line.unit}${tag}`;
+                                                  const blockSuffix =
+                                                      line.notices
+                                                          .filter(
+                                                              (n) =>
+                                                                  n.severity ===
+                                                                  "block",
+                                                          )
+                                                          .map(
+                                                              (n) =>
+                                                                  ` — ${n.message}`,
+                                                          )
+                                                          .join("");
+                                                  return `${line.display_name} ${line.amount} ${line.unit}${tag}${blockSuffix}`;
                                               })
                                               .join("\n"),
                             },
@@ -239,6 +268,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 id: z.string(),
                 display_name: z.string(),
                 already_have: z.string().nullable(),
+                // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
                 warning: z.string().nullable(),
                 store_id: z.string(),
                 amount: z.number(),
