@@ -5345,6 +5345,160 @@ describe("phone-app domain MCP tools", () => {
             expect(payload.notices).toEqual([]);
         });
     });
+
+    test("list_notices count matches household notices; filters narrow notices only", async () => {
+        function addDaysUtc(iso: string, delta: number): string {
+            const [y, m, d] = iso.split("-").map(Number);
+            return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                .toISOString()
+                .slice(0, 10);
+        }
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const today = utcTodayFromDate();
+            const added = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "Soon kefir",
+                amount: 1,
+                unit: "g",
+            });
+            const itemId = added.structuredContent?.id as string;
+            const row = (await db.fridgeStore.listItems("hh-1")).find(
+                (r) => r.id === itemId,
+            );
+            await db.fridgeStore.updateItem({
+                ...row!,
+                expiresOn: addDaysUtc(today, 4),
+            });
+            const plain = await call("upsert_food", { name: "Half and half" });
+            const plainId = plain.structuredContent?.id as string;
+            const recipe = await call("create_recipe", {
+                name: "Coffee",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: plainId,
+                amount: 60,
+                unit: "ml",
+            });
+
+            const listed = await call("list_notices", {});
+            expect(listed.isError).toBeFalsy();
+            const sc = listed.structuredContent as {
+                count: number;
+                notices: unknown[];
+            };
+            expect(sc.count).toBeGreaterThanOrEqual(2);
+            for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
+            expect(sc.count).toBeGreaterThanOrEqual(sc.notices.length);
+
+            const byCode = await call("list_notices", {
+                code: "fridge.expiring",
+            });
+            const codeSc = byCode.structuredContent as {
+                count: number;
+                notices: Array<{ code: string }>;
+            };
+            expect(codeSc.count).toBe(sc.count);
+            expect(
+                codeSc.notices.every((n) => n.code === "fridge.expiring"),
+            ).toBe(true);
+
+            const bySeverity = await call("list_notices", { severity: "info" });
+            const sevSc = bySeverity.structuredContent as {
+                count: number;
+                notices: Array<{ severity: string }>;
+            };
+            expect(sevSc.count).toBe(sc.count);
+            expect(sevSc.notices.every((n) => n.severity === "info")).toBe(
+                true,
+            );
+
+            const byKind = await call("list_notices", {
+                subject_kind: "recipe_ingredient",
+            });
+            const kindSc = byKind.structuredContent as {
+                count: number;
+                notices: Array<{ subject: { kind: string } }>;
+            };
+            expect(kindSc.count).toBe(sc.count);
+            expect(
+                kindSc.notices.every(
+                    (n) => n.subject.kind === "recipe_ingredient",
+                ),
+            ).toBe(true);
+        });
+    });
+
+    test("dismiss_notice on info then list; warn and unknown subject error", async () => {
+        function addDaysUtc(iso: string, delta: number): string {
+            const [y, m, d] = iso.split("-").map(Number);
+            return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                .toISOString()
+                .slice(0, 10);
+        }
+        await withUser(alice, async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const today = utcTodayFromDate();
+            const added = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "Soon butter",
+                amount: 1,
+                unit: "g",
+            });
+            const itemId = added.structuredContent?.id as string;
+            const row = (await db.fridgeStore.listItems("hh-1")).find(
+                (r) => r.id === itemId,
+            );
+            await db.fridgeStore.updateItem({
+                ...row!,
+                expiresOn: addDaysUtc(today, 3),
+            });
+
+            const ok = await call("dismiss_notice", {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: itemId,
+            });
+            expect(ok.isError).toBeFalsy();
+            const after = await call("list_notices", {});
+            const notices = (
+                after.structuredContent as {
+                    notices: Array<{ code: string; subject: { id: string } }>;
+                }
+            ).notices;
+            expect(
+                notices.some(
+                    (n) =>
+                        n.subject.id === itemId && n.code === "fridge.expiring",
+                ),
+            ).toBe(false);
+
+            const warn = await call("dismiss_notice", {
+                code: "fridge.expired",
+                subject_kind: "fridge_item",
+                subject_id: itemId,
+            });
+            expect(warn.isError).toBe(true);
+            expect(textOf(warn)).toContain(
+                "Only suggestions (info notices) can be dismissed",
+            );
+
+            const missing = await call("dismiss_notice", {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: crypto.randomUUID(),
+            });
+            expect(missing.isError).toBe(true);
+            expect(textOf(missing).toLowerCase()).toContain("not open");
+        });
+    });
 });
 
 describe("removed membership admin MCP tools", () => {

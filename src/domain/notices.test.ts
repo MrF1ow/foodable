@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { type Notice, sortNotices } from "./notices.js";
+import {
+    needsAttentionCount,
+    tabDotsFromNotices,
+    type Notice,
+    sortNotices,
+} from "./notices.js";
 
 function n(
     code: Notice["code"],
@@ -33,4 +38,44 @@ test("sortNotices orders block, warn, info and is stable", () => {
         "first",
         "second",
     ]);
+});
+
+test("needsAttentionCount counts warn and info, not block", () => {
+    const notices: Notice[] = [
+        n("fridge.expired", "warn", "a"),
+        n("fridge.expiring", "info", "b"),
+        n("recipe.allergen", "block", "c"),
+    ];
+    expect(needsAttentionCount(notices)).toBe(2);
+});
+
+test("tabDotsFromNotices lights only tabs that own the code", () => {
+    const fridgeOnly: Notice[] = [
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: { kind: "fridge_item", id: "f1" },
+            related: [],
+            params: { name: "Milk" },
+        },
+    ];
+    expect(tabDotsFromNotices(fridgeOnly)).toEqual({ fridge: true });
+
+    const recipeOnly: Notice[] = [
+        {
+            code: "recipe.no_food",
+            severity: "warn",
+            subject: { kind: "recipe_ingredient", id: "i1", recipeId: "r1" },
+            related: [],
+            params: { name: "Salt" },
+        },
+    ];
+    expect(tabDotsFromNotices(recipeOnly)).toEqual({ recipes: true });
+
+    const both: Notice[] = [...fridgeOnly, ...recipeOnly];
+    expect(tabDotsFromNotices(both)).toEqual({
+        fridge: true,
+        recipes: true,
+    });
+    expect(tabDotsFromNotices(both).household).toBeUndefined();
 });
