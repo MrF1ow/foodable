@@ -28,6 +28,7 @@ import {
     type RecipeIngredient,
 } from "./recipes.js";
 import { createMemorySocialReaderStatusStore } from "./social-readers.js";
+import { createMemoryFetchMemoryStore, deadLinkHash } from "./fetch-memory.js";
 import {
     readerFailureSentence,
     readerNoRecipeSentence,
@@ -87,8 +88,26 @@ function fakeFetcher(opts: {
             return {
                 ok: false as const,
                 reason: result.reason,
-                status: result.reason === "not_found" ? 404 : 403,
+                status:
+                    result.reason === "not_found"
+                        ? 404
+                        : result.reason === "site_refused"
+                          ? 403
+                          : result.reason === "timeout"
+                            ? null
+                            : result.reason === "http_error"
+                              ? 500
+                              : null,
                 detail: result.reason,
+                url: typeof url === "string" ? url : url.href,
+                host: (() => {
+                    try {
+                        return new URL(typeof url === "string" ? url : url.href)
+                            .hostname;
+                    } catch {
+                        return "";
+                    }
+                })(),
             };
         },
     } as SafeFetcher & { calls: { robots: number; fetch: number } };
@@ -386,6 +405,8 @@ test("importOutcomeToastKey uses paste_needed_reader when reader failed", () => 
         },
         unresolvedLines: [],
         readerFailure: "Could not read caption.",
+        fromMemory: false,
+        rememberedUntil: null,
     });
     expect(key).toBe("recipes.import.paste_needed_reader");
     const msg = importOutcomeMessage({
@@ -401,6 +422,8 @@ test("importOutcomeToastKey uses paste_needed_reader when reader failed", () => 
         },
         unresolvedLines: [],
         readerFailure: "Could not read caption.",
+        fromMemory: false,
+        rememberedUntil: null,
     });
     expect(msg).toContain("Could not read caption.");
     expect(msg).not.toMatch(/\{reason\}/);
@@ -454,6 +477,8 @@ test("every import status has toast copy and importOutcomeMessage", () => {
             },
             unresolvedLines: [],
             readerFailure: status === "paste_needed" ? null : null,
+            fromMemory: false,
+            rememberedUntil: null,
         };
         const msg = importOutcomeMessage(outcome);
         expect(msg.length).toBeGreaterThan(0);
@@ -1376,4 +1401,441 @@ test("a read caption and transcript with no recipe fall through to paste", async
     expect(await recipes.listRecipes(HH)).toHaveLength(0);
     const row = (await status.get(HH)).find((r) => r.reader === "tiktok");
     expect(row?.lastSuccessAt).not.toBeNull();
+});
+
+describe("importRecipeFromUrl fetch memory (websites)", () => {
+    test("403 records host; next page on host skips fetcher", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "site_refused" }),
+        });
+        const first = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/a",
+            },
+        );
+        expect(first.status).toBe("site_refused");
+        expect(first.fromMemory).toBe(false);
+        expect(fetcher.calls.robots).toBe(1);
+        expect(fetcher.calls.fetch).toBe(1);
+
+        const second = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/b",
+            },
+        );
+        expect(second.status).toBe("site_refused");
+        expect(second.fromMemory).toBe(true);
+        expect(fetcher.calls.fetch).toBe(1);
+        expect(fetcher.calls.robots).toBe(1);
+    });
+
+    test("www. and bare host share refusal row", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: false, reason: "site_refused" }),
+                }),
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.example.com/a",
+            },
+        );
+        const row = await memory.getRefusal(HH, "example.com", new Date());
+        expect(row?.host).toBe("example.com");
+        const skip = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({}),
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/b",
+            },
+        );
+        expect(skip.fromMemory).toBe(true);
+    });
+
+    test("after refusal TTL passes, fetch runs again", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        let t = new Date("2026-01-01T00:00:00.000Z").getTime();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "site_refused" }),
+        });
+        await importRecipeFromUrl(
+            {
+                recipes,
+                foods,
+                fetcher,
+                memory,
+                now: () => new Date(t),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://ttl.example/x",
+            },
+        );
+        expect(fetcher.calls.fetch).toBe(1);
+        t += 8 * 24 * 60 * 60 * 1000;
+        await importRecipeFromUrl(
+            {
+                recipes,
+                foods,
+                fetcher,
+                memory,
+                now: () => new Date(t),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://ttl.example/y",
+            },
+        );
+        expect(fetcher.calls.fetch).toBe(2);
+    });
+
+    test("retry clears memory and fetches", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "site_refused" }),
+        });
+        await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retry.example/p",
+            },
+        );
+        const memBlock = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retry.example/q",
+            },
+        );
+        expect(memBlock.fromMemory).toBe(true);
+        const after = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retry.example/q",
+                retry: true,
+            },
+        );
+        expect(after.fromMemory).toBe(false);
+        expect(fetcher.calls.fetch).toBe(2);
+    });
+
+    test("a retry that gets through clears the redirect host's refusal too", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const now = new Date();
+        await memory.recordRefusal(HH, "cdn.example", 403, now);
+        await memory.recordRefusal(HH, "start.example", 403, now);
+        const fetcher: SafeFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true as const,
+                    url: "https://cdn.example/soup",
+                    status: 200,
+                    contentType: "text/html",
+                    body: loadFixture("array-top-level"),
+                };
+            },
+        };
+        const out = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://start.example/soup",
+                retry: true,
+            },
+        );
+        expect(out.status).toMatch(/imported|unverified_needs_review/);
+        expect(await memory.getRefusal(HH, "cdn.example", now)).toBeNull();
+        expect(await memory.getRefusal(HH, "start.example", now)).toBeNull();
+    });
+
+    test("404 records URL; same link skips fetch; other path still fetches", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "not_found" }),
+        });
+        await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://gone.example/recipe",
+            },
+        );
+        expect(fetcher.calls.fetch).toBe(1);
+        const again = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://gone.example/recipe",
+            },
+        );
+        expect(again.status).toBe("not_found");
+        expect(again.fromMemory).toBe(true);
+        expect(fetcher.calls.fetch).toBe(1);
+        const other = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://gone.example/other",
+            },
+        );
+        expect(other.fromMemory).toBe(false);
+        expect(fetcher.calls.fetch).toBe(2);
+    });
+
+    test("410 is permanent in memory", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        await memory.recordDeadLink(
+            HH,
+            deadLinkHash("https://perm.example/gone"),
+            "https://perm.example/gone",
+            410,
+            new Date(),
+        );
+        const remembered = await importRecipeFromUrl(
+            {
+                recipes,
+                foods,
+                fetcher: fakeFetcher({
+                    fetch: () => ({
+                        ok: true,
+                        body: loadFixture("array-top-level"),
+                    }),
+                }),
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://perm.example/gone",
+            },
+        );
+        expect(remembered.fromMemory).toBe(true);
+        expect(remembered.rememberedUntil).toBeNull();
+        const still = await importRecipeFromUrl(
+            {
+                recipes,
+                foods,
+                fetcher: fakeFetcher({
+                    fetch: () => ({
+                        ok: true,
+                        body: loadFixture("array-top-level"),
+                    }),
+                }),
+                memory,
+                now: () => new Date("2040-01-01T00:00:00.000Z"),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://perm.example/gone",
+            },
+        );
+        expect(still.fromMemory).toBe(true);
+    });
+
+    test("500 does not record in memory", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "http_error" }),
+        });
+        await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://err.example/z",
+            },
+        );
+        expect(
+            await memory.getDeadLink(
+                HH,
+                deadLinkHash("https://err.example/z"),
+                new Date(),
+            ),
+        ).toBeNull();
+    });
+
+    test("memory record throws do not break import", async () => {
+        const memory = {
+            ...createMemoryFetchMemoryStore(),
+            async recordRefusal() {
+                throw new Error("db down");
+            },
+        };
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: false, reason: "site_refused" }),
+                }),
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://throw.example/t",
+            },
+        );
+        expect(result.status).toBe("site_refused");
+    });
+
+    test("memory read throws do not block import", async () => {
+        const memory = {
+            ...createMemoryFetchMemoryStore(),
+            async getRefusal() {
+                throw new Error("read down");
+            },
+            async getDeadLink() {
+                throw new Error("read down");
+            },
+        };
+        const fetcher = fakeFetcher({
+            fetch: () => ({
+                ok: true,
+                body: loadFixture("array-top-level"),
+            }),
+        });
+        const recipes = createMemoryRecipesStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://readthrow.example/r",
+            },
+        );
+        expect(result.status).toBe("imported");
+        expect(fetcher.calls.robots).toBe(1);
+        expect(fetcher.calls.fetch).toBe(1);
+    });
+
+    test("retry with pasted text clears memory and fetches before text", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        let fetchCalls = 0;
+        const fetcher = fakeFetcher({
+            fetch: () => {
+                fetchCalls += 1;
+                if (fetchCalls === 1) {
+                    return { ok: false, reason: "site_refused" };
+                }
+                return { ok: false, reason: "not_found" };
+            },
+        });
+        await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/a",
+            },
+        );
+        expect(fetchCalls).toBe(1);
+        const blocked = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/b",
+            },
+        );
+        expect(blocked.fromMemory).toBe(true);
+        const caption = loadCaption("clean-headers");
+        const retry = await importRecipeFromUrl(
+            { recipes, foods, fetcher, memory },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://retrytext.example/b",
+                text: caption,
+                retry: true,
+            },
+        );
+        expect(retry.fromMemory).toBe(false);
+        expect(fetchCalls).toBe(2);
+        expect(retry.status).toBe("imported");
+    });
+
+    test("social links never touch memory", async () => {
+        const memory = createMemoryFetchMemoryStore();
+        await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: false, reason: "site_refused" }),
+                }),
+                memory,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.instagram.com/p/x/",
+            },
+        );
+        expect(
+            await memory.listRefusals(HH, { limit: 10, now: new Date() }),
+        ).toHaveLength(0);
+    });
 });

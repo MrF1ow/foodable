@@ -49,7 +49,10 @@ import {
     importRecipeFromUrl,
     importRecipeFromUrlAnalyticsOutcome,
 } from "../../domain/recipe-import.js";
-import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
+import {
+    recipeFetchMemory,
+    recipeImportFetcher,
+} from "../../recipe-url-fetcher.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
 import { QUANTITY_ITEM } from "../shared.js";
@@ -113,6 +116,8 @@ export const IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA = z.object({
     unresolved_lines: z.array(z.string()),
     reader_failure: z.string().nullable(),
     message: z.string(),
+    from_memory: z.boolean(),
+    remembered_until: z.string().nullable(),
 });
 
 const RECIPE_IMPORT_WIRE = z.object({
@@ -1503,6 +1508,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     .max(120)
                     .optional()
                     .describe("Optional creator name the user typed."),
+                retry: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "Check the link again even if Foodable remembers the site refusing or the page being gone.",
+                    ),
             }),
             outputSchema: IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA,
         },
@@ -1519,6 +1530,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             recipes: liveRecipesStore(),
                             foods: liveFoodsStore(),
                             fetcher: recipeImportFetcher(),
+                            memory: recipeFetchMemory(),
                             transaction: (fn) => run(async () => fn()),
                             readers: household.preferences.socialReaders,
                             readerStatus: liveSocialReaderStatusStore(),
@@ -1530,6 +1542,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             text: args.text,
                             credit: args.credit,
                             textOrigin: "pasted",
+                            retry: args.retry === true,
                         },
                     );
                     const payload = {
@@ -1548,6 +1561,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         unresolved_lines: outcome.unresolvedLines,
                         reader_failure: outcome.readerFailure,
                         message: importOutcomeMessage(outcome),
+                        from_memory: outcome.fromMemory,
+                        remembered_until: outcome.rememberedUntil,
                     };
                     IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
                     return {
