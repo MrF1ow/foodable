@@ -41,7 +41,14 @@ import {
 import type {
     RecipeImport,
     RecipeProblem,
+    RecipeImportStatus,
 } from "../../domain/recipe-import.js";
+import {
+    importOutcomeMessage,
+    importRecipeFromUrl,
+    importRecipeFromUrlAnalyticsOutcome,
+} from "../../domain/recipe-import.js";
+import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
 import { QUANTITY_ITEM } from "../shared.js";
@@ -73,6 +80,37 @@ export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
     recipe_id: z.string(),
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
+});
+
+const RECIPE_IMPORT_STATUS = z.enum([
+    "imported",
+    "unverified_needs_review",
+    "paste_needed",
+    "no_recipe_in_text",
+    "no_recipe_on_page",
+    "robots_disallowed",
+    "site_refused",
+    "not_found",
+    "timeout",
+    "duplicate",
+    "invalid_link",
+]);
+
+export const IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA = z.object({
+    status: RECIPE_IMPORT_STATUS,
+    recipe_id: z.string().nullable(),
+    recipe_name: z.string().nullable(),
+    verification: z.enum(["verified", "unverified"]).nullable(),
+    problems: z.array(RECIPE_PROBLEM),
+    source: z
+        .object({
+            kind: z.string(),
+            url: z.string().nullable(),
+            label: z.string(),
+        })
+        .nullable(),
+    unresolved_lines: z.array(z.string()),
+    message: z.string(),
 });
 
 const RECIPE_IMPORT_WIRE = z.object({
@@ -1432,6 +1470,87 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     };
                 },
                 analytics,
+            ),
+    );
+
+    server.registerTool(
+        "import_recipe_from_url",
+        {
+            title: "Import Recipe From URL",
+            description:
+                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed — then ask the user to paste the caption or recipe text; do not open, fetch, or browse the post yourself. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: true,
+            },
+            inputSchema: z.object({
+                url: z
+                    .string()
+                    .describe("HTTPS link to a recipe page or social post."),
+            }),
+            outputSchema: IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "import_recipe_from_url",
+                async () => {
+                    const actor = await callerActor();
+                    const outcome = await importRecipeFromUrl(
+                        {
+                            recipes: liveRecipesStore(),
+                            foods: liveFoodsStore(),
+                            fetcher: recipeImportFetcher(),
+                            transaction: (fn) => run(async () => fn()),
+                        },
+                        {
+                            householdId: actor.householdId,
+                            creatorId: actor.userId,
+                            url: args.url,
+                        },
+                    );
+                    const payload = {
+                        status: outcome.status,
+                        recipe_id: outcome.recipeId,
+                        recipe_name: outcome.recipeName,
+                        verification: outcome.verification,
+                        problems: wireProblems(outcome.problems),
+                        source: outcome.source
+                            ? {
+                                  kind: outcome.source.kind,
+                                  url: outcome.source.url,
+                                  label: outcome.source.label,
+                              }
+                            : null,
+                        unresolved_lines: outcome.unresolvedLines,
+                        message: importOutcomeMessage(outcome),
+                    };
+                    IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: payload.message,
+                            },
+                        ],
+                        structuredContent: payload,
+                    };
+                },
+                analytics,
+                undefined,
+                {
+                    outcome: (r) => {
+                        const status = (
+                            r as {
+                                structuredContent?: {
+                                    status?: RecipeImportStatus;
+                                };
+                            }
+                        ).structuredContent?.status;
+                        return importRecipeFromUrlAnalyticsOutcome(status);
+                    },
+                },
             ),
     );
 }

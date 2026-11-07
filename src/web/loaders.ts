@@ -703,6 +703,9 @@ export async function renderRecipesListPage(
         canMakeNow?: boolean;
         safeFor?: string;
         verification?: string;
+        importUrl?: string;
+        importError?: string;
+        importDuplicateRecipeId?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -760,6 +763,23 @@ export async function renderRecipesListPage(
     } else {
         recipes = await listRecipes(liveRecipesStore(), householdId);
     }
+    const store = liveRecipesStore();
+    const imports = await store.listImports(householdId);
+    const importByRecipeId: Record<
+        string,
+        {
+            recipeId: string;
+            sourceKind: (typeof imports)[0]["sourceKind"];
+            sourceUrl: string | null;
+        }
+    > = {};
+    for (const row of imports) {
+        importByRecipeId[row.recipeId] = {
+            recipeId: row.recipeId,
+            sourceKind: row.sourceKind,
+            sourceUrl: row.sourceUrl,
+        };
+    }
     return {
         status: 200,
         html: renderRecipesPage({
@@ -778,6 +798,10 @@ export async function renderRecipesListPage(
             },
             error,
             openModalId: opts.openModalId,
+            importByRecipeId,
+            importUrl: opts.importUrl,
+            importError: opts.importError,
+            importDuplicateRecipeId: opts.importDuplicateRecipeId,
         }),
     };
 }

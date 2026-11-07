@@ -29,6 +29,7 @@ import {
     disclosure,
     emptyState,
     errorBanner,
+    errorBannerWithLink,
     modal,
     modalTrigger,
     pageHeader,
@@ -42,6 +43,8 @@ import {
     noticeList,
     type NoticeRouteContext,
 } from "../components/notices.js";
+import { sourceIcon } from "../components/source-icon.js";
+import { recipeDisplaySource } from "../../domain/recipe-import.js";
 
 export type RecipeMember = { userId: string; displayName: string };
 export type RecipeStoreOption = { id: string; name: string };
@@ -66,6 +69,12 @@ export function recipesListHref(
     return query ? `/recipes?${query}` : "/recipes";
 }
 
+export type RecipeListImportRow = {
+    recipeId: string;
+    sourceKind: RecipeImport["sourceKind"];
+    sourceUrl: string | null;
+};
+
 export type RecipesPageView = {
     chrome: ViewerChrome;
     recipes: Recipe[];
@@ -74,6 +83,10 @@ export type RecipesPageView = {
     filter?: RecipesPageFilter;
     error?: string;
     openModalId?: string;
+    importByRecipeId?: Record<string, RecipeListImportRow>;
+    importUrl?: string;
+    importError?: string;
+    importDuplicateRecipeId?: string;
 };
 
 export type RecipeIngredientRow = RecipeIngredientView & {
@@ -104,6 +117,7 @@ export type RecipeDetailView = {
 };
 
 const NEW_RECIPE_MODAL_ID = "recipe-new";
+export const IMPORT_RECIPE_MODAL_ID = "recipe-import-url";
 
 function modalOpen(view: { openModalId?: string }, id: string): boolean {
     return view.openModalId === id;
@@ -220,15 +234,28 @@ export function renderRecipesPage(view: RecipesPageView): string {
             ? emptyState("Add a recipe.", "empty-recipes")
             : "";
     const cards = view.recipes
-        .map((recipe) =>
-            renderRecipeCard({
+        .map((recipe) => {
+            const imp = view.importByRecipeId?.[recipe.id];
+            const display = recipeDisplaySource(
+                recipe,
+                imp
+                    ? {
+                          sourceKind: imp.sourceKind,
+                          sourceUrl: imp.sourceUrl,
+                      }
+                    : null,
+            );
+            return renderRecipeCard({
                 id: recipe.id,
                 name: recipe.name,
                 yieldPortions: recipe.yieldPortions,
                 tags: recipe.tags,
                 verification: recipe.verification,
-            }),
-        )
+                sourceIconHtml: display
+                    ? sourceIcon(display.kind, { label: display.label })
+                    : undefined,
+            });
+        })
         .join("");
     const memberOptions = [
         `<option value="">Anyone</option>`,
@@ -260,6 +287,28 @@ export function renderRecipesPage(view: RecipesPageView): string {
             : panel({
                   body: `<ul class="recipe-list list">${cards}</ul>`,
               });
+    const importUrlValue = escapeHtml(view.importUrl ?? "");
+    const importDuplicateBanner =
+        view.importDuplicateRecipeId != null
+            ? errorBannerWithLink(
+                  "You already imported this.",
+                  `/recipes/${view.importDuplicateRecipeId}`,
+                  "Open it",
+              )
+            : "";
+    const importErrorBanner =
+        view.importError && !view.importDuplicateRecipeId
+            ? errorBanner(view.importError)
+            : "";
+    const importModal = modal({
+        id: IMPORT_RECIPE_MODAL_ID,
+        title: "Import from link",
+        openOnLoad: modalOpen(view, IMPORT_RECIPE_MODAL_ID),
+        body: `${importDuplicateBanner}${importErrorBanner}<form class="recipe-import-url" method="post" action="/recipes/import" data-busy-form>
+                ${field({ id: "import-url", label: "Recipe link", control: `<input id="import-url" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" required placeholder="https://…" value="${importUrlValue}" />` })}
+                <button type="submit" class="btn-primary" data-busy-label="Importing…">Import</button>
+            </form>`,
+    });
     const newRecipeModal = modal({
         id: NEW_RECIPE_MODAL_ID,
         title: "New recipe",
@@ -273,11 +322,16 @@ export function renderRecipesPage(view: RecipesPageView): string {
     const body = `
         ${pageHeader({
             title: "Recipes",
-            titleActions: modalTrigger({
-                target: NEW_RECIPE_MODAL_ID,
-                label: "New recipe",
-                className: "btn-sm btn-primary",
-            }),
+            titleActions: `${modalTrigger({
+                target: IMPORT_RECIPE_MODAL_ID,
+                label: "Import from link",
+                className: "btn-sm",
+            })}
+${modalTrigger({
+    target: NEW_RECIPE_MODAL_ID,
+    label: "New recipe",
+    className: "btn-sm btn-primary",
+})}`,
         })}
         ${error}
         <nav class="seg recipe-verification-filter" aria-label="Verification">
@@ -301,6 +355,7 @@ export function renderRecipesPage(view: RecipesPageView): string {
         })}
         ${empty}
         ${list}
+        ${importModal}
         ${newRecipeModal}
     `;
     return renderAppShell({
@@ -446,6 +501,13 @@ export function renderRecipeDetailPage(view: RecipeDetailView): string {
             ? [`${DELETE_INGREDIENT_PREFIX}${deleteIngredient.id}`]
             : []),
     ];
+    const displaySource = recipeDisplaySource(
+        view.recipe,
+        view.importRow ?? null,
+    );
+    const sourceLine = displaySource
+        ? `<p class="recipe-source-line muted"><a href="${escapeHtml(displaySource.url)}" target="_blank" rel="noopener noreferrer">${sourceIcon(displaySource.kind, { label: displaySource.label, decorative: true })} ${escapeHtml(displaySource.label)}</a>${view.importRow?.credit ? ` · by ${escapeHtml(view.importRow.credit)}` : ""}</p>`
+        : "";
     const error = pageLevelErrorBanner(view, renderedModalIds);
     const allergen = noticeList(view.allergenNotices ?? [], {
         className: "allergen-warning",
@@ -687,6 +749,7 @@ ${modalTrigger({
         ${unverifiedPanel}
         ${allergen}
         ${dislike}
+        ${sourceLine}
         <p class="recipe-yield muted" data-yield="${escapeHtml(String(view.recipe.yieldPortions))}">Yield ${escapeHtml(String(view.recipe.yieldPortions))}</p>
         ${panel({
             title: "Nutrition",

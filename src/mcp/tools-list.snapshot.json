@@ -57,6 +57,7 @@
     "reorder_recipe_ingredients",
     "import_recipe_from_text",
     "verify_recipe",
+    "import_recipe_from_url",
     "get_household_rules",
     "set_household_rules",
     "search_food",
