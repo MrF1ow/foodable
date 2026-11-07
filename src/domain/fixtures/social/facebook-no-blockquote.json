@@ -1,0 +1,5 @@
+{
+    "html": "<div class=\"fb-video\">Embed without fallback text</div>",
+    "type": "video",
+    "version": "1.0"
+}

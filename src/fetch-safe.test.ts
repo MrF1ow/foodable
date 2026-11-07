@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import pkg from "../package.json" with { type: "json" };
 import {
@@ -5,6 +7,12 @@ import {
     createSafeFetcher,
     isPublicAddress,
 } from "./fetch-safe.js";
+
+/** Host check for fake fetchers: the exact host or a subdomain of it. */
+function onHost(href: string, domain: string): boolean {
+    const host = new URL(href).hostname;
+    return host === domain || host.endsWith(`.${domain}`);
+}
 
 const PUBLIC = "93.184.216.34";
 
@@ -26,6 +34,11 @@ describe("FOODABLE_USER_AGENT", () => {
         expect(FOODABLE_USER_AGENT).toBe(
             `Mozilla/5.0 (compatible; Foodable/${pkg.version}; +https://github.com/MrF1ow/foodable/blob/main/docs/fetcher.md)`,
         );
+    });
+
+    test("links to docs/fetcher.md in the repo", () => {
+        const doc = join(import.meta.dir, "..", "docs", "fetcher.md");
+        expect(existsSync(doc)).toBe(true);
     });
 });
 
@@ -450,6 +463,35 @@ describe("createSafeFetcher", () => {
         }
     });
 
+    test("allowedHosts refuses redirect to a host outside the list", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async (host) =>
+                host === "graph.example" || host === "example.com"
+                    ? [PUBLIC]
+                    : [PUBLIC],
+            fetch: async (url) => {
+                const href = String(url);
+                if (href.includes("graph.example")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: {
+                            location: "https://www.facebook.com/nope",
+                        },
+                    });
+                }
+                return okResponse("ok");
+            },
+        });
+        const out = await fetcher.fetchPage("https://graph.example/start", {
+            accept: ["text/html"],
+            checkRobots: false,
+            allowedHosts: ["graph.example"],
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("host_not_allowed");
+    });
+
     test("404 is not_found", async () => {
         const fetcher = createSafeFetcher({
             resolve: async () => [PUBLIC],
@@ -557,4 +599,45 @@ describe("createSafeFetcher", () => {
             expect(fetches).toBe(2);
         });
     });
+});
+
+test("a robots.txt redirect to another site is never followed", async () => {
+    const requested: string[] = [];
+    const fetcher = createSafeFetcher({
+        resolve: async () => [PUBLIC],
+        fetch: async (url) => {
+            const href = String(url);
+            requested.push(href);
+            if (href === "https://www.tiktok.com/robots.txt") {
+                return okResponse("", {
+                    status: 302,
+                    headers: {
+                        location: "https://www.facebook.com/robots.txt",
+                    },
+                });
+            }
+            return okResponse("<html></html>");
+        },
+    });
+    expect(
+        await fetcher.robotsAllows("https://www.tiktok.com/@a/video/1"),
+    ).toBe(false);
+    expect(requested.some((href) => onHost(href, "facebook.com"))).toBe(false);
+});
+
+test("a robots.txt redirect to the www twin is followed", async () => {
+    const fetcher = createSafeFetcher({
+        resolve: async () => [PUBLIC],
+        fetch: async (url) => {
+            const href = String(url);
+            if (href === "https://example.com/robots.txt") {
+                return okResponse("", {
+                    status: 301,
+                    headers: { location: "https://www.example.com/robots.txt" },
+                });
+            }
+            return okResponse("User-agent: *\nAllow: /");
+        },
+    });
+    expect(await fetcher.robotsAllows("https://example.com/soup")).toBe(true);
 });

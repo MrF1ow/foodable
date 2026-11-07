@@ -9,6 +9,7 @@ import {
     type HouseholdConfig,
     type MemberDraft,
     type MemberRole,
+    setSocialReaderEnabled,
 } from "../household.js";
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
 import { liveAuthStore } from "./users.js";
@@ -325,6 +326,18 @@ export async function getHouseholdConfig(
         if (!parsed.ok) throw new Error(parsed.error);
         return parsed.value;
     });
+}
+
+export async function updateSocialReaderEnabled(
+    householdId: string,
+    reader: "tiktok" | "facebook",
+    enabled: boolean,
+): Promise<HouseholdConfig> {
+    const config = await getHouseholdConfig(householdId);
+    return updateHouseholdConfig(
+        householdId,
+        setSocialReaderEnabled(config, reader, enabled),
+    );
 }
 
 export async function updateHouseholdConfig(

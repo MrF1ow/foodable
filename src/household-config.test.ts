@@ -30,6 +30,7 @@ const current: HouseholdConfig = {
             lastRunOn: "2026-11-01",
         },
         unverifiedRecipeExpiryDays: null,
+        socialReaders: { tiktok: false, facebook: false },
     },
 };
 
@@ -61,6 +62,7 @@ test("preference merge keeps unspecified fields", () => {
             timezone: "Europe/Kyiv",
             restock: current.preferences.restock,
             unverifiedRecipeExpiryDays: null,
+            socialReaders: { tiktok: false, facebook: false },
         },
     });
 });
@@ -76,6 +78,24 @@ test("merge preserves lastRunOn when restock fields change", () => {
     expect(merged.preferences.restock.lastRunOn).toBe("2026-11-01");
     expect(merged.preferences.restock.enabled).toBe(false);
     expect(merged.preferences.restock.time).toBe("08:30");
+});
+
+test("preferences patch ignores socialReaders", () => {
+    const parsed = parseHouseholdConfigPatch({
+        preferences: {
+            social_readers: { tiktok: true, facebook: true },
+            budget: "low",
+        },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(
+        (parsed.value.preferences as { socialReaders?: unknown } | undefined)
+            ?.socialReaders,
+    ).toBeUndefined();
+    expect(
+        mergeHouseholdConfig(current, parsed.value).preferences.socialReaders,
+    ).toEqual({ tiktok: false, facebook: false });
 });
 
 test("unverified recipe expiry defaults null and validates range", () => {

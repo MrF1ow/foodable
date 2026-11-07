@@ -128,6 +128,9 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/ingredient-lines.ts": "recipes",
     "src/domain/not-measured.ts": "recipes",
     "src/recipe-url-fetcher.ts": "recipes",
+    "src/domain/social-readers.ts": "recipes",
+    "src/db/social-readers.ts": "recipes",
+    "src/copy/social-readers.ts": "recipes",
     "src/fetch-safe.ts": "platform",
     "src/mcp/tools/recipes.ts": "recipes",
     "src/web/routes/recipes.ts": "recipes",
@@ -205,6 +208,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
     { prefix: "src/domain/fixtures/recipe-pages/", area: "recipes" },
     { prefix: "src/domain/fixtures/captions/", area: "recipes" },
+    { prefix: "src/domain/fixtures/social/", area: "recipes" },
     { prefix: "src/db/", area: "db" },
     { prefix: "public/app/", area: "web" },
     { prefix: "src/web/components/", area: "web" },

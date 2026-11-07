@@ -32,6 +32,9 @@ import {
     type HouseholdConfig,
     type HouseholdMember,
 } from "../../household.js";
+import { setSocialReaderEnabled } from "../../household.js";
+import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
+import * as actualDbSocialReaders from "../../db/social-readers.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -46,6 +49,7 @@ const realDbSettings = { ...actualDbSettings };
 const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
 const realFoods = { ...actualFoods };
+const realDbSocialReaders = { ...actualDbSocialReaders };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const HH = "hh-1";
@@ -64,7 +68,24 @@ const PROFILE: actualDbProfiles.Profile = {
     updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-const db = {
+const db: {
+    profile: actualDbProfiles.Profile;
+    members: HouseholdMember[];
+    household: HouseholdConfig;
+    configWrites: number;
+    dismissalsStore: ReturnType<typeof createMemoryNoticeDismissalsStore>;
+    socialReaderStatusStore: ReturnType<
+        typeof createMemorySocialReaderStatusStore
+    >;
+    foodsStore: ReturnType<typeof createMemoryFoodsStore>;
+    fridgeStore: ReturnType<typeof createMemoryFridgeStore>;
+    stockStore: ReturnType<typeof createMemoryStockStore>;
+    groceryStore: ReturnType<typeof createMemoryGroceryStore>;
+    recipesStore: ReturnType<typeof createMemoryRecipesStore>;
+    settingsStore: ReturnType<typeof createMemorySettingsStore>;
+    rulesStore: ReturnType<typeof createMemoryRulesStore>;
+    barcodeFoods: Record<string, FoodResult>;
+} = {
     profile: PROFILE,
     members: [
         {
@@ -83,6 +104,7 @@ const db = {
         },
     } as HouseholdConfig,
     configWrites: 0,
+    socialReaderStatusStore: createMemorySocialReaderStatusStore(),
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     fridgeStore: createMemoryFridgeStore(),
@@ -141,8 +163,24 @@ mock.module("../../db/household.js", () => ({
         db.household = structuredClone(config);
         return structuredClone(db.household);
     },
+    updateSocialReaderEnabled: async (
+        _householdId: string,
+        reader: "tiktok" | "facebook",
+        enabled: boolean,
+    ) => {
+        db.household = setSocialReaderEnabled(
+            structuredClone(db.household),
+            reader,
+            enabled,
+        );
+        return structuredClone(db.household);
+    },
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+}));
+mock.module("../../db/social-readers.js", () => ({
+    ...realDbSocialReaders,
+    liveSocialReaderStatusStore: () => db.socialReaderStatusStore,
 }));
 mock.module("../../db/profiles.js", () => ({
     ...realDbProfiles,
@@ -162,6 +200,7 @@ afterAll(() => {
     mock.module("../../db/settings.js", () => realDbSettings);
     mock.module("../../db/rules.js", () => realDbRules);
     mock.module("../../db/household.js", () => realDbHousehold);
+    mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/profiles.js", () => realDbProfiles);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
     mock.module("../../foods.js", () => realFoods);
@@ -1500,5 +1539,69 @@ describe("fridge notice add-to-grocery route", () => {
         expect(r.status).toBeGreaterThanOrEqual(400);
         expect(r.status).toBeLessThan(500);
         expect((await db.groceryStore.listLines(HH)).length).toBe(before);
+    });
+});
+
+describe("social reader settings", () => {
+    const MANAGER = "22222222-2222-4222-8222-222222222222";
+
+    beforeEach(() => {
+        db.household = {
+            name: "Home",
+            recipeSearchPlaces: [],
+            preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
+        };
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: MANAGER,
+                role: "admin",
+                displayName: "Admin",
+            },
+        ];
+    });
+
+    test("owner enables tiktok reader with confirm", async () => {
+        const r = await app().request("http://x/household/social-readers", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "reader=tiktok&enabled=1&confirm=1",
+        });
+        expect(r.status).toBe(303);
+        expect(db.household.preferences.socialReaders.tiktok).toBe(true);
+    });
+
+    test("owner cannot enable without confirm", async () => {
+        const r = await app().request("http://x/household/social-readers", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "reader=tiktok&enabled=1",
+        });
+        expect(r.status).toBe(400);
+        expect(db.household.preferences.socialReaders.tiktok).toBe(false);
+    });
+
+    test("manager gets 403", async () => {
+        const r = await app().request("http://x/household/social-readers", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(MANAGER),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "reader=tiktok&enabled=1&confirm=1",
+        });
+        expect(r.status).toBe(403);
     });
 });

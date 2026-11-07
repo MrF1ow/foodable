@@ -26,6 +26,25 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
+import {
+    DEFAULT_SOCIAL_READERS,
+    type SocialReadersPreferences,
+} from "../../household.js";
+import type { SocialReaderStatusRow } from "../../domain/social-readers.js";
+import type { ReaderFailure } from "../../domain/social-readers.js";
+import { sourceIcon } from "../components/source-icon.js";
+import {
+    readerFailureSentence,
+    SOCIAL_READER_FACEBOOK_CAVEAT,
+    SOCIAL_READER_LABELS,
+    SOCIAL_READER_OWNER_ONLY,
+    SOCIAL_READER_RESEARCH_URL,
+    SOCIAL_READER_RISK_INTRO,
+    socialReaderConfirmLabel,
+    socialReaderTurnOffLabel,
+    socialReaderTurnOnLabel,
+    type SocialReaderId,
+} from "../../copy/social-readers.js";
 
 export type HouseholdStoreView = GroceryStore & {
     sections: GrocerySection[];
@@ -55,11 +74,150 @@ export type HouseholdSettingsView = {
     issuedToken?: string;
     openModalId?: string;
     unverifiedRecipeExpiryDays: number | null;
+    socialReaders?: SocialReadersPreferences;
+    socialReaderStatus?: SocialReaderStatusRow[];
+    timezone?: string;
 };
 
 export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
 export const HOUSEHOLD_ADD_STORE_MODAL_ID = "household-add-store";
 export const HOUSEHOLD_ROTATE_TOKEN_MODAL_ID = "household-rotate-token";
+export const HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID =
+    "household-social-reader-tiktok";
+export const HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID =
+    "household-social-reader-facebook";
+
+function formatReaderInstant(iso: string | null, timezone: string): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        dateStyle: "medium",
+        timeStyle: "short",
+    }).format(d);
+}
+
+function socialReaderStatusLine(
+    reader: SocialReaderId,
+    row: SocialReaderStatusRow,
+    timezone: string,
+): string {
+    if (!row.lastSuccessAt && !row.lastFailureAt) return "Never used";
+    const parts: string[] = [];
+    if (row.lastSuccessAt) {
+        parts.push(
+            `Last success: ${formatReaderInstant(row.lastSuccessAt, timezone)}`,
+        );
+    }
+    if (row.lastFailureAt) {
+        const reason =
+            row.lastFailureReason &&
+            (
+                [
+                    "robots_disallowed",
+                    "blocked",
+                    "timeout",
+                    "not_found",
+                    "empty",
+                    "format_changed",
+                    "unsupported_link",
+                    "network",
+                ] as const
+            ).includes(row.lastFailureReason as ReaderFailure)
+                ? readerFailureSentence(
+                      reader,
+                      row.lastFailureReason as ReaderFailure,
+                  )
+                : row.lastFailureReason;
+        parts.push(
+            `Last failure: ${formatReaderInstant(row.lastFailureAt, timezone)} (${reason})`,
+        );
+    }
+    return parts.join(" · ");
+}
+
+function socialReaderRows(
+    socialReaders: SocialReadersPreferences,
+    socialReaderStatus: SocialReaderStatusRow[],
+    timezone: string,
+    isOwner: boolean,
+): string {
+    const statusByReader = new Map(
+        socialReaderStatus.map((row) => [row.reader, row]),
+    );
+    const readers: SocialReaderId[] = ["tiktok", "facebook"];
+    return readers
+        .map((reader) => {
+            const label = SOCIAL_READER_LABELS[reader];
+            const enabled = socialReaders[reader];
+            const row = statusByReader.get(reader)!;
+            const state = enabled ? "On" : "Off";
+            const status = socialReaderStatusLine(reader, row, timezone);
+            const kind = reader === "tiktok" ? "tiktok" : "facebook";
+            let actions = "";
+            if (isOwner) {
+                if (enabled) {
+                    actions = `<form method="post" action="/household/social-readers" class="inline-form">
+<input type="hidden" name="reader" value="${reader}" />
+<input type="hidden" name="enabled" value="0" />
+<button type="submit" class="btn-sm">${escapeHtml(socialReaderTurnOffLabel(reader))}</button>
+</form>`;
+                } else {
+                    const modalId =
+                        reader === "tiktok"
+                            ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
+                            : HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID;
+                    actions = modalTrigger({
+                        target: modalId,
+                        label: socialReaderTurnOnLabel(reader),
+                        // Opting into something against a platform's terms is
+                        // never the page's main action.
+                        className: "btn-sm",
+                    });
+                }
+            }
+            const actionsBlock = actions
+                ? `<div class="row-actions">${actions}</div>`
+                : "";
+            return `<li class="row"><div class="row-title">${sourceIcon(kind, { label, decorative: true })} ${escapeHtml(label)}</div><span class="row-meta">${escapeHtml(`${state} · ${status}`)}</span>${actionsBlock}</li>`;
+        })
+        .join("\n");
+}
+
+function socialReaderRiskBlock(): string {
+    return `<p class="hint">${escapeHtml(SOCIAL_READER_RISK_INTRO)} <a href="${SOCIAL_READER_RESEARCH_URL}" target="_blank" rel="noopener noreferrer">Terms research</a>.</p>`;
+}
+
+function socialReaderEnableModal(
+    reader: SocialReaderId,
+    modalId: string,
+    view: HouseholdSettingsView,
+): string {
+    const open = view.openModalId === modalId;
+    const label = SOCIAL_READER_LABELS[reader];
+    const extra =
+        reader === "facebook"
+            ? `<p class="hint">${escapeHtml(SOCIAL_READER_FACEBOOK_CAVEAT)}</p>`
+            : "";
+    return modal({
+        id: modalId,
+        title: `Turn on ${label} reader`,
+        openOnLoad: open,
+        body: `${open && view.error ? errorBanner(view.error) : ""}<form method="post" action="/household/social-readers" class="modal-confirm social-reader-enable">
+<input type="hidden" name="reader" value="${reader}" />
+<input type="hidden" name="enabled" value="1" />
+<p class="modal-message">Enable automatic reading of ${escapeHtml(label)} captions for recipe imports?</p>
+${socialReaderRiskBlock()}
+${extra}
+<label><input type="checkbox" name="confirm" value="1" required /> ${escapeHtml(socialReaderConfirmLabel(reader))}</label>
+<div class="modal-actions">
+<button type="button" command="close" commandfor="${escapeHtml(modalId)}">Cancel</button>
+<button type="submit" class="btn-primary">${escapeHtml(socialReaderTurnOnLabel(reader))}</button>
+</div>
+</form>`,
+    });
+}
 
 /** One manage, make-owner, and remove dialog for every member. */
 const HOUSEHOLD_MANAGE_ID = "household-manage";
@@ -458,6 +616,25 @@ ${editTrigger}
 export function renderHouseholdSettingsPage(
     view: HouseholdSettingsView,
 ): string {
+    const settingsView: HouseholdSettingsView = {
+        ...view,
+        socialReaders: view.socialReaders ?? { ...DEFAULT_SOCIAL_READERS },
+        socialReaderStatus: view.socialReaderStatus ?? [
+            {
+                reader: "tiktok",
+                lastSuccessAt: null,
+                lastFailureAt: null,
+                lastFailureReason: null,
+            },
+            {
+                reader: "facebook",
+                lastSuccessAt: null,
+                lastFailureAt: null,
+                lastFailureReason: null,
+            },
+        ],
+        timezone: view.timezone ?? "UTC",
+    };
     const modalIds: string[] = [];
     const token = view.issuedToken
         ? `<p class="token-once">Household bot token (shown once): <code>${escapeHtml(view.issuedToken)}</code></p>`
@@ -508,7 +685,12 @@ ${field({ id: "household_location", label: "Household location", control: `<inpu
 ${rotateToken}`
         : `<p class="household-name">${escapeHtml(view.householdName)}</p>
 <p class="household-location muted">${view.location ? escapeHtml(view.location) : "No location set."}</p>`;
-    modalIds.push(HOUSEHOLD_ADD_MEMBER_MODAL_ID, HOUSEHOLD_ADD_STORE_MODAL_ID);
+    modalIds.push(
+        HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+        HOUSEHOLD_ADD_STORE_MODAL_ID,
+        HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
+        HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
+    );
     if (view.isOwner) {
         modalIds.push(HOUSEHOLD_ROTATE_TOKEN_MODAL_ID);
     }
@@ -582,6 +764,16 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
         memberModals,
         storeModals,
         rulesModals,
+        socialReaderEnableModal(
+            "tiktok",
+            HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
+            settingsView,
+        ),
+        socialReaderEnableModal(
+            "facebook",
+            HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
+            settingsView,
+        ),
     ].join("");
 
     const body = `
@@ -597,8 +789,9 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
         ${panel({ title: "Household", body: householdCard })}
         ${panel({
             title: "Recipe settings",
-            body: view.canManage
-                ? `<form method="post" action="/household/recipe-settings" class="household-recipe-settings">
+            body: `${
+                view.canManage
+                    ? `<form method="post" action="/household/recipe-settings" class="household-recipe-settings">
 ${field({
     id: "unverified_recipe_expiry_days",
     label: "Delete unverified recipes after (days)",
@@ -607,7 +800,20 @@ ${field({
 <p class="hint">Leave empty to keep them until they're verified or deleted.</p>
 <button type="submit">Save</button>
 </form>`
-                : `<p class="muted">${view.unverifiedRecipeExpiryDays == null ? "Never delete unverified recipes automatically." : `Delete unverified recipes after ${view.unverifiedRecipeExpiryDays} days.`}</p>`,
+                    : `<p class="muted">${view.unverifiedRecipeExpiryDays == null ? "Never delete unverified recipes automatically." : `Delete unverified recipes after ${view.unverifiedRecipeExpiryDays} days.`}</p>`
+            }
+<div class="psec">
+<h3 class="psec-title">Read social posts automatically</h3>
+${socialReaderRiskBlock()}
+<p class="hint">${escapeHtml(SOCIAL_READER_FACEBOOK_CAVEAT)}</p>
+<ul class="list">${socialReaderRows(
+                settingsView.socialReaders!,
+                settingsView.socialReaderStatus!,
+                settingsView.timezone!,
+                settingsView.isOwner,
+            )}</ul>
+${settingsView.isOwner ? "" : `<p class="muted">${escapeHtml(SOCIAL_READER_OWNER_ONLY)}</p>`}
+</div>`,
         })}
         ${panel({
             title: "Members",
