@@ -273,7 +273,11 @@ export async function renderFridgeInventoryPage(
         html: renderFridgePage({
             ...snapshot,
             today,
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                await loadHouseholdNotices(householdId, { today }),
+            ),
             error,
             openModalId,
             linkProductPrompt,
@@ -447,7 +451,7 @@ export async function renderGroceryListPage(
               opts.error,
           )
         : null;
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId, { today });
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -1164,15 +1168,16 @@ export async function renderNeedsAttentionInventoryPage(
     const householdId = gate.viewer.householdId;
     let pageError = error;
     let redirect = false;
+    let today: string | undefined;
 
     if (post?.member) {
         const deps = noticeDeps();
-        const today = await householdToday(householdId);
         try {
             if (post.undoDismissalId) {
                 await undoDismissal(deps, householdId, post.undoDismissalId);
                 redirect = true;
             } else if (post.code && post.subjectKind && post.subjectId) {
+                today = await householdToday(householdId);
                 await dismissNotice(
                     deps,
                     householdId,
@@ -1197,7 +1202,7 @@ export async function renderNeedsAttentionInventoryPage(
         }
     }
 
-    const result = await loadHouseholdNotices(householdId);
+    const result = await loadHouseholdNotices(householdId, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         householdId,

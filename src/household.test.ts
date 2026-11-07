@@ -497,8 +497,12 @@ test("householdTodayAt falls back owner then UTC", () => {
         householdTodayAt(
             noTz,
             { timezone: "Not/A_Tz" },
-            new Date("2026-11-08T00:00:00.000Z"),
+            // 9 November in Auckland, still 8 November in UTC.
+            new Date("2026-11-08T20:00:00.000Z"),
         ),
+    ).toBe("2026-11-08");
+    expect(
+        householdTodayAt(noTz, null, new Date("2026-11-08T20:00:00.000Z")),
     ).toBe("2026-11-08");
     expect(householdTimezone(noTz, null)).toBe("UTC");
 });

@@ -41,9 +41,13 @@ export function attentionFromNotices(
 
 export async function loadHouseholdNotices(
     householdId: string,
-    opts?: { refCounts?: ReadonlyMap<string, number> },
+    opts?: {
+        refCounts?: ReadonlyMap<string, number>;
+        /** The household date the caller already looked up, so one request reads one date. */
+        today?: string;
+    },
 ): Promise<NoticesForResult> {
-    const today = await householdToday(householdId);
+    const today = opts?.today ?? (await householdToday(householdId));
     return noticesFor(
         {
             foods: liveFoodsStore(),
