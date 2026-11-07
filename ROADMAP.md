@@ -1,6 +1,6 @@
 # Foodable roadmap
 
-Foodable is one household's food system: what everyone eats, what is in the fridge, what to buy, and what to cook, run by the household's own AI agents and a small web app. This page is the big picture. Every item, with its status, priority and size, is a file in [roadmap/](planner/), and `bun run planner --next` says what to work on.
+Foodable is one household's food system: what everyone eats, what is in the fridge, what to buy, and what to cook, run by the household's own AI agents and a small web app. This page is the big picture. Every item, with its status, priority and size, is a file in [planner/](planner/), and `bun run planner --next` says what to work on.
 
 ## Where it is heading
 
@@ -22,7 +22,7 @@ Foodable is one household's food system: what everyone eats, what is in the frid
 | [Recipe import](planner/recipe-import/)          | Shipped; optional ideas left                                                     |
 | [General](planner/general/)                      | Single items too small for a project                                             |
 
-New ideas start in [roadmap/inbox/](planner/inbox/) and join a project once they are decided. Bugs are [GitHub issues](https://github.com/MrF1ow/foodable/issues). How items are written and closed: [planner/README.md](planner/README.md).
+New ideas start in [planner/inbox/](planner/inbox/) and join a project once they are decided. Bugs are [GitHub issues](https://github.com/MrF1ow/foodable/issues). How items are written and closed: [planner/README.md](planner/README.md).
 
 ## Shipped
 
