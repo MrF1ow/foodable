@@ -15,6 +15,17 @@ import {
 } from "./recipe-link.js";
 import { readRecipeJsonLd } from "./recipe-jsonld.js";
 import { parseRecipeText } from "./recipe-text.js";
+import {
+    readerFailureSentence,
+    readerNoRecipeSentence,
+} from "../copy/social-readers.js";
+import {
+    readFacebook,
+    readTikTok,
+    type ReaderFailure,
+    type SocialReaderId,
+    type SocialReaderStatusStore,
+} from "./social-readers.js";
 export { NOT_MEASURED_PHRASES, isNotMeasuredNote } from "./not-measured.js";
 import { isNotMeasuredNote } from "./not-measured.js";
 import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
@@ -323,6 +334,7 @@ export function outcomeFromFetchFailure(
             return "timeout";
         case "invalid_link":
         case "blocked_address":
+        case "host_not_allowed":
             return "invalid_link";
         case "too_large":
         case "bad_content_type":
@@ -529,6 +541,7 @@ async function saveImportedRecipe(
         sourceUrl: string;
         sourceText: string | null;
         sourceTextOrigin: RecipeTextOrigin | null;
+        transcript: string | null;
         credit: string | null;
     },
     sourceForOutcome: RecipeImportOutcome["source"],
@@ -573,7 +586,7 @@ async function saveImportedRecipe(
                 sourceUrl: meta.sourceUrl,
                 sourceText: meta.sourceText,
                 sourceTextOrigin: meta.sourceTextOrigin,
-                transcript: null,
+                transcript: meta.transcript,
                 credit: meta.credit,
                 unresolvedLines: parsed.unresolved,
                 problems: [],
@@ -633,6 +646,18 @@ async function saveImportedRecipe(
     }
 }
 
+function parseCaptionForImport(
+    sourceText: string,
+    transcript: string | null,
+    fallbackName: string,
+) {
+    let parsed = parseRecipeText(sourceText, { fallbackName });
+    if (!parsed.hasRecipe && transcript?.trim()) {
+        parsed = parseRecipeText(transcript, { fallbackName });
+    }
+    return parsed;
+}
+
 async function importFromParsedCaption(
     deps: {
         recipes: RecipesStore;
@@ -647,12 +672,16 @@ async function importFromParsedCaption(
         sourceInfo: ReturnType<typeof recipeSource>;
         sourceText: string;
         sourceTextOrigin: RecipeTextOrigin;
+        transcript?: string | null;
         credit: string | null;
     },
 ): Promise<RecipeImportOutcome> {
-    const parsedCaption = parseRecipeText(input.sourceText, {
-        fallbackName: `${input.sourceInfo.label} recipe`,
-    });
+    const fallbackName = `${input.sourceInfo.label} recipe`;
+    const parsedCaption = parseCaptionForImport(
+        input.sourceText,
+        input.transcript ?? null,
+        fallbackName,
+    );
     if (!parsedCaption.hasRecipe) {
         return emptyOutcome("no_recipe_in_text", {
             source: sourceFromInfo(input.sourceInfo, input.cleaned),
@@ -661,7 +690,7 @@ async function importFromParsedCaption(
 
     const prepared = prepareImportedRecipe({
         name: parsedCaption.name,
-        fallbackName: `${input.sourceInfo.label} recipe`,
+        fallbackName,
         yieldPortions: parsedCaption.yieldPortions,
         steps: parsedCaption.steps,
         prepMinutes: null,
@@ -684,10 +713,103 @@ async function importFromParsedCaption(
             sourceUrl: input.cleaned,
             sourceText: input.sourceText,
             sourceTextOrigin: input.sourceTextOrigin,
+            transcript: input.transcript ?? null,
             credit: input.credit,
         },
         sourceFromInfo(input.sourceInfo, input.cleaned),
     );
+}
+
+const READER_BY_KIND: Partial<Record<RecipeSourceKind, SocialReaderId>> = {
+    tiktok: "tiktok",
+    facebook: "facebook",
+};
+
+async function trySocialReader(
+    deps: {
+        recipes: RecipesStore;
+        foods: FoodsStore;
+        fetcher: SafeFetcher;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+        readers: { tiktok: boolean; facebook: boolean };
+        readerStatus?: SocialReaderStatusStore;
+        now?: () => Date;
+    },
+    input: {
+        householdId: string;
+        creatorId: string;
+        cleaned: string;
+        sourceInfo: ReturnType<typeof recipeSource>;
+        credit: string | null;
+    },
+): Promise<
+    | { kind: "imported"; outcome: RecipeImportOutcome }
+    | { kind: "paste"; readerFailure: string | null }
+> {
+    const readerId = READER_BY_KIND[input.sourceInfo.kind];
+    if (!readerId || !deps.readers[readerId]) {
+        return { kind: "paste", readerFailure: null };
+    }
+
+    const read =
+        readerId === "tiktok"
+            ? () => readTikTok(deps.fetcher, input.cleaned)
+            : () => readFacebook(deps.fetcher, input.cleaned);
+    const result = await read();
+    const now = deps.now?.() ?? new Date();
+
+    if (!result.ok) {
+        await deps.readerStatus?.recordFailure(
+            input.householdId,
+            readerId,
+            now,
+            result.reason,
+        );
+        return {
+            kind: "paste",
+            readerFailure: readerFailureSentence(readerId, result.reason),
+        };
+    }
+
+    const caption = result.text.trim();
+    const transcript = result.transcript?.trim() ?? null;
+    if (!caption && !transcript) {
+        const reason: ReaderFailure = "empty";
+        await deps.readerStatus?.recordFailure(
+            input.householdId,
+            readerId,
+            now,
+            reason,
+        );
+        return {
+            kind: "paste",
+            readerFailure: readerFailureSentence(readerId, reason),
+        };
+    }
+
+    await deps.readerStatus?.recordSuccess(input.householdId, readerId, now);
+
+    // The read worked. If neither the caption nor the subtitles hold a
+    // recipe, saving an empty unverified recipe helps nobody: offer the paste
+    // step instead (the recipe is usually in the photos).
+    if (!parseCaptionForImport(caption, transcript, "recipe").hasRecipe) {
+        return {
+            kind: "paste",
+            readerFailure: readerNoRecipeSentence(readerId),
+        };
+    }
+
+    const outcome = await importFromParsedCaption(deps, {
+        householdId: input.householdId,
+        creatorId: input.creatorId,
+        cleaned: input.cleaned,
+        sourceInfo: input.sourceInfo,
+        sourceText: caption || transcript || "",
+        sourceTextOrigin: "read",
+        transcript,
+        credit: input.credit,
+    });
+    return { kind: "imported", outcome };
 }
 
 export async function importRecipeFromUrl(
@@ -697,6 +819,9 @@ export async function importRecipeFromUrl(
         fetcher: SafeFetcher;
         transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
         pasteOnlySites?: readonly string[];
+        readers?: { tiktok: boolean; facebook: boolean };
+        readerStatus?: SocialReaderStatusStore;
+        now?: () => Date;
     },
     input: {
         householdId: string;
@@ -791,6 +916,7 @@ export async function importRecipeFromUrl(
                 sourceUrl: cleaned,
                 sourceText,
                 sourceTextOrigin: textOrigin,
+                transcript: null,
                 credit,
             },
             sourceOutcome,
@@ -798,8 +924,23 @@ export async function importRecipeFromUrl(
     }
 
     if (isSocialSource(sourceInfo.kind) || pasteOnlyHost) {
+        const readers = deps.readers ?? { tiktok: false, facebook: false };
+        const socialAttempt = await trySocialReader(
+            { ...deps, readers },
+            {
+                householdId: input.householdId,
+                creatorId: input.creatorId,
+                cleaned,
+                sourceInfo,
+                credit,
+            },
+        );
+        if (socialAttempt.kind === "imported") {
+            return socialAttempt.outcome;
+        }
         return emptyOutcome("paste_needed", {
             source: sourceOutcome,
+            readerFailure: socialAttempt.readerFailure,
         });
     }
 
@@ -848,6 +989,7 @@ export async function importRecipeFromUrl(
             sourceUrl: cleaned,
             sourceText: null,
             sourceTextOrigin: null,
+            transcript: null,
             credit,
         },
         sourceOutcome,

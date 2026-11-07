@@ -275,7 +275,7 @@ test("member dialog count does not grow with the household", () => {
     const six = page(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    expect(dialogs(one)).toBe(8);
+    expect(dialogs(one)).toBe(10);
     expect(six.match(/id="household-manage"/g)?.length).toBe(1);
     expect(six.match(/id="household-remove"/g)?.length).toBe(1);
     expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
@@ -331,4 +331,31 @@ test("member action template escapes a hostile display name", () => {
     );
     expect(html).not.toContain('"><img src=x');
     expect(html).not.toContain("onerror=alert(1)>");
+});
+
+test("recipe settings lists social reader risk text and platforms", () => {
+    const html = renderHouseholdSettingsPage({
+        chrome,
+        householdName: "Home",
+        location: "",
+        members: [alice],
+        stores: [],
+        memberRules: [],
+        isOwner: true,
+        canManage: true,
+        viewerUserId: alice.userId,
+        unverifiedRecipeExpiryDays: null,
+    });
+    expect(html).toContain("Read social posts automatically");
+    expect(html).toContain("goes against that platform's terms of service");
+    expect(html).toContain("recipe-import-terms-2026-11.md");
+    expect(html).toContain("Never used");
+    expect(html).toContain("Turn on TikTok reader");
+    expect(html).toContain("Facebook doesn't document");
+    expect(
+        html.match(/goes against that platform's terms of service/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+        html.match(/recipe-import-terms-2026-11\.md/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
 });

@@ -146,7 +146,8 @@ export function cleanRecipeLink(url: URL): string {
     return cleaned.href;
 }
 
-function hostMatches(host: string, pattern: string): boolean {
+/** The host is `pattern` or a subdomain of it (never a substring match). */
+export function hostMatches(host: string, pattern: string): boolean {
     const h = host.toLowerCase();
     const p = pattern.toLowerCase();
     return h === p || h.endsWith(`.${p}`);

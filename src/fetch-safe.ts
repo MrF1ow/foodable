@@ -12,9 +12,21 @@ const MAX_PAGE_REDIRECTS = 3;
 const MAX_ROBOTS_REDIRECTS = 5;
 const DEFAULT_ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
 
+export function hostnameAllowedForList(
+    hostname: string,
+    allowedHosts: readonly string[],
+): boolean {
+    const host = hostname.toLowerCase();
+    return allowedHosts.some((allowed) => {
+        const a = allowed.toLowerCase();
+        return host === a || host.endsWith(`.${a}`);
+    });
+}
+
 export type FetchFailure =
     | "invalid_link"
     | "blocked_address"
+    | "host_not_allowed"
     | "robots_disallowed"
     | "site_refused"
     | "not_found"
@@ -303,6 +315,14 @@ function beforeDeadline<T>(
     });
 }
 
+/** Same host, its www. twin, or one a subdomain of the other. */
+export function sameSite(a: string, b: string): boolean {
+    const strip = (host: string) => host.toLowerCase().replace(/^www\./, "");
+    const x = strip(a);
+    const y = strip(b);
+    return x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`);
+}
+
 async function resolveHost(
     host: string,
     resolve: (host: string) => Promise<string[]>,
@@ -492,6 +512,8 @@ export function createSafeFetcher(deps?: {
             maxBytes: number;
             maxRedirects: number;
             enforceContentType: boolean;
+            /** robots.txt: a redirect may only stay on the same site. */
+            sameSiteAs?: string;
         },
     ): Promise<FetchOutcome> {
         if (!urlAllowedForFetch(url)) {
@@ -594,6 +616,21 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
+                    if (
+                        opts.sameSiteAs != null &&
+                        !sameSite(next.hostname, opts.sameSiteAs)
+                    ) {
+                        // A robots.txt that redirects to another site is
+                        // treated as unreachable (disallow), so a reader with
+                        // an allow-list never ends up requesting a host it
+                        // was not allowed to contact.
+                        return {
+                            ok: false,
+                            reason: "host_not_allowed",
+                            status: null,
+                            detail: next.hostname,
+                        };
+                    }
                     const hopResolved = await resolveHost(
                         next.hostname,
                         resolve,
@@ -674,6 +711,7 @@ export function createSafeFetcher(deps?: {
             maxBytes: ROBOTS_MAX_BYTES,
             maxRedirects: MAX_ROBOTS_REDIRECTS,
             enforceContentType: false,
+            sameSiteAs: host,
         });
 
         let policy: RobotsPolicy;
@@ -714,6 +752,7 @@ export function createSafeFetcher(deps?: {
             checkRobots: boolean;
             maxBytes: number;
             timeoutMs: number;
+            allowedHosts?: readonly string[];
         },
     ): Promise<FetchOutcome> {
         // Known gap: the address is checked before the connection and fetch
@@ -725,6 +764,17 @@ export function createSafeFetcher(deps?: {
                 reason: "invalid_link",
                 status: null,
                 detail: start.href,
+            };
+        }
+        if (
+            opts.allowedHosts?.length &&
+            !hostnameAllowedForList(start.hostname, opts.allowedHosts)
+        ) {
+            return {
+                ok: false,
+                reason: "host_not_allowed",
+                status: null,
+                detail: start.hostname,
             };
         }
         if (opts.checkRobots) {
@@ -839,6 +889,20 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
+                    if (
+                        opts.allowedHosts?.length &&
+                        !hostnameAllowedForList(
+                            next.hostname,
+                            opts.allowedHosts,
+                        )
+                    ) {
+                        return {
+                            ok: false,
+                            reason: "host_not_allowed",
+                            status: response.status,
+                            detail: next.hostname,
+                        };
+                    }
                     const hopResolved = await beforeDeadline(
                         resolveHost(next.hostname, resolve),
                         controller.signal,
@@ -950,6 +1014,7 @@ export function createSafeFetcher(deps?: {
                 checkRobots?: boolean;
                 maxBytes?: number;
                 timeoutMs?: number;
+                allowedHosts?: readonly string[];
             },
         ): Promise<FetchOutcome> {
             try {
@@ -960,6 +1025,7 @@ export function createSafeFetcher(deps?: {
                     checkRobots: opts.checkRobots !== false,
                     maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
                     timeoutMs: opts.timeoutMs ?? defaultTimeoutMs,
+                    allowedHosts: opts.allowedHosts,
                 });
             } catch {
                 return Promise.resolve({

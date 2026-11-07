@@ -257,7 +257,7 @@ test("recipes list shows verification filter and unverified badge", () => {
                 id: "r-open",
                 householdId: "hh-1",
                 creatorId: VIEWER,
-                name: "Draft soup",
+                name: "Imported soup",
                 yieldPortions: 2,
                 instructions: null,
                 sourceUrl: null,
@@ -280,7 +280,7 @@ test("recipes list shows verification filter and unverified badge", () => {
     });
     expect(html).toContain("Unverified");
     expect(html).toContain("recipe-verification-filter");
-    expect(html).toContain("Draft soup");
+    expect(html).toContain("Imported soup");
 });
 
 test("unverified recipe detail shows problems panel and check again", () => {
@@ -572,4 +572,28 @@ test("unmeasured recipe ingredient renders to taste", () => {
     });
     expect(html).toContain("Total to taste");
     expect(html).toContain('placeholder="to taste"');
+});
+
+test("a read import shows its caption and spoken transcript", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({ verification: "unverified", name: "Pasta" }),
+        problems: [],
+        importRow: {
+            recipeId: "r1",
+            householdId: "hh-1",
+            sourceKind: "tiktok",
+            sourceUrl: "https://www.tiktok.com/@a/video/1",
+            sourceText: "Pasta night",
+            sourceTextOrigin: "read",
+            transcript: "two cups of pasta <then> butter",
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    expect(html).toContain("<summary>Caption</summary>");
+    expect(html).not.toContain("Pasted text");
+    expect(html).toContain("Spoken transcript");
+    expect(html).toContain("two cups of pasta &lt;then&gt; butter");
 });
