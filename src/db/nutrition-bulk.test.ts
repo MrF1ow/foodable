@@ -166,7 +166,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
         ({ userId, householdId } = await seedHousehold(sql));
         otherUserId = crypto.randomUUID();
         await sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${otherUserId}, ${`keep-${otherUserId}@foodable.test`})
         `;
         await insertMeal(otherUserId, {

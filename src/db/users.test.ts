@@ -103,7 +103,7 @@ async function seedCascadeAndSetNullRows(
 ): Promise<{ foodId: string }> {
     const otherUserId = crypto.randomUUID();
     await sql`
-        insert into auth.users (id, email)
+        insert into public.users (id, email)
         values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
     `;
     await upsertProfile(userId, { timezone: "UTC" });
@@ -226,43 +226,20 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
         expect(authRefs).toHaveLength(0);
     });
 
-    test("sync trigger mirrors auth.users into public.users", async () => {
+    test("sync trigger and mirror function are gone", async () => {
         const { sql } = getCtx();
-        const id = crypto.randomUUID();
-        await sql`
-            insert into auth.users (id, email, encrypted_password, created_at)
-            values (
-                ${id},
-                ${"sync@example.com"},
-                ${"$2a$10$5pc/WMgCYJtPxZ3BH1Ccz.jWAQFEavBIGuDkytwIuSpPn9WqjSJSK"},
-                ${"2020-01-01T00:00:00.000Z"}
-            )
+        const triggers = await sql`
+            select 1
+            from pg_trigger
+            where tgname = 'sync_auth_users_to_public_users'
         `;
-        const [row] = await sql`
-            select email, password_hash, created_at
-            from public.users
-            where id = ${id}
+        expect(triggers).toHaveLength(0);
+        const [fn] = await sql`
+            select to_regprocedure(
+                'public.sync_auth_user_to_public_users()'
+            ) as fn
         `;
-        expect(row.email).toBe("sync@example.com");
-        expect(row.password_hash).toBeTruthy();
-        await sql`
-            update auth.users
-            set email = ${"sync2@example.com"},
-                encrypted_password = ${"new-hash"}
-            where id = ${id}
-        `;
-        const [updated] = await sql`
-            select email, password_hash
-            from public.users
-            where id = ${id}
-        `;
-        expect(updated.email).toBe("sync2@example.com");
-        expect(updated.password_hash).toBe("new-hash");
-        await sql`delete from auth.users where id = ${id}`;
-        const [gone] = await sql`
-            select id from public.users where id = ${id}
-        `;
-        expect(gone).toBeUndefined();
+        expect(fn.fn).toBeNull();
     });
 
     test("cascade and set-null on public.users delete", async () => {
@@ -407,7 +384,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             },
         ]) {
             await sql`
-                insert into auth.users (id, email, created_at)
+                insert into public.users (id, email, created_at)
                 values (${row.id}, ${row.email}, ${row.created_at})
             `;
         }
@@ -464,7 +441,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             },
         ]) {
             await sql`
-                insert into auth.users (id, email, created_at)
+                insert into public.users (id, email, created_at)
                 values (${row.id}, ${row.email}, ${row.created_at})
             `;
         }

@@ -64,7 +64,6 @@ const PROFILE: actualDbProfiles.Profile = {
     widgets_enabled: true,
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
-    locale: null,
     theme: "light",
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",

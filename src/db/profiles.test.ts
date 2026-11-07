@@ -51,7 +51,6 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
         expect(inserted.preferred_weight_unit).toBe("lb");
         expect(inserted.alcohol_tracking_enabled).toBe(false);
         expect(inserted.preferred_drink_unit).toBeNull();
-        expect(inserted.locale).toBeNull();
         expect(inserted.theme).toBeNull();
         expect(inserted.nutrition_layout).toBeNull();
         expect(inserted.created_at).toMatch(/\+00:00$/);
@@ -76,7 +75,7 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
     test("preference wrappers without a row", async () => {
         const other = crypto.randomUUID();
         await getCtx().sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${other}, ${`orphan-${other}@foodable.test`})
         `;
         expect(await getUserTimezone(other)).toBe("UTC");
@@ -124,7 +123,6 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
             widgets_enabled: true,
             alcohol_tracking_enabled: false,
             preferred_drink_unit: null,
-            locale: null,
             theme: "dark",
             nutrition_layout: null,
             created_at: expect.any(String),
