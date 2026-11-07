@@ -349,7 +349,7 @@ test("import modal keeps url and shows error on 422 re-render", () => {
 
 test("import paste step shows caption field and creator for Instagram", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -370,7 +370,7 @@ test("import paste step shows caption field and creator for Instagram", () => {
 
 test("import paste step for Pinterest lists website link first", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -386,7 +386,7 @@ test("import paste step for Pinterest lists website link first", () => {
 
 test("website failure paste step uses Paste the recipe label", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -404,7 +404,7 @@ test("website failure paste step uses Paste the recipe label", () => {
 
 test("import paste step uses cleaned https link for open post", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -420,7 +420,7 @@ test("import paste step uses cleaned https link for open post", () => {
 
 test("no_recipe_in_text re-render keeps pasted text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
