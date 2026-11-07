@@ -27,6 +27,7 @@ describe("didYouMeanView", () => {
                 food_id: "ignored",
                 new_food: "1",
                 remember_alias: "1",
+                confirm_allergen: "1",
                 store_id: "s1",
             },
         );
@@ -103,5 +104,24 @@ describe("rememberAliasForChoice", () => {
         expect(
             await rememberAliasForChoice(store, HH, crypto.randomUUID(), "x"),
         ).toBe("skipped");
+    });
+
+    test("archived owner releases alias", async () => {
+        const store = createMemoryFoodsStore();
+        const archived = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Old pack" }),
+        );
+        await store.setAlias(HH, "stale label", archived.id);
+        await store.updateFoodRow({
+            ...archived,
+            archivedAt: new Date().toISOString(),
+        });
+        const eggs = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        expect(
+            await rememberAliasForChoice(store, HH, eggs.id, "stale label"),
+        ).toBe("set");
+        expect(await store.getAliasFoodId(HH, "stale label")).toBe(eggs.id);
     });
 });

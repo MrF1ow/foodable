@@ -162,12 +162,6 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                 return c.html(page.html, 400);
             }
             if (foodId) {
-                await rememberAliasIfRequested(
-                    foods,
-                    member.householdId,
-                    body,
-                    foodId,
-                );
                 await addGroceryFoodById(grocery, settings, foods, {
                     householdId: member.householdId,
                     storeId,
@@ -176,6 +170,12 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     amount,
                     unit: formText(body, "qty_unit"),
                 });
+                await rememberAliasIfRequested(
+                    foods,
+                    member.householdId,
+                    body,
+                    foodId,
+                );
             } else if (formText(body, "barcode")) {
                 const { food, created } = await findOrCreateFoodByBarcodeResult(
                     foods,

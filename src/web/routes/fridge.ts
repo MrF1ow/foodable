@@ -160,22 +160,13 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
                       foodId: formText(body, "food_id") || undefined,
                   })
                 : formText(body, "food_id")
-                  ? await (async () => {
-                        const foodId = formText(body, "food_id");
-                        await rememberAliasIfRequested(
-                            foods,
-                            member.householdId,
-                            body,
-                            foodId,
-                        );
-                        return prepareAddFoodById(store, foods, {
-                            householdId: member.householdId,
-                            locationId,
-                            foodId,
-                            amount,
-                            unit: formText(body, "qty_unit"),
-                        });
-                    })()
+                  ? await prepareAddFoodById(store, foods, {
+                        householdId: member.householdId,
+                        locationId,
+                        foodId: formText(body, "food_id"),
+                        amount,
+                        unit: formText(body, "qty_unit"),
+                    })
                   : formText(body, "barcode")
                     ? await (async () => {
                           const { food, created } =
@@ -214,6 +205,16 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             locationId: prepared.locationId,
             actorUserId: userId,
         });
+        const pickedFoodId =
+            kind !== "supply" ? formText(body, "food_id").trim() : "";
+        if (pickedFoodId) {
+            await rememberAliasIfRequested(
+                foods,
+                member.householdId,
+                body,
+                pickedFoodId,
+            );
+        }
         const created =
             "barcodeCreated" in prepared && prepared.barcodeCreated === true;
         if (created) {

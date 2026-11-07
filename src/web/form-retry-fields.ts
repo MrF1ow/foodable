@@ -37,6 +37,9 @@ export function groceryLineRetryFields(
         name: formText(body, "name") || undefined,
         confirm_allergen:
             formText(body, "confirm_allergen") === "1" ? "1" : undefined,
+        remember_alias:
+            formText(body, "remember_alias") === "1" ? "1" : undefined,
+        alias_name: formText(body, "alias_name") || undefined,
     });
 }
 

@@ -31,7 +31,7 @@ import {
     createGroceryStore,
     createMemorySettingsStore,
 } from "../../domain/settings.js";
-import { createMemoryRulesStore } from "../../domain/rules.js";
+import { addAllergen, createMemoryRulesStore } from "../../domain/rules.js";
 import { createMemoryStockStore } from "../../domain/stock.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
@@ -547,5 +547,151 @@ describe("did-you-mean web forms", () => {
             "tofu",
         );
         expect(ings.some((row) => row.foodId === tofuFood?.id)).toBe(true);
+    });
+
+    test("recipe alias is not saved when ingredient add fails", async () => {
+        const eggs = await seedEggs();
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Omelette",
+            yieldPortions: 1,
+        });
+        const path = `/recipes/${recipe.id}/ingredients`;
+        const fail = await app().request(`http://x${path}`, {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                food_id: eggs.id,
+                food_name: "chicken egg",
+                alias_name: "chicken egg",
+                remember_alias: "1",
+                qty_amount: "0",
+                qty_unit: "each",
+            }),
+        });
+        expect(fail.status).toBeGreaterThanOrEqual(400);
+        expect(fail.status).toBeLessThan(500);
+        const aliasMap = await db.foodsStore.listAllAliases(HH);
+        expect([...aliasMap.values()].flat()).not.toContain("chicken egg");
+        expect(
+            (await db.recipesStore.listIngredients(HH, recipe.id)).length,
+        ).toBe(0);
+    });
+});
+
+describe("did-you-mean allergen replay", () => {
+    async function seedWheatNoodles() {
+        return db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Noodles",
+                allergens: ["wheat"],
+            }),
+        );
+    }
+
+    test("candidate POST runs catalog allergen check without leaked confirm", async () => {
+        const noodles = await seedWheatNoodles();
+        await addAllergen(db.rulesStore, {
+            householdId: HH,
+            userId: ALICE,
+            allergen: "wheat",
+        });
+        const store = await createGroceryStore(db.settingsStore, HH, "Shop");
+        const base = {
+            kind: "food",
+            store_id: store.id,
+            food_name: "egg noodles",
+            qty_amount: "1",
+            qty_unit: "g",
+        };
+        const ask = await app().request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({ ...base, confirm_allergen: "1" }),
+        });
+        expect(ask.status).toBe(409);
+        const askHtml = await ask.text();
+        const didYouMean = askHtml.match(
+            /<div data-fill-transient class="did-you-mean-block">[\s\S]*?<\/form>\s*<\/div>/,
+        )?.[0];
+        expect(didYouMean).toBeDefined();
+        expect(didYouMean!).not.toContain('name="confirm_allergen"');
+
+        const block = await app().request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                ...base,
+                food_id: noodles.id,
+                alias_name: "egg noodles",
+            }),
+        });
+        expect(block.status).toBe(400);
+        expect((await block.text()).toLowerCase()).toContain("wheat");
+        expect((await db.groceryStore.listLines(HH)).length).toBe(0);
+    });
+
+    test("allergen override keeps remember_alias for add anyway", async () => {
+        const noodles = await seedWheatNoodles();
+        await addAllergen(db.rulesStore, {
+            householdId: HH,
+            userId: ALICE,
+            allergen: "wheat",
+        });
+        const store = await createGroceryStore(db.settingsStore, HH, "Shop");
+        const base = {
+            kind: "food",
+            store_id: store.id,
+            food_name: "egg noodles",
+            qty_amount: "1",
+            qty_unit: "g",
+        };
+        const block = await app().request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                ...base,
+                food_id: noodles.id,
+                alias_name: "egg noodles",
+                remember_alias: "1",
+            }),
+        });
+        expect(block.status).toBe(400);
+        const html = await block.text();
+        expect(html).toContain('name="remember_alias" value="1"');
+        expect(html).toContain('name="alias_name" value="egg noodles"');
+        const ok = await app().request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                ...base,
+                food_id: noodles.id,
+                alias_name: "egg noodles",
+                remember_alias: "1",
+                confirm_allergen: "1",
+            }),
+        });
+        expect(ok.status).toBe(303);
+        const aliasMap = await db.foodsStore.listAllAliases(HH);
+        expect([...aliasMap.values()].flat()).toContain("egg noodles");
+        expect((await db.groceryStore.listLines(HH)).length).toBe(1);
     });
 });

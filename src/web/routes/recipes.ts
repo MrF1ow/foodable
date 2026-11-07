@@ -786,12 +786,6 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
     try {
         if (formText(body, "food_id")) {
             const foodId = formText(body, "food_id");
-            await rememberAliasIfRequested(
-                liveFoodsStore(),
-                member.householdId,
-                body,
-                foodId,
-            );
             await addRecipeIngredientById(
                 liveRecipesStore(),
                 liveFoodsStore(),
@@ -802,6 +796,12 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                     amount,
                     unit: formText(body, "qty_unit"),
                 },
+            );
+            await rememberAliasIfRequested(
+                liveFoodsStore(),
+                member.householdId,
+                body,
+                foodId,
             );
         } else if (formText(body, "barcode")) {
             const foods = liveFoodsStore();

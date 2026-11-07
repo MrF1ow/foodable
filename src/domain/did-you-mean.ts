@@ -15,7 +15,12 @@ export type DidYouMeanView = {
     hiddenFields: Record<string, string>;
 };
 
-const HIDDEN_OMIT = new Set(["food_id", "new_food", "remember_alias"]);
+const HIDDEN_OMIT = new Set([
+    "food_id",
+    "new_food",
+    "remember_alias",
+    "confirm_allergen",
+]);
 
 function candidateLabel(name: string, brand: string | null): string {
     return brand ? `${brand} · ${name}` : name;
@@ -83,7 +88,10 @@ export async function rememberAliasForChoice(
     if (alias === food.normalizedName) return "same";
 
     const taken = await store.getAliasFoodId(householdId, alias);
-    if (taken && taken !== foodId) return "taken";
+    if (taken && taken !== foodId) {
+        const owner = await store.getFood(householdId, taken);
+        if (owner && !owner.archivedAt) return "taken";
+    }
     if (taken === foodId) return "same";
 
     await store.setAlias(householdId, alias, foodId);
