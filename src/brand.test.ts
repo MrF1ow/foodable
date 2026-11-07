@@ -55,6 +55,29 @@ test("the favicon switches tiles with the OS theme", () => {
     expect(svg).toContain(TILE.light.tile);
 });
 
+test("PWA icon PNGs are 192×192 and 512×512", async () => {
+    function pngSize(path: string, buf: Uint8Array) {
+        expect(buf.length).toBeGreaterThan(24);
+        expect(buf[0]).toBe(0x89);
+        expect(buf[1]).toBe(0x50);
+        const w =
+            (buf[16]! << 24) | (buf[17]! << 16) | (buf[18]! << 8) | buf[19]!;
+        const h =
+            (buf[20]! << 24) | (buf[21]! << 16) | (buf[22]! << 8) | buf[23]!;
+        const side = path.includes("192") ? 192 : 512;
+        expect(w).toBe(side);
+        expect(h).toBe(side);
+    }
+    for (const file of [
+        "public/icon-192.png",
+        "public/icon-512.png",
+        "public/icon-maskable-512.png",
+    ]) {
+        const buf = new Uint8Array(await Bun.file(file).arrayBuffer());
+        pngSize(file, buf);
+    }
+});
+
 test("the CSS accent is the logo green", async () => {
     const tokens = await Bun.file(
         "public/widgets/src/shared/tokens.css",

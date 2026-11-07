@@ -102,6 +102,21 @@ export function faviconSvg(): string {
     );
 }
 
+/** Maskable PWA icon: the mark centered in the 80% safe zone on the light tile. */
+export function maskableTileSvg(): string {
+    const { tile, mark } = TILE.light;
+    const safe = Math.round(TILE_SIZE * 0.8);
+    const scale = safe / MARK_W;
+    const inset = Math.round((TILE_SIZE - MARK_W * scale) / 2);
+    const stem = Math.ceil((TILE_SIZE - inset) / scale) + 4;
+    const transform = `translate(${inset} ${inset}) scale(${scale.toFixed(5)})`;
+    return (
+        svgOpen(TILE_SIZE, TILE_SIZE) +
+        `<rect width="${TILE_SIZE}" height="${TILE_SIZE}" fill="${tile}"/>` +
+        `<g transform="${transform}" fill="${mark}">${markPaths(stem)}</g></svg>\n`
+    );
+}
+
 /** The SVG files served under /brand/, keyed by file name. */
 export const BRAND_SVGS: Record<string, () => string> = {
     "mark.svg": markSvg,
