@@ -50,7 +50,7 @@ test("to-taste grocery line shows note instead of placeholder amount", () => {
 
 test("to-taste put-away asks for an amount prefilled with 1 and shows the unit", () => {
     const html = renderGroceryPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [
             {
                 id: "st-1",
