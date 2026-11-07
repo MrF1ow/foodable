@@ -27,6 +27,8 @@ import {
     linkProduct,
     findUpsertFoodByName,
     newFood,
+    similarFoodsForNewName,
+    SimilarFoodsError,
     parseUsualPurchase,
     type FoodPatch,
     searchFoodCatalog,
@@ -38,7 +40,14 @@ import {
 import {
     householdFoodNames,
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
     type WireNotice,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
@@ -224,6 +233,36 @@ const EFFECTIVE_FOOD = z.object({
             brand: z.string().nullable(),
         })
         .nullable(),
+    usual_store_id: z.string().nullable(),
+    usual_amount: z.number().nullable(),
+    usual_unit: z.string().nullable(),
+});
+
+export const UPSERT_FOOD_OUTPUT = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    id: z.string().nullable(),
+    kind: z.enum(["food", "supply"]).nullable(),
+    name: z.string().nullable(),
+    brand: z.string().nullable(),
+    default_unit: z.string().nullable(),
+    grams_per_each: z.number().nullable(),
+    grams_per_ml: z.number().nullable(),
+    calories: z.number().nullable(),
+    protein_g: z.number().nullable(),
+    carbs_g: z.number().nullable(),
+    fat_g: z.number().nullable(),
+    fiber_g: z.number().nullable(),
+    sugar_g: z.number().nullable(),
+    alcohol_g: z.number().nullable(),
+    caffeine_mg: z.number().nullable(),
+    nutrition_source: z.string().nullable(),
+    allergens: z.array(z.string()).nullable(),
+    aliases: z.array(z.string()).nullable(),
+    barcodes: z.array(z.string()).nullable(),
+    archived: z.boolean().nullable(),
+    generic_food_id: z.string().nullable(),
+    usual_product_id: z.string().nullable(),
     usual_store_id: z.string().nullable(),
     usual_amount: z.number().nullable(),
     usual_unit: z.string().nullable(),
@@ -543,8 +582,10 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                 usual_store_id: z.string().nullable().optional(),
                 usual_amount: z.coerce.number().nullable().optional(),
                 usual_unit: z.string().nullable().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
-            outputSchema: FOOD_OUTPUT,
+            outputSchema: UPSERT_FOOD_OUTPUT,
         },
         async (args) =>
             withAnalytics(
@@ -552,227 +593,302 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const householdId = await callerHouseholdId();
                     const store = liveFoodsStore();
-                    if (args.food_id && args.generic_food_id) {
-                        throw new FoodsInputError(
-                            "generic_food_id only applies when creating; use link_product to link an existing food.",
-                        );
-                    }
-                    const kind = args.kind ?? "food";
-                    let normalizedBarcode: string | null = null;
-                    if (args.barcode != null && args.barcode !== "") {
-                        normalizedBarcode = normalizeBarcode(args.barcode);
-                        if (!normalizedBarcode) {
-                            throw new FoodsInputError("Enter a valid barcode.");
+                    const onSimilar = onSimilarFor(args);
+                    try {
+                        if (args.food_id && args.generic_food_id) {
+                            throw new FoodsInputError(
+                                "generic_food_id only applies when creating; use link_product to link an existing food.",
+                            );
                         }
-                    }
-                    const settings = liveSettingsStore();
-                    const patch: FoodPatch = {
-                        name: args.name,
-                        brand: args.brand,
-                        defaultUnit: args.default_unit,
-                        gramsPerEach: args.grams_per_each,
-                        gramsPerMl: args.grams_per_ml,
-                        calories: args.calories,
-                        proteinG: args.protein_g,
-                        carbsG: args.carbs_g,
-                        fatG: args.fat_g,
-                        fiberG: args.fiber_g,
-                        sugarG: args.sugar_g,
-                        alcoholG: args.alcohol_g,
-                        caffeineMg: args.caffeine_mg,
-                        nutritionSource: args.nutrition_source,
-                        allergens: args.allergens,
-                        aliases: args.aliases,
-                        archived: args.archived,
-                    };
-                    const hasUsualKeys =
-                        args.usual_store_id !== undefined ||
-                        args.usual_amount !== undefined ||
-                        args.usual_unit !== undefined;
-                    const usualPurchasePatch = hasUsualKeys
-                        ? {
-                              ...(args.usual_store_id !== undefined
-                                  ? {
-                                        usualStoreId: args.usual_store_id,
-                                    }
-                                  : {}),
-                              ...(args.usual_amount !== undefined ||
-                              args.usual_unit !== undefined
-                                  ? {
-                                        usualAmount: {
-                                            amount: args.usual_amount ?? null,
-                                            unit: args.usual_unit ?? null,
-                                        },
-                                    }
-                                  : {}),
-                          }
-                        : null;
-                    if (usualPurchasePatch) {
-                        await parseUsualPurchase(
-                            householdId,
-                            usualPurchasePatch,
-                            settings,
-                        );
-                        if (args.usual_store_id !== undefined) {
-                            patch.usualStoreId = args.usual_store_id;
+                        const kind = args.kind ?? "food";
+                        let normalizedBarcode: string | null = null;
+                        if (args.barcode != null && args.barcode !== "") {
+                            normalizedBarcode = normalizeBarcode(args.barcode);
+                            if (!normalizedBarcode) {
+                                throw new FoodsInputError(
+                                    "Enter a valid barcode.",
+                                );
+                            }
                         }
-                        if (
+                        const settings = liveSettingsStore();
+                        const patch: FoodPatch = {
+                            name: args.name,
+                            brand: args.brand,
+                            defaultUnit: args.default_unit,
+                            gramsPerEach: args.grams_per_each,
+                            gramsPerMl: args.grams_per_ml,
+                            calories: args.calories,
+                            proteinG: args.protein_g,
+                            carbsG: args.carbs_g,
+                            fatG: args.fat_g,
+                            fiberG: args.fiber_g,
+                            sugarG: args.sugar_g,
+                            alcoholG: args.alcohol_g,
+                            caffeineMg: args.caffeine_mg,
+                            nutritionSource: args.nutrition_source,
+                            allergens: args.allergens,
+                            aliases: args.aliases,
+                            archived: args.archived,
+                        };
+                        const hasUsualKeys =
+                            args.usual_store_id !== undefined ||
                             args.usual_amount !== undefined ||
-                            args.usual_unit !== undefined
-                        ) {
-                            patch.usualAmount = {
-                                amount: args.usual_amount ?? null,
-                                unit: args.usual_unit ?? null,
-                            };
+                            args.usual_unit !== undefined;
+                        const usualPurchasePatch = hasUsualKeys
+                            ? {
+                                  ...(args.usual_store_id !== undefined
+                                      ? {
+                                            usualStoreId: args.usual_store_id,
+                                        }
+                                      : {}),
+                                  ...(args.usual_amount !== undefined ||
+                                  args.usual_unit !== undefined
+                                      ? {
+                                            usualAmount: {
+                                                amount:
+                                                    args.usual_amount ?? null,
+                                                unit: args.usual_unit ?? null,
+                                            },
+                                        }
+                                      : {}),
+                              }
+                            : null;
+                        if (usualPurchasePatch) {
+                            await parseUsualPurchase(
+                                householdId,
+                                usualPurchasePatch,
+                                settings,
+                            );
+                            if (args.usual_store_id !== undefined) {
+                                patch.usualStoreId = args.usual_store_id;
+                            }
+                            if (
+                                args.usual_amount !== undefined ||
+                                args.usual_unit !== undefined
+                            ) {
+                                patch.usualAmount = {
+                                    amount: args.usual_amount ?? null,
+                                    unit: args.usual_unit ?? null,
+                                };
+                            }
                         }
-                    }
-                    // Everything that can reject runs before the first write,
-                    // so a refused call leaves no new row and no barcode
-                    // behind. The barcode is attached last.
-                    let food: Food;
-                    if (args.food_id) {
-                        food = await findFoodById(
-                            store,
-                            householdId,
-                            args.food_id,
-                        );
-                        await assertFoodPatchValid(
+                        // Everything that can reject runs before the first write,
+                        // so a refused call leaves no new row and no barcode
+                        // behind. The barcode is attached last.
+                        let food: Food;
+                        if (args.food_id) {
+                            food = await findFoodById(
+                                store,
+                                householdId,
+                                args.food_id,
+                            );
+                            await assertFoodPatchValid(
+                                store,
+                                householdId,
+                                food.id,
+                                patch,
+                            );
+                            if (normalizedBarcode) {
+                                await assertBarcodeFree(
+                                    store,
+                                    householdId,
+                                    normalizedBarcode,
+                                    food.id,
+                                );
+                            }
+                        } else if (args.generic_food_id) {
+                            const plain = await findFoodById(
+                                store,
+                                householdId,
+                                args.generic_food_id,
+                            );
+                            if (args.kind && args.kind !== plain.kind) {
+                                throw new FoodsInputError(
+                                    `Product kind must match ${plain.name} (${plain.kind}).`,
+                                );
+                            }
+                            await assertFoodPatchValid(
+                                store,
+                                householdId,
+                                null,
+                                patch,
+                            );
+                            if (normalizedBarcode) {
+                                await assertBarcodeFree(
+                                    store,
+                                    householdId,
+                                    normalizedBarcode,
+                                    null,
+                                );
+                            }
+                            food = await createProduct(
+                                store,
+                                householdId,
+                                args.generic_food_id,
+                                {
+                                    name: args.name ?? "",
+                                    brand: args.brand,
+                                    defaultUnit: args.default_unit,
+                                    gramsPerEach: args.grams_per_each,
+                                    gramsPerMl: args.grams_per_ml,
+                                    calories: args.calories,
+                                    proteinG: args.protein_g,
+                                    carbsG: args.carbs_g,
+                                    fatG: args.fat_g,
+                                    fiberG: args.fiber_g,
+                                    sugarG: args.sugar_g,
+                                    alcoholG: args.alcohol_g,
+                                    caffeineMg: args.caffeine_mg,
+                                    nutritionSource: args.nutrition_source,
+                                    allergens: args.allergens,
+                                },
+                            );
+                        } else {
+                            const resolved = await findUpsertFoodByName(
+                                store,
+                                householdId,
+                                kind,
+                                args.name ?? "",
+                                args.brand,
+                            );
+                            const targetId =
+                                resolved.kind === "existing"
+                                    ? resolved.food.id
+                                    : null;
+                            // The name found the food; it is not a rename. A
+                            // loose match ("All purpose flour" for "All-purpose
+                            // flour") keeps the stored spelling. Rename by
+                            // passing food_id.
+                            if (resolved.kind === "existing") {
+                                patch.name = undefined;
+                            }
+                            await assertFoodPatchValid(
+                                store,
+                                householdId,
+                                targetId,
+                                patch,
+                            );
+                            if (normalizedBarcode) {
+                                await assertBarcodeFree(
+                                    store,
+                                    householdId,
+                                    normalizedBarcode,
+                                    targetId,
+                                );
+                            }
+                            if (
+                                resolved.kind === "create" &&
+                                onSimilar === "ask"
+                            ) {
+                                const branded = Boolean(
+                                    resolved.brand?.trim() || normalizedBarcode,
+                                );
+                                const entries = await similarFoodsForNewName(
+                                    store,
+                                    householdId,
+                                    kind,
+                                    resolved.name,
+                                    { branded },
+                                );
+                                if (entries.length > 0) {
+                                    throw new SimilarFoodsError(entries);
+                                }
+                            }
+                            food =
+                                resolved.kind === "existing"
+                                    ? resolved.food
+                                    : await store.insertFood(
+                                          newFood({
+                                              householdId,
+                                              kind,
+                                              name: resolved.name,
+                                              brand: resolved.brand,
+                                          }),
+                                      );
+                        }
+                        // The usual fields ride on the same patch, so a create
+                        // and an edit save them in one write. They were parsed
+                        // above, before any insert.
+                        const saved = await updateFood(
                             store,
                             householdId,
                             food.id,
                             patch,
+                            usualPurchasePatch
+                                ? { stores: settings }
+                                : undefined,
                         );
                         if (normalizedBarcode) {
-                            await assertBarcodeFree(
-                                store,
+                            await store.setBarcode(
                                 householdId,
                                 normalizedBarcode,
-                                food.id,
+                                saved.id,
                             );
                         }
-                    } else if (args.generic_food_id) {
-                        const plain = await findFoodById(
-                            store,
-                            householdId,
-                            args.generic_food_id,
-                        );
-                        if (args.kind && args.kind !== plain.kind) {
-                            throw new FoodsInputError(
-                                `Product kind must match ${plain.name} (${plain.kind}).`,
-                            );
-                        }
-                        await assertFoodPatchValid(
-                            store,
-                            householdId,
-                            null,
-                            patch,
-                        );
-                        if (normalizedBarcode) {
-                            await assertBarcodeFree(
-                                store,
-                                householdId,
-                                normalizedBarcode,
-                                null,
-                            );
-                        }
-                        food = await createProduct(
-                            store,
-                            householdId,
-                            args.generic_food_id,
-                            {
-                                name: args.name ?? "",
-                                brand: args.brand,
-                                defaultUnit: args.default_unit,
-                                gramsPerEach: args.grams_per_each,
-                                gramsPerMl: args.grams_per_ml,
-                                calories: args.calories,
-                                proteinG: args.protein_g,
-                                carbsG: args.carbs_g,
-                                fatG: args.fat_g,
-                                fiberG: args.fiber_g,
-                                sugarG: args.sugar_g,
-                                alcoholG: args.alcohol_g,
-                                caffeineMg: args.caffeine_mg,
-                                nutritionSource: args.nutrition_source,
-                                allergens: args.allergens,
+                        const [aliases, barcodes] = await Promise.all([
+                            store.listAliases(householdId, saved.id),
+                            store.listBarcodes(householdId, saved.id),
+                        ]);
+                        const payload = foodPayload(saved, aliases, barcodes);
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Saved ${payload.name} ${payload.id}`,
+                                },
+                            ],
+                            structuredContent: {
+                                status: "ok" as const,
+                                similar_foods: [],
+                                ...payload,
                             },
-                        );
-                    } else {
-                        const resolved = await findUpsertFoodByName(
-                            store,
-                            householdId,
-                            kind,
-                            args.name ?? "",
-                            args.brand,
-                        );
-                        const targetId =
-                            resolved.kind === "existing"
-                                ? resolved.food.id
-                                : null;
-                        // The name found the food; it is not a rename. A
-                        // loose match ("All purpose flour" for "All-purpose
-                        // flour") keeps the stored spelling. Rename by
-                        // passing food_id.
-                        if (resolved.kind === "existing") {
-                            patch.name = undefined;
+                        };
+                    } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    status: "similar_foods" as const,
+                                    similar_foods: wire,
+                                    id: null,
+                                    kind: null,
+                                    name: null,
+                                    brand: null,
+                                    default_unit: null,
+                                    grams_per_each: null,
+                                    grams_per_ml: null,
+                                    calories: null,
+                                    protein_g: null,
+                                    carbs_g: null,
+                                    fat_g: null,
+                                    fiber_g: null,
+                                    sugar_g: null,
+                                    alcohol_g: null,
+                                    caffeine_mg: null,
+                                    nutrition_source: null,
+                                    allergens: null,
+                                    aliases: null,
+                                    barcodes: null,
+                                    archived: null,
+                                    generic_food_id: null,
+                                    usual_product_id: null,
+                                    usual_store_id: null,
+                                    usual_amount: null,
+                                    usual_unit: null,
+                                },
+                            };
                         }
-                        await assertFoodPatchValid(
-                            store,
-                            householdId,
-                            targetId,
-                            patch,
-                        );
-                        if (normalizedBarcode) {
-                            await assertBarcodeFree(
-                                store,
-                                householdId,
-                                normalizedBarcode,
-                                targetId,
-                            );
+                        if (err instanceof FoodsInputError) {
+                            throw new Error(err.message);
                         }
-                        food =
-                            resolved.kind === "existing"
-                                ? resolved.food
-                                : await store.insertFood(
-                                      newFood({
-                                          householdId,
-                                          kind,
-                                          name: resolved.name,
-                                          brand: resolved.brand,
-                                      }),
-                                  );
+                        throw err;
                     }
-                    // The usual fields ride on the same patch, so a create
-                    // and an edit save them in one write. They were parsed
-                    // above, before any insert.
-                    const saved = await updateFood(
-                        store,
-                        householdId,
-                        food.id,
-                        patch,
-                        usualPurchasePatch ? { stores: settings } : undefined,
-                    );
-                    if (normalizedBarcode) {
-                        await store.setBarcode(
-                            householdId,
-                            normalizedBarcode,
-                            saved.id,
-                        );
-                    }
-                    const [aliases, barcodes] = await Promise.all([
-                        store.listAliases(householdId, saved.id),
-                        store.listBarcodes(householdId, saved.id),
-                    ]);
-                    const payload = foodPayload(saved, aliases, barcodes);
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Saved ${payload.name} ${payload.id}`,
-                            },
-                        ],
-                        structuredContent: payload,
-                    };
                 },
                 analytics,
             ),

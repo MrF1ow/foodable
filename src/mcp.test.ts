@@ -31,6 +31,7 @@ import {
 import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
+import { ADD_FRIDGE_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/fridge.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -100,9 +101,21 @@ import {
     mergeFoods,
     updateFood,
 } from "./domain/foods.js";
-import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
-import { GROCERY_LIST_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
-import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
+import {
+    FOOD_OUTPUT,
+    GET_FOOD_OUTPUT,
+    UPSERT_FOOD_OUTPUT,
+} from "./mcp/tools/food.js";
+import {
+    ADD_GROCERY_LINE_OUTPUT_SCHEMA,
+    GROCERY_LIST_OUTPUT_SCHEMA,
+} from "./mcp/tools/grocery.js";
+import {
+    ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA,
+    IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA,
+    MACROS_ITEM_OUTPUT_SCHEMA,
+} from "./mcp/tools/recipes.js";
+import { MEAL_PROGRESS_OUTPUT_SCHEMA } from "./mcp/shared.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
@@ -762,6 +775,33 @@ type CallTool = (
     args?: Record<string, unknown>,
 ) => Promise<ToolResult>;
 
+const SIMILAR_WRITE_TOOLS = new Set([
+    "upsert_food",
+    "add_fridge_item",
+    "add_grocery_line",
+    "add_recipe_ingredient",
+    "import_recipe_from_text",
+    "log_meal",
+]);
+
+function callToolArguments(
+    name: string,
+    args: Record<string, unknown>,
+): Record<string, unknown> {
+    const next = { ...args };
+    // Existing fixtures predate "did you mean" and expect a create, so they
+    // get on_similar "create". A test that passes the key (even as undefined,
+    // which serializes away) runs the tool's real default, "ask".
+    if (
+        SIMILAR_WRITE_TOOLS.has(name) &&
+        !("on_similar" in next) &&
+        next.new_food !== true
+    ) {
+        next.on_similar = "create";
+    }
+    return next;
+}
+
 /** Register the real tools for a user whose alcohol gate is `alcohol`, then
  *  drive them through a client. `alcohol` is the whole opt-in: null = off. */
 async function withTools(
@@ -793,7 +833,7 @@ async function withTools(
             (name, args = {}) =>
                 client.callTool({
                     name,
-                    arguments: args,
+                    arguments: callToolArguments(name, args),
                 }) as Promise<ToolResult>,
         );
     } finally {
@@ -2988,7 +3028,7 @@ describe("household PAT has no default user", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
                 async () => {
                     const { tools } = await client.listTools();
@@ -3109,7 +3149,7 @@ describe("household person targeting", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3395,7 +3435,7 @@ describe("household config tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
                 async () => {
                     const { tools } = await client.listTools();
@@ -3806,7 +3846,7 @@ describe("phone-app domain MCP tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3837,7 +3877,7 @@ describe("phone-app domain MCP tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3879,6 +3919,216 @@ describe("phone-app domain MCP tools", () => {
                     }),
                 ]),
             );
+        });
+    });
+
+    test("add_fridge_item returns similar_foods without writing", async () => {
+        await withPat(async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            const before = (await db.fridgeStore.listItems("hh-1")).length;
+            const r = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg",
+                amount: 2,
+                on_similar: "ask",
+            });
+            expect(r.isError).toBeFalsy();
+            expect(r.structuredContent?.status).toBe("similar_foods");
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(r.structuredContent);
+            expect((await db.fridgeStore.listItems("hh-1")).length).toBe(
+                before,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+            const created = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg",
+                amount: 2,
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(created.structuredContent?.status).toBe("ok");
+            expect(created.structuredContent?.similar_foods).toEqual([]);
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(created.structuredContent);
+            const forced = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg white",
+                amount: 1,
+                on_similar: "create",
+            });
+            expect(forced.structuredContent?.status).toBe("ok");
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(forced.structuredContent);
+        });
+    });
+
+    test("similar_foods on grocery, recipe, meal, upsert, and import tools", async () => {
+        await withPat(async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            await call("upsert_food", { name: "Milk" });
+            await createGroceryStore(db.settingsStore, "hh-1", "Store");
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            const groceryBefore = (await db.groceryStore.listLines("hh-1"))
+                .length;
+            const groceryAsk = await call("add_grocery_line", {
+                kind: "food",
+                name: "whole milk",
+                on_similar: "ask",
+            });
+            expect(groceryAsk.isError).toBeFalsy();
+            expect(groceryAsk.structuredContent?.status).toBe("similar_foods");
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(groceryAsk.structuredContent);
+            expect((await db.groceryStore.listLines("hh-1")).length).toBe(
+                groceryBefore,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+
+            const recipe = await call("create_recipe", {
+                name: "Test",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const ingBefore = (
+                await db.recipesStore.listIngredients("hh-1", recipeId)
+            ).length;
+            const ingAsk = await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                name: "chicken egg",
+                on_similar: "ask",
+            });
+            expect(ingAsk.structuredContent?.status).toBe("similar_foods");
+            ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA.parse(ingAsk.structuredContent);
+            expect(
+                (await db.recipesStore.listIngredients("hh-1", recipeId))
+                    .length,
+            ).toBe(ingBefore);
+            const ingNew = await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                name: "egg",
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(ingNew.structuredContent?.status).toBe("ok");
+            ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA.parse(ingNew.structuredContent);
+
+            const groceryNew = await call("add_grocery_line", {
+                kind: "food",
+                name: "egg",
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(groceryNew.structuredContent?.status).toBe("ok");
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(groceryNew.structuredContent);
+
+            const recipeBefore = (await db.recipesStore.listRecipes("hh-1"))
+                .length;
+            const foodBeforeImport = (await db.foodsStore.listFoods("hh-1"))
+                .length;
+            const importAsk = await call("import_recipe_from_text", {
+                name: "Dup",
+                text: "Dup",
+                ingredients: [{ name: "chicken egg" }, { name: "whole milk" }],
+                on_similar: "ask",
+            });
+            expect(importAsk.structuredContent?.status).toBe("similar_foods");
+            const parsedImport = IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA.parse(
+                importAsk.structuredContent,
+            );
+            expect(parsedImport.similar_foods.map((e) => e.name)).toEqual([
+                "chicken egg",
+                "whole milk",
+            ]);
+            expect((await db.recipesStore.listRecipes("hh-1")).length).toBe(
+                recipeBefore,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBeforeImport,
+            );
+        });
+        await withPat(async (call) => {
+            const branded = await call("upsert_food", {
+                name: "All-purpose flour",
+                brand: "King Arthur",
+            });
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            // No on_similar value: the tool's own default ("ask") applies.
+            const upsertAsk = await call("upsert_food", {
+                name: "all purpose flour",
+                on_similar: undefined,
+            });
+            expect(upsertAsk.isError).toBeFalsy();
+            expect(upsertAsk.structuredContent?.status).toBe("similar_foods");
+            const parsedAsk = UPSERT_FOOD_OUTPUT.parse(
+                upsertAsk.structuredContent,
+            );
+            expect(
+                parsedAsk.similar_foods[0]?.candidates.map((c) => c.food_id),
+            ).toEqual([branded.structuredContent?.id as string]);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+            const upsertCreate = await call("upsert_food", {
+                name: "all purpose flour",
+                on_similar: "create",
+            });
+            expect(upsertCreate.structuredContent?.status).toBe("ok");
+            UPSERT_FOOD_OUTPUT.parse(upsertCreate.structuredContent);
+        });
+        await withUser(alice, async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            const mealsBefore = db.inserted.length;
+            const foodBeforeMeal = (await db.foodsStore.listFoods("hh-1"))
+                .length;
+            const mealAsk = await call("log_meal", {
+                description: "Snack",
+                meal_type: "snack",
+                items: [{ name: "chicken egg" }],
+                on_similar: "ask",
+            });
+            expect(mealAsk.isError).toBeFalsy();
+            expect(mealAsk.structuredContent?.status).toBe("similar_foods");
+            expect(mealAsk.structuredContent?.similar_foods).not.toEqual([]);
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealAsk.structuredContent);
+            expect(db.inserted.length).toBe(mealsBefore);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBeforeMeal,
+            );
+            const mealNew = await call("log_meal", {
+                description: "Snack",
+                meal_type: "snack",
+                items: [{ name: "egg", new_food: true }],
+                on_similar: "ask",
+            });
+            expect(mealNew.structuredContent?.status).toBe("ok");
+            expect(mealNew.structuredContent?.similar_foods).toEqual([]);
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealNew.structuredContent);
+            const mealCreate = await call("log_meal", {
+                description: "Snack 2",
+                meal_type: "snack",
+                items: [{ name: "egg salad" }],
+                on_similar: "create",
+            });
+            expect(mealCreate.structuredContent?.status).toBe("ok");
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealCreate.structuredContent);
+            await call("log_meal", {
+                description: "Base",
+                meal_type: "lunch",
+                calories: 100,
+            });
+            const updated = await call("update_meal", {
+                id: "m1",
+                description: "Base edit",
+            });
+            expect(updated.structuredContent?.status).toBe("ok");
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(updated.structuredContent);
         });
     });
 

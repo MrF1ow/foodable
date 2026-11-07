@@ -10,6 +10,7 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     FoodsInputError,
+    type OnSimilar,
     type Food,
     type FoodsStore,
     type MemoryFoodRefHolder,
@@ -430,6 +431,7 @@ export async function prepareAddManualFood(
         name: string;
         amount: number;
         unit?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<PreparedFridgeAdd> {
     await requireLocation(store, input.householdId, input.locationId);
@@ -440,6 +442,7 @@ export async function prepareAddManualFood(
             input.householdId,
             "food",
             input.name,
+            { onSimilar: input.onSimilar },
         );
         return {
             householdId: input.householdId,
@@ -462,6 +465,7 @@ export async function addManualFood(
         name: string;
         amount: number;
         unit?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<FridgeItem> {
     return insertFromFood(
@@ -480,6 +484,7 @@ export async function prepareAddSupply(
         amount: number;
         unit: string;
         foodId?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<PreparedFridgeAdd> {
     await requireLocation(store, input.householdId, input.locationId);
@@ -494,6 +499,7 @@ export async function prepareAddSupply(
                   input.householdId,
                   "supply",
                   input.name,
+                  { onSimilar: input.onSimilar },
               );
         if (food.kind !== "supply") {
             throw new FridgeInputError("That catalog item is a food.");
@@ -520,6 +526,7 @@ export async function addSupply(
         amount: number;
         unit: string;
         foodId?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<FridgeItem> {
     return insertFromFood(store, await prepareAddSupply(store, foods, input));
