@@ -190,7 +190,10 @@ html:has(dialog.modal[open]) {
     width: 20px;
     height: 20px;
 }
+/* margin-inline-start: auto pulls the count over to the Settings gear; the
+   bar is space-between, which would otherwise centre it. */
 .app-bar-attention {
+    margin-inline-start: auto;
     margin-inline-end: 8px;
     min-width: 1.5rem;
     padding: 2px 8px;
@@ -204,6 +207,11 @@ html:has(dialog.modal[open]) {
 }
 .bottom-nav a {
     position: relative;
+}
+/* The Dismiss form sits in the notice line, after the sentence and action. */
+.notice-dismiss-form {
+    display: inline;
+    margin-inline-start: 8px;
 }
 .tab-dot {
     position: absolute;

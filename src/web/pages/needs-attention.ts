@@ -43,7 +43,7 @@ function groupOpenLink(
         case "grocery_line":
             return { href: "/grocery", label: "Open grocery" };
         case "food":
-            return { href: "/settings/foods", label: "Open foods" };
+            return { href: "/household/items", label: "Open items" };
         default:
             return null;
     }
@@ -69,11 +69,15 @@ function sortGroupKeys(
     order: string[],
     subjectTimes: ReadonlyMap<string, number>,
 ): string[] {
+    // Newest activity first. A group with no timestamp goes last, and those
+    // keep producer order among themselves (the sort is stable).
+    const time = (key: string) =>
+        subjectTimes.get(key) ?? Number.NEGATIVE_INFINITY;
     return order.slice().sort((a, b) => {
-        const ta = subjectTimes.get(a) ?? Number.POSITIVE_INFINITY;
-        const tb = subjectTimes.get(b) ?? Number.POSITIVE_INFINITY;
-        if (ta !== tb) return tb - ta;
-        return order.indexOf(a) - order.indexOf(b);
+        const ta = time(a);
+        const tb = time(b);
+        if (ta === tb) return 0;
+        return tb > ta ? 1 : -1;
     });
 }
 
@@ -147,11 +151,11 @@ export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
                               d,
                               dismissedNames,
                           );
-                          return row({
-                              title: `${escapeHtml(badge)} — ${escapeHtml(label)}`,
+                          return `<li>${row({
+                              title: `${badge} — ${label}`,
                               meta: "",
                               actions: `<form method="post" action="/needs-attention/undo" class="row-action"><input type="hidden" name="dismissal_id" value="${escapeHtml(d.id)}" /><button type="submit" class="btn-sm">Undo</button></form>`,
-                          });
+                          })}</li>`;
                       });
                   if (rows.length === 0) {
                       return emptyState("No dismissed notices.");
