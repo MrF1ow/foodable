@@ -316,7 +316,7 @@ test("unverified recipe detail shows problems panel and check again", () => {
 
 test("import from link modal field and busy submit attributes", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -331,7 +331,7 @@ test("import from link modal field and busy submit attributes", () => {
 
 test("import modal keeps url and shows error on 422 re-render", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -350,7 +350,7 @@ test("import modal keeps url and shows error on 422 re-render", () => {
 
 test("duplicate import shows open link in modal", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -363,7 +363,7 @@ test("duplicate import shows open link in modal", () => {
 
 test("recipe list shows source icon when import row exists", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [
             {
                 id: "r-web",
@@ -425,7 +425,7 @@ test("recipe detail links source with credit", () => {
 
 test("recipe list source icon is labelled and does not capture clicks above the title link", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [
             {
                 id: "r-web",
