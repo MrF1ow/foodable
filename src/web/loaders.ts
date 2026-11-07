@@ -58,7 +58,10 @@ import {
     suggestFoodFor,
     usualProductRows,
     type Food,
+    type MergePairPickField,
 } from "../domain/foods.js";
+import { possibleDuplicateNoticesByFoodId } from "../domain/notices-for.js";
+import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
 import {
     plainFoodIdForUsualPicker,
     safeReturnPath,
@@ -423,10 +426,19 @@ export async function renderGroceryListPage(
               opts.error,
           )
         : null;
+    const noticeResult = await loadHouseholdNotices(householdId);
+    const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
+        noticeResult.notices,
+    );
     return {
         status: 200,
         html: renderGroceryPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
+            foodDuplicateNotices,
             stores,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
@@ -599,10 +611,15 @@ export async function renderSettingsFoodsPage(
         : null;
     const settings = liveSettingsStore();
     const stores = await settings.listStores(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
             foods: withAliases,
             stores,
             error: opts.error,
@@ -636,10 +653,15 @@ export async function renderUsualProductsListPage(
             truncated: matched.length > 20,
         };
     }
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderUsualProductsListHtml({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
             rows,
             addable,
             from: opts.from,
@@ -691,10 +713,15 @@ export async function renderUsualProductsPickerPage(
         ? usualProduct.usualAmount
         : food.usualAmount;
     const stores = await liveSettingsStore().listStores(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
             food,
             products,
             usualProductId: food.usualProductId,
@@ -760,10 +787,15 @@ export async function renderHouseholdSettingsRoute(
               )}`
             : null;
 
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderHouseholdSettingsPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
             householdName: config.name,
             location: location ?? "",
             members,
@@ -1031,10 +1063,19 @@ export async function renderRecipeDetailRoute(
         };
     });
     const importRow = await liveRecipesStore().getImport(householdId, recipeId);
+    const noticeResult = await loadHouseholdNotices(householdId);
+    const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
+        noticeResult.notices,
+    );
     return {
         status: 200,
         html: renderRecipeDetailPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
+            foodDuplicateNotices,
             recipe: view,
             notices,
             noticeContext: {
@@ -1146,5 +1187,45 @@ export async function renderNeedsAttentionInventoryPage(
     return {
         status: pageError ? 400 : 200,
         html,
+    };
+}
+
+export async function renderPossibleDuplicatesRoute(
+    viewerUserId: string,
+    opts: {
+        error?: string;
+        openModalId?: string;
+        mergePost?: {
+            foodA: string;
+            foodB: string;
+            keepId: string;
+            picks: Partial<Record<MergePairPickField, string>>;
+        };
+    } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const store = liveFoodsStore();
+    const refCounts = await store.countFoodRefs(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId, {
+        refCounts,
+    });
+    const pairs = noticeResult.possibleDuplicatePairs;
+    return {
+        status: 200,
+        html: renderPossibleDuplicatesPage({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                noticeResult,
+            ),
+            pairs,
+            refCounts,
+            error: opts.error,
+            openModalId: opts.openModalId,
+            mergePost: opts.mergePost,
+        }),
     };
 }

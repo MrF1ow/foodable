@@ -3,10 +3,13 @@ import type { Notice } from "../../domain/notices.js";
 import type { NoticeRoute } from "../../copy/notices.js";
 import {
     NOTICE_COPY,
+    POSSIBLE_DUPLICATE_OF_PREFIX,
     noticeActionFor,
     noticeDismissLabel,
+    noticeDismissPair,
     noticeSentence,
 } from "../../copy/notices.js";
+import { normalizePairIds } from "../../domain/notice-dismissals.js";
 import { escapeHtml } from "../shell.js";
 import {
     plainFoodIdForUsualPicker,
@@ -36,7 +39,36 @@ export const NOTICE_ROUTES: Record<
         if (subject.kind !== "fridge_item") return null;
         return `/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
     },
+    possibleDuplicatePair(notice, _ctx) {
+        const foodRel = notice.related.find((r) => r.kind === "food");
+        if (notice.subject.kind !== "food" || !foodRel) return null;
+        const pair = normalizePairIds(notice.subject.id, foodRel.id);
+        return `/household/possible-duplicates#dup-${encodeURIComponent(pair.subjectId)}-${encodeURIComponent(pair.relatedKey)}`;
+    },
 };
+
+export function noticeInlineLink(
+    notice: Notice,
+    forFoodId: string,
+    ctx?: NoticeRouteContext,
+): string {
+    if (notice.code !== "food.possible_duplicate") return "";
+    const foodRel = notice.related.find((r) => r.kind === "food");
+    if (notice.subject.kind !== "food" || !foodRel) return "";
+    const onPair = notice.subject.id === forFoodId || foodRel.id === forFoodId;
+    if (!onPair) return "";
+    const otherName =
+        notice.subject.id === forFoodId
+            ? foodRel.name
+            : String(notice.params.name);
+    const routeCtx: NoticeRouteContext = ctx ?? {
+        from: "/",
+        foods: new Map(),
+    };
+    const href = NOTICE_ROUTES.possibleDuplicatePair(notice, routeCtx);
+    if (!href) return "";
+    return `<a class="notice-link" href="${escapeHtml(href)}">${escapeHtml(POSSIBLE_DUPLICATE_OF_PREFIX)} <em>${escapeHtml(otherName)}</em></a>`;
+}
 
 export function noticeHref(
     notice: Notice,
@@ -100,8 +132,13 @@ export function noticeList(
     const items: string[] = [];
     for (const notice of notices) {
         const sentence = noticeSentence(notice);
-        if (seen.has(sentence)) continue;
-        seen.add(sentence);
+        // Pair notices are told apart by their foods, not their wording: two
+        // pairs can read alike ("Milk may be the same as Milk") and both count.
+        const dedupeKey = noticeDismissPair(notice.code)
+            ? `${notice.code}|${notice.subject.id}|${notice.related.map((r) => r.id).join(",")}`
+            : sentence;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
         const action = ctx ? noticeAction(notice, ctx) : "";
         const dismiss = opts?.dismiss?.(notice);
         let li = `<li class="notice-row">${escapeHtml(sentence)}`;

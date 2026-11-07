@@ -71,7 +71,7 @@ Member targeting — nutrition is per person. On an OAuth user token, omit user_
 
 Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools warn on allergen matches; treat a warning as blocking unless the user overrides it explicitly.
 
-Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them. Use \`list_notices\` to see what needs attention; never dismiss a notice with \`dismiss_notice\` without asking the person first.
+Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them. Use \`list_notices\` to see what needs attention; never dismiss a notice with \`dismiss_notice\` without asking the person first. After an unattended run (imports, bulk writes), call \`list_notices\` with \`code: "food.possible_duplicate"\` and mention any new possible duplicates to the household; never merge or dismiss a possible duplicate without asking the person first.
 
 Knowing what time it is — some hosts put the current date and time in your context and some do not, but this server always knows both the clock and the user's timezone. Never ask the user what time it is.
 - Logging something that just happened: omit logged_at entirely. The server stamps the entry with the current time, which is more accurate than any time you could reconstruct.

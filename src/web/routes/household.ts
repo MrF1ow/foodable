@@ -50,7 +50,15 @@ import {
 import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
-import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
+import {
+    liveFoodsStore,
+    mergeLiveFoodPair,
+    mergeLiveFoods,
+} from "../../db/foods.js";
+import { liveFridgeStore } from "../../db/fridge.js";
+import { liveRecipesStore } from "../../db/recipes.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { liveGroceryStore } from "../../db/grocery.js";
 import {
     buildFoodUpdate,
     addProduct,
@@ -58,6 +66,8 @@ import {
     findFoodById,
     findOrCreateFoodByBarcode,
     FoodsInputError,
+    MERGE_PAIR_PICK_FIELDS,
+    type MergePairPickField,
     linkProduct,
     parseUsualPurchase,
     removeProduct,
@@ -72,7 +82,13 @@ import {
     renderSettingsFoodsPage,
     renderUsualProductsListPage,
     renderUsualProductsPickerPage,
+    renderPossibleDuplicatesRoute,
 } from "../loaders.js";
+import {
+    dismissNotice,
+    type NoticesForDeps,
+} from "../../domain/notices-for.js";
+import { NoticeDismissError } from "../../domain/notice-dismissals.js";
 import {
     safeReturnPath,
     usualProductsPickerHref,
@@ -85,6 +101,7 @@ import {
 } from "../pages/household.js";
 import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
+import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import {
@@ -1119,3 +1136,114 @@ householdRoutes.post("/household/items/:id", requireMember, async (c) => {
     }
     return redirectWithToast(c, "/household/items", "settings.foods.updated");
 });
+
+function noticeDeps(): NoticesForDeps {
+    return {
+        foods: liveFoodsStore(),
+        fridge: liveFridgeStore(),
+        recipes: liveRecipesStore(),
+        dismissals: liveNoticeDismissalsStore(),
+        grocery: liveGroceryStore(),
+    };
+}
+
+householdRoutes.get(
+    "/household/possible-duplicates",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderPossibleDuplicatesRoute(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/household/possible-duplicates/keep-separate",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            await dismissNotice(noticeDeps(), member.householdId, userId, {
+                code: "food.possible_duplicate",
+                subjectKind: "food",
+                subjectId: formText(body, "subject_id"),
+                relatedId: formText(body, "related_id"),
+            });
+        } catch (err) {
+            const message =
+                err instanceof NoticeDismissError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not keep foods separate.";
+            const page = await renderPossibleDuplicatesRoute(userId, {
+                error: message,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect("/household/possible-duplicates", 303);
+    },
+);
+
+function parseMergePicks(
+    body: Record<string, string | File>,
+): Partial<Record<MergePairPickField, string>> {
+    const picks: Partial<Record<MergePairPickField, string>> = {};
+    for (const wire of MERGE_PAIR_PICK_FIELDS) {
+        const key = `pick_${wire}`;
+        if (key in body) {
+            picks[wire] = formText(body, key);
+        }
+    }
+    return picks;
+}
+
+householdRoutes.post(
+    "/household/possible-duplicates/merge",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody({ all: true });
+        const asText = body as Record<string, string | File>;
+        const foodA = formText(asText, "food_a");
+        const foodB = formText(asText, "food_b");
+        const keepId = formText(asText, "keep_id");
+        const mergePost = {
+            foodA,
+            foodB,
+            keepId,
+            picks: parseMergePicks(asText),
+        };
+        try {
+            if (keepId !== foodA && keepId !== foodB) {
+                throw new FoodsInputError(
+                    "Keep must be one of the two foods in this pair.",
+                );
+            }
+            const dropId = keepId === foodA ? foodB : foodA;
+            await mergeLiveFoodPair(member.householdId, {
+                keepId,
+                dropId,
+                picks: mergePost.picks,
+            });
+        } catch (err) {
+            const message =
+                err instanceof FoodsInputError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not merge foods.";
+            const page = await renderPossibleDuplicatesRoute(userId, {
+                error: message,
+                openModalId: DUP_MERGE_MODAL_ID,
+                mergePost,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect("/household/possible-duplicates", 303);
+    },
+);

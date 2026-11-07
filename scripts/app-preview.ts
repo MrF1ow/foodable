@@ -56,7 +56,19 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import { matchFoodsByWords, usualProductRows } from "../src/domain/foods.js";
+import {
+    matchFoodsByWords,
+    possibleDuplicates,
+    usualProductRows,
+} from "../src/domain/foods.js";
+import {
+    possibleDuplicateNotices,
+    possibleDuplicateNoticesByFoodId,
+} from "../src/domain/notices-for.js";
+import {
+    DUP_MERGE_MODAL_ID,
+    renderPossibleDuplicatesPage,
+} from "../src/web/pages/possible-duplicates.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
 
 const OUT = "./tmp/app-preview";
@@ -372,9 +384,10 @@ function food(
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
 function previewFoodCatalog() {
     const catalog = [
-        food("f-eggs", "Eggs", null, {
+        food("f-eggs", "Eggs", 143, {
             usualProductId: "f-kirkland",
             gramsPerEach: 50,
+            proteinG: 12,
         }),
         food("f-kirkland", "Kirkland Large Eggs", 140, {
             genericFoodId: "f-eggs",
@@ -390,6 +403,7 @@ function previewFoodCatalog() {
         food("f-carton", "Cage Free Grade A Large Eggs", 140, {
             offSourceId: "070852010016",
         }),
+        food("f-chicken-egg", "chicken egg", 155, { proteinG: 13 }),
     ];
     const usual = usualProductRows({ foods: catalog });
     return { catalog, usual };
@@ -399,6 +413,7 @@ function previewFoodCatalog() {
  *  producer over the fridge fixture, plus one recipe gap. The top-bar count
  *  and the tab dots are computed from them, as the loaders do. */
 function previewNotices(): Notice[] {
+    const { catalog } = previewFoodCatalog();
     const recipeGap: Notice = {
         code: "recipe.no_nutrition",
         severity: "warn",
@@ -406,8 +421,15 @@ function previewNotices(): Notice[] {
         related: [],
         params: { name: "Buttermilk", foodId: "f-buttermilk" },
     };
+    const duplicateNotices = possibleDuplicateNotices(
+        catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+        new Map(),
+        new Set(),
+        new Set(),
+    );
     return sortNotices([
         recipeGap,
+        ...duplicateNotices,
         ...(() => {
             const items = fridgeView(null).items;
             // Nothing is on the grocery list, so each food item offers
@@ -511,7 +533,18 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             viewerId: "u1",
         } as never),
         recipe: renderRecipeDetailPage({
-            chrome,
+            chrome: {
+                ...chrome,
+                householdPossibleDuplicates: 1,
+            },
+            foodDuplicateNotices: possibleDuplicateNoticesByFoodId(
+                possibleDuplicateNotices(
+                    catalog,
+                    new Map(),
+                    new Set(),
+                    new Set(),
+                ),
+            ),
             recipe: {
                 ...RECIPE,
                 name: "Banana bread",
@@ -675,6 +708,52 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 truncated: false,
             },
         } as never),
+        "possible-duplicates": (() => {
+            const dupPairs = possibleDuplicates(
+                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+                new Map(),
+                new Set(),
+                new Set(),
+            );
+            return renderPossibleDuplicatesPage({
+                chrome: {
+                    ...chrome,
+                    householdPossibleDuplicates: dupPairs.length,
+                },
+                pairs: dupPairs,
+                refCounts: new Map([
+                    ["f-chicken-egg", 0],
+                    ["f-eggs", 1],
+                ]),
+            } as never);
+        })(),
+        "possible-duplicates-merge": (() => {
+            const dupPairs = possibleDuplicates(
+                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+                new Map(),
+                new Set(),
+                new Set(),
+            );
+            const pair = dupPairs[0]!;
+            return renderPossibleDuplicatesPage({
+                chrome: {
+                    ...chrome,
+                    householdPossibleDuplicates: dupPairs.length,
+                },
+                pairs: dupPairs,
+                refCounts: new Map([
+                    [pair.subject.id, 0],
+                    [pair.related.id, 0],
+                ]),
+                openModalId: DUP_MERGE_MODAL_ID,
+                mergePost: {
+                    foodA: pair.subject.id,
+                    foodB: pair.related.id,
+                    keepId: pair.subject.id,
+                    picks: {},
+                },
+            } as never);
+        })(),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
         "needs-attention": (() => {
             const fridgeItems = fridgeView(null).items;
@@ -817,6 +896,9 @@ for (const theme of ["light", "dark"] as const) {
     modalShotPages.push(
         `foods-edit-${theme}`,
         `usual-products-picker-${theme}`,
+        `possible-duplicates-${theme}`,
+        `possible-duplicates-merge-${theme}`,
+        `recipe-${theme}`,
     );
 }
 

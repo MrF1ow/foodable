@@ -41,6 +41,7 @@ import {
 } from "../components/ui.js";
 import {
     noticeAction,
+    noticeInlineLink,
     noticeList,
     type NoticeRouteContext,
 } from "../components/notices.js";
@@ -135,6 +136,7 @@ export type RecipeDetailView = {
     linkProductPrompt?: LinkProductPromptView | null;
     problems?: RecipeProblem[];
     importRow?: RecipeImport | null;
+    foodDuplicateNotices?: ReadonlyMap<string, Notice[]>;
 };
 
 const NEW_RECIPE_MODAL_ID = "recipe-new";
@@ -486,6 +488,21 @@ function ingredientRow(
     const usualProductActionHtml = noNutrition
         ? noticeAction(noNutrition, view.noticeContext)
         : "";
+    const dupNotices = ingredient.foodId
+        ? (view.foodDuplicateNotices?.get(ingredient.foodId) ?? [])
+        : [];
+    const duplicateNoticeHtml =
+        dupNotices.length > 0 && ingredient.foodId
+            ? dupNotices
+                  .map((n) =>
+                      noticeInlineLink(
+                          n,
+                          ingredient.foodId!,
+                          view.noticeContext,
+                      ),
+                  )
+                  .join(" ")
+            : undefined;
     return renderRecipeIngredientRow({
         id: ingredient.id,
         recipeId: view.recipe.id,
@@ -515,6 +532,7 @@ function ingredientRow(
         editFill: ingredientFill(view, ingredient, "edit"),
         deleteFill: ingredientFill(view, ingredient, "delete"),
         usualProductActionHtml,
+        duplicateNoticeHtml,
     });
 }
 

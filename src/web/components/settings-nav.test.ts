@@ -24,3 +24,15 @@ test("household nav", () => {
         '<a href="/household/usual-products" aria-current="page">Usual products</a>',
     );
 });
+
+test("household nav hides Possible duplicates at zero count", () => {
+    expect(
+        renderHouseholdNav("members", { possibleDuplicates: 0 }),
+    ).not.toContain("Possible duplicates");
+    expect(
+        renderHouseholdNav("possible-duplicates", { possibleDuplicates: 0 }),
+    ).not.toContain("Possible duplicates");
+    expect(renderHouseholdNav("members", { possibleDuplicates: 2 })).toContain(
+        "Possible duplicates",
+    );
+});

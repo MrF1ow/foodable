@@ -29,3 +29,17 @@ test("noticeToWire maps subjects, action, and message", () => {
     expect(wr.action).toBeNull();
     expect(wr.message).toBe(noticeSentence(recipeOnly));
 });
+
+test("noticeToWire maps food.possible_duplicate", () => {
+    const dup: Notice = {
+        code: "food.possible_duplicate",
+        severity: "info",
+        subject: { kind: "food", id: "f-a" },
+        related: [{ kind: "food", id: "f-b", name: "Eggs" }],
+        params: { name: "chicken egg", rule: "contains_words", foodId: "f-a" },
+    };
+    const w = noticeToWire(dup);
+    expect(NOTICE_SCHEMA.parse(w)).toEqual(w);
+    expect(w.message).toBe(noticeSentence(dup));
+    expect(w.action).toEqual({ label: "Review" });
+});

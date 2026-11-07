@@ -109,7 +109,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Dismiss Notice",
             description:
-                "Dismiss an info-level suggestion after the person agrees. Do not call without asking first.",
+                "Dismiss an info-level suggestion after the person agrees. Do not call without asking first. Pair notices (for example food.possible_duplicate) require related_id naming the other food in the pair.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,

@@ -828,7 +828,9 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
                 : undefined,
         })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderHouseholdNav("members")}
+        ${renderHouseholdNav("members", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${token}
         ${panel({ title: "Household", body: householdCard })}
         ${panel({

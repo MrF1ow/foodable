@@ -97,6 +97,7 @@ import { createMemoryFoodsStore } from "./domain/foods.js";
 import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
+    mergeFoods,
     updateFood,
 } from "./domain/foods.js";
 import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
@@ -614,6 +615,12 @@ mock.module("./db/rules.js", () => ({
 mock.module("./db/foods.js", () => ({
     ...actualDbFoods,
     liveFoodsStore: () => db.foodsStore,
+    mergeLiveFoods: (
+        householdId: string,
+        keepId: string,
+        dropId: string,
+        store = db.foodsStore,
+    ) => mergeFoods(store, householdId, keepId, dropId),
 }));
 
 mock.module("./db/notice-dismissals.js", () => ({
@@ -6035,6 +6042,113 @@ describe("phone-app domain MCP tools", () => {
             });
             expect(missing.isError).toBe(true);
             expect(textOf(missing).toLowerCase()).toContain("not open");
+        });
+    });
+
+    test("food.possible_duplicate list, dismiss pair either order, merge, get_food", async () => {
+        await withUser(alice, async (call) => {
+            const a = await call("upsert_food", { name: "chicken egg" });
+            const b = await call("upsert_food", {
+                name: "Eggs",
+                calories: 140,
+            });
+            const idA = a.structuredContent?.id as string;
+            const idB = b.structuredContent?.id as string;
+            await call("upsert_food", {
+                food_id: idA,
+                calories: 100,
+            });
+
+            const byCode = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            const notices = (
+                byCode.structuredContent as {
+                    notices: Array<{
+                        code: string;
+                        subject: { id: string };
+                        related: Array<{ id: string }>;
+                    }>;
+                }
+            ).notices.filter((n) => n.code === "food.possible_duplicate");
+            expect(
+                notices.some(
+                    (n) =>
+                        (n.subject.id === idA &&
+                            n.related.some((r) => r.id === idB)) ||
+                        (n.subject.id === idB &&
+                            n.related.some((r) => r.id === idA)),
+                ),
+            ).toBe(true);
+            for (const n of notices) NOTICE_SCHEMA.parse(n);
+
+            const oat = await call("upsert_food", { name: "rolled oat" });
+            const oats = await call("upsert_food", { name: "rolled oats" });
+            const oatId = oat.structuredContent?.id as string;
+            const oatsId = oats.structuredContent?.id as string;
+
+            const dismissSwapped = await call("dismiss_notice", {
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: oatsId,
+                related_id: oatId,
+            });
+            expect(dismissSwapped.isError).toBeFalsy();
+            const afterSwapped = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            expect(
+                (
+                    afterSwapped.structuredContent as {
+                        notices: Array<{ subject: { id: string } }>;
+                    }
+                ).notices.some(
+                    (n) => n.subject.id === oatId || n.subject.id === oatsId,
+                ),
+            ).toBe(false);
+
+            const dismissDirect = await call("dismiss_notice", {
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: idA,
+                related_id: idB,
+            });
+            expect(dismissDirect.isError).toBeFalsy();
+
+            const pita = await call("upsert_food", { name: "pita" });
+            const pitas = await call("upsert_food", { name: "pitas" });
+            const pitaId = pita.structuredContent?.id as string;
+            const pitasId = pitas.structuredContent?.id as string;
+            const gotFood = await call("get_food", { food_id: pitaId });
+            const withNotice = GET_FOOD_OUTPUT.parse(gotFood.structuredContent);
+            expect(
+                withNotice.notices.some(
+                    (n) => n.code === "food.possible_duplicate",
+                ),
+            ).toBe(true);
+            for (const n of withNotice.notices) NOTICE_SCHEMA.parse(n);
+
+            await call("merge_foods", {
+                keep_id: pitaId,
+                drop_id: pitasId,
+            });
+            const afterMerge = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            expect(
+                (
+                    afterMerge.structuredContent as {
+                        notices: Array<{
+                            code: string;
+                            subject: { id: string };
+                        }>;
+                    }
+                ).notices.some(
+                    (n) =>
+                        n.code === "food.possible_duplicate" &&
+                        (n.subject.id === pitaId || n.subject.id === pitasId),
+                ),
+            ).toBe(false);
         });
     });
 });
