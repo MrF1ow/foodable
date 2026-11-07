@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
@@ -24,8 +23,14 @@ function onHost(href: string, domain: string): boolean {
 }
 
 const FIX = join(import.meta.dir, "fixtures/social");
+const SOCIAL_FIXTURES = new Map<string, string>();
+for await (const file of new Bun.Glob("*").scan(FIX)) {
+    SOCIAL_FIXTURES.set(file, await Bun.file(join(FIX, file)).text());
+}
 function load(name: string): string {
-    return readFileSync(join(FIX, name), "utf8");
+    const text = SOCIAL_FIXTURES.get(name);
+    if (text == null) throw new Error(`Missing fixture ${name}`);
+    return text;
 }
 
 test("readerFailureFromFetch maps fetch failures", () => {

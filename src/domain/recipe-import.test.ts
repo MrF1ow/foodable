@@ -602,10 +602,9 @@ describe("importRecipeFromUrl", () => {
     });
 
     test("tiktok reader on imports with read origin and records success", async () => {
-        const tiktokHtml = readFileSync(
+        const tiktokHtml = await Bun.file(
             join(import.meta.dir, "fixtures/social/tiktok-no-subtitles.html"),
-            "utf8",
-        );
+        ).text();
         const fetcher = fakeFetcher({
             fetch: () => ({ ok: true, body: tiktokHtml }),
         });
