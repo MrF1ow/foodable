@@ -246,6 +246,8 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
             [
                 {
                     id: "it-1",
+                    kind: "food",
+                    foodId: "f-eggs",
                     displayName: "Eggs",
                     quantity: { amount: 6, unit: "each" },
                     expiresOn,

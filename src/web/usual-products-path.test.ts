@@ -14,6 +14,10 @@ test("safeReturnPath rejects unsafe from values", () => {
     expect(safeReturnPath("/recipes/r1", "/household/items")).toBe(
         "/recipes/r1",
     );
+    expect(safeReturnPath("/fridge/../logout", "/fridge")).toBe("/fridge");
+    expect(safeReturnPath("/./logout", "/fridge")).toBe("/fridge");
+    expect(safeReturnPath("/%2e%2e/logout", "/fridge")).toBe("/fridge");
+    expect(safeReturnPath("/fridge?q=1", "/fridge")).toBe("/fridge?q=1");
 });
 
 test("plainFoodIdForUsualPicker uses generic parent for products", () => {

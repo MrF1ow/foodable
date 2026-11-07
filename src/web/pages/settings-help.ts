@@ -36,7 +36,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "expiry-levels",
         title: "Expiry levels",
-        body: "Only expired items show an Expired badge on the row. Later dates and items with no expiry date show no badge. Expiring soon lists items already expired or due within three days, and shows that count.",
+        body: "Only expired items show an Expired badge on the row. Later dates and items with no expiry date show no badge. Expiring soon lists items already expired or due within three days, and shows that count. Expired and expiring food offers Add to grocery list, or says it is already on the list.",
     },
     {
         id: "allergens",

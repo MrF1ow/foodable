@@ -40,6 +40,13 @@ import {
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
 import { redirectWithToast } from "../components/toast.js";
+import {
+    addFridgeItemToGrocery,
+    GroceryInputError,
+} from "../../domain/grocery.js";
+import { liveGroceryStore } from "../../db/grocery.js";
+import { liveSettingsStore } from "../../db/settings.js";
+import { safeReturnPath } from "../usual-products-path.js";
 
 export const fridgeRoutes = new Hono();
 
@@ -61,11 +68,13 @@ async function fridgeFormError(
             ? err.message
             : err instanceof StockInputError
               ? err.message
-              : err instanceof MealItemsError
+              : err instanceof GroceryInputError
                 ? err.message
-                : err instanceof Error
+                : err instanceof MealItemsError
                   ? err.message
-                  : "Could not update the fridge.";
+                  : err instanceof Error
+                    ? err.message
+                    : "Could not update the fridge.";
     const page = await renderFridgeInventoryPage(userId, message, openModalId);
     return { html: page.html, status: 400 as const };
 }
@@ -344,6 +353,40 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
     }
     return redirectWithToast(c, "/fridge", "fridge.item.eaten");
 });
+
+fridgeRoutes.post(
+    "/fridge/items/:id/add-to-grocery",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const from = formText(body, "from");
+        const target = safeReturnPath(from, "/fridge");
+        try {
+            const result = await addFridgeItemToGrocery(
+                liveGroceryStore(),
+                liveSettingsStore(),
+                liveFoodsStore(),
+                liveFridgeStore(),
+                {
+                    householdId: member.householdId,
+                    itemId: c.req.param("id"),
+                },
+            );
+            return redirectWithToast(
+                c,
+                target,
+                result.added
+                    ? "fridge.item.added-to-grocery"
+                    : "fridge.item.already-on-grocery",
+            );
+        } catch (err) {
+            const page = await fridgeFormError(userId, err);
+            return c.html(page.html, page.status);
+        }
+    },
+);
 
 fridgeRoutes.post("/fridge/items/:id/discard", requireMember, async (c) => {
     const userId = c.get("userId");

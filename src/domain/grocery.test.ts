@@ -11,6 +11,7 @@ import {
     addGroceryFoodByBarcode,
     addGroceryFoodById,
     addGroceryManualFood,
+    addFridgeItemToGrocery,
     addGrocerySupply,
     checkGroceryLine,
     clearCheckedLines,
@@ -18,6 +19,7 @@ import {
     groceryAllergenWarning,
     GroceryInputError,
     listGrocery,
+    onGroceryList,
     pickGroceryAmount,
     pickGroceryStore,
     resolveGroceryLineSource,
@@ -29,6 +31,7 @@ import { alreadyHaveTag } from "./linking.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import { renderGroceryPage } from "../web/pages/grocery.js";
 import { addAllergen, createMemoryRulesStore } from "./rules.js";
+import { addFridgeItemAdjust, createMemoryStockStore } from "./stock.js";
 
 const HH = "hh-1";
 const OTHER_HH = "hh-2";
@@ -1564,4 +1567,318 @@ test("addGroceryFoodById no store no amount uses usual store and name-based sect
     expect(line.storeId).toBe(store.id);
     expect(line.sectionId).toBe(dairy.id);
     expect(line.quantity).toEqual({ amount: 12, unit: "each" });
+});
+
+test("onGroceryList family matching", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    const product = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Eggs",
+            genericFoodId: plain.id,
+        }),
+    );
+    const foodsById = new Map([
+        [plain.id, { id: plain.id, genericFoodId: null }],
+        [product.id, { id: product.id, genericFoodId: plain.id }],
+    ]);
+    expect(
+        onGroceryList(
+            { foodId: product.id },
+            [{ foodId: plain.id, checked: false }],
+            foodsById,
+        ),
+    ).toBe(true);
+    expect(
+        onGroceryList(
+            { foodId: product.id },
+            [{ foodId: plain.id, checked: true }],
+            foodsById,
+        ),
+    ).toBe(false);
+    const other = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    foodsById.set(other.id, { id: other.id, genericFoodId: null });
+    expect(
+        onGroceryList(
+            { foodId: product.id },
+            [{ foodId: other.id, checked: false }],
+            foodsById,
+        ),
+    ).toBe(false);
+    expect(
+        onGroceryList(
+            { foodId: plain.id },
+            [{ foodId: null, checked: false }],
+            foodsById,
+        ),
+    ).toBe(false);
+    expect(
+        onGroceryList(
+            { foodId: "ghost-food" },
+            [{ foodId: "ghost-food", checked: false }],
+            new Map(),
+        ),
+    ).toBe(true);
+    expect(
+        onGroceryList(
+            { foodId: "ghost-food" },
+            [{ foodId: "other-ghost", checked: false }],
+            new Map(),
+        ),
+    ).toBe(false);
+});
+
+test("addFridgeItemToGrocery uses fridge item amount when plain has no usual amount", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Bananas" }),
+    );
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: plain.id,
+        amount: 6,
+        unit: "each",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    const { line } = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(line.quantity).toEqual({ amount: 6, unit: "each" });
+});
+
+test("addFridgeItemToGrocery uses usual on the usual product when plain has none", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const costco = await createGroceryStore(settings, HH, "Costco");
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    const kirkland = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Eggs",
+            genericFoodId: plain.id,
+            usualStoreId: costco.id,
+            usualAmount: { amount: 24, unit: "each" },
+        }),
+    );
+    await foods.updateFoodRow({
+        ...plain,
+        usualProductId: kirkland.id,
+    });
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: kirkland.id,
+        amount: 6,
+        unit: "each",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    const { line } = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(line.foodId).toBe(plain.id);
+    expect(line.storeId).toBe(costco.id);
+    expect(line.quantity).toEqual({ amount: 24, unit: "each" });
+});
+
+test("addFridgeItemToGrocery uses standalone food usual store and amount", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const market = await createGroceryStore(settings, HH, "Market");
+    const butter = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Butter",
+            usualStoreId: market.id,
+            usualAmount: { amount: 2, unit: "each" },
+        }),
+    );
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: butter.id,
+        amount: 1,
+        unit: "each",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    const { line } = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(line.storeId).toBe(market.id);
+    expect(line.quantity).toEqual({ amount: 2, unit: "each" });
+});
+
+test("addFridgeItemToGrocery defaults quantity when fridge unit is not a food quantity unit", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Wraps",
+            defaultUnit: "each",
+        }),
+    );
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: plain.id,
+        amount: 3,
+        unit: "roll",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    const { line } = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(line.quantity).toEqual({ amount: 1, unit: "each" });
+});
+
+test("addFridgeItemToGrocery adds at usual store and amount", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const costco = await createGroceryStore(settings, HH, "Costco");
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggs",
+            usualStoreId: costco.id,
+            usualAmount: { amount: 12, unit: "each" },
+        }),
+    );
+    const product = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Eggs",
+            genericFoodId: plain.id,
+        }),
+    );
+    await foods.updateFoodRow({ ...plain, usualProductId: product.id });
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: product.id,
+        amount: 6,
+        unit: "each",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    const first = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(first.added).toBe(true);
+    expect(first.line.foodId).toBe(plain.id);
+    expect(first.line.storeId).toBe(costco.id);
+    expect(first.line.quantity).toEqual({ amount: 12, unit: "each" });
+    expect(first.line.source).toBe("notice");
+    expect(first.line.sourceFridgeItemId).toBe(added.item!.id);
+    const before = (await grocery.listLines(HH)).length;
+    const second = await addFridgeItemToGrocery(
+        grocery,
+        settings,
+        foods,
+        fridge,
+        { householdId: HH, itemId: added.item!.id },
+    );
+    expect(second.added).toBe(false);
+    expect((await grocery.listLines(HH)).length).toBe(before);
+});
+
+test("addFridgeItemToGrocery rejects other household and non-food", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const { settings } = await seedStore();
+    const loc = await addLocation(fridge, OTHER_HH, "Fridge");
+    const item = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: OTHER_HH,
+        foodId: (
+            await foods.insertFood(
+                newFood({ householdId: OTHER_HH, kind: "food", name: "X" }),
+            )
+        ).id,
+        amount: 1,
+        unit: "g",
+        locationId: loc.id,
+        actorUserId: "u1",
+    });
+    await expect(
+        addFridgeItemToGrocery(grocery, settings, foods, fridge, {
+            householdId: HH,
+            itemId: item.item!.id,
+        }),
+    ).rejects.toThrow(/no longer in the fridge/);
+    const supplyLoc = await addLocation(fridge, HH, "Pantry");
+    const supply = await fridge.insertItem({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        locationId: supplyLoc.id,
+        kind: "supply",
+        displayName: "Foil",
+        quantity: { amount: 1, unit: "roll" },
+        foodId: (
+            await foods.insertFood(
+                newFood({ householdId: HH, kind: "supply", name: "Foil" }),
+            )
+        ).id,
+        expiresOn: "2026-01-01",
+    });
+    await expect(
+        addFridgeItemToGrocery(grocery, settings, foods, fridge, {
+            householdId: HH,
+            itemId: supply.id,
+        }),
+    ).rejects.toThrow(/Only food can be added/);
 });

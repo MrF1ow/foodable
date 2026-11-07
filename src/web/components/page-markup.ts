@@ -2,7 +2,12 @@ import { escapeHtml } from "../shell.js";
 import type { Notice } from "../../domain/notices.js";
 import { iconArrowDown, iconArrowUp, iconPencil, iconTrash } from "./icons.js";
 import { disclosure, modalTrigger, type ModalFill } from "./ui.js";
-import { noticeBadge } from "./notices.js";
+import {
+    noticeAction,
+    noticeBadge,
+    type NoticeRouteContext,
+} from "./notices.js";
+import { noticeActionFor, ON_GROCERY_LIST_TEXT } from "../../copy/notices.js";
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
@@ -66,9 +71,14 @@ export function renderFridgeItemRow(opts: {
     expiresOn?: string | null;
     notices: readonly Notice[];
     rowActions: string;
+    noticeCtx?: NoticeRouteContext;
 }): string {
     const id = escapeHtml(opts.id);
     const expiredNotice = opts.notices.find((n) => n.code === "fridge.expired");
+    const expiringNotice = opts.notices.find(
+        (n) => n.code === "fridge.expiring",
+    );
+    const groceryNotice = expiredNotice ?? expiringNotice;
     const expired = expiredNotice != null;
     const expiryAttr = expired ? ` data-expiry="expired"` : "";
     const pill =
@@ -78,7 +88,15 @@ export function renderFridgeItemRow(opts: {
     const expiryText = opts.expiresOn
         ? `Expires ${escapeHtml(opts.expiresOn)}`
         : "No expiry";
-    const meta = `${escapeHtml(opts.quantityLabel)} · ${expiryText}`;
+    let meta = `${escapeHtml(opts.quantityLabel)} · ${expiryText}`;
+    const onList = groceryNotice?.params.onGroceryList === "yes";
+    if (onList) {
+        meta += ` · <span class="fridge-on-list">${escapeHtml(ON_GROCERY_LIST_TEXT)}</span>`;
+    }
+    let noticeActionHtml = "";
+    if (opts.noticeCtx && groceryNotice && noticeActionFor(groceryNotice)) {
+        noticeActionHtml = noticeAction(groceryNotice, opts.noticeCtx);
+    }
     const titleLine = `<div class="row-title-line"><p class="fridge-item-name row-title">${escapeHtml(opts.displayName)}</p>${pill}</div>`;
     return `<li class="fridge-item" data-item-id="${id}" data-kind="${opts.kind}"${expiryAttr}>
 <div class="list-row fridge-item-row">
@@ -87,7 +105,7 @@ ${titleLine}
 <p class="fridge-item-qty row-meta">${meta}</p>
 </div>
 <div class="row-actions">
-${opts.rowActions}
+${noticeActionHtml}${opts.rowActions}
 </div>
 </div>
 </li>`;

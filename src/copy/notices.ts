@@ -1,16 +1,23 @@
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import type { RecipeGapNutrient } from "../domain/recipes.js";
 
-export type NoticeRoute = "usualProductPicker";
+export type NoticeRoute = "usualProductPicker" | "addFridgeItemToGrocery";
 
 export type NoticeCopy = {
     badge: string;
     sentence: (notice: Notice) => string;
-    action?: { label: string; to: NoticeRoute };
+    action?: {
+        label: string;
+        to: NoticeRoute;
+        method?: "get" | "post";
+        when?: (notice: Notice) => boolean;
+    };
     help: string;
     dismissible: boolean;
     badgeTone?: "bad" | "warn" | "dim";
 };
+
+export const ON_GROCERY_LIST_TEXT = "on the grocery list";
 
 export const UNKNOWN_ALLERGEN_TEXT = "unknown allergen data";
 
@@ -23,13 +30,39 @@ export function fridgeExpiryLine(p: {
     return `${p.name} ${p.amount} ${p.unit} expires ${p.expiresOn}`;
 }
 
-function fridgeSentence(notice: Notice): string {
+function fridgeExpirySentence(notice: Notice): string {
     return fridgeExpiryLine({
         name: String(notice.params.name),
         amount: Number(notice.params.amount),
         unit: String(notice.params.unit),
         expiresOn: String(notice.params.expiresOn),
     });
+}
+
+function fridgeExpiredSentence(notice: Notice): string {
+    if (notice.params.onGroceryList === "yes") {
+        return `${String(notice.params.name)} expired · ${ON_GROCERY_LIST_TEXT}`;
+    }
+    return fridgeExpirySentence(notice);
+}
+
+function fridgeExpiringSentence(notice: Notice): string {
+    if (notice.params.onGroceryList === "yes") {
+        const name = String(notice.params.name);
+        const daysLeft = Number(notice.params.daysLeft);
+        const expiresOn = String(notice.params.expiresOn);
+        let when: string;
+        if (daysLeft === 0) when = "today";
+        else if (daysLeft === 1) when = "tomorrow";
+        else {
+            when = new Date(`${expiresOn}T00:00:00Z`).toLocaleDateString(
+                "en-US",
+                { weekday: "long", timeZone: "UTC" },
+            );
+        }
+        return `${name} expires ${when} · ${ON_GROCERY_LIST_TEXT}`;
+    }
+    return fridgeExpirySentence(notice);
 }
 
 /** Today's `groceryAllergenWarning` text: the first allergen, then every affected member. */
@@ -60,13 +93,25 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
     "fridge.expired": {
         badge: "Expired",
         badgeTone: "bad",
-        sentence: fridgeSentence,
+        sentence: fridgeExpiredSentence,
+        action: {
+            label: "Add to grocery list",
+            to: "addFridgeItemToGrocery",
+            method: "post",
+            when: (n) => n.params.onGroceryList === "no",
+        },
         help: "expiry-levels",
         dismissible: false,
     },
     "fridge.expiring": {
         badge: "Expiring soon",
-        sentence: fridgeSentence,
+        sentence: fridgeExpiringSentence,
+        action: {
+            label: "Add to grocery list",
+            to: "addFridgeItemToGrocery",
+            method: "post",
+            when: (n) => n.params.onGroceryList === "no",
+        },
         help: "expiry-levels",
         dismissible: false,
     },
@@ -133,4 +178,11 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
 
 export function noticeSentence(notice: Notice): string {
     return NOTICE_COPY[notice.code].sentence(notice);
+}
+
+export function noticeActionFor(notice: Notice): NoticeCopy["action"] | null {
+    const action = NOTICE_COPY[notice.code].action;
+    if (!action) return null;
+    const when = action.when ?? (() => true);
+    return when(notice) ? action : null;
 }

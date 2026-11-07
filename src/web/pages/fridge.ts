@@ -28,6 +28,8 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
+import type { Food } from "../../domain/foods.js";
+import type { GroceryLine } from "../../domain/grocery.js";
 import {
     fridgeNotices,
     listExpiring,
@@ -52,6 +54,8 @@ export type FridgePageView = FridgeSnapshot & {
     error?: string;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
+    groceryLines?: readonly Pick<GroceryLine, "foodId" | "checked">[];
+    foodsById?: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>;
 };
 
 function quantityLabel(item: FridgeItem): string {
@@ -192,7 +196,11 @@ function itemFill(item: FridgeItem, mode: "edit" | "delete"): ModalFill {
     };
 }
 
-function itemRow(item: FridgeItem, today: string): string {
+function itemRow(
+    item: FridgeItem,
+    today: string,
+    view: FridgePageView,
+): string {
     const editTarget =
         item.kind === "supply" ? FRIDGE_EDIT_SUPPLY_ID : FRIDGE_EDIT_FOOD_ID;
     const rowActions = `${modalTrigger({
@@ -208,13 +216,22 @@ function itemRow(item: FridgeItem, today: string): string {
         icon: iconTrash(),
         fill: itemFill(item, "delete"),
     })}`;
+    const grocery =
+        view.groceryLines != null && view.foodsById != null
+            ? { lines: view.groceryLines, foodsById: view.foodsById }
+            : undefined;
+    const noticeCtx =
+        view.foodsById != null
+            ? { from: "/fridge", foods: view.foodsById }
+            : undefined;
     return renderFridgeItemRow({
         id: item.id,
         kind: item.kind,
         displayName: item.displayName,
         quantityLabel: quantityLabel(item),
         expiresOn: item.expiresOn,
-        notices: fridgeNotices([item], today),
+        notices: fridgeNotices([item], today, grocery),
+        noticeCtx,
         rowActions,
     });
 }
@@ -337,9 +354,10 @@ function locationSection(
     location: FridgeLocation,
     items: FridgeItem[],
     today: string,
+    view: FridgePageView,
 ): string {
     const locItems = items.filter((item) => item.locationId === location.id);
-    const rows = locItems.map((item) => itemRow(item, today)).join("");
+    const rows = locItems.map((item) => itemRow(item, today, view)).join("");
     const empty = locItems.length
         ? ""
         : emptyState(`Add an item to ${location.name}.`, "add-item-prompt");
@@ -457,7 +475,7 @@ export function renderFridgePage(view: FridgePageView): string {
         })),
     );
     const sections = view.locations
-        .map((loc) => locationSection(loc, view.items, today))
+        .map((loc) => locationSection(loc, view.items, today, view))
         .join("");
     const locationErrorId = sharedLocationErrorId(view);
     const itemErrorId = sharedItemErrorId(view);

@@ -18,7 +18,11 @@ import {
     type FridgeStore,
     FridgeInputError,
 } from "./fridge.js";
-import type { GroceryLine, GroceryListStore } from "./grocery.js";
+import {
+    onGroceryList,
+    type GroceryLine,
+    type GroceryListStore,
+} from "./grocery.js";
 import {
     convertQuantity,
     dimensionOf,
@@ -731,22 +735,37 @@ export function listExpiring(
 export function fridgeNotices(
     items: readonly Pick<
         FridgeItem,
-        "id" | "displayName" | "quantity" | "expiresOn"
+        "id" | "kind" | "foodId" | "displayName" | "quantity" | "expiresOn"
     >[],
     today: string,
+    grocery?: {
+        lines: readonly Pick<GroceryLine, "foodId" | "checked">[];
+        foodsById: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>;
+    },
 ): Notice[] {
     const out: Notice[] = [];
     for (const item of items) {
         const level = expiryLevel(item.expiresOn, today);
         if (level == null) continue;
         const expiresOn = item.expiresOn ?? "";
-        const baseParams = {
+        const baseParams: Record<string, string | number | string[]> = {
             name: item.displayName,
             amount: item.quantity.amount,
             unit: item.quantity.unit,
             expiresOn,
             level,
         };
+        if (grocery && item.kind === "food" && item.foodId != null) {
+            const listed = onGroceryList(
+                item,
+                grocery.lines,
+                grocery.foodsById,
+            );
+            baseParams.onGroceryList = listed ? "yes" : "no";
+            if (level !== "expired") {
+                baseParams.daysLeft = daysUntilExpiry(today, expiresOn);
+            }
+        }
         const code = level === "expired" ? "fridge.expired" : "fridge.expiring";
         out.push({
             code,

@@ -72,7 +72,7 @@ import { effectiveFoodsByIds } from "../domain/foods.js";
 import type { Food } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
-import { NOTICE_COPY, noticeSentence } from "../copy/notices.js";
+import { noticeActionFor, noticeSentence } from "../copy/notices.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -160,9 +160,10 @@ export function noticeToWire(notice: Notice): WireNotice {
             name: r.name,
         })),
         message: noticeSentence(notice),
-        action: NOTICE_COPY[notice.code].action
-            ? { label: NOTICE_COPY[notice.code].action!.label }
-            : null,
+        action: (() => {
+            const row = noticeActionFor(notice);
+            return row ? { label: row.label } : null;
+        })(),
     };
 }
 
