@@ -654,7 +654,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 ]),
                 subjectTimes: new Map([
                     ["fridge_item:i2", Date.parse("2026-01-01T00:00:00.000Z")],
-                    [`recipe:${RECIPE.id}`, Date.parse("2026-02-01T00:00:00.000Z")],
+                    [
+                        `recipe:${RECIPE.id}`,
+                        Date.parse("2026-02-01T00:00:00.000Z"),
+                    ],
                 ]),
                 noticeFoods: new Map(),
             },
