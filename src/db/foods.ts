@@ -278,6 +278,67 @@ export function liveFoodsStore(): FoodsStore {
                 }
             });
         },
+        async listBarcodesForFoods(householdId, foodIds) {
+            const ids = [...new Set(foodIds)];
+            if (ids.length === 0) return new Map();
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        food_id: unknown;
+                        barcode: unknown;
+                    }>(
+                        tx,
+                        tx`
+                            select food_id, barcode
+                            from ${tx.unsafe(FOOD_BARCODES)}
+                            where household_id = ${householdId}
+                              and food_id = any(${tx.array(ids, "uuid")})
+                        `,
+                    );
+                    const grouped = new Map<string, string[]>();
+                    for (const row of data) {
+                        const foodId = String(row.food_id);
+                        const barcode = String(row.barcode);
+                        const list = grouped.get(foodId);
+                        if (list) list.push(barcode);
+                        else grouped.set(foodId, [barcode]);
+                    }
+                    return grouped;
+                } catch (err) {
+                    throw pgError("list barcodes for foods", err);
+                }
+            });
+        },
+        async getBarcodeFoodIds(householdId, barcodesIn) {
+            const barcodes = [...new Set(barcodesIn)];
+            if (barcodes.length === 0) return new Map();
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        barcode: unknown;
+                        food_id: unknown;
+                    }>(
+                        tx,
+                        tx`
+                            select barcode, food_id
+                            from ${tx.unsafe(FOOD_BARCODES)}
+                            where household_id = ${householdId}
+                              and barcode = any(${tx.array(barcodes, "text")})
+                        `,
+                    );
+                    const out = new Map<string, string>();
+                    for (const row of data) {
+                        const barcode = String(row.barcode);
+                        if (!out.has(barcode)) {
+                            out.set(barcode, String(row.food_id));
+                        }
+                    }
+                    return out;
+                } catch (err) {
+                    throw pgError("match barcodes", err);
+                }
+            });
+        },
         async setBarcode(householdId, barcode, foodId) {
             return run(async (tx) => {
                 try {

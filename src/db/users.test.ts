@@ -27,6 +27,7 @@ const EXPECTED_USER_FKS: {
     { table: "meal_items", column: "user_id", deltype: "c" },
     { table: "member_allergens", column: "user_id", deltype: "c" },
     { table: "member_dislikes", column: "user_id", deltype: "c" },
+    { table: "nutrition_goal_days", column: "user_id", deltype: "c" },
     { table: "nutrition_goals", column: "user_id", deltype: "c" },
     { table: "person_rules", column: "user_id", deltype: "c" },
     { table: "profiles", column: "user_id", deltype: "c" },
@@ -76,6 +77,7 @@ const CASCADE_TABLES = [
     "meal_items",
     "member_allergens",
     "member_dislikes",
+    "nutrition_goal_days",
     "nutrition_goals",
     "person_rules",
     "profiles",
@@ -118,6 +120,10 @@ async function seedCascadeAndSetNullRows(
     await sql`
         insert into nutrition_goals (user_id, daily_calories)
         values (${userId}, ${1800})
+    `;
+    await sql`
+        insert into nutrition_goal_days (household_id, user_id, date, daily_calories)
+        values (${householdId}, ${userId}, ${"2026-11-08"}, ${2200})
     `;
     await sql`
         insert into person_rules (household_id, user_id, body)
