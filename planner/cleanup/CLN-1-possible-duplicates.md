@@ -1,7 +1,7 @@
 ---
 id: CLN-1
 title: Possible duplicates
-status: doing
+status: done
 priority: high
 size: M
 type: feature

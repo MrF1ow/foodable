@@ -283,7 +283,13 @@ export function classifyPath(path: string): ClassifyResult {
     if (path.endsWith(".test.ts")) {
         return { level: "low", area: "test", mapped: true };
     }
-    if (path.endsWith(".md") || path.startsWith("docs/")) {
+    // planner/ is planning data (item files and retired.yml), checked by the
+    // planner rules, not code.
+    if (
+        path.endsWith(".md") ||
+        path.startsWith("docs/") ||
+        path.startsWith("planner/")
+    ) {
         return { level: "low", area: "docs", mapped: true };
     }
     const mediumExact = MEDIUM_EXACT[path];

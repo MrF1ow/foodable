@@ -1,7 +1,7 @@
 ---
 id: CLN-2
 title: Restock run
-status: doing
+status: done
 priority: high
 size: M
 type: feature
