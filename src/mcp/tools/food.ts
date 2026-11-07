@@ -30,7 +30,11 @@ import {
     type EffectiveFood,
     type Food,
 } from "../../domain/foods.js";
-import { householdFoodNames } from "../shared.js";
+import {
+    householdFoodNames,
+    NOTICE_SCHEMA,
+    type WireNotice,
+} from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
 export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
@@ -222,6 +226,8 @@ const EFFECTIVE_FOOD = z.object({
 export const GET_FOOD_OUTPUT = FOOD_OUTPUT.extend({
     products: z.array(FOOD_PRODUCT_ITEM),
     effective: EFFECTIVE_FOOD,
+    /** Reserved for notice producers (e.g. possible duplicates); always [] until then. */
+    notices: z.array(NOTICE_SCHEMA),
 });
 
 function foodPayload(
@@ -417,7 +423,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Food",
             description:
-                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Returns stored usual store and usual amount on the row plus effective usual store/amount (read through the usual product for plain foods). Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product).",
+                "Read one household catalog food, including aliases, barcodes, stored nutrition per 100 g, default unit, grams per each, grams per millilitre, and allergens. Returns stored usual store and usual amount on the row plus effective usual store/amount (read through the usual product for plain foods). Also lists the food family's products and usual product, with effective nutrition (what recipes and new meal logs read through the usual product). `notices` is reserved for future attention items; it is empty today.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -455,6 +461,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         ...foodPayload(food, aliases, barcodes),
                         products: familyProducts(food, listed),
                         effective: effectivePayload(eff),
+                        notices: [] as WireNotice[],
                     };
                     return {
                         content: [

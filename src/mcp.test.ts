@@ -88,7 +88,9 @@ import {
 } from "./domain/foods.js";
 import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
 import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
+import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
+import { utcTodayFromDate } from "./domain/stock.js";
 import { createMemoryRecipesStore } from "./domain/recipes.js";
 import {
     createGroceryStore,
@@ -4989,6 +4991,238 @@ describe("phone-app domain MCP tools", () => {
             expect(line.isError).toBeFalsy();
             expect(line.structuredContent?.warning).toContain("peanut");
             expect(textOf(line).toLowerCase()).toContain("peanut");
+        });
+    });
+
+    test("get_recipe wires recipe.no_nutrition notices beside gaps", async () => {
+        await withUser(alice, async (call) => {
+            const plain = await call("upsert_food", { name: "Half and half" });
+            const plainId = plain.structuredContent?.id as string;
+            await call("upsert_food", {
+                food_id: plainId,
+                grams_per_ml: 1,
+            });
+            const recipe = await call("create_recipe", {
+                name: "Coffee",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: plainId,
+                amount: 60,
+                unit: "ml",
+            });
+            const got = await call("get_recipe", { id: recipeId });
+            expect(got.isError).toBeFalsy();
+            const sc = got.structuredContent as {
+                notices: Array<{
+                    code: string;
+                    severity: string;
+                    subject: {
+                        kind: string;
+                        recipe_id: string | null;
+                    };
+                    message: string;
+                    action: { label: string } | null;
+                }>;
+                macros_per_portion: { gaps: Array<{ message: string }> };
+            };
+            for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
+            const nn = sc.notices.find((n) => n.code === "recipe.no_nutrition");
+            expect(nn?.severity).toBe("warn");
+            expect(nn?.subject.kind).toBe("recipe_ingredient");
+            expect(nn?.subject.recipe_id).toBe(recipeId);
+            expect(nn?.action).toEqual({ label: "Pick usual product" });
+            expect(nn?.message).toBe(sc.macros_per_portion.gaps[0]?.message);
+        });
+    });
+
+    test("get_recipe wires recipe.allergen block notice for viewing member", async () => {
+        await withUser(alice, async (call) => {
+            await call("set_household_rules", {
+                person: [
+                    { user_id: alice, allergens: [{ allergen: "peanut" }] },
+                ],
+            });
+            const pb = await call("upsert_food", {
+                name: "Peanut Butter",
+                allergens: ["peanut"],
+                calories: 100,
+                protein_g: 1,
+                carbs_g: 1,
+                fat_g: 1,
+            });
+            const pbId = pb.structuredContent?.id as string;
+            const recipe = await call("create_recipe", {
+                name: "Toast",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: pbId,
+                amount: 10,
+                unit: "g",
+            });
+            const got = await call("get_recipe", { id: recipeId });
+            const notices = (got.structuredContent as { notices: unknown[] })
+                .notices;
+            for (const n of notices) NOTICE_SCHEMA.parse(n);
+            const hit = notices.find(
+                (n) => (n as { code: string }).code === "recipe.allergen",
+            ) as { severity: string } | undefined;
+            expect(hit?.severity).toBe("block");
+            expect(textOf(got)).toContain("Allergen:");
+            expect(textOf(got)).toContain("Allergen: Contains peanut");
+        });
+    });
+
+    test("list_grocery_lines wires grocery.allergen notices on lines", async () => {
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        await withPat(async (call) => {
+            await call("set_household_rules", {
+                person: [{ user_id: bob, allergens: [{ allergen: "peanut" }] }],
+            });
+            await call("upsert_food", {
+                name: "Peanut Butter",
+                allergens: ["peanut"],
+            });
+            const added = await call("add_grocery_line", {
+                store_id: store.id,
+                kind: "food",
+                name: "Peanut Butter",
+                amount: 1,
+            });
+            expect(added.structuredContent?.warning).toBe(
+                "Contains peanut — Bob.",
+            );
+            await call("add_grocery_line", {
+                store_id: store.id,
+                kind: "food",
+                name: "Rolled oats",
+                amount: 1,
+            });
+            const listed = await call("list_grocery_lines");
+            const lines = (
+                listed.structuredContent as {
+                    stores: Array<{
+                        sections: Array<{
+                            lines: Array<{
+                                display_name: string;
+                                notices: Array<{
+                                    code: string;
+                                    severity: string;
+                                    message: string;
+                                    related: Array<{
+                                        kind: string;
+                                        name: string;
+                                    }>;
+                                }>;
+                            }>;
+                        }>;
+                    }>;
+                }
+            ).stores.flatMap((s) => s.sections.flatMap((sec) => sec.lines));
+            const pean = lines.find((l) =>
+                l.display_name.toLowerCase().includes("peanut"),
+            );
+            expect(pean).toBeTruthy();
+            for (const n of pean!.notices) NOTICE_SCHEMA.parse(n);
+            expect(pean!.notices[0]?.code).toBe("grocery.allergen");
+            expect(pean!.notices[0]?.severity).toBe("block");
+            expect(
+                pean!.notices[0]?.related.some(
+                    (r) => r.kind === "member" && r.name === "Bob",
+                ),
+            ).toBe(true);
+            expect(pean!.notices[0]?.message).toBe(
+                added.structuredContent?.warning as string,
+            );
+            expect(textOf(listed)).toContain(" — Contains peanut — Bob.");
+            const oats = lines.find((l) =>
+                l.display_name.toLowerCase().includes("oats"),
+            )!;
+            expect(oats.notices).toEqual([]);
+        });
+    });
+
+    test("get_fridge wires expiry notices per item", async () => {
+        function addDaysUtc(iso: string, delta: number): string {
+            const [y, m, d] = iso.split("-").map(Number);
+            return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                .toISOString()
+                .slice(0, 10);
+        }
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const today = utcTodayFromDate();
+            for (const [name, expiresOn] of [
+                ["Expired milk", addDaysUtc(today, -1)],
+                ["Soon yogurt", addDaysUtc(today, 4)],
+                ["No date flour", null],
+            ] as const) {
+                const added = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    name,
+                    amount: 1,
+                    unit: "g",
+                });
+                if (expiresOn != null) {
+                    const row = (await db.fridgeStore.listItems("hh-1")).find(
+                        (r) => r.id === added.structuredContent?.id,
+                    );
+                    await db.fridgeStore.updateItem({
+                        ...row!,
+                        expiresOn,
+                    });
+                }
+            }
+            const listed = await call("get_fridge");
+            const items = (
+                listed.structuredContent as {
+                    locations: Array<{
+                        items: Array<{
+                            display_name: string;
+                            notices: Array<{ code: string; severity: string }>;
+                        }>;
+                    }>;
+                }
+            ).locations.flatMap((l) => l.items);
+            for (const item of items) {
+                for (const n of item.notices) NOTICE_SCHEMA.parse(n);
+            }
+            const expired = items.find((i) =>
+                i.display_name.includes("Expired"),
+            )!;
+            expect(expired.notices[0]?.code).toBe("fridge.expired");
+            expect(expired.notices[0]?.severity).toBe("warn");
+            const soonItem = items.find((i) =>
+                i.display_name.includes("Soon"),
+            )!;
+            expect(soonItem.notices[0]?.code).toBe("fridge.expiring");
+            expect(soonItem.notices[0]?.severity).toBe("info");
+            const plain = items.find((i) =>
+                i.display_name.includes("No date"),
+            )!;
+            expect(plain.notices).toEqual([]);
+        });
+    });
+
+    test("get_food includes empty notices", async () => {
+        await withPat(async (call) => {
+            const made = await call("upsert_food", { name: "Rice" });
+            const got = await call("get_food", {
+                food_id: made.structuredContent?.id as string,
+            });
+            const payload = GET_FOOD_OUTPUT.parse(got.structuredContent);
+            expect(payload.notices).toEqual([]);
         });
     });
 });

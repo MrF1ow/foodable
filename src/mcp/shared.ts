@@ -62,9 +62,17 @@ export {
 } from "../domain/import.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import { listFridge } from "../domain/fridge.js";
-import { groceryAllergenWarning } from "../domain/grocery.js";
+import {
+    allergenNotices,
+    groceryAllergenWarning,
+    type GroceryAllergenMember,
+} from "../domain/grocery.js";
 import { listRecipes } from "../domain/recipes.js";
 import { effectiveFoodsByIds } from "../domain/foods.js";
+import type { Food } from "../domain/foods.js";
+import type { Notice, NoticeCode } from "../domain/notices.js";
+import { NOTICE_CODES } from "../domain/notices.js";
+import { NOTICE_COPY, noticeSentence } from "../copy/notices.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -83,6 +91,130 @@ export const WEIGHT_TRENDS_WIDGET_URI = "ui://widget/weight-trends.html";
 export const IMPORT_MEALS_WIDGET_URI = "ui://widget/import-meals.html";
 export const GROCERY_LIST_WIDGET_URI = "ui://widget/grocery-list.html";
 export const FRIDGE_WIDGET_URI = "ui://widget/fridge.html";
+
+const NOTICE_CODE_ENUM = NOTICE_CODES as unknown as [
+    NoticeCode,
+    ...NoticeCode[],
+];
+
+const NOTICE_SUBJECT_KIND = z.enum([
+    "food",
+    "recipe",
+    "recipe_ingredient",
+    "fridge_item",
+    "grocery_line",
+]);
+
+const NOTICE_RELATED_KIND = z.enum([
+    "food",
+    "recipe",
+    "recipe_ingredient",
+    "fridge_item",
+    "grocery_line",
+    "member",
+]);
+
+/** Wire shape for MCP tool `notices` arrays (same sentences as the app; no `params`). */
+export const NOTICE_SCHEMA = z.object({
+    code: z.enum(NOTICE_CODE_ENUM),
+    severity: z
+        .enum(["block", "warn", "info"])
+        .describe(
+            "block: raise with the person before acting; warn: something is wrong; info: a suggestion",
+        ),
+    subject: z.object({
+        kind: NOTICE_SUBJECT_KIND,
+        id: z.string(),
+        recipe_id: z.string().nullable(),
+    }),
+    related: z.array(
+        z.object({
+            kind: NOTICE_RELATED_KIND,
+            id: z.string(),
+            name: z.string(),
+        }),
+    ),
+    message: z
+        .string()
+        .describe(
+            "Full sentence for the model and UI, from the notice registry.",
+        ),
+    action: z.object({ label: z.string() }).nullable(),
+});
+export type WireNotice = z.infer<typeof NOTICE_SCHEMA>;
+
+export function noticeToWire(notice: Notice): WireNotice {
+    const subject = notice.subject;
+    return {
+        code: notice.code,
+        severity: notice.severity,
+        subject: {
+            kind: subject.kind,
+            id: subject.id,
+            recipe_id:
+                subject.kind === "recipe_ingredient" ? subject.recipeId : null,
+        },
+        related: notice.related.map((r) => ({
+            kind: r.kind,
+            id: r.id,
+            name: r.name,
+        })),
+        message: noticeSentence(notice),
+        action: NOTICE_COPY[notice.code].action
+            ? { label: NOTICE_COPY[notice.code].action!.label }
+            : null,
+    };
+}
+
+/** All household members with their allergen rules; use on grocery MCP paths and `groceryLineExtras`. */
+export async function householdAllergenMembers(
+    householdId: string,
+): Promise<GroceryAllergenMember[]> {
+    const members = await listHouseholdMembers(householdId);
+    const rules = liveRulesStore();
+    return Promise.all(
+        members.map(async (member) => ({
+            displayName: member.displayName,
+            userId: member.userId,
+            allergens: await rules.listAllergens(householdId, member.userId),
+        })),
+    );
+}
+
+/** Recipe-page allergen notices for the viewing member (mirrors `src/web/loaders.ts`). */
+export async function recipeAllergenNoticesForView(p: {
+    householdId: string;
+    recipeId: string;
+    ingredients: readonly { foodId: string | null; displayName: string }[];
+    catalog: ReadonlyMap<string, Food>;
+    viewingMemberId: string;
+}): Promise<Notice[]> {
+    const members = await listHouseholdMembers(p.householdId);
+    const person = members.find((m) => m.userId === p.viewingMemberId);
+    const rules = liveRulesStore();
+    const allergens = person
+        ? await rules.listAllergens(p.householdId, p.viewingMemberId)
+        : [];
+    const allCatalogued = p.ingredients.every(
+        (row) => row.foodId && p.catalog.has(row.foodId),
+    );
+    return allergenNotices(
+        { kind: "recipe", id: p.recipeId },
+        p.ingredients.map((row) => row.displayName).join(" "),
+        person
+            ? [
+                  {
+                      displayName: person.displayName,
+                      userId: person.userId,
+                      allergens,
+                  },
+              ]
+            : [],
+        allCatalogued
+            ? [...p.catalog.values()].flatMap((food) => food.allergens)
+            : null,
+    );
+}
 
 /** Shared date window for get_meals / get_water / get_weight.
  * `date` is a single local day (defaults to today). `from`+`to` is an
@@ -1091,9 +1223,9 @@ export async function groceryLineExtras(
         foodId?: string | null;
     },
 ): Promise<{ alreadyHave: string | null; warning: string | null }> {
-    const [fridge, members] = await Promise.all([
+    const [fridge, allergenMembers] = await Promise.all([
         listFridge(liveFridgeStore(), householdId),
-        listHouseholdMembers(householdId),
+        householdAllergenMembers(householdId),
     ]);
     const catalog = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
         line.foodId,
@@ -1109,14 +1241,6 @@ export async function groceryLineExtras(
             foodId: item.foodId,
         })),
         catalog,
-    );
-    const rules = liveRulesStore();
-    const allergenMembers = await Promise.all(
-        members.map(async (member) => ({
-            displayName: member.displayName,
-            userId: member.userId,
-            allergens: await rules.listAllergens(householdId, member.userId),
-        })),
     );
     const food = line.foodId ? catalog.get(line.foodId) : undefined;
     const warning = groceryAllergenWarning(
