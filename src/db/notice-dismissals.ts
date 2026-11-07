@@ -104,6 +104,23 @@ export async function cleanupDismissalsForFoodTx(
     await cleanupDismissalsForRelatedKeyTx(tx, householdId, foodId);
 }
 
+export async function cleanupDismissalsForFridgeLocationTx(
+    tx: Tx,
+    householdId: string,
+    locationId: string,
+): Promise<void> {
+    await tx`
+        delete from ${tx.unsafe(NOTICE_DISMISSALS)}
+        where household_id = ${householdId}
+          and subject_kind = 'fridge_item'
+          and subject_id in (
+              select id from fridge_items
+              where household_id = ${householdId}
+                and location_id = ${locationId}::uuid
+          )
+    `;
+}
+
 export async function cleanupDismissalsForRecipeTx(
     tx: Tx,
     householdId: string,
@@ -146,33 +163,53 @@ export function liveNoticeDismissalsStore(): NoticeDismissalsStore {
         },
         async insert(row) {
             return run(async (tx) => {
-                const existing = await selectDismissalByKey(
-                    tx,
-                    row.householdId,
-                    {
-                        code: row.code,
-                        subjectKind: row.subjectKind,
-                        subjectId: row.subjectId,
-                        relatedKey: row.relatedKey,
-                    },
-                );
-                if (existing) return existing;
-                const data = await insertReturning<Record<string, unknown>>(
-                    tx,
-                    NOTICE_DISMISSALS,
-                    noticeDismissalToRow({
-                        id: row.id ?? crypto.randomUUID(),
-                        householdId: row.householdId,
-                        code: row.code,
-                        subjectKind: row.subjectKind,
-                        subjectId: row.subjectId,
-                        relatedKey: row.relatedKey,
-                        dismissedBy: row.dismissedBy,
-                    }),
-                    NOTICE_DISMISSAL_COLS,
-                    "dismiss notice",
-                );
-                return noticeDismissalFromRow(data);
+                const id = row.id ?? crypto.randomUUID();
+                try {
+                    const inserted = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            insert into ${tx.unsafe(NOTICE_DISMISSALS)} (
+                                id, household_id, code, subject_kind, subject_id,
+                                related_key, dismissed_by
+                            )
+                            values (
+                                ${id}::uuid,
+                                ${row.householdId},
+                                ${row.code},
+                                ${row.subjectKind},
+                                ${row.subjectId}::uuid,
+                                ${row.relatedKey},
+                                ${row.dismissedBy}
+                            )
+                            on conflict (household_id, code, subject_kind, subject_id, related_key)
+                            do nothing
+                            returning ${tx.unsafe(NOTICE_DISMISSAL_COLS)}
+                        `,
+                        "dismiss notice",
+                    );
+                    if (inserted) {
+                        return noticeDismissalFromRow(inserted);
+                    }
+                    const existing = await selectDismissalByKey(
+                        tx,
+                        row.householdId,
+                        {
+                            code: row.code,
+                            subjectKind: row.subjectKind,
+                            subjectId: row.subjectId,
+                            relatedKey: row.relatedKey,
+                        },
+                    );
+                    if (!existing) {
+                        throw pgError(
+                            "dismiss notice",
+                            new Error("insert conflict but row missing"),
+                        );
+                    }
+                    return existing;
+                } catch (err) {
+                    throw pgError("dismiss notice", err);
+                }
             });
         },
         async delete(householdId, key) {

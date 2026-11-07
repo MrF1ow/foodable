@@ -12,7 +12,8 @@ export type CategoryId =
     | "fridge"
     | "grocery"
     | "recipes"
-    | "rules";
+    | "rules"
+    | "notices";
 
 export type BadgeKind =
     | "log"
@@ -343,7 +344,7 @@ const TOOLS_BASE: ToolIdentity[] = [
     },
     {
         name: "list_notices",
-        category: "rules",
+        category: "notices",
         badges: ["view"],
         params: [
             { name: "code", required: false },
@@ -354,7 +355,7 @@ const TOOLS_BASE: ToolIdentity[] = [
     },
     {
         name: "dismiss_notice",
-        category: "rules",
+        category: "notices",
         badges: ["edit"],
         params: [
             { name: "code", required: true },

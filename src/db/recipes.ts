@@ -282,5 +282,29 @@ export function liveRecipesStore(): RecipesStore {
                 }
             });
         },
+        async recipeActivityMsById(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        id: string;
+                        activity_at: string;
+                    }>(
+                        tx,
+                        tx`
+                            select id, coalesce(updated_at, created_at) as activity_at
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                        `,
+                    );
+                    const map = new Map<string, number>();
+                    for (const row of data) {
+                        map.set(String(row.id), Date.parse(row.activity_at));
+                    }
+                    return map;
+                } catch (err) {
+                    throw pgError("list recipe activity", err);
+                }
+            });
+        },
     };
 }

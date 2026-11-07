@@ -1,4 +1,5 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, mock } from "bun:test";
+import * as noticesCopy from "../copy/notices.js";
 import {
     createMemoryNoticeDismissalsStore,
     dismissalKey,
@@ -23,6 +24,7 @@ import {
     addManualFood,
     createMemoryFridgeStore,
     deleteItem,
+    deleteLocation,
 } from "./fridge.js";
 import {
     addFridgeItemAdjust,
@@ -236,7 +238,63 @@ async function expectTargetDismissalsGone(
     expect(rows).toHaveLength(1);
 }
 
+test("pair dismissal is found from either food side", async () => {
+    const realPair = noticesCopy.noticeDismissPair;
+    mock.module("../copy/notices.js", () => ({
+        ...noticesCopy,
+        noticeDismissPair: (code: string) =>
+            code === "fridge.expiring" || realPair(code as never),
+    }));
+    const { isDismissed: isDismissedLive } =
+        await import("./notice-dismissals.js");
+    const idA = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const idB = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const pair = normalizePairIds(idA, idB);
+    const dismissals = createMemoryNoticeDismissalsStore();
+    await dismissals.insert({
+        householdId: HH,
+        code: "fridge.expiring",
+        subjectKind: "food",
+        subjectId: pair.subjectId,
+        relatedKey: pair.relatedKey,
+        dismissedBy: "u1",
+    });
+    const fromA: Notice = {
+        code: "fridge.expiring",
+        severity: "info",
+        subject: { kind: "food", id: idA },
+        related: [{ kind: "food", id: idB, name: "B" }],
+        params: {},
+    };
+    const fromB: Notice = {
+        ...fromA,
+        subject: { kind: "food", id: idB },
+        related: [{ kind: "food", id: idA, name: "A" }],
+    };
+    const list = await dismissals.listForHousehold(HH);
+    expect(isDismissedLive(fromA, list)).toBe(true);
+    expect(isDismissedLive(fromB, list)).toBe(true);
+});
+
 describe("dismissal cleanup on writers (memory)", () => {
+    test("fridge deleteLocation removes dismissals for items in the location", async () => {
+        const dismissals = createMemoryNoticeDismissalsStore();
+        const fridge = createMemoryFridgeStore();
+        fridge.linkDismissals(dismissals);
+        const foods = createMemoryFoodsStore();
+        const loc = await addLocation(fridge, HH, "Shelf");
+        const item = await addManualFood(fridge, foods, {
+            householdId: HH,
+            locationId: loc.id,
+            name: "Tea",
+            amount: 1,
+            unit: "g",
+        });
+        await seedSubjectDismissals(dismissals, "fridge_item", item.id);
+        expect(await deleteLocation(fridge, HH, loc.id)).toBe(true);
+        await expectTargetDismissalsGone(dismissals, "fridge_item", item.id);
+    });
+
     test("fridge deleteItem", async () => {
         const dismissals = createMemoryNoticeDismissalsStore();
         const fridge = createMemoryFridgeStore();

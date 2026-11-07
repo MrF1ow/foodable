@@ -149,6 +149,7 @@ export type RecipesStore = {
         userId: string,
     ): Promise<RecipePortion | null>;
     upsertPortion(row: RecipePortion): Promise<RecipePortion>;
+    recipeActivityMsById?(householdId: string): Promise<Map<string, number>>;
 };
 
 export type RecipePatch = {
@@ -658,10 +659,15 @@ export function macrosForPerson(
     return sum;
 }
 
-export type MemoryRecipesStore = RecipesStore & MemoryNoticeDismissalsHolder;
+export type MemoryRecipesStore = RecipesStore &
+    MemoryNoticeDismissalsHolder & {
+        __paritySetRecipeActivityAt?(id: string, activityAt: string): void;
+    };
+
+type MemoryRecipeRow = Recipe & { activityAt: string };
 
 export function createMemoryRecipesStore(): MemoryRecipesStore {
-    const recipes: Recipe[] = [];
+    const recipes: MemoryRecipeRow[] = [];
     const ingredients: RecipeIngredient[] = [];
     const portions: RecipePortion[] = [];
     let linkedDismissals: NoticeDismissalsStore | undefined;
@@ -686,7 +692,10 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             return row ? cloneRecipe(row) : null;
         },
         async insertRecipe(row) {
-            const saved = cloneRecipe(row);
+            const saved: MemoryRecipeRow = {
+                ...cloneRecipe(row),
+                activityAt: new Date().toISOString(),
+            };
             recipes.push(saved);
             return cloneRecipe(saved);
         },
@@ -697,8 +706,25 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     recipe.id === row.id,
             );
             if (idx < 0) return null;
-            recipes[idx] = cloneRecipe(row);
+            const updated: MemoryRecipeRow = {
+                ...cloneRecipe(row),
+                activityAt: new Date().toISOString(),
+            };
+            recipes[idx] = updated;
             return cloneRecipe(row);
+        },
+        async recipeActivityMsById(householdId) {
+            const map = new Map<string, number>();
+            for (const recipe of recipes) {
+                if (recipe.householdId === householdId) {
+                    map.set(recipe.id, Date.parse(recipe.activityAt));
+                }
+            }
+            return map;
+        },
+        __paritySetRecipeActivityAt(id: string, activityAt: string) {
+            const row = recipes.find((recipe) => recipe.id === id);
+            if (row) row.activityAt = activityAt;
         },
         async deleteRecipe(householdId, id) {
             const ingIds = ingredients

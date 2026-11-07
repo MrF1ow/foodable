@@ -12,7 +12,7 @@ import * as actualDbStock from "../../db/stock.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import * as actualFoods from "../../foods.js";
-import { createMemoryFoodsStore } from "../../domain/foods.js";
+import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
 import {
     addLocation,
     addManualFood,
@@ -447,5 +447,200 @@ describe("needs-attention routes", () => {
         expect(badgeHtml).toContain('class="pill app-bar-attention"');
         expect(badgeHtml).toContain(`>${count}<`);
         expect(badgeHtml).toContain('href="/settings" data-turbo="false"');
+    });
+
+    test("panel title is plain text with an Open recipe link in the body", async () => {
+        const { recipe } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        expect(html).toContain("<h2>Gap stew</h2>");
+        expect(html).toContain(
+            `<a href="/recipes/${recipe.id}">Open recipe</a>`,
+        );
+        expect(html).not.toContain("&lt;a href=");
+    });
+
+    test("one recipe with three gap ingredients renders one recipe panel", async () => {
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Triple gap",
+            yieldPortions: 2,
+        });
+        for (const name of ["A", "B", "C"]) {
+            await db.recipesStore.insertIngredient({
+                id: crypto.randomUUID(),
+                householdId: HH,
+                recipeId: recipe.id,
+                kind: "food",
+                displayName: name,
+                quantity: { amount: 1, unit: "g" },
+                foodId: null,
+                sortOrder: 0,
+                note: null,
+            });
+        }
+        const r = await app().request("http://x/needs-attention", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        expect(html).toContain("<h2>Triple gap</h2>");
+        const stewPanels = (html.match(/<h2>Triple gap<\/h2>/g) ?? []).length;
+        expect(stewPanels).toBe(1);
+        expect(html).toContain("not linked to a food");
+    });
+
+    test("recipe.no_nutrition shows Pick usual product action", async () => {
+        const food = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Buttermilk",
+            }),
+        );
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Pancakes",
+            yieldPortions: 2,
+        });
+        await db.recipesStore.insertIngredient({
+            id: crypto.randomUUID(),
+            householdId: HH,
+            recipeId: recipe.id,
+            kind: "food",
+            displayName: "Buttermilk",
+            quantity: { amount: 100, unit: "g" },
+            foodId: food.id,
+            sortOrder: 0,
+            note: null,
+        });
+        const r = await app().request("http://x/needs-attention", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        expect(html).toContain("Pick usual product");
+        expect(html).toContain("/needs-attention");
+    });
+
+    test("show dismissed names an existing fridge item", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+            }).toString(),
+        });
+        const dismissed = await app().request(
+            "http://x/needs-attention?show=dismissed",
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        const html = await dismissed.text();
+        expect(html).toContain("Soon yogurt");
+        expect(html).not.toContain("Removed item");
+    });
+
+    test("show dismissed opens the disclosure", async () => {
+        const r = await app().request(
+            "http://x/needs-attention?show=dismissed",
+            {
+                headers: { cookie: cookieFor(ALICE) },
+            },
+        );
+        const html = await r.text();
+        expect(html).toContain('<details class="more" open>');
+    });
+
+    test("panels sort newest activity first", async () => {
+        const today = utcTodayFromDate();
+        const oldLoc = await addLocation(db.fridgeStore, HH, "Old");
+        const newLoc = await addLocation(db.fridgeStore, HH, "New");
+        const oldItem = await addManualFood(db.fridgeStore, db.foodsStore, {
+            householdId: HH,
+            locationId: oldLoc.id,
+            name: "Old stock",
+            amount: 1,
+            unit: "g",
+        });
+        const newRecipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Fresh recipe",
+            yieldPortions: 1,
+        });
+        await db.fridgeStore.updateItem({
+            ...oldItem,
+            expiresOn: addDaysUtc(today, 4),
+        });
+        (
+            db.fridgeStore as typeof db.fridgeStore & {
+                __paritySetItemCreatedAt?: (id: string, at: string) => void;
+            }
+        ).__paritySetItemCreatedAt?.(oldItem.id, "2020-01-01T00:00:00.000Z");
+        (
+            db.recipesStore as typeof db.recipesStore & {
+                __paritySetRecipeActivityAt?: (id: string, at: string) => void;
+            }
+        ).__paritySetRecipeActivityAt?.(
+            newRecipe.id,
+            "2030-01-01T00:00:00.000Z",
+        );
+        await db.recipesStore.insertIngredient({
+            id: crypto.randomUUID(),
+            householdId: HH,
+            recipeId: newRecipe.id,
+            kind: "food",
+            displayName: "Gap",
+            quantity: { amount: 1, unit: "g" },
+            foodId: null,
+            sortOrder: 0,
+            note: null,
+        });
+        const r = await app().request("http://x/needs-attention", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        const freshAt = html.indexOf("<h2>Fresh recipe</h2>");
+        const oldAt = html.indexOf("<h2>Old stock</h2>");
+        expect(freshAt).toBeGreaterThanOrEqual(0);
+        expect(oldAt).toBeGreaterThanOrEqual(0);
+        expect(freshAt).toBeLessThan(oldAt);
+    });
+
+    test("deleting a fridge location cleans dismissals for its items", async () => {
+        const loc = await addLocation(db.fridgeStore, HH, "Door");
+        const item = await addManualFood(db.fridgeStore, db.foodsStore, {
+            householdId: HH,
+            locationId: loc.id,
+            name: "Juice",
+            amount: 1,
+            unit: "g",
+        });
+        await db.dismissalsStore.insert({
+            householdId: HH,
+            code: "fridge.expiring",
+            subjectKind: "fridge_item",
+            subjectId: item.id,
+            relatedKey: "",
+            dismissedBy: ALICE,
+        });
+        await app().request(`http://x/fridge/locations/${loc.id}/delete`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "",
+        });
+        const rows = await db.dismissalsStore.listForHousehold(HH);
+        expect(rows.some((r) => r.subjectId === item.id)).toBe(false);
     });
 });

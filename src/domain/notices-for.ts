@@ -1,9 +1,11 @@
+import type { Food } from "./foods.js";
 import { effectiveFoodsByIds, type FoodsStore } from "./foods.js";
 import type { FridgeStore } from "./fridge.js";
 import {
     assertDismissibleCode,
     dismissalKey,
-    isDismissed,
+    dismissedKeySet,
+    isDismissedIn,
     lookupDismissalKey,
     NoticeDismissError,
     type NoticeDismissal,
@@ -26,10 +28,21 @@ export type NoticesForResult = {
     notices: Notice[];
     dismissals: NoticeDismissal[];
     subjectNames: Map<string, string>;
+    /** Panel group keys (`recipe:<id>` or `<kind>:<id>`) to activity ms, newest-first ordering. */
+    subjectTimes: Map<string, number>;
+    noticeFoods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
 };
 
-function subjectGroupKey(kind: NoticeSubjectKind, id: string): string {
+function subjectNameKey(kind: NoticeSubjectKind, id: string): string {
     return `${kind}:${id}`;
+}
+
+/** Panel grouping key; recipe-ingredient notices roll up under their recipe. */
+export function panelGroupKey(notice: Notice): string {
+    if (notice.subject.kind === "recipe_ingredient") {
+        return `recipe:${notice.subject.recipeId}`;
+    }
+    return `${notice.subject.kind}:${notice.subject.id}`;
 }
 
 /** Display name for a notice group from params or related recipe context. */
@@ -37,12 +50,51 @@ export function subjectLabel(
     notice: Notice,
     recipeNames: ReadonlyMap<string, string>,
 ): string {
+    if (notice.subject.kind === "recipe_ingredient") {
+        const recipeName =
+            (typeof notice.params.recipeName === "string" &&
+            notice.params.recipeName.length > 0
+                ? notice.params.recipeName
+                : undefined) ??
+            recipeNames.get(notice.subject.recipeId) ??
+            "Recipe";
+        return recipeName;
+    }
     const name = notice.params.name;
     if (typeof name === "string" && name.length > 0) return name;
     if (notice.subject.kind === "recipe") {
         return recipeNames.get(notice.subject.id) ?? "Recipe";
     }
     return "Item";
+}
+
+export function dismissalSubjectLabel(
+    dismissal: NoticeDismissal,
+    subjectNames: ReadonlyMap<string, string>,
+): string {
+    const key = subjectNameKey(dismissal.subjectKind, dismissal.subjectId);
+    return subjectNames.get(key) ?? "Removed item";
+}
+
+async function buildSubjectTimes(
+    deps: NoticesForDeps,
+    householdId: string,
+): Promise<Map<string, number>> {
+    const subjectTimes = new Map<string, number>();
+    const [fridgeTimes, recipeTimes] = await Promise.all([
+        deps.fridge.itemActivityMsById?.(householdId) ??
+            Promise.resolve(new Map<string, number>()),
+        deps.recipes.recipeActivityMsById?.(householdId) ??
+            Promise.resolve(new Map<string, number>()),
+    ]);
+    for (const [id, ms] of fridgeTimes) {
+        subjectTimes.set(`fridge_item:${id}`, ms);
+    }
+    for (const [id, ms] of recipeTimes) {
+        subjectTimes.set(`recipe:${id}`, ms);
+    }
+    // Subjects with no activity timestamp are sorted last (see needs-attention page).
+    return subjectTimes;
 }
 
 export async function noticesFor(
@@ -52,12 +104,15 @@ export async function noticesFor(
 ): Promise<NoticesForResult> {
     const today = opts?.today ?? utcTodayFromDate(new Date());
     const dismissals = await deps.dismissals.listForHousehold(householdId);
+    const dismissed = dismissedKeySet(dismissals);
 
-    const [recipes, fridgeItems, allIngredients] = await Promise.all([
-        listRecipes(deps.recipes, householdId),
-        deps.fridge.listItems(householdId),
-        deps.recipes.listIngredientsForHousehold(householdId),
-    ]);
+    const [recipes, fridgeItems, allIngredients, subjectTimes] =
+        await Promise.all([
+            listRecipes(deps.recipes, householdId),
+            deps.fridge.listItems(householdId),
+            deps.recipes.listIngredientsForHousehold(householdId),
+            buildSubjectTimes(deps, householdId),
+        ]);
 
     const foodIds = new Set<string>();
     for (const ing of allIngredients) {
@@ -70,6 +125,30 @@ export async function noticesFor(
     const recipeNames = new Map<string, string>();
     for (const recipe of recipes) {
         recipeNames.set(recipe.id, recipe.name);
+    }
+
+    const subjectNames = new Map<string, string>();
+    for (const recipe of recipes) {
+        subjectNames.set(subjectNameKey("recipe", recipe.id), recipe.name);
+        subjectNames.set(`recipe:${recipe.id}`, recipe.name);
+    }
+    for (const ing of allIngredients) {
+        const recipeName = recipeNames.get(ing.recipeId) ?? "Recipe";
+        subjectNames.set(
+            subjectNameKey("recipe_ingredient", ing.id),
+            `${recipeName} — ${ing.displayName}`,
+        );
+    }
+    for (const item of fridgeItems) {
+        subjectNames.set(
+            subjectNameKey("fridge_item", item.id),
+            item.displayName,
+        );
+    }
+
+    const noticeFoods = new Map<string, Pick<Food, "genericFoodId">>();
+    for (const [id, food] of catalog) {
+        noticeFoods.set(id, { genericFoodId: food.genericFoodId });
     }
 
     const ingredientsByRecipe = new Map<string, typeof allIngredients>();
@@ -94,19 +173,28 @@ export async function noticesFor(
 
     let filtered = raw;
     if (!opts?.includeDismissed) {
-        filtered = raw.filter((n) => !isDismissed(n, dismissals));
+        filtered = raw.filter((n) => !isDismissedIn(n, dismissed));
     }
 
     const notices = sortNotices(filtered);
-    const subjectNames = new Map<string, string>();
     for (const notice of notices) {
-        const key = subjectGroupKey(notice.subject.kind, notice.subject.id);
-        if (!subjectNames.has(key)) {
-            subjectNames.set(key, subjectLabel(notice, recipeNames));
+        const panelKey = panelGroupKey(notice);
+        if (panelKey.startsWith("recipe:") && !subjectNames.has(panelKey)) {
+            const recipeId = panelKey.slice("recipe:".length);
+            subjectNames.set(
+                panelKey,
+                recipeNames.get(recipeId) ?? subjectLabel(notice, recipeNames),
+            );
         }
     }
 
-    return { notices, dismissals, subjectNames };
+    return {
+        notices,
+        dismissals,
+        subjectNames,
+        subjectTimes,
+        noticeFoods,
+    };
 }
 
 export type DismissNoticeInput = {

@@ -1,4 +1,5 @@
 import {
+    cleanupDismissalsForFridgeLocation,
     cleanupDismissalsForSubject,
     type MemoryNoticeDismissalsHolder,
     type NoticeDismissalsStore,
@@ -53,6 +54,8 @@ export type FridgeStore = {
     insertItem(row: FridgeItem): Promise<FridgeItem>;
     updateItem(row: FridgeItem): Promise<FridgeItem | null>;
     deleteItem(householdId: string, id: string): Promise<boolean>;
+    /** Newest-first group ordering on the Needs attention page. */
+    itemActivityMsById?(householdId: string): Promise<Map<string, number>>;
 };
 
 export class FridgeInputError extends Error {
@@ -139,14 +142,22 @@ export function createMemoryFridgeStore(): MemoryFridgeStore {
         },
         async deleteLocation(householdId, id) {
             const before = locations.length;
+            const removedItemIds: string[] = [];
             for (let i = items.length - 1; i >= 0; i--) {
                 if (
                     items[i]!.householdId === householdId &&
                     items[i]!.locationId === id
                 ) {
+                    removedItemIds.push(items[i]!.id);
                     items.splice(i, 1);
                 }
             }
+            await cleanupDismissalsForFridgeLocation(
+                linkedDismissals,
+                householdId,
+                id,
+                removedItemIds,
+            );
             const next = locations.filter(
                 (loc) => !(loc.householdId === householdId && loc.id === id),
             );
@@ -154,6 +165,15 @@ export function createMemoryFridgeStore(): MemoryFridgeStore {
             locations.length = 0;
             locations.push(...next);
             return removed;
+        },
+        async itemActivityMsById(householdId) {
+            const map = new Map<string, number>();
+            for (const item of items) {
+                if (item.householdId === householdId) {
+                    map.set(item.id, Date.parse(item.createdAt));
+                }
+            }
+            return map;
         },
         async listItems(householdId) {
             return items

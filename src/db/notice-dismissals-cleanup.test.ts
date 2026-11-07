@@ -6,7 +6,7 @@ import { liveGroceryStore } from "./grocery.js";
 import { liveRecipesStore } from "./recipes.js";
 import { liveStockStore } from "./stock.js";
 import { clearCheckedLines } from "../domain/grocery.js";
-import { deleteItem } from "../domain/fridge.js";
+import { deleteItem, deleteLocation } from "../domain/fridge.js";
 import { discardFridgeItem, eatFridgeItem } from "../domain/stock.js";
 import { removeRecipeIngredient } from "../domain/recipes.js";
 import { updateFood } from "../domain/foods.js";
@@ -133,6 +133,27 @@ describeDb(
     "notice dismissal cleanup (live)",
     (getCtx) => {
         afterEach(() => setSqlForTests(null));
+
+        test("deleteLocation removes dismissals for items in the location", async () => {
+            const { sql, truncateAll } = getCtx();
+            await truncateAll();
+            setSqlForTests(sql);
+            const { householdId } = await seedHousehold(sql);
+            const foodId = await seedFood(sql, householdId);
+            const locationId = await seedFridgeLocation(sql, householdId);
+            const itemId = await seedFridgeItem(
+                sql,
+                householdId,
+                locationId,
+                foodId,
+            );
+            await insertDismissals(sql, householdId, "fridge_item", itemId);
+            const fridge = liveFridgeStore();
+            expect(await deleteLocation(fridge, householdId, locationId)).toBe(
+                true,
+            );
+            await expectTargetGone(sql, householdId, "fridge_item", itemId);
+        });
 
         test("fridge deleteItem removes dismissals for that item", async () => {
             const { sql, truncateAll } = getCtx();

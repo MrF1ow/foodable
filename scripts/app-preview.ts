@@ -650,8 +650,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 dismissals: [],
                 subjectNames: new Map([
                     ["fridge_item:i2", "Expired milk"],
-                    ["recipe_ingredient:ing-1", `${RECIPE.name} — Buttermilk`],
+                    [`recipe:${RECIPE.id}`, RECIPE.name],
                 ]),
+                subjectTimes: new Map([
+                    ["fridge_item:i2", Date.parse("2026-01-01T00:00:00.000Z")],
+                    [`recipe:${RECIPE.id}`, Date.parse("2026-02-01T00:00:00.000Z")],
+                ]),
+                noticeFoods: new Map(),
             },
         } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),

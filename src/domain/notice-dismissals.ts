@@ -101,13 +101,12 @@ export function lookupDismissalKey(
     return { code, subjectKind, subjectId, relatedKey: relatedId ?? "" };
 }
 
-export function isDismissed(
+export function isDismissedIn(
     notice: Notice,
-    dismissals: readonly NoticeDismissal[],
+    dismissed: ReadonlySet<string>,
 ): boolean {
-    const set = dismissedKeySet(dismissals);
     const key = dismissalKey(notice);
-    if (set.has(dismissalKeyString(key))) return true;
+    if (dismissed.has(dismissalKeyString(key))) return true;
     if (noticeDismissPair(notice.code)) {
         const alt = lookupDismissalKey(
             notice.code,
@@ -115,9 +114,16 @@ export function isDismissed(
             notice.subject.id,
             notice.related.find((r) => r.kind === "food")?.id,
         );
-        return set.has(dismissalKeyString(alt));
+        return dismissed.has(dismissalKeyString(alt));
     }
     return false;
+}
+
+export function isDismissed(
+    notice: Notice,
+    dismissals: readonly NoticeDismissal[],
+): boolean {
+    return isDismissedIn(notice, dismissedKeySet(dismissals));
 }
 
 export function dismissedKeySet(
@@ -264,6 +270,18 @@ export async function cleanupDismissalsForFood(
     if (!dismissals) return;
     await dismissals.deleteForSubject(householdId, "food", foodId);
     await dismissals.deleteForRelatedKey(householdId, foodId);
+}
+
+export async function cleanupDismissalsForFridgeLocation(
+    dismissals: NoticeDismissalsStore | undefined,
+    householdId: string,
+    locationId: string,
+    itemIds: readonly string[],
+): Promise<void> {
+    if (!dismissals) return;
+    for (const id of itemIds) {
+        await dismissals.deleteForSubject(householdId, "fridge_item", id);
+    }
 }
 
 export async function cleanupDismissalsForRecipe(
