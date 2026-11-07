@@ -1,6 +1,6 @@
 # Recipe import from links: implementation plan
 
-Status: proposed 2026-11-04. Starts after [usual products](./usual-products-plan.md), which supplies the macros an imported recipe needs. Replaces the sketch that was in [roadmap.md](./roadmap.md#recipe-import-from-links).
+Status: proposed 2026-11-04. Starts after [usual products](./usual-products-plan.md), which supplies the macros an imported recipe needs. Replaces the sketch that was in [ROADMAP.md](../ROADMAP.md).
 
 ## Goal
 
