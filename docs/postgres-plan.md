@@ -1,6 +1,6 @@
 # Own Postgres and auth: implementation plan
 
-Status: v1 shipped (#132, #129, #134–#142); production runs on Railway Postgres. Proposed 2026-10-31. Replaces the "Local Postgres instead of Supabase" sketch in [roadmap.md](./roadmap.md).
+Status: v1 shipped (#132, #129, #134–#142); production runs on Railway Postgres. Proposed 2026-10-31. Replaces the "Local Postgres instead of Supabase" sketch in [ROADMAP.md](../ROADMAP.md).
 
 This is the plan as written, kept as a record. Two things changed after it: migrations moved from `supabase/migrations/` to `db/migrations/`, and the runner keeps its history in `foodable_migrations.schema_migrations` (it renames a `supabase_migrations` schema it finds). How things work today is in [self-hosting.md](./self-hosting.md#database).
 

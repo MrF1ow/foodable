@@ -45,6 +45,7 @@
         "db:import-postgres": "bun run scripts/import-postgres-data.ts",
         "foods:merge-duplicates": "bun run scripts/merge-duplicate-foods.ts",
         "pr:check": "bun run scripts/pr-lint.ts",
+        "planner": "bun run scripts/planner.ts",
         "labels:sync": "bun run scripts/sync-labels.ts",
         "release": "bun run scripts/release.ts",
         "gen:pages": "bun run scripts/gen-login.ts",

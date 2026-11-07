@@ -124,6 +124,10 @@ Branch from `main` and open the PR against `main`. PRs are squash-merged, so the
 
 Example: `fix(fridge): ignore expired lines in grocery sync`.
 
+## Planner
+
+Planned work lives in [planner/](planner/), one Markdown file per item, and [ROADMAP.md](ROADMAP.md) is the overview. A PR that works on an item names it in its `## Planner` section (`Closes CAL-2` or `Part of CAL-2`) and updates the item in the same PR with `bun run planner --close CAL-2 --pr <number>` or `--start`. Closing a project's last item also removes the project folder and retires its key. The **PR lint** check fails when the body and the files disagree. Run `bun run planner --next` to see what is next, and read [planner/README.md](planner/README.md) for the fields.
+
 ## Releases
 
 Railway deploys `main`, so a release is not what ships code. It marks a point on `main` that a self-hosted deploy can safely update to.
@@ -163,6 +167,7 @@ Use the template GitHub fills in. Required sections:
 | **Migrations**   | Describe migration work, or `None.` Must **not** be `None` when any file under `db/migrations/` changes                                         |
 | **Contracts**    | Breaking changes, snapshot updates, or `None.` Must **not** be `None` when the title contains `!` or `src/mcp/tools-list.snapshot.json` changes |
 | **Testing**      | Commands run and anything checked by hand                                                                                                       |
+| **Planner**      | `Closes <ID>`, `Part of <ID>`, or `None.` A named item must be updated in the same PR (see [planner/README.md](planner/README.md))              |
 | **Links**        | `Closes #…` when applicable                                                                                                                     |
 
 Include screenshots for UI changes (`bun run preview:app --shots` takes them). Link the issue the PR closes when there is one.
