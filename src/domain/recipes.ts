@@ -45,7 +45,11 @@ import {
 import { assertRecipeVerified } from "./recipe-import.js";
 
 export type { RecipeVerification, RecipeImport, RecipeProblem };
-export { recheckRecipe, RecipeUnverifiedError } from "./recipe-import.js";
+export {
+    recheckRecipe,
+    RecipeUnverifiedError,
+    resolveUnresolvedLines,
+} from "./recipe-import.js";
 
 export type Recipe = {
     id: string;

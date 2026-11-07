@@ -311,6 +311,31 @@ test("unverified recipe detail shows problems panel and check again", () => {
     expect(html).toContain('action="/recipes/r1/verify"');
 });
 
+test("each unresolved import line can be marked handled", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({ verification: "unverified", name: "Import" }),
+        problems: [],
+        importRow: {
+            recipeId: "r1",
+            householdId: "hh-1",
+            sourceKind: "website",
+            sourceUrl: "https://example.com/soup",
+            sourceText: null,
+            sourceTextOrigin: null,
+            transcript: null,
+            credit: null,
+            unresolvedLines: ['1 x 400g "tin" tomatoes'],
+            problems: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    expect(html).toContain('action="/recipes/r1/unresolved"');
+    expect(html).toContain(
+        '<input type="hidden" name="line" value="1 x 400g &quot;tin&quot; tomatoes" />',
+    );
+    expect(html).toContain(">Handled</button>");
+});
+
 test("unmeasured recipe ingredient renders to taste", () => {
     const html = renderRecipeDetailPage({
         ...detail({}),

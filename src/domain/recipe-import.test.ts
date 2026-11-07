@@ -4,6 +4,7 @@ import {
     recheckRecipe,
     recipeImportFromRow,
     recipeImportToRow,
+    resolveUnresolvedLines,
     sweepUnverifiedRecipes,
     verifyRecipe,
 } from "./recipe-import.js";
@@ -212,6 +213,42 @@ test("recheckRecipe never demotes a hand-made recipe", async () => {
     expect(result.verified).toBe(false);
     expect(result.verification).toBe("verified");
     expect(result.problems.map((row) => row.code)).toContain("no_ingredients");
+    expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
+        "verified",
+    );
+});
+
+test("handled unresolved lines can be cleared so a fixed recipe verifies", async () => {
+    const store = createMemoryRecipesStore();
+    const recipe = await store.insertRecipe(baseRecipe());
+    await store.insertIngredient(ingredient({ recipeId: recipe.id }));
+    await store.upsertImport({
+        recipeId: recipe.id,
+        householdId: HH,
+        sourceKind: "website",
+        sourceUrl: "https://example.com/soup",
+        sourceText: null,
+        sourceTextOrigin: null,
+        transcript: null,
+        credit: null,
+        unresolvedLines: ["1 x 400g tin tomatoes", "2 eggs 1 cup flour"],
+        problems: [],
+        importedAt: "2026-01-01T00:00:00.000Z",
+    });
+    // The person added tomatoes by hand; the line still blocks the check.
+    expect((await recheckRecipe(store, HH, recipe.id)).verified).toBe(false);
+    const partial = await resolveUnresolvedLines(store, HH, recipe.id, [
+        " 1 x 400g tin tomatoes ",
+    ]);
+    expect(partial.removed).toBe(1);
+    expect(partial.verified).toBe(false);
+    expect((await store.getImport(HH, recipe.id))?.unresolvedLines).toEqual([
+        "2 eggs 1 cup flour",
+    ]);
+    const done = await resolveUnresolvedLines(store, HH, recipe.id, [
+        "2 eggs 1 cup flour",
+    ]);
+    expect(done.verified).toBe(true);
     expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
         "verified",
     );

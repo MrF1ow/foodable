@@ -704,7 +704,10 @@ const TOOLS_BASE: ToolIdentity[] = [
         name: "verify_recipe",
         category: "recipes",
         badges: ["edit"],
-        params: [{ name: "recipe_id", required: true }],
+        params: [
+            { name: "recipe_id", required: true },
+            { name: "resolved_lines", required: false },
+        ],
         hasPhotoHint: false,
     },
     {

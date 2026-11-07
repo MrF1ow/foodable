@@ -20,6 +20,7 @@ import {
     RecipeInputError,
     RecipeUnverifiedError,
     recheckRecipe,
+    resolveUnresolvedLines,
     removeRecipeIngredient,
     reorderRecipeIngredients,
     setPersonPortion,
@@ -636,6 +637,32 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
         if (blocked) return blocked;
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
+    }
+});
+
+recipesRoutes.post("/recipes/:id/unresolved", requireMember, async (c) => {
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    const body = await c.req.parseBody();
+    try {
+        const checked = await resolveUnresolvedLines(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+            [formText(body, "line")],
+        );
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            checked.verified
+                ? "recipes.verify.passed"
+                : "recipes.unresolved.cleared",
+        );
+    } catch (err) {
+        if (err instanceof RecipeInputError) {
+            return redirectWithToast(c, "/recipes", "recipes.not_found");
+        }
+        throw err;
     }
 });
 

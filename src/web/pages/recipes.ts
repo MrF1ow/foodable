@@ -667,9 +667,14 @@ ${modalTrigger({
             : "";
     const unresolved =
         view.importRow && view.importRow.unresolvedLines.length > 0
-            ? `<ul class="list">${view.importRow.unresolvedLines
-                  .map((line) => `<li>${escapeHtml(line)}</li>`)
-                  .join("")}</ul>`
+            ? `<ul class="list recipe-unresolved">${view.importRow.unresolvedLines
+                  .map(
+                      (line) =>
+                          `<li class="row"><span class="row-title">${escapeHtml(line)}</span><div class="row-actions"><form method="post" action="/recipes/${recipeIdEsc}/unresolved"><input type="hidden" name="line" value="${escapeHtml(line)}" /><button type="submit" class="btn-sm">Handled</button></form></div></li>`,
+                  )
+                  .join(
+                      "",
+                  )}</ul><p class="muted">Mark a line handled once you've added it as an ingredient, or if it isn't needed.</p>`
             : "";
     const unverifiedPanel = unverified
         ? panel({

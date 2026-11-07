@@ -89,6 +89,10 @@ export const TOASTS = {
         text: "Added to the grocery list ({count})",
     },
     "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
+    "recipes.unresolved.cleared": {
+        kind: "success",
+        text: "Line marked as handled",
+    },
     "recipes.verify.failed": {
         kind: "info",
         text: "Still unverified: {count} problems",

@@ -5224,6 +5224,32 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("verify_recipe resolved_lines clears handled import lines", async () => {
+        await withUser(alice, async (call) => {
+            const imported = await call("import_recipe_from_text", {
+                text: "caption",
+                instructions: "1. Mix",
+                name: "Lines soup",
+                ingredients: [{ name: "water", amount: 100, unit: "g" }],
+            });
+            const id = (imported.structuredContent?.recipe as { id: string })
+                .id;
+            const row = await db.recipesStore.getImport("hh-1", id);
+            await db.recipesStore.upsertImport({
+                ...row!,
+                unresolvedLines: ["1 x 400g tin tomatoes"],
+            });
+            const blocked = await call("verify_recipe", { recipe_id: id });
+            expect(blocked.structuredContent?.status).toBe("unverified");
+            const fixed = await call("verify_recipe", {
+                recipe_id: id,
+                resolved_lines: ["1 x 400g tin tomatoes"],
+            });
+            expect(fixed.isError).toBeFalsy();
+            expect(fixed.structuredContent?.status).toBe("verified");
+        });
+    });
+
     test("list_recipes filters by verification", async () => {
         await withUser(alice, async (call) => {
             await call("import_recipe_from_text", {
@@ -7413,6 +7439,56 @@ describe("authenticated dashboard HTTP", () => {
             `/recipes/${imported.recipe.id}`,
         );
         expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+    });
+
+    test("POST unresolved marks a line handled and rechecks", async () => {
+        const recipe = await db.recipesStore.insertRecipe({
+            id: crypto.randomUUID(),
+            householdId: "hh-1",
+            creatorId: alice,
+            name: "Line soup",
+            yieldPortions: 1,
+            instructions: "Simmer.",
+            sourceUrl: null,
+            tags: [],
+            notes: null,
+            prepMinutes: null,
+            cookMinutes: null,
+            verification: "unverified",
+            updatedAt: new Date().toISOString(),
+        });
+        await db.recipesStore.upsertImport({
+            recipeId: recipe.id,
+            householdId: "hh-1",
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText: "x",
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: ["2 eggs 1 cup flour", "keep me"],
+            problems: [],
+            importedAt: new Date().toISOString(),
+        });
+        const res = await siteApp.request(
+            `http://x/recipes/${recipe.id}/unresolved`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    line: "2 eggs 1 cup flour",
+                }).toString(),
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${recipe.id}`);
+        expect(
+            (await db.recipesStore.getImport("hh-1", recipe.id))
+                ?.unresolvedLines,
+        ).toEqual(["keep me"]);
     });
 
     test("POST verify on unknown recipe redirects to list with toast", async () => {

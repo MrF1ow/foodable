@@ -38,6 +38,7 @@ import {
     resolveTotalPortions,
     RecipeUnverifiedError,
     recheckRecipe,
+    resolveUnresolvedLines,
 } from "../../domain/recipes.js";
 import { sortNotices } from "../../domain/notices.js";
 import type {
@@ -1424,7 +1425,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Verify Recipe",
             description:
-                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import.",
+                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import. Pass resolved_lines with the unresolved import lines you have dealt with (added as ingredients, or not needed); they are removed before the check runs, and any other unresolved lines still count.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1433,6 +1434,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             },
             inputSchema: z.object({
                 recipe_id: z.string(),
+                resolved_lines: z
+                    .array(z.string().max(2000))
+                    .max(200)
+                    .optional()
+                    .describe(
+                        "Unresolved import lines you have handled, copied exactly from get_recipe.",
+                    ),
             }),
             outputSchema: VERIFY_RECIPE_OUTPUT_SCHEMA,
         },
@@ -1468,11 +1476,19 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             structuredContent: payload,
                         };
                     }
-                    const checked = await recheckRecipe(
-                        store,
-                        actor.householdId,
-                        args.recipe_id,
-                    );
+                    const checked =
+                        args.resolved_lines && args.resolved_lines.length > 0
+                            ? await resolveUnresolvedLines(
+                                  store,
+                                  actor.householdId,
+                                  args.recipe_id,
+                                  args.resolved_lines,
+                              )
+                            : await recheckRecipe(
+                                  store,
+                                  actor.householdId,
+                                  args.recipe_id,
+                              );
                     const payload = {
                         status: checked.verification,
                         recipe_id: args.recipe_id,

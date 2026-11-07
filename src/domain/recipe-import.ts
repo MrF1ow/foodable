@@ -164,6 +164,42 @@ export function verifyRecipe(
     return { verified: problems.length === 0, problems };
 }
 
+/**
+ * Mark import lines the parser couldn't read as handled (the person added
+ * them as ingredients, or they aren't needed), then run the check again.
+ * Only the given lines are removed; every other unresolved line stays, so
+ * the check keeps asking about them.
+ */
+export async function resolveUnresolvedLines(
+    store: RecipesStore,
+    householdId: string,
+    recipeId: string,
+    lines: string[],
+): Promise<{
+    verified: boolean;
+    problems: RecipeProblem[];
+    verification: RecipeVerification;
+    removed: number;
+}> {
+    const importRow = await store.getImport(householdId, recipeId);
+    let removed = 0;
+    if (importRow) {
+        const done = new Set(lines.map((line) => line.trim()).filter(Boolean));
+        const remaining = importRow.unresolvedLines.filter(
+            (line) => !done.has(line.trim()),
+        );
+        removed = importRow.unresolvedLines.length - remaining.length;
+        if (removed > 0) {
+            await store.upsertImport({
+                ...importRow,
+                unresolvedLines: remaining,
+            });
+        }
+    }
+    const checked = await recheckRecipe(store, householdId, recipeId);
+    return { ...checked, removed };
+}
+
 export async function recheckRecipe(
     store: RecipesStore,
     householdId: string,
