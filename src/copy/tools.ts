@@ -683,7 +683,11 @@ const TOOLS_BASE: ToolIdentity[] = [
         name: "import_recipe_from_url",
         category: "recipes",
         badges: ["import"],
-        params: [{ name: "url", required: true }],
+        params: [
+            { name: "url", required: true },
+            { name: "text", required: false },
+            { name: "credit", required: false },
+        ],
         hasPhotoHint: false,
     },
     {

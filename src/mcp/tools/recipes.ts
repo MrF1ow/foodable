@@ -1478,7 +1478,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From URL",
             description:
-                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed — then ask the user to paste the caption or recipe text; do not open, fetch, or browse the post yourself. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
+                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1489,6 +1489,18 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 url: z
                     .string()
                     .describe("HTTPS link to a recipe page or social post."),
+                text: z
+                    .string()
+                    .max(20_000)
+                    .optional()
+                    .describe(
+                        "The caption or recipe the user pasted. Needed for Instagram, Facebook, Threads, TikTok, Pinterest and YouTube links.",
+                    ),
+                credit: z
+                    .string()
+                    .max(120)
+                    .optional()
+                    .describe("Optional creator name the user typed."),
             }),
             outputSchema: IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA,
         },
@@ -1508,6 +1520,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             householdId: actor.householdId,
                             creatorId: actor.userId,
                             url: args.url,
+                            text: args.text,
+                            credit: args.credit,
+                            textOrigin: "pasted",
                         },
                     );
                     const payload = {

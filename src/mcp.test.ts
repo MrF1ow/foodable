@@ -5084,7 +5084,50 @@ describe("phone-app domain MCP tools", () => {
             IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(dup.structuredContent);
             expect(dup.structuredContent?.status).toBe("duplicate");
             expect(dup.structuredContent?.recipe_id).toBe(dupId);
+
+            const caption = readFileSync(
+                join(
+                    import.meta.dir,
+                    "domain/fixtures/captions/clean-headers.txt",
+                ),
+                "utf8",
+            );
+            const fromCaption = await call("import_recipe_from_url", {
+                url: "https://www.instagram.com/p/import-caption/",
+                text: caption,
+            });
+            expect(fromCaption.isError).toBeUndefined();
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                fromCaption.structuredContent,
+            );
+            expect(fromCaption.structuredContent?.status).toBe("imported");
+
+            const noRecipe = await call("import_recipe_from_url", {
+                url: "https://www.instagram.com/p/empty-caption/",
+                text: readFileSync(
+                    join(
+                        import.meta.dir,
+                        "domain/fixtures/captions/no-recipe.txt",
+                    ),
+                    "utf8",
+                ),
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                noRecipe.structuredContent,
+            );
+            expect(noRecipe.structuredContent?.status).toBe(
+                "no_recipe_in_text",
+            );
         });
+    });
+
+    test("import_recipe_from_url catalog lists text and credit params", () => {
+        const tool = TOOLS.find(
+            (item) => item.name === "import_recipe_from_url",
+        );
+        expect(tool?.params.map((row) => row.name)).toEqual(
+            expect.arrayContaining(["url", "text", "credit"]),
+        );
     });
 
     test("verify_recipe output validates for verified, unverified, and not_found", async () => {
@@ -6701,6 +6744,191 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipesHtml).not.toContain("Coming soon.");
         expect(recipesHtml).toContain('action="/recipes"');
         expect(recipesHtml).toContain("Add a recipe.");
+    });
+
+    test("POST /recipes/import paste flow for Instagram and Pinterest website_url", async () => {
+        const { readFileSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                throw new Error("fetch should not run in paste flow test");
+            },
+        };
+        const caption = readFileSync(
+            join(import.meta.dir, "domain/fixtures/captions/clean-headers.txt"),
+            "utf8",
+        );
+        const pasteNeeded = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "url=https%3A%2F%2Fwww.instagram.com%2Fp%2Fweb-import%2F",
+        });
+        expect(pasteNeeded.status).toBe(422);
+        const pasteHtml = await pasteNeeded.text();
+        expect(pasteHtml).toContain("Paste the Instagram caption below.");
+        expect(pasteHtml).toContain("Open the post");
+        expect(pasteHtml).toContain('name="text"');
+
+        const imported = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.instagram.com/p/web-import/",
+                text: caption,
+                credit: "Web Chef",
+            }).toString(),
+        });
+        expect(imported.status).toBe(303);
+        const recipeId = (imported.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        expect(recipeId.length).toBeGreaterThan(0);
+
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: true as const,
+                    url: "https://example.com/pin-target",
+                    status: 200,
+                    contentType: "text/html",
+                    body: readFileSync(
+                        join(
+                            import.meta.dir,
+                            "domain/fixtures/recipe-pages/array-top-level.html",
+                        ),
+                        "utf8",
+                    ),
+                };
+            },
+        };
+        const pinSite = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/site-only/",
+                website_url: "https://example.com/pin-target",
+                credit: "Pin Chef",
+            }).toString(),
+        });
+        expect(pinSite.status).toBe(303);
+        const pinRecipeId = (pinSite.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        const pinImport = await db.recipesStore.getImport("hh-1", pinRecipeId);
+        expect(pinImport?.credit).toBe("Pin Chef");
+
+        const pinBadSite = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/bad-site/",
+                website_url: "javascript:alert(1)",
+                text: "Saved caption text",
+                credit: "Still Here",
+            }).toString(),
+        });
+        expect(pinBadSite.status).toBe(422);
+        const pinBadHtml = await pinBadSite.text();
+        expect(pinBadHtml).toContain("That doesn't look like a web link.");
+        expect(pinBadHtml).toContain("Saved caption text");
+        expect(pinBadHtml).toContain('value="Still Here"');
+
+        // A website link that validates but can't be read falls back to the
+        // pasted caption under the pin's link; with no caption the Pinterest
+        // step stays open with what was typed.
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                return {
+                    ok: false as const,
+                    reason: "not_found" as const,
+                    status: 404,
+                    detail: "gone",
+                };
+            },
+        };
+        const pinFallback = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/fallback/",
+                website_url: "https://example.com/gone",
+                text: "Ingredients:\n2 cups flour\nMethod:\n1. Mix",
+                credit: "Fallback Chef",
+            }).toString(),
+        });
+        expect(pinFallback.status).toBe(303);
+        const fallbackId = (pinFallback.headers.get("location") ?? "").slice(
+            "/recipes/".length,
+        );
+        const fallbackImport = await db.recipesStore.getImport(
+            "hh-1",
+            fallbackId,
+        );
+        expect(fallbackImport?.sourceKind).toBe("pinterest");
+        expect(fallbackImport?.credit).toBe("Fallback Chef");
+
+        const pinGone = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/gone/",
+                website_url: "https://example.com/gone-too",
+                credit: "Kept Chef",
+            }).toString(),
+        });
+        expect(pinGone.status).toBe(422);
+        const pinGoneHtml = await pinGone.text();
+        expect(pinGoneHtml).toContain("That page doesn't exist anymore.");
+        expect(pinGoneHtml).toContain('value="Kept Chef"');
+        expect(pinGoneHtml).toContain("Recipe website link");
+
+        const pinEmpty = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                import_step: "paste",
+                url: "https://www.pinterest.com/pin/empty/",
+            }).toString(),
+        });
+        expect(pinEmpty.status).toBe(422);
+        expect(await pinEmpty.text()).toContain(
+            "Paste the recipe website link or the recipe.",
+        );
     });
 
     test("POST /recipes creates, member delete is refused, owner deletes member recipe", async () => {
