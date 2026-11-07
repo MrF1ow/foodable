@@ -1,27 +1,64 @@
+const BLOCKED_PREFIXES = [
+    "/settings",
+    "/logout",
+    "/login",
+    "/authorize",
+    "/approve",
+    "/exports",
+] as const;
+
+function isBlockedPathname(pathname: string): boolean {
+    const lower = pathname.toLowerCase();
+    return BLOCKED_PREFIXES.some(
+        (blocked) => lower === blocked || lower.startsWith(`${blocked}/`),
+    );
+}
+
+function hasDotSegment(pathname: string): boolean {
+    return pathname
+        .split("/")
+        .some((segment) => segment === "." || segment === "..");
+}
+
+/**
+ * A same-origin path the app may send someone back to. The pathname is
+ * checked at every percent-decoding layer, because a browser decodes `%25`
+ * once when following a redirect and the router decodes the rest: a value
+ * like `/%6c%6f%67%6f%75%74` or `/%252e%252e/logout` must not reach
+ * `/logout`.
+ */
 export function isSafeAppBackPath(path: string): boolean {
     if (path.length === 0 || path.length > 512) return false;
     if (!path.startsWith("/") || path.startsWith("//")) return false;
     if (path.includes("\\")) return false;
     if (/[\u0000-\u001f\u007f]/.test(path)) return false;
     const q = path.indexOf("?");
-    const pathname = q >= 0 ? path.slice(0, q) : path;
-    if (pathname === "/settings" || pathname.startsWith("/settings/")) {
-        return false;
-    }
-    for (const blocked of [
-        "/logout",
-        "/login",
-        "/authorize",
-        "/approve",
-    ] as const) {
-        if (pathname === blocked || pathname.startsWith(`${blocked}/`)) {
+    let layer = q >= 0 ? path.slice(0, q) : path;
+    for (let round = 0; round < 4; round++) {
+        if (layer.startsWith("//") || layer.includes("\\")) return false;
+        if (/[\u0000-\u001f\u007f]/.test(layer)) return false;
+        if (hasDotSegment(layer) || isBlockedPathname(layer)) return false;
+        let resolved: URL;
+        try {
+            resolved = new URL(layer, "http://local");
+        } catch {
             return false;
         }
+        if (resolved.origin !== "http://local") return false;
+        if (isBlockedPathname(resolved.pathname)) return false;
+        let decoded: string;
+        try {
+            decoded = decodeURIComponent(layer);
+        } catch {
+            // A malformed escape in the value as given is refused. One that
+            // only appears after decoding (`50%25off` → `50%off`) cannot be
+            // decoded any further, so this layer was the last one.
+            return round > 0;
+        }
+        if (decoded === layer) return true;
+        layer = decoded;
     }
-    if (pathname === "/exports" || pathname.startsWith("/exports/")) {
-        return false;
-    }
-    return true;
+    return false;
 }
 
 export function settingsBackHref(input: {

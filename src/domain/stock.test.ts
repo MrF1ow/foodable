@@ -9,7 +9,9 @@ import {
     addGroceryManualFood,
     createMemoryGroceryStore,
     listGrocery,
+    onGroceryList,
 } from "./grocery.js";
+import { noticeActionFor } from "../copy/notices.js";
 import {
     addRecipeManualIngredient,
     createMemoryRecipesStore,
@@ -262,6 +264,8 @@ test("fridgeNotices maps expiry levels to notice codes", () => {
     const today = "2026-11-06";
     const item = {
         id: "i1",
+        kind: "food" as const,
+        foodId: "f-eggs",
         displayName: "Eggs",
         quantity: { amount: 6, unit: "each" },
         expiresOn: "2026-11-05" as string,
@@ -274,7 +278,7 @@ test("fridgeNotices maps expiry levels to notice codes", () => {
         kind: "fridge_item",
         id: "i1",
     });
-    expect(expired[0]?.params).toMatchObject({
+    expect(expired[0]?.params).toEqual({
         name: "Eggs",
         amount: 6,
         unit: "each",
@@ -357,6 +361,50 @@ test("fridgeNotices maps expiry levels to notice codes", () => {
     expect(
         fridgeNotices([{ ...item, id: "f", expiresOn: null }], today),
     ).toEqual([]);
+});
+
+test("fridgeNotices onGroceryList params gate the add action", () => {
+    const today = "2026-11-06";
+    const item = {
+        id: "i1",
+        kind: "food" as const,
+        foodId: "f-prod",
+        displayName: "Kirkland Eggs",
+        quantity: { amount: 12, unit: "each" },
+        expiresOn: "2026-11-05",
+    };
+    const foodsById = new Map([
+        ["f-plain", { id: "f-plain", genericFoodId: null as string | null }],
+        ["f-prod", { id: "f-prod", genericFoodId: "f-plain" as string | null }],
+    ]);
+    const notOnList = fridgeNotices([item], today, {
+        lines: [],
+        foodsById,
+    })[0]!;
+    expect(notOnList.params.onGroceryList).toBe("no");
+    expect(noticeActionFor(notOnList)?.label).toBe("Add to grocery list");
+
+    const onList = fridgeNotices([item], today, {
+        lines: [{ foodId: "f-plain", checked: false }],
+        foodsById,
+    })[0]!;
+    expect(onList.params.onGroceryList).toBe("yes");
+    expect(noticeActionFor(onList)).toBeNull();
+
+    expect(
+        onGroceryList(
+            { foodId: "f-prod" },
+            [{ foodId: "f-plain", checked: false }],
+            foodsById,
+        ),
+    ).toBe(true);
+    expect(
+        onGroceryList(
+            { foodId: "f-prod" },
+            [{ foodId: "f-plain", checked: true }],
+            foodsById,
+        ),
+    ).toBe(false);
 });
 
 test("manual add writes an adjust movement and the ledger matches stock", async () => {

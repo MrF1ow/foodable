@@ -94,6 +94,34 @@ test("noticeList adds data-blocking when every notice is block severity", () => 
     );
 });
 
+test("noticeAction renders POST add-to-grocery form for fridge notices", () => {
+    const notice: Notice = {
+        code: "fridge.expired",
+        severity: "warn",
+        subject: { kind: "fridge_item", id: "it-1" },
+        related: [],
+        params: {
+            name: "Milk",
+            amount: 1,
+            unit: "l",
+            expiresOn: "2026-11-05",
+            onGroceryList: "no",
+        },
+    };
+    const ctx: NoticeRouteContext = {
+        from: "/fridge",
+        foods: new Map(),
+    };
+    expect(noticeAction(notice, ctx)).toBe(
+        '<form class="notice-action" method="post" action="/fridge/items/it-1/add-to-grocery"><input type="hidden" name="from" value="/fridge" /><button type="submit" class="btn-sm">Add to grocery list</button></form>',
+    );
+    const onList: Notice = {
+        ...notice,
+        params: { ...notice.params, onGroceryList: "yes" },
+    };
+    expect(noticeAction(onList, ctx)).toBe("");
+});
+
 test("noticeAction builds href for plain food and for product generic id", () => {
     const plain: Notice = {
         code: "recipe.no_nutrition",

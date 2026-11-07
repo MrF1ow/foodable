@@ -2,6 +2,7 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveGroceryStore } from "../../db/grocery.js";
 import { liveStockStore } from "../../db/stock.js";
 import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
@@ -115,6 +116,17 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                         householdId,
                     );
                     const today = utcTodayFromDate();
+                    const [groceryLines, allFoods] = await Promise.all([
+                        liveGroceryStore().listLines(householdId),
+                        liveFoodsStore().listFoods(householdId),
+                    ]);
+                    const foodsById = new Map(
+                        allFoods.map((row) => [
+                            row.id,
+                            { id: row.id, genericFoodId: row.genericFoodId },
+                        ]),
+                    );
+                    const groceryCtx = { lines: groceryLines, foodsById };
                     const payload = {
                         locale: WIDGET_LOCALE,
                         locations: locations.map((row) => ({
@@ -132,7 +144,11 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                     unit: item.quantity.unit,
                                     expires_on: item.expiresOn ?? null,
                                     notices: sortNotices(
-                                        fridgeNotices([item], today),
+                                        fridgeNotices(
+                                            [item],
+                                            today,
+                                            groceryCtx,
+                                        ),
                                     ).map(noticeToWire),
                                 })),
                         })),

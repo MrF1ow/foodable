@@ -13,6 +13,7 @@ import * as actualFoods from "../../foods.js";
 import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
 import { addLocation, createMemoryFridgeStore } from "../../domain/fridge.js";
 import {
+    addGroceryFoodById,
     addGroceryManualFood,
     createMemoryGroceryStore,
 } from "../../domain/grocery.js";
@@ -1053,5 +1054,212 @@ describe("household usual products and items routes", () => {
         );
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/fridge");
+    });
+});
+
+describe("fridge notice add-to-grocery route", () => {
+    function post(path: string, body: string) {
+        return app().request(`http://x${path}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+    }
+
+    function get(path: string) {
+        return app().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+    }
+
+    async function seedExpiredFridgeItem(opts?: {
+        foodId?: string;
+        expiresOn?: string;
+        groceryFoodId?: string;
+    }) {
+        const { utcTodayFromDate } = await import("../../domain/stock.js");
+        const { addFridgeItemAdjust } = await import("../../domain/stock.js");
+        const existingStores = await db.settingsStore.listStores(HH);
+        const store =
+            existingStores[0] ??
+            (await createGroceryStore(db.settingsStore, HH, "Shop"));
+        const milk = opts?.foodId
+            ? { id: opts.foodId }
+            : await db.foodsStore.insertFood(
+                  newFood({ householdId: HH, kind: "food", name: "Milk" }),
+              );
+        const locations = await db.fridgeStore.listLocations(HH);
+        const loc =
+            locations[0] ?? (await addLocation(db.fridgeStore, HH, "Fridge"));
+        const today = utcTodayFromDate();
+        const expiresOn =
+            opts?.expiresOn ??
+            new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+        const row = await addFridgeItemAdjust(
+            db.fridgeStore,
+            db.stockStore,
+            db.foodsStore,
+            {
+                householdId: HH,
+                foodId: milk.id,
+                amount: 1,
+                unit: "l",
+                locationId: loc.id,
+                expiresOn,
+                actorUserId: ALICE,
+            },
+        );
+        if (opts?.groceryFoodId) {
+            await addGroceryFoodById(
+                db.groceryStore,
+                db.settingsStore,
+                db.foodsStore,
+                {
+                    householdId: HH,
+                    storeId: store.id,
+                    foodId: opts.groceryFoodId,
+                    amount: 1,
+                    unit: "l",
+                },
+            );
+        }
+        return { item: row.item!, store, today };
+    }
+
+    test("POST add-to-grocery creates a notice line and is idempotent", async () => {
+        const { item } = await seedExpiredFridgeItem();
+        const r1 = await post(
+            `/fridge/items/${item.id}/add-to-grocery`,
+            "from=%2Ffridge",
+        );
+        expect(r1.status).toBe(303);
+        const lines = await db.groceryStore.listLines(HH);
+        const noticeLine = lines.find((l) => l.sourceFridgeItemId === item.id);
+        expect(noticeLine).toBeDefined();
+        expect(noticeLine!.source).toBe("notice");
+        const r2 = await post(
+            `/fridge/items/${item.id}/add-to-grocery`,
+            "from=%2Ffridge",
+        );
+        expect(r2.status).toBe(303);
+        expect((await db.groceryStore.listLines(HH)).length).toBe(lines.length);
+    });
+
+    test("POST add-to-grocery respects safe from redirect", async () => {
+        const { item } = await seedExpiredFridgeItem();
+        const safe = await post(
+            `/fridge/items/${item.id}/add-to-grocery`,
+            `from=${encodeURIComponent("/grocery")}`,
+        );
+        expect(safe.headers.get("location")).toMatch(/^\/grocery/);
+        const bad = await post(
+            `/fridge/items/${item.id}/add-to-grocery`,
+            `from=${encodeURIComponent("https://evil.example/")}`,
+        );
+        expect(bad.headers.get("location")).toMatch(/^\/fridge/);
+        const dot = await post(
+            `/fridge/items/${item.id}/add-to-grocery`,
+            `from=${encodeURIComponent("//evil")}`,
+        );
+        expect(dot.headers.get("location")).toMatch(/^\/fridge/);
+    });
+
+    test("GET fridge shows add form and on-list text", async () => {
+        const eggs = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        const milk = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const withButton = await seedExpiredFridgeItem({ foodId: eggs.id });
+        const onList = await seedExpiredFridgeItem({
+            foodId: milk.id,
+            groceryFoodId: milk.id,
+        });
+        const { utcTodayFromDate } = await import("../../domain/stock.js");
+        const { addFridgeItemAdjust } = await import("../../domain/stock.js");
+        const loc =
+            (await db.fridgeStore.listLocations(HH))[0] ??
+            (await addLocation(db.fridgeStore, HH, "Fridge"));
+        const expiring = await addFridgeItemAdjust(
+            db.fridgeStore,
+            db.stockStore,
+            db.foodsStore,
+            {
+                householdId: HH,
+                foodId: eggs.id,
+                amount: 2,
+                unit: "each",
+                locationId: loc.id,
+                expiresOn: utcTodayFromDate(),
+                actorUserId: ALICE,
+            },
+        );
+        const page = await get("/fridge");
+        expect(page.status).toBe(200);
+        const html = await page.text();
+        expect(html).toContain(
+            `action="/fridge/items/${withButton.item.id}/add-to-grocery"`,
+        );
+        expect(html).toContain(
+            `action="/fridge/items/${expiring.item!.id}/add-to-grocery"`,
+        );
+        const milkRow = html.match(
+            new RegExp(
+                `<li class="fridge-item" data-item-id="${onList.item.id}"[\\s\\S]*?</li>`,
+            ),
+        )?.[0];
+        expect(milkRow).toBeDefined();
+        expect(milkRow!).toContain("fridge-on-list");
+        expect(milkRow!).not.toContain("notice-action");
+        const expiredRow = html.match(
+            new RegExp(
+                `<li class="fridge-item" data-item-id="${withButton.item.id}"[\\s\\S]*?</li>`,
+            ),
+        )?.[0];
+        expect(expiredRow).toBeDefined();
+        expect(expiredRow!).toContain("notice-action");
+        expect(expiredRow!).not.toContain("fridge-on-list");
+    });
+
+    test("POST add-to-grocery 4xx for unknown item", async () => {
+        const r = await post(
+            "/fridge/items/missing-id/add-to-grocery",
+            "from=%2Ffridge",
+        );
+        expect(r.status).toBe(400);
+    });
+
+    test("POST add-to-grocery 4xx for another household item", async () => {
+        const OTHER_HH = "hh-2";
+        const { addFridgeItemAdjust } = await import("../../domain/stock.js");
+        const otherFood = await db.foodsStore.insertFood(
+            newFood({ householdId: OTHER_HH, kind: "food", name: "Other" }),
+        );
+        const otherLoc = await addLocation(db.fridgeStore, OTHER_HH, "Fridge");
+        const otherItem = await addFridgeItemAdjust(
+            db.fridgeStore,
+            db.stockStore,
+            db.foodsStore,
+            {
+                householdId: OTHER_HH,
+                foodId: otherFood.id,
+                amount: 1,
+                unit: "each",
+                locationId: otherLoc.id,
+                actorUserId: "other",
+            },
+        );
+        const before = (await db.groceryStore.listLines(HH)).length;
+        const r = await post(
+            `/fridge/items/${otherItem.item!.id}/add-to-grocery`,
+            "from=%2Ffridge",
+        );
+        expect(r.status).toBeGreaterThanOrEqual(400);
+        expect(r.status).toBeLessThan(500);
+        expect((await db.groceryStore.listLines(HH)).length).toBe(before);
     });
 });

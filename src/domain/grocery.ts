@@ -8,6 +8,7 @@ import {
     findOrCreateManualFood,
     FoodsInputError,
     normalizeFoodName,
+    type Food,
     type FoodsStore,
     type UsualAmount,
 } from "./foods.js";
@@ -25,7 +26,8 @@ import {
 import type { Notice } from "./notices.js";
 import { NOTICE_SEVERITY } from "./notices.js";
 import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
-import type { FridgeStore } from "./fridge.js";
+import type { FridgeItem, FridgeStore } from "./fridge.js";
+import { isQuantityUnit } from "./quantity.js";
 
 export const GROCERY_LINE_SOURCES = [
     "manual",
@@ -713,6 +715,109 @@ async function requireAnyStore(
     if (stores.length === 0) {
         throw new GroceryInputError("Add a store first.");
     }
+}
+
+function groceryLineFamily(
+    line: Pick<GroceryLine, "foodId">,
+    foodsById: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>,
+): string | null {
+    if (!line.foodId) return null;
+    const row = foodsById.get(line.foodId);
+    return row ? familyOf(row) : line.foodId;
+}
+
+export function onGroceryList(
+    item: Pick<FridgeItem, "foodId">,
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[],
+    foodsById: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>,
+): boolean {
+    if (!item.foodId) return false;
+    const row = foodsById.get(item.foodId);
+    const itemFamily = row ? familyOf(row) : item.foodId;
+    for (const line of lines) {
+        if (line.checked) continue;
+        const lineFamily = groceryLineFamily(line, foodsById);
+        if (lineFamily === itemFamily) return true;
+    }
+    return false;
+}
+
+function firstUncheckedFamilyLine(
+    itemFamily: string,
+    lines: readonly GroceryLine[],
+    foodsById: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>,
+): GroceryLine | null {
+    for (const line of lines) {
+        if (line.checked) continue;
+        const lineFamily = groceryLineFamily(line, foodsById);
+        if (lineFamily === itemFamily) return line;
+    }
+    return null;
+}
+
+export async function addFridgeItemToGrocery(
+    grocery: GroceryListStore,
+    settings: SettingsStore,
+    foods: FoodsStore,
+    fridge: FridgeStore,
+    input: {
+        householdId: string;
+        itemId: string;
+        onPicked?: GroceryPickCallback;
+    },
+): Promise<{ added: boolean; line: GroceryLine }> {
+    const items = await fridge.listItems(input.householdId);
+    const item = items.find((row) => row.id === input.itemId);
+    if (!item) {
+        throw new GroceryInputError("That item is no longer in the fridge.");
+    }
+    if (item.kind !== "food" || item.foodId == null) {
+        throw new GroceryInputError(
+            "Only food can be added to the grocery list from here.",
+        );
+    }
+    const food = await findFoodById(foods, input.householdId, item.foodId);
+    const plainId = familyOf(food);
+    const lines = await grocery.listLines(input.householdId);
+    const listed = await foods.listFoods(input.householdId);
+    const foodsById = new Map(
+        listed.map((row) => [
+            row.id,
+            { id: row.id, genericFoodId: row.genericFoodId },
+        ]),
+    );
+    const itemFamily = familyOf(food);
+    if (onGroceryList(item, lines, foodsById)) {
+        const existing = firstUncheckedFamilyLine(itemFamily, lines, foodsById);
+        if (existing) return { added: false, line: existing };
+    }
+    const effMap = await effectiveFoodsByIds(foods, input.householdId, [
+        plainId,
+    ]);
+    const plain = effMap.get(plainId)!;
+    const base = {
+        householdId: input.householdId,
+        foodId: plainId,
+        source: "notice" as const,
+        sourceFridgeItemId: item.id,
+        fridge,
+        onPicked: input.onPicked,
+    };
+    if (plain.usualAmount != null) {
+        const line = await addGroceryFoodById(grocery, settings, foods, base);
+        return { added: true, line };
+    }
+    const { amount, unit } = item.quantity;
+    if (isQuantityUnit(unit)) {
+        const line = await addGroceryFoodById(grocery, settings, foods, {
+            ...base,
+            amount,
+            unit,
+        });
+        return { added: true, line };
+    }
+    const line = await addGroceryFoodById(grocery, settings, foods, base);
+    return { added: true, line };
 }
 
 export async function addGroceryFoodById(

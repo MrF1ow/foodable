@@ -20,7 +20,9 @@ import { HELP_IDS } from "../web/pages/settings-help.js";
 import {
     NOTICE_COPY,
     formatMissingNutrientList,
+    noticeActionFor,
     noticeSentence,
+    ON_GROCERY_LIST_TEXT,
     UNKNOWN_ALLERGEN_TEXT,
 } from "./notices.js";
 import { addAllergen, createMemoryRulesStore } from "../domain/rules.js";
@@ -92,6 +94,99 @@ test("only fridge.expired sets badgeTone bad", () => {
     expect(withTone.map(([code]) => code)).toEqual(["fridge.expired"]);
 });
 
+test("fridge expiry sentences with grocery list state", () => {
+    const today = "2026-11-06";
+    const foodItem = {
+        id: "i1",
+        kind: "food" as const,
+        foodId: "f-milk",
+        displayName: "Milk",
+        quantity: { amount: 1, unit: "l" },
+        expiresOn: "2026-11-05",
+    };
+    const foodsById = new Map([
+        ["f-milk", { id: "f-milk", genericFoodId: null as string | null }],
+    ]);
+    const withoutGrocery = fridgeNotices([foodItem], today)[0]!;
+    expect(noticeSentence(withoutGrocery)).toBe("Milk 1 l expires 2026-11-05");
+    expect(noticeActionFor(withoutGrocery)).toBeNull();
+
+    const notListed = fridgeNotices([foodItem], today, {
+        lines: [],
+        foodsById,
+    })[0]!;
+    expect(noticeSentence(notListed)).toBe("Milk 1 l expires 2026-11-05");
+    expect(noticeActionFor(notListed)?.label).toBe("Add to grocery list");
+
+    const listed = fridgeNotices([foodItem], today, {
+        lines: [{ foodId: "f-milk", checked: false }],
+        foodsById,
+    })[0]!;
+    expect(noticeSentence(listed)).toBe(
+        `Milk expired · ${ON_GROCERY_LIST_TEXT}`,
+    );
+    expect(noticeActionFor(listed)).toBeNull();
+
+    const expiring = fridgeNotices(
+        [
+            {
+                ...foodItem,
+                id: "i2",
+                expiresOn: "2026-11-07",
+            },
+        ],
+        today,
+        { lines: [], foodsById },
+    )[0]!;
+    expect(noticeSentence(expiring)).toBe("Milk 1 l expires 2026-11-07");
+    expect(noticeActionFor(expiring)?.label).toBe("Add to grocery list");
+
+    const expiringToday = fridgeNotices(
+        [{ ...foodItem, id: "i3", expiresOn: today }],
+        today,
+        {
+            lines: [{ foodId: "f-milk", checked: false }],
+            foodsById,
+        },
+    )[0]!;
+    expect(noticeSentence(expiringToday)).toBe(
+        `Milk expires today · ${ON_GROCERY_LIST_TEXT}`,
+    );
+
+    const expiringTomorrowListed = fridgeNotices(
+        [{ ...foodItem, id: "i4b", expiresOn: "2026-11-07" }],
+        today,
+        {
+            lines: [{ foodId: "f-milk", checked: false }],
+            foodsById,
+        },
+    )[0]!;
+    expect(noticeSentence(expiringTomorrowListed)).toBe(
+        `Milk expires tomorrow · ${ON_GROCERY_LIST_TEXT}`,
+    );
+
+    const expiringTomorrow = fridgeNotices(
+        [{ ...foodItem, id: "i4", expiresOn: "2026-11-07" }],
+        today,
+        { lines: [], foodsById },
+    )[0]!;
+
+    const thursday = fridgeNotices(
+        [{ ...foodItem, id: "i5", expiresOn: "2026-11-12" }],
+        today,
+        {
+            lines: [{ foodId: "f-milk", checked: false }],
+            foodsById,
+        },
+    )[0]!;
+    expect(noticeSentence(thursday)).toBe(
+        `Milk expires Thursday · ${ON_GROCERY_LIST_TEXT}`,
+    );
+    expect(noticeActionFor(expiringTomorrow)?.label).toBe(
+        "Add to grocery list",
+    );
+});
+
 test("fridge.expired badge and pill markup are pinned", () => {
     expect(NOTICE_COPY["fridge.expired"].badge).toBe("Expired");
     const today = "2026-11-06";
@@ -99,6 +194,8 @@ test("fridge.expired badge and pill markup are pinned", () => {
         [
             {
                 id: "x",
+                kind: "food",
+                foodId: "f-milk",
                 displayName: "Milk",
                 quantity: { amount: 1, unit: "l" },
                 expiresOn: "2026-11-05",

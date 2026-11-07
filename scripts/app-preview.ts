@@ -94,6 +94,7 @@ function fridgeView(chrome: unknown) {
         unit: string,
         expiresOn: string | null,
         food = true,
+        foodId?: string,
     ) => ({
         id,
         householdId: H,
@@ -101,9 +102,17 @@ function fridgeView(chrome: unknown) {
         kind: food ? "food" : "supply",
         displayName,
         quantity: { amount, unit },
-        foodId: food ? `f-${id}` : `f-sup-${id}`,
+        foodId: food ? (foodId ?? `f-${id}`) : `f-sup-${id}`,
         expiresOn,
     });
+    const foodsById = new Map([
+        ["f-i1", { id: "f-i1", genericFoodId: null }],
+        ["f-milk", { id: "f-milk", genericFoodId: null }],
+        ["f-long-milk", { id: "f-long-milk", genericFoodId: null }],
+        ["f-i3", { id: "f-i3", genericFoodId: null }],
+        ["f-i4", { id: "f-i4", genericFoodId: null }],
+        ["f-i5", { id: "f-i5", genericFoodId: null }],
+    ]);
     return {
         chrome,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
@@ -116,7 +125,16 @@ function fridgeView(chrome: unknown) {
                 "g",
                 addUtcDays(today, -2),
             ),
-            item("i2", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
+            item(
+                "i2",
+                "l1",
+                "Expired milk",
+                1,
+                "l",
+                addUtcDays(today, -1),
+                true,
+                "f-milk",
+            ),
             item(
                 "i-long",
                 "l1",
@@ -124,12 +142,19 @@ function fridgeView(chrome: unknown) {
                 1,
                 "l",
                 addUtcDays(today, -5),
+                true,
+                "f-long-milk",
             ),
             item("i3", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
             item("i4", "l1", "Lime", 3, "each", addUtcDays(today, 5)),
             item("i5", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
             item("i6", "l2", "Paper towels", 3, "roll", null, false),
         ],
+        groceryLines: [
+            { foodId: "f-milk", checked: false },
+            { foodId: "f-i4", checked: false },
+        ],
+        foodsById,
     };
 }
 

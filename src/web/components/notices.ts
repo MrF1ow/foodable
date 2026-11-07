@@ -1,7 +1,11 @@
 import type { Food } from "../../domain/foods.js";
 import type { Notice } from "../../domain/notices.js";
 import type { NoticeRoute } from "../../copy/notices.js";
-import { NOTICE_COPY, noticeSentence } from "../../copy/notices.js";
+import {
+    NOTICE_COPY,
+    noticeActionFor,
+    noticeSentence,
+} from "../../copy/notices.js";
 import { escapeHtml } from "../shell.js";
 import {
     plainFoodIdForUsualPicker,
@@ -26,14 +30,18 @@ export const NOTICE_ROUTES: Record<
             ctx.from,
         );
     },
+    addFridgeItemToGrocery(notice) {
+        const subject = notice.subject;
+        if (subject.kind !== "fridge_item") return null;
+        return `/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
+    },
 };
 
 export function noticeHref(
     notice: Notice,
     ctx: NoticeRouteContext,
 ): string | null {
-    const copy = NOTICE_COPY[notice.code];
-    const action = copy.action;
+    const action = noticeActionFor(notice);
     if (!action) return null;
     return NOTICE_ROUTES[action.to](notice, ctx);
 }
@@ -59,11 +67,13 @@ export function noticeBadge(
 }
 
 export function noticeAction(notice: Notice, ctx: NoticeRouteContext): string {
-    const copy = NOTICE_COPY[notice.code];
-    const action = copy.action;
+    const action = noticeActionFor(notice);
     if (!action) return "";
     const href = NOTICE_ROUTES[action.to](notice, ctx);
     if (href == null) return "";
+    if (action.method === "post") {
+        return `<form class="notice-action" method="post" action="${escapeHtml(href)}"><input type="hidden" name="from" value="${escapeHtml(ctx.from)}" /><button type="submit" class="btn-sm">${escapeHtml(action.label)}</button></form>`;
+    }
     return `<a href="${escapeHtml(href)}">${escapeHtml(action.label)}</a>`;
 }
 

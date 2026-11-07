@@ -5248,7 +5248,12 @@ describe("phone-app domain MCP tools", () => {
                     locations: Array<{
                         items: Array<{
                             display_name: string;
-                            notices: Array<{ code: string; severity: string }>;
+                            notices: Array<{
+                                code: string;
+                                severity: string;
+                                action: { label: string } | null;
+                                message: string;
+                            }>;
                         }>;
                     }>;
                 }
@@ -5261,15 +5266,57 @@ describe("phone-app domain MCP tools", () => {
             )!;
             expect(expired.notices[0]?.code).toBe("fridge.expired");
             expect(expired.notices[0]?.severity).toBe("warn");
+            expect(expired.notices[0]?.action).toEqual({
+                label: "Add to grocery list",
+            });
             const soonItem = items.find((i) =>
                 i.display_name.includes("Soon"),
             )!;
             expect(soonItem.notices[0]?.code).toBe("fridge.expiring");
             expect(soonItem.notices[0]?.severity).toBe("info");
+            expect(soonItem.notices[0]?.action).toEqual({
+                label: "Add to grocery list",
+            });
             const plain = items.find((i) =>
                 i.display_name.includes("No date"),
             )!;
             expect(plain.notices).toEqual([]);
+
+            const expiredRow = (await db.fridgeStore.listItems("hh-1")).find(
+                (r) => r.displayName.includes("Expired"),
+            )!;
+            await db.groceryStore.insertLine({
+                id: "line-on-list",
+                householdId: "hh-1",
+                storeId: "store-1",
+                sectionId: "sec-1",
+                kind: "food",
+                displayName: "Expired milk",
+                quantity: { amount: 1, unit: "g" },
+                foodId: expiredRow.foodId,
+                checked: false,
+                source: "manual",
+                sourceFridgeItemId: null,
+            });
+            const relisted = await call("get_fridge");
+            const relistedItems = (
+                relisted.structuredContent as {
+                    locations: Array<{
+                        items: Array<{
+                            display_name: string;
+                            notices: Array<{
+                                action: { label: string } | null;
+                                message: string;
+                            }>;
+                        }>;
+                    }>;
+                }
+            ).locations.flatMap((l) => l.items);
+            const onList = relistedItems.find((i) =>
+                i.display_name.includes("Expired"),
+            )!;
+            expect(onList.notices[0]?.action).toBeNull();
+            expect(onList.notices[0]?.message).toContain("on the grocery list");
         });
     });
 

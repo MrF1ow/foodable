@@ -13,6 +13,14 @@ export const TOASTS = {
     "fridge.item.updated": { kind: "success", text: "Fridge item updated" },
     "fridge.item.eaten": { kind: "success", text: "Marked as eaten" },
     "fridge.item.discarded": { kind: "success", text: "Item discarded" },
+    "fridge.item.added-to-grocery": {
+        kind: "success",
+        text: "Added to the grocery list",
+    },
+    "fridge.item.already-on-grocery": {
+        kind: "info",
+        text: "Already on the grocery list",
+    },
 
     "grocery.store.added": { kind: "success", text: "Store added" },
     "grocery.line.added": {

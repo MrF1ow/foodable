@@ -218,6 +218,13 @@ export async function renderFridgeInventoryPage(
     const householdId = gate.viewer.householdId;
     const snapshot = await listFridge(liveFridgeStore(), householdId);
     const allFoods = await liveFoodsStore().listFoods(householdId);
+    const groceryLines = await liveGroceryStore().listLines(householdId);
+    const foodsById = new Map(
+        allFoods.map((row) => [
+            row.id,
+            { id: row.id, genericFoodId: row.genericFoodId },
+        ]),
+    );
     const linkProductPrompt = linkProductId
         ? linkProductPromptFromFoods(
               allFoods,
@@ -235,6 +242,8 @@ export async function renderFridgeInventoryPage(
             error,
             openModalId,
             linkProductPrompt,
+            groceryLines,
+            foodsById,
         }),
     };
 }
