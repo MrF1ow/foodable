@@ -112,3 +112,37 @@ export async function seedFood(
     `;
     return id;
 }
+
+export async function seedFridgeItem(
+    sql: SQL,
+    householdId: string,
+    locationId: string,
+    foodId: string,
+    opts?: { displayName?: string; amount?: number; unit?: string },
+): Promise<string> {
+    const displayName = opts?.displayName ?? "Contract fridge item";
+    const amount = opts?.amount ?? 100;
+    const unit = opts?.unit ?? "g";
+    const [row] = await sql`
+        insert into public.fridge_items (
+            household_id,
+            location_id,
+            kind,
+            display_name,
+            amount,
+            unit,
+            food_id
+        )
+        values (
+            ${householdId},
+            ${locationId},
+            ${"food"},
+            ${displayName},
+            ${amount},
+            ${unit},
+            ${foodId}
+        )
+        returning id
+    `;
+    return String(row.id);
+}

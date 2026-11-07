@@ -25,6 +25,15 @@ import {
 import type { Notice } from "./notices.js";
 import { NOTICE_SEVERITY } from "./notices.js";
 import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
+import type { FridgeStore } from "./fridge.js";
+
+export const GROCERY_LINE_SOURCES = [
+    "manual",
+    "recipe",
+    "restock",
+    "notice",
+] as const;
+export type GroceryLineSource = (typeof GROCERY_LINE_SOURCES)[number];
 
 export type GroceryKind = "food" | "supply";
 
@@ -43,6 +52,8 @@ export type GroceryLine = {
     quantity: GroceryQuantity;
     foodId: string | null;
     checked: boolean;
+    source: GroceryLineSource;
+    sourceFridgeItemId: string | null;
 };
 
 export type GrocerySnapshot = {
@@ -586,6 +597,59 @@ function wrapFoodsError(err: unknown): never {
     throw err;
 }
 
+function parseGroceryLineSource(raw: unknown): GroceryLineSource {
+    if (raw == null) return "manual";
+    const value = String(raw);
+    if ((GROCERY_LINE_SOURCES as readonly string[]).includes(value)) {
+        return value as GroceryLineSource;
+    }
+    throw new Error(`Invalid grocery line source: ${value}`);
+}
+
+export async function resolveGroceryLineSource(
+    fridge: Pick<FridgeStore, "listItems"> | undefined,
+    householdId: string,
+    input: {
+        source?: GroceryLineSource;
+        sourceFridgeItemId?: string | null;
+    },
+): Promise<{ source: GroceryLineSource; sourceFridgeItemId: string | null }> {
+    let source: GroceryLineSource = "manual";
+    if (input.source !== undefined) {
+        if (
+            !(GROCERY_LINE_SOURCES as readonly string[]).includes(input.source)
+        ) {
+            throw new GroceryInputError("Unknown grocery line source.");
+        }
+        source = input.source;
+    }
+
+    let sourceFridgeItemId: string | null = null;
+    const rawId = input.sourceFridgeItemId;
+    if (rawId != null && String(rawId).trim() !== "") {
+        sourceFridgeItemId = String(rawId).trim();
+    }
+
+    if (sourceFridgeItemId) {
+        if (source === "manual" || source === "recipe") {
+            throw new GroceryInputError(
+                "A fridge item can only be named for a restock or notice line.",
+            );
+        }
+        if (!fridge) {
+            throw new GroceryInputError(
+                "A fridge item id requires a fridge store to verify.",
+            );
+        }
+        const items = await fridge.listItems(householdId);
+        if (!items.some((row) => row.id === sourceFridgeItemId)) {
+            throw new GroceryInputError("Unknown fridge item.");
+        }
+    }
+
+    return { source, sourceFridgeItemId };
+}
+
 async function insertFromFood(
     grocery: GroceryListStore,
     settings: SettingsStore,
@@ -597,6 +661,8 @@ async function insertFromFood(
         amount: number;
         unit: string;
         food: Awaited<ReturnType<typeof findFoodById>>;
+        source: GroceryLineSource;
+        sourceFridgeItemId: string | null;
     },
 ): Promise<GroceryLine> {
     const sectionId = await placeGroceryLine(
@@ -622,6 +688,8 @@ async function insertFromFood(
         quantity: { amount: input.amount, unit: input.unit },
         foodId: input.food.id,
         checked: false,
+        source: input.source,
+        sourceFridgeItemId: input.sourceFridgeItemId,
     });
 }
 
@@ -659,6 +727,9 @@ export async function addGroceryFoodById(
         amount?: number | null;
         unit?: string;
         onPicked?: GroceryPickCallback;
+        source?: GroceryLineSource;
+        sourceFridgeItemId?: string | null;
+        fridge?: Pick<FridgeStore, "listItems">;
     },
 ): Promise<GroceryLine> {
     const explicit = explicitStoreId(input.storeId);
@@ -675,6 +746,14 @@ export async function addGroceryFoodById(
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
     }
+    const lineSource = await resolveGroceryLineSource(
+        input.fridge,
+        input.householdId,
+        {
+            source: input.source,
+            sourceFridgeItemId: input.sourceFridgeItemId,
+        },
+    );
 
     try {
         const food = await findFoodById(foods, input.householdId, input.foodId);
@@ -751,6 +830,8 @@ export async function addGroceryFoodById(
             amount: quantity.amount,
             unit: quantity.unit,
             food,
+            source: lineSource.source,
+            sourceFridgeItemId: lineSource.sourceFridgeItemId,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -769,6 +850,9 @@ export async function addGroceryFoodByBarcode(
         amount?: number | null;
         unit?: string;
         onPicked?: GroceryPickCallback;
+        source?: GroceryLineSource;
+        sourceFridgeItemId?: string | null;
+        fridge?: Pick<FridgeStore, "listItems">;
     },
     opts: {
         lookup: (barcode: string) => Promise<FoodResult | null>;
@@ -788,6 +872,14 @@ export async function addGroceryFoodByBarcode(
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
     }
+    const lineSource = await resolveGroceryLineSource(
+        input.fridge,
+        input.householdId,
+        {
+            source: input.source,
+            sourceFridgeItemId: input.sourceFridgeItemId,
+        },
+    );
 
     try {
         const food = await findOrCreateFoodByBarcode(
@@ -866,6 +958,8 @@ export async function addGroceryFoodByBarcode(
             amount: quantity.amount,
             unit: quantity.unit,
             food,
+            source: lineSource.source,
+            sourceFridgeItemId: lineSource.sourceFridgeItemId,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -884,6 +978,9 @@ export async function addGroceryManualFood(
         amount?: number | null;
         unit?: string;
         onPicked?: GroceryPickCallback;
+        source?: GroceryLineSource;
+        sourceFridgeItemId?: string | null;
+        fridge?: Pick<FridgeStore, "listItems">;
     },
 ): Promise<GroceryLine> {
     const explicit = explicitStoreId(input.storeId);
@@ -900,6 +997,14 @@ export async function addGroceryManualFood(
     if (hasExplicitAmount) {
         parseAmount(Number(input.amount));
     }
+    const lineSource = await resolveGroceryLineSource(
+        input.fridge,
+        input.householdId,
+        {
+            source: input.source,
+            sourceFridgeItemId: input.sourceFridgeItemId,
+        },
+    );
 
     try {
         const food = await findOrCreateManualFood(
@@ -978,6 +1083,8 @@ export async function addGroceryManualFood(
             amount: quantity.amount,
             unit: quantity.unit,
             food,
+            source: lineSource.source,
+            sourceFridgeItemId: lineSource.sourceFridgeItemId,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -997,6 +1104,9 @@ export async function addGrocerySupply(
         unit?: string;
         foodId?: string;
         onPicked?: GroceryPickCallback;
+        source?: GroceryLineSource;
+        sourceFridgeItemId?: string | null;
+        fridge?: Pick<FridgeStore, "listItems">;
     },
 ): Promise<GroceryLine> {
     const explicit = explicitStoreId(input.storeId);
@@ -1010,6 +1120,14 @@ export async function addGrocerySupply(
     } else {
         await requireAnyStore(settings, input.householdId);
     }
+    const lineSource = await resolveGroceryLineSource(
+        input.fridge,
+        input.householdId,
+        {
+            source: input.source,
+            sourceFridgeItemId: input.sourceFridgeItemId,
+        },
+    );
     if (hasExplicitAmount) {
         const u = input.unit?.trim() ?? "";
         if (!u) throw new GroceryInputError("Enter a unit.");
@@ -1118,6 +1236,8 @@ export async function addGrocerySupply(
             amount: quantity.amount,
             unit: quantity.unit,
             food,
+            source: lineSource.source,
+            sourceFridgeItemId: lineSource.sourceFridgeItemId,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -1288,6 +1408,8 @@ export function groceryLineFromRow(row: {
     unit: unknown;
     checked: unknown;
     food_id?: unknown;
+    source?: unknown;
+    source_fridge_item_id?: unknown;
 }): GroceryLine {
     const kind = row.kind === "supply" ? "supply" : "food";
     return {
@@ -1306,6 +1428,12 @@ export function groceryLineFromRow(row: {
                 ? null
                 : String(row.food_id),
         checked: Boolean(row.checked),
+        source: parseGroceryLineSource(row.source),
+        sourceFridgeItemId:
+            row.source_fridge_item_id == null ||
+            row.source_fridge_item_id === ""
+                ? null
+                : String(row.source_fridge_item_id),
     };
 }
 
@@ -1321,5 +1449,7 @@ export function groceryLineToRow(row: GroceryLine) {
         unit: row.quantity.unit,
         food_id: row.foodId,
         checked: row.checked,
+        source: row.source,
+        source_fridge_item_id: row.sourceFridgeItemId,
     };
 }

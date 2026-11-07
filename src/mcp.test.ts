@@ -87,6 +87,7 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
+import { GROCERY_LIST_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
 import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
@@ -4474,6 +4475,63 @@ describe("phone-app domain MCP tools", () => {
             expect(full.effective.usual_store_id).toBe(costco.id);
             expect(full.effective.usual_amount).toBe(12);
             expect(full.effective.usual_unit).toBe("each");
+        });
+    });
+
+    test("list_grocery_lines returns manual and recipe source on each line", async () => {
+        await withPat(async (call) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            const recipe = await call("create_recipe", {
+                name: "Pancakes",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const flour = await call("upsert_food", { name: "Flour" });
+            const flourId = flour.structuredContent?.id as string;
+            const butter = await call("upsert_food", { name: "Butter" });
+            const butterId = butter.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: flourId,
+                amount: 100,
+                unit: "g",
+            });
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: butterId,
+                amount: 10,
+                unit: "g",
+            });
+            await call("add_grocery_line", {
+                kind: "food",
+                food_id: butterId,
+            });
+            const added = await call("add_recipe_to_grocery", {
+                recipe_id: recipeId,
+                store_id: store.id,
+                total_portions: 1,
+            });
+            expect(added.isError).toBeFalsy();
+            const listed = await call("list_grocery_lines");
+            expect(listed.isError).toBeFalsy();
+            const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                listed.structuredContent,
+            );
+            const lines = body.stores.flatMap((s) =>
+                s.sections.flatMap((sec) => sec.lines),
+            );
+            expect(lines.length).toBeGreaterThanOrEqual(2);
+            const manual = lines.find((row) => row.source === "manual");
+            const fromRecipe = lines.find((row) => row.source === "recipe");
+            expect(manual).toBeDefined();
+            expect(fromRecipe).toBeDefined();
+            for (const row of lines) {
+                expect(row.source_fridge_item_id).toBeNull();
+            }
         });
     });
 

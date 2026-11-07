@@ -1295,6 +1295,8 @@ export async function addRecipeToGrocery(opts: {
             quantity: line.remainder,
             foodId,
             checked: false,
+            source: "recipe",
+            sourceFridgeItemId: null,
         });
         added.push(inserted);
     }

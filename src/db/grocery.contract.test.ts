@@ -1,11 +1,13 @@
-import { afterEach, beforeEach, describe } from "bun:test";
+import { afterEach, beforeEach, describe, test, expect } from "bun:test";
 import { createMemoryGroceryStore } from "../domain/grocery.js";
 import { liveGroceryStore } from "./grocery.js";
 import { runGroceryListStoreContract } from "./contract/grocery.contract.js";
 import type { StoreContractCtx } from "./contract/helpers.js";
 import { describeDb } from "./testing/pg.js";
+import { liveFridgeStore } from "./fridge.js";
 import {
     seedFood,
+    seedFridgeItem,
     seedFridgeLocation,
     seedGrocerySection,
     seedGroceryStore,
@@ -32,6 +34,7 @@ describe("grocery store contract", () => {
             sectionId: crypto.randomUUID(),
             foodId: crypto.randomUUID(),
             locationId: crypto.randomUUID(),
+            ensureFridgeItem: async () => crypto.randomUUID(),
             setLineCreatedAt: async (id, createdAt) => {
                 grocery.__paritySetLineCreatedAt(id, createdAt);
             },
@@ -74,6 +77,8 @@ describeDb(pgAvailable !== null, "grocery store contract live", (getCtx) => {
             sectionId,
             foodId,
             locationId,
+            ensureFridgeItem: () =>
+                seedFridgeItem(sql, primary.householdId, locationId, foodId),
             sql,
             setLineCreatedAt: async (lineId, createdAt) => {
                 await sql`
@@ -95,4 +100,34 @@ describeDb(pgAvailable !== null, "grocery store contract live", (getCtx) => {
         reseed,
         () => ctx,
     );
+
+    test("source_fridge_item_id clears when fridge item is deleted", async () => {
+        const fridgeItemId = await ctx.ensureFridgeItem!();
+        const grocery = liveGroceryStore();
+        const line = await grocery.insertLine({
+            id: crypto.randomUUID(),
+            householdId: ctx.householdId,
+            storeId: ctx.storeId,
+            sectionId: ctx.sectionId,
+            kind: "food",
+            displayName: "Restock line",
+            quantity: { amount: 1, unit: "g" },
+            foodId: ctx.foodId,
+            checked: false,
+            source: "restock",
+            sourceFridgeItemId: fridgeItemId,
+        });
+        expect(line.sourceFridgeItemId).toBe(fridgeItemId);
+        const listedBeforeDelete = await grocery.listLines(ctx.householdId);
+        expect(
+            listedBeforeDelete.find((row) => row.id === line.id)
+                ?.sourceFridgeItemId,
+        ).toBe(fridgeItemId);
+
+        await liveFridgeStore().deleteItem(ctx.householdId, fridgeItemId);
+        const listed = await grocery.listLines(ctx.householdId);
+        const found = listed.find((row) => row.id === line.id);
+        expect(found?.source).toBe("restock");
+        expect(found?.sourceFridgeItemId).toBeNull();
+    });
 });

@@ -19,6 +19,9 @@ export type StoreContractCtx = {
     sectionId: string;
     foodId: string;
     locationId: string;
+    /** A fridge item id in this household. Live contexts seed it on call, so
+     * tests that count fridge rows never see it. */
+    ensureFridgeItem?: () => Promise<string>;
     setLineCreatedAt?: (lineId: string, createdAt: string) => Promise<void>;
     setAllergenCreatedAt?: (id: string, createdAt: string) => Promise<void>;
     setDislikeCreatedAt?: (id: string, createdAt: string) => Promise<void>;
@@ -100,6 +103,8 @@ export function sampleGroceryLine(
         quantity: { amount: 1, unit: "L" },
         foodId: ctx.foodId,
         checked: false,
+        source: "manual",
+        sourceFridgeItemId: null,
         ...overrides,
     };
 }

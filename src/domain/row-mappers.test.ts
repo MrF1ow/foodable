@@ -40,11 +40,69 @@ test("a grocery row round-trips through food_id alone", () => {
         unit: "g",
         checked: false,
         food_id: FOOD_ID,
+        source: "recipe",
+        source_fridge_item_id: "fridge-1",
     });
     expect(line.foodId).toBe(FOOD_ID);
+    expect(line.source).toBe("recipe");
+    expect(line.sourceFridgeItemId).toBe("fridge-1");
     const row = groceryLineToRow(line);
     expect(row.food_id).toBe(FOOD_ID);
+    expect(row.source).toBe("recipe");
+    expect(row.source_fridge_item_id).toBe("fridge-1");
     expect(row).not.toHaveProperty("identity");
+});
+
+test("grocery row defaults missing source to manual", () => {
+    const line = groceryLineFromRow({
+        id: "g2",
+        household_id: "h1",
+        store_id: "s1",
+        section_id: "sec1",
+        kind: "food",
+        display_name: "Rice",
+        amount: 1,
+        unit: "kg",
+        checked: false,
+        food_id: FOOD_ID,
+    });
+    expect(line.source).toBe("manual");
+    expect(line.sourceFridgeItemId).toBeNull();
+});
+
+test("grocery row rejects an unknown source", () => {
+    expect(() =>
+        groceryLineFromRow({
+            id: "g3",
+            household_id: "h1",
+            store_id: "s1",
+            section_id: "sec1",
+            kind: "food",
+            display_name: "X",
+            amount: 1,
+            unit: "g",
+            checked: false,
+            source: "imported",
+        }),
+    ).toThrow(/Invalid grocery line source/);
+});
+
+test("grocery row rejects an empty string source", () => {
+    expect(() =>
+        groceryLineFromRow({
+            id: "g4",
+            household_id: "h1",
+            store_id: "s1",
+            section_id: "sec1",
+            kind: "food",
+            display_name: "Y",
+            amount: 1,
+            unit: "g",
+            checked: false,
+            food_id: FOOD_ID,
+            source: "",
+        }),
+    ).toThrow(/Invalid grocery line source/);
 });
 
 test("a recipe ingredient row writes neither identity nor nutrition", () => {

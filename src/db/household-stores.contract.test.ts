@@ -24,6 +24,7 @@ import { liveStockStore } from "./stock.js";
 import { describeDb } from "./testing/pg.js";
 import {
     seedFood,
+    seedFridgeItem,
     seedFridgeLocation,
     seedGrocerySection,
     seedGroceryStore,
@@ -69,6 +70,7 @@ describe("household store contracts (memory)", () => {
             sectionId: crypto.randomUUID(),
             foodId: crypto.randomUUID(),
             locationId: crypto.randomUUID(),
+            ensureFridgeItem: async () => crypto.randomUUID(),
             setLineCreatedAt: async (id, createdAt) => {
                 refs.grocery.__paritySetLineCreatedAt(id, createdAt);
             },
@@ -160,6 +162,13 @@ describeDb(
                 sectionId,
                 foodId,
                 locationId,
+                ensureFridgeItem: () =>
+                    seedFridgeItem(
+                        sql,
+                        primary.householdId,
+                        locationId,
+                        foodId,
+                    ),
                 sql,
                 setLineCreatedAt: async (lineId, createdAt) => {
                     await sql`
