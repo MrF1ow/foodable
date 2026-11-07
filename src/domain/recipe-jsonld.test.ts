@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readRecipeJsonLd } from "./recipe-jsonld.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "fixtures/recipe-pages");
 
+// Read every fixture once with Bun.file, so the helper below stays sync.
+const FIXTURES = new Map<string, string>();
+for await (const file of new Bun.Glob("*.html").scan(FIXTURE_DIR)) {
+    FIXTURES.set(file, await Bun.file(join(FIXTURE_DIR, file)).text());
+}
+
 function loadFixture(name: string): string {
-    return readFileSync(join(FIXTURE_DIR, `${name}.html`), "utf8");
+    const html = FIXTURES.get(`${name}.html`);
+    if (html == null) throw new Error(`Missing fixture ${name}.html`);
+    return html;
 }
 
 describe("readRecipeJsonLd fixtures", () => {
