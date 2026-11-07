@@ -57,6 +57,8 @@
         "@hotwired/turbo": "8.0.23",
         "@modelcontextprotocol/server": "^2.4.0",
         "hono": "^4.13.14",
+        "parse-ingredient": "3.1.0",
+        "robots-parser": "3.0.1",
         "zod": "^4.6.7"
     }
 }
