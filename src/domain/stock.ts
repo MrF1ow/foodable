@@ -692,6 +692,7 @@ export async function applyMovement(
 
 export type ExpiryLevel = "expired" | "high" | "medium" | "low";
 
+/** UTC calendar date; production expiry/notice "today" uses `householdToday` / `householdTodayAt`. */
 export function utcTodayFromDate(now = new Date()): string {
     return new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -725,14 +726,13 @@ export function expiryLevel(
 
 export function listExpiring(
     items: readonly FridgeItem[],
+    today: string,
     days = 3,
-    now = new Date(),
 ): FridgeItem[] {
-    const horizon = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
-    horizon.setUTCDate(horizon.getUTCDate() + days);
-    const latest = horizon.toISOString().slice(0, 10);
+    const [y, m, d] = today.split("-").map(Number);
+    const latest = new Date(Date.UTC(y!, m! - 1, d! + days))
+        .toISOString()
+        .slice(0, 10);
     return items
         .filter((item) => item.expiresOn && item.expiresOn <= latest)
         .slice()

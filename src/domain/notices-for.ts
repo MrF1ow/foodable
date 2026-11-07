@@ -23,7 +23,7 @@ import { NOTICE_SEVERITY, sortNotices } from "./notices.js";
 import { listRecipes, recipeNotices, type RecipesStore } from "./recipes.js";
 import type { GroceryListStore } from "./grocery.js";
 import { groceryRestockNotices } from "./restock.js";
-import { fridgeNotices, utcTodayFromDate } from "./stock.js";
+import { fridgeNotices } from "./stock.js";
 
 export type NoticesForDeps = {
     foods: FoodsStore;
@@ -169,14 +169,14 @@ async function buildSubjectTimes(
 export async function noticesFor(
     deps: NoticesForDeps,
     householdId: string,
-    opts?: {
-        today?: string;
+    opts: {
+        today: string;
         includeDismissed?: boolean;
         /** When set (e.g. Possible duplicates page), used for job exclusion and not fetched again. */
         refCounts?: ReadonlyMap<string, number>;
     },
 ): Promise<NoticesForResult> {
-    const today = opts?.today ?? utcTodayFromDate(new Date());
+    const today = opts.today;
     const dismissals = await deps.dismissals.listForHousehold(householdId);
     const dismissed = dismissedKeySet(dismissals);
 
@@ -365,10 +365,12 @@ export async function dismissNotice(
     householdId: string,
     userId: string,
     input: DismissNoticeInput,
+    opts: { today: string },
 ): Promise<NoticeDismissal> {
     assertDismissibleCode(input.code);
 
     const { notices } = await noticesFor(deps, householdId, {
+        today: opts.today,
         includeDismissed: true,
     });
     const key = lookupDismissalKey(

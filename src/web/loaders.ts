@@ -247,9 +247,12 @@ export async function renderFridgeInventoryPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const snapshot = await listFridge(liveFridgeStore(), householdId);
-    const allFoods = await liveFoodsStore().listFoods(householdId);
-    const groceryLines = await liveGroceryStore().listLines(householdId);
+    const [snapshot, allFoods, groceryLines, today] = await Promise.all([
+        listFridge(liveFridgeStore(), householdId),
+        liveFoodsStore().listFoods(householdId),
+        liveGroceryStore().listLines(householdId),
+        householdToday(householdId),
+    ]);
     const foodsById = new Map(
         allFoods.map((row) => [
             row.id,
@@ -269,6 +272,7 @@ export async function renderFridgeInventoryPage(
         status: 200,
         html: renderFridgePage({
             ...snapshot,
+            today,
             chrome: await viewerChromeWithAttention(profile, householdId),
             error,
             openModalId,
@@ -1163,17 +1167,24 @@ export async function renderNeedsAttentionInventoryPage(
 
     if (post?.member) {
         const deps = noticeDeps();
+        const today = await householdToday(householdId);
         try {
             if (post.undoDismissalId) {
                 await undoDismissal(deps, householdId, post.undoDismissalId);
                 redirect = true;
             } else if (post.code && post.subjectKind && post.subjectId) {
-                await dismissNotice(deps, householdId, post.member.userId, {
-                    code: post.code as NoticeCode,
-                    subjectKind: post.subjectKind as NoticeSubjectKind,
-                    subjectId: post.subjectId,
-                    relatedId: post.relatedId,
-                });
+                await dismissNotice(
+                    deps,
+                    householdId,
+                    post.member.userId,
+                    {
+                        code: post.code as NoticeCode,
+                        subjectKind: post.subjectKind as NoticeSubjectKind,
+                        subjectId: post.subjectId,
+                        relatedId: post.relatedId,
+                    },
+                    { today },
+                );
                 redirect = true;
             }
         } catch (err) {

@@ -271,7 +271,9 @@ describe("needs-attention routes", () => {
 
     test("POST dismiss info notice redirects and removes it from the list", async () => {
         const { yogurt } = await seedGroupedNotices();
-        const before = await noticesFor(noticeDeps(), HH);
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const countBefore = needsAttentionCount(before.notices);
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
@@ -287,7 +289,9 @@ describe("needs-attention routes", () => {
         });
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/needs-attention");
-        const after = await noticesFor(noticeDeps(), HH);
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(
             after.notices.some(
                 (n) =>
@@ -358,7 +362,9 @@ describe("needs-attention routes", () => {
             ...milk,
             expiresOn: addDaysUtc(today, -1),
         });
-        const before = await noticesFor(noticeDeps(), HH);
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
             headers: {
@@ -374,7 +380,9 @@ describe("needs-attention routes", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html.toLowerCase()).toContain("suggestion");
-        const after = await noticesFor(noticeDeps(), HH);
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(after.notices).toEqual(before.notices);
     });
 
@@ -392,7 +400,9 @@ describe("needs-attention routes", () => {
             ...milk,
             expiresOn: addDaysUtc(today, -1),
         });
-        const before = await noticesFor(noticeDeps(), HH);
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
             headers: {
@@ -408,7 +418,9 @@ describe("needs-attention routes", () => {
         });
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/grocery");
-        const after = await noticesFor(noticeDeps(), HH);
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(after.notices).toEqual(before.notices);
     });
 
@@ -472,7 +484,9 @@ describe("needs-attention routes", () => {
         expect(undo.headers.get("location")).toBe(
             "/needs-attention?show=dismissed",
         );
-        const open = await noticesFor(noticeDeps(), HH);
+        const open = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(
             open.notices.some(
                 (n) =>
@@ -514,7 +528,9 @@ describe("needs-attention routes", () => {
         expect(emptyHtml).toContain('href="/settings" data-turbo="false"');
 
         await seedGroupedNotices();
-        const open = await noticesFor(noticeDeps(), HH);
+        const open = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const count = needsAttentionCount(open.notices);
         expect(count).toBeGreaterThan(0);
         const withBadge = await app().request("http://x/fridge", {

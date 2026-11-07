@@ -3,6 +3,7 @@ import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
+import { householdToday } from "../../db/restock.js";
 import { liveStockStore } from "../../db/stock.js";
 import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
@@ -27,7 +28,6 @@ import {
     listExpiring,
     StockInputError,
     updateFridgeItemQuantityAdjust,
-    utcTodayFromDate,
 } from "../../domain/stock.js";
 import { sortNotices } from "../../domain/notices.js";
 import { fridgeExpiryLine } from "../../copy/notices.js";
@@ -128,12 +128,14 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 "get_fridge",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const { locations, items } = await listFridge(
-                        liveFridgeStore(),
-                        householdId,
-                    );
-                    const today = utcTodayFromDate();
-                    const [groceryLines, allFoods] = await Promise.all([
+                    const [
+                        { locations, items },
+                        today,
+                        groceryLines,
+                        allFoods,
+                    ] = await Promise.all([
+                        listFridge(liveFridgeStore(), householdId),
+                        householdToday(householdId),
                         liveGroceryStore().listLines(householdId),
                         liveFoodsStore().listFoods(householdId),
                     ]);
@@ -628,11 +630,11 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 "list_expiring",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const { items } = await listFridge(
-                        liveFridgeStore(),
-                        householdId,
-                    );
-                    const expiring = listExpiring(items, args.days ?? 3);
+                    const [{ items }, today] = await Promise.all([
+                        listFridge(liveFridgeStore(), householdId),
+                        householdToday(householdId),
+                    ]);
+                    const expiring = listExpiring(items, today, args.days ?? 3);
                     const payload = {
                         items: expiring.map((item) => ({
                             id: item.id,

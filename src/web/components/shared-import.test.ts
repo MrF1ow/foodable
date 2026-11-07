@@ -10,6 +10,9 @@ import {
     runBarcodeLookupAction,
 } from "./food-picker.js";
 import { renderFridgePage } from "../pages/fridge.js";
+import { utcTodayFromDate } from "../../domain/stock.js";
+
+const FRIDGE_PAGE_TODAY = utcTodayFromDate();
 import { renderGroceryPage } from "../pages/grocery.js";
 import { renderRecipeDetailPage, renderRecipesPage } from "../pages/recipes.js";
 import { renderMemberMultiSelect } from "./member-multi-select.js";
@@ -67,6 +70,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(recipesSrc).toContain('from "../components/member-multi-select.js"');
 
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -197,6 +201,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(nutritionSrc).not.toContain("page-markup.js");
 
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -226,6 +231,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(fridge).not.toContain('class="empty-fridge"');
 
     const emptyFridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [],
         items: [],
         chrome: { theme: "light", attention: { count: 0, tabs: {} } },

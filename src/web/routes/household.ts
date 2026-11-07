@@ -59,6 +59,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveGroceryStore } from "../../db/grocery.js";
+import { householdToday } from "../../db/restock.js";
 import {
     buildFoodUpdate,
     addProduct,
@@ -1164,12 +1165,19 @@ householdRoutes.post(
         const member = siteMember(c);
         const body = await c.req.parseBody();
         try {
-            await dismissNotice(noticeDeps(), member.householdId, userId, {
-                code: "food.possible_duplicate",
-                subjectKind: "food",
-                subjectId: formText(body, "subject_id"),
-                relatedId: formText(body, "related_id"),
-            });
+            const today = await householdToday(member.householdId);
+            await dismissNotice(
+                noticeDeps(),
+                member.householdId,
+                userId,
+                {
+                    code: "food.possible_duplicate",
+                    subjectKind: "food",
+                    subjectId: formText(body, "subject_id"),
+                    relatedId: formText(body, "related_id"),
+                },
+                { today },
+            );
         } catch (err) {
             const message =
                 err instanceof NoticeDismissError

@@ -908,11 +908,17 @@ test("noticesFor and dismissNotice accept grocery.restocked", async () => {
     await grocery.insertLine(line);
     const open = await noticesFor(deps, HH, { today: TODAY });
     expect(open.notices.some((n) => n.code === "grocery.restocked")).toBe(true);
-    await dismissNotice(deps, HH, "u", {
-        code: "grocery.restocked",
-        subjectKind: "grocery_line",
-        subjectId: line.id,
-    });
+    await dismissNotice(
+        deps,
+        HH,
+        "u",
+        {
+            code: "grocery.restocked",
+            subjectKind: "grocery_line",
+            subjectId: line.id,
+        },
+        { today: TODAY },
+    );
     const after = await noticesFor(deps, HH, { today: TODAY });
     expect(after.notices.some((n) => n.code === "grocery.restocked")).toBe(
         false,

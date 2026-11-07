@@ -101,7 +101,8 @@ test("noticesFor calls listForHousehold once", async () => {
         recipes: createMemoryRecipesStore(),
         dismissals: tracking,
     };
-    await noticesFor(deps, HH);
+    const today = utcTodayFromDate();
+    await noticesFor(deps, HH, { today });
     expect(calls).toBe(1);
 });
 
@@ -153,18 +154,24 @@ async function seedOpenNotices(
 
 test("needsAttentionCount matches noticesFor list length and excludes dismissed", async () => {
     const dismissals = createMemoryNoticeDismissalsStore();
-    const { fridge, foods, recipes, item } = await seedOpenNotices();
+    const { fridge, foods, recipes, item, today } = await seedOpenNotices();
     const deps = { foods, fridge, recipes, dismissals };
-    const open = await noticesFor(deps, HH);
+    const open = await noticesFor(deps, HH, { today });
     expect(needsAttentionCount(open.notices)).toBe(open.notices.length);
     expect(open.notices.length).toBeGreaterThanOrEqual(2);
 
-    await dismissNotice(deps, HH, "u1", {
-        code: "fridge.expiring",
-        subjectKind: "fridge_item",
-        subjectId: item.id,
-    });
-    const after = await noticesFor(deps, HH);
+    await dismissNotice(
+        deps,
+        HH,
+        "u1",
+        {
+            code: "fridge.expiring",
+            subjectKind: "fridge_item",
+            subjectId: item.id,
+        },
+        { today },
+    );
+    const after = await noticesFor(deps, HH, { today });
     expect(after.notices.some((n) => n.subject.id === item.id)).toBe(false);
     expect(needsAttentionCount(after.notices)).toBe(after.notices.length);
 });
