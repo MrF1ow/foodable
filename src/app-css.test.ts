@@ -8,7 +8,13 @@ function shellPage(
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Settings";
-    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+    return renderAppShell({
+        title,
+        active,
+        theme,
+        body: `<h1>${title}</h1>`,
+        attention: { count: 0, tabs: {} },
+    });
 }
 
 const SHARED = ["tokens.css", "base.css", "form.css", "table.css", "seg.css"];

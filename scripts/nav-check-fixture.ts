@@ -280,7 +280,10 @@ function food(id: string, name: string, calories: number | null) {
 // Views are cast with `as never`: this script is not typechecked (CI's
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = viewerChromeFromProfile({ theme });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme }),
+        attention: { count: 0, tabs: {} },
+    };
     const nutrition = await renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -544,7 +547,10 @@ function recipeDetailFixture(chrome: unknown) {
 
 function renderFailedModal(pathname: string, modalId: string): string | null {
     if (!modalId) return null;
-    const chrome = viewerChromeFromProfile({ theme: themeFileSuffix() });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme: themeFileSuffix() }),
+        attention: { count: 0, tabs: {} },
+    };
     if (pathname === "/fridge") {
         const view = fridgeView(chrome);
         const itemId = (prefix: string) =>

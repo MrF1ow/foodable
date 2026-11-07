@@ -32,6 +32,7 @@ import {
 } from "../src/web/pages/usual-products.js";
 import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
+import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
 import {
     NUTRITION_LOG_MEAL_MODAL_ID,
     NUTRITION_LOG_WATER_MODAL_ID,
@@ -384,7 +385,10 @@ function previewFoodCatalog() {
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = viewerChromeFromProfile({ theme });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme }),
+        attention: { count: 2, tabs: { fridge: true, recipes: true } },
+    };
     const { catalog, usual } = previewFoodCatalog();
     const catalogById = new Map(catalog.map((row) => [row.id, row]));
     const eggsPlain = catalog.find((row) => row.id === "f-eggs")!;
@@ -622,6 +626,34 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             },
         } as never),
         help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        "needs-attention": renderNeedsAttentionPage({
+            chrome,
+            result: {
+                notices: [
+                    {
+                        code: "fridge.expiring",
+                        severity: "info",
+                        subject: { kind: "fridge_item", id: "i2" },
+                        params: { days: 2 },
+                    },
+                    {
+                        code: "recipe.no_food",
+                        severity: "warn",
+                        subject: {
+                            kind: "recipe_ingredient",
+                            id: "ing-1",
+                            recipeId: RECIPE.id,
+                        },
+                        params: { name: "Buttermilk" },
+                    },
+                ],
+                dismissals: [],
+                subjectNames: new Map([
+                    ["fridge_item:i2", "Expired milk"],
+                    ["recipe_ingredient:ing-1", `${RECIPE.name} — Buttermilk`],
+                ]),
+            },
+        } as never),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -656,7 +688,10 @@ async function nutritionWithModal(
     theme: "light" | "dark",
     openModalId: string,
 ): Promise<string> {
-    const chrome = viewerChromeFromProfile({ theme });
+    const chrome = {
+        ...viewerChromeFromProfile({ theme }),
+        attention: { count: 2, tabs: { fridge: true, recipes: true } },
+    };
     return renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],

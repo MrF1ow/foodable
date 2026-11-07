@@ -34,6 +34,7 @@ const EXPECTED_USER_FKS: {
     { table: "weight_log", column: "user_id", deltype: "c" },
     { table: "foods", column: "created_by", deltype: "n" },
     { table: "household_mcp_tokens", column: "issued_by", deltype: "n" },
+    { table: "notice_dismissals", column: "dismissed_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "auth_codes", column: "user_id", deltype: "a" },

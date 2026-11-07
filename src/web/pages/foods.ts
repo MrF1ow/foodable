@@ -1,4 +1,5 @@
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
+import { escapeHtml, renderAppShell } from "../shell.js";
 import { ALLERGEN_LABELS, NAMED_ALLERGENS } from "../../domain/rules.js";
 import { FOOD_QUANTITY_UNITS } from "../../domain/quantity.js";
 import type { GroceryStore } from "../../domain/settings.js";
@@ -25,7 +26,7 @@ import {
 } from "../components/ui.js";
 
 export type FoodsSettingsView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     foods: Array<Food & { aliases: string[] }>;
     stores: GroceryStore[];
     error?: string;
@@ -536,9 +537,9 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
         ${linkPrompt}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Items",
         active: "household",
-        theme: view.chrome.theme,
         body,
     });
 }

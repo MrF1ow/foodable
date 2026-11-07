@@ -190,6 +190,30 @@ html:has(dialog.modal[open]) {
     width: 20px;
     height: 20px;
 }
+.app-bar-attention {
+    margin-inline-end: 8px;
+    min-width: 1.5rem;
+    padding: 2px 8px;
+    border-radius: var(--r-999);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+}
+.bottom-nav a {
+    position: relative;
+}
+.tab-dot {
+    position: absolute;
+    top: 4px;
+    right: calc(50% - 18px);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+}
 
 .settings-back {
     align-self: flex-start;

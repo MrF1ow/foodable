@@ -79,8 +79,22 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
+import {
+    loadHouseholdNotices,
+    viewerChromeWithAttention,
+} from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
+import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
+import {
+    dismissNotice,
+    undoDismissal,
+    type NoticesForDeps,
+} from "../domain/notices-for.js";
+import { NoticeDismissError } from "../domain/notice-dismissals.js";
+import type { NoticeCode } from "../domain/notices.js";
+import type { NoticeSubjectKind } from "../domain/notice-dismissals.js";
+import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
 
 function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],
@@ -196,7 +210,10 @@ export async function renderDashboardPage(
             goals,
             trends,
             weight,
-            chrome: viewerChromeFromProfile(viewerProfile),
+            chrome: await viewerChromeWithAttention(
+                viewerProfile,
+                access.subject.householdId,
+            ),
             cardOrder: orderCards(viewerProfile?.nutrition_layout),
             viewMemberId,
             error,
@@ -238,7 +255,7 @@ export async function renderFridgeInventoryPage(
         status: 200,
         html: renderFridgePage({
             ...snapshot,
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             error,
             openModalId,
             linkProductPrompt,
@@ -401,7 +418,7 @@ export async function renderGroceryListPage(
     return {
         status: 200,
         html: renderGroceryPage({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             stores,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
@@ -542,7 +559,7 @@ export async function renderSettingsFoodsPage(
     return {
         status: 200,
         html: renderFoodsSettingsPage({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             foods: withAliases,
             stores,
             error: opts.error,
@@ -579,7 +596,7 @@ export async function renderUsualProductsListPage(
     return {
         status: 200,
         html: renderUsualProductsListHtml({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             rows,
             addable,
             from: opts.from,
@@ -634,7 +651,7 @@ export async function renderUsualProductsPickerPage(
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             food,
             products,
             usualProductId: food.usualProductId,
@@ -685,7 +702,7 @@ export async function renderHouseholdSettingsRoute(
     return {
         status: 200,
         html: renderHouseholdSettingsPage({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             householdName: config.name,
             location: location ?? "",
             members,
@@ -763,7 +780,7 @@ export async function renderRecipesListPage(
     return {
         status: 200,
         html: renderRecipesPage({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             recipes,
             members: members.map((member) => ({
                 userId: member.userId,
@@ -885,7 +902,7 @@ export async function renderRecipeDetailRoute(
     return {
         status: 200,
         html: renderRecipeDetailPage({
-            chrome: viewerChromeFromProfile(profile),
+            chrome: await viewerChromeWithAttention(profile, householdId),
             recipe: view,
             notices,
             noticeContext: {
@@ -919,5 +936,80 @@ export async function renderRecipeDetailRoute(
             openModalId: opts.openModalId,
             linkProductPrompt,
         }),
+    };
+}
+
+function noticeDeps(): NoticesForDeps {
+    return {
+        foods: liveFoodsStore(),
+        fridge: liveFridgeStore(),
+        recipes: liveRecipesStore(),
+        dismissals: liveNoticeDismissalsStore(),
+    };
+}
+
+export async function renderNeedsAttentionInventoryPage(
+    viewerUserId: string,
+    error?: string,
+    showDismissed?: boolean,
+    post?: {
+        code?: string;
+        subjectKind?: string;
+        subjectId?: string;
+        relatedId?: string;
+        undoDismissalId?: string;
+        member?: HouseholdMember;
+    },
+): Promise<{ status: 200 | 303 | 400 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    let pageError = error;
+    let redirect = false;
+
+    if (post?.member) {
+        const deps = noticeDeps();
+        try {
+            if (post.undoDismissalId) {
+                await undoDismissal(deps, householdId, post.undoDismissalId);
+                redirect = true;
+            } else if (post.code && post.subjectKind && post.subjectId) {
+                await dismissNotice(deps, householdId, post.member.userId, {
+                    code: post.code as NoticeCode,
+                    subjectKind: post.subjectKind as NoticeSubjectKind,
+                    subjectId: post.subjectId,
+                    relatedId: post.relatedId,
+                });
+                redirect = true;
+            }
+        } catch (err) {
+            pageError =
+                err instanceof NoticeDismissError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not update notices.";
+        }
+    }
+
+    const result = await loadHouseholdNotices(householdId);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        householdId,
+        result,
+    );
+    const html = renderNeedsAttentionPage({
+        chrome,
+        result,
+        showDismissed,
+        error: pageError,
+    });
+    if (redirect && !pageError) {
+        return { status: 303, html };
+    }
+    return {
+        status: pageError ? 400 : 200,
+        html,
     };
 }

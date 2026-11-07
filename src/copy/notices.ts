@@ -14,10 +14,24 @@ export type NoticeCopy = {
     };
     help: string;
     dismissible: boolean;
+    dismissLabel?: string;
+    dismissPair?: true;
     badgeTone?: "bad" | "warn" | "dim";
 };
 
 export const ON_GROCERY_LIST_TEXT = "on the grocery list";
+
+export function noticeDismissLabel(code: NoticeCode): string {
+    return NOTICE_COPY[code].dismissLabel ?? "Dismiss";
+}
+
+export function noticeCodeDismissible(code: NoticeCode): boolean {
+    return NOTICE_COPY[code].dismissible;
+}
+
+export function noticeDismissPair(code: NoticeCode): boolean {
+    return NOTICE_COPY[code].dismissPair === true;
+}
 
 export const UNKNOWN_ALLERGEN_TEXT = "unknown allergen data";
 
@@ -113,7 +127,7 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
             when: (n) => n.params.onGroceryList === "no",
         },
         help: "expiry-levels",
-        dismissible: false,
+        dismissible: true,
     },
     "grocery.allergen": {
         badge: "Allergen",

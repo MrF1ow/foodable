@@ -28,6 +28,11 @@ import { NOTICE_SEVERITY } from "./notices.js";
 import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
 import type { FridgeItem, FridgeStore } from "./fridge.js";
 import { isQuantityUnit } from "./quantity.js";
+import {
+    cleanupDismissalsForSubject,
+    type MemoryNoticeDismissalsHolder,
+    type NoticeDismissalsStore,
+} from "./notice-dismissals.js";
 
 export const GROCERY_LINE_SOURCES = [
     "manual",
@@ -102,11 +107,21 @@ function publicLine({
     return { ...row, quantity: { ...row.quantity } };
 }
 
-export function createMemoryGroceryStore(): GroceryListStore {
+export type MemoryGroceryListStore = GroceryListStore &
+    MemoryNoticeDismissalsHolder;
+
+export function createMemoryGroceryStore(): MemoryGroceryListStore {
     const lines: MemoryGroceryLine[] = [];
-    const store: GroceryListStore & {
+    let linkedDismissals: NoticeDismissalsStore | undefined;
+    const store: MemoryGroceryListStore & {
         __paritySetLineCreatedAt(id: string, createdAt: string): void;
     } = {
+        linkDismissals(s) {
+            linkedDismissals = s;
+        },
+        dismissalsStore() {
+            return linkedDismissals;
+        },
         async listLines(householdId) {
             return lines
                 .filter((row) => row.householdId === householdId)
@@ -144,6 +159,14 @@ export function createMemoryGroceryStore(): GroceryListStore {
             const removed = next.length < before;
             lines.length = 0;
             lines.push(...next);
+            if (removed) {
+                await cleanupDismissalsForSubject(
+                    linkedDismissals,
+                    householdId,
+                    "grocery_line",
+                    id,
+                );
+            }
             return removed;
         },
         __paritySetLineCreatedAt(id, createdAt) {

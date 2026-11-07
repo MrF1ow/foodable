@@ -5,6 +5,7 @@ import {
     fridgeLocationToRow,
     type FridgeStore,
 } from "../domain/fridge.js";
+import { cleanupDismissalsForSubjectTx } from "./notice-dismissals.js";
 import {
     definedColumns,
     insertReturning,
@@ -168,6 +169,14 @@ export function liveFridgeStore(): FridgeStore {
                             returning id
                         `,
                     );
+                    if (data.length > 0) {
+                        await cleanupDismissalsForSubjectTx(
+                            tx,
+                            householdId,
+                            "fridge_item",
+                            id,
+                        );
+                    }
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete fridge item", err);

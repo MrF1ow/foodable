@@ -14,6 +14,9 @@ import { runRecipesStoreContract } from "./contract/recipes.contract.js";
 import { runRulesStoreContract } from "./contract/rules.contract.js";
 import { runSettingsStoreContract } from "./contract/settings.contract.js";
 import { runStockStoreContract } from "./contract/stock.contract.js";
+import { runNoticeDismissalsStoreContract } from "./contract/notice-dismissals.contract.js";
+import { createMemoryNoticeDismissalsStore } from "../domain/notice-dismissals.js";
+import { liveNoticeDismissalsStore } from "./notice-dismissals.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
 import { liveGroceryStore } from "./grocery.js";
@@ -125,6 +128,12 @@ describe("household store contracts (memory)", () => {
     runFoodsStoreContract(
         "memory",
         () => createMemoryFoodsStore(),
+        async () => {},
+        () => ctx,
+    );
+    runNoticeDismissalsStoreContract(
+        "memory",
+        () => createMemoryNoticeDismissalsStore(),
         async () => {},
         () => ctx,
     );
@@ -244,6 +253,12 @@ describeDb(
         runFoodsStoreContract(
             "live",
             () => liveFoodsStore(),
+            reseed,
+            () => ctx,
+        );
+        runNoticeDismissalsStoreContract(
+            "live",
+            () => liveNoticeDismissalsStore(),
             reseed,
             () => ctx,
         );

@@ -28,7 +28,7 @@ test("items nests products with Usual pill", () => {
         brand: "Kirkland",
     });
     const html = renderFoodsSettingsPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [],
         foods: [{ ...plain, usualProductId: "k1" }, kirkland],
     });
@@ -41,7 +41,7 @@ test("standalone row shows Belongs to action", () => {
     const solo = food("s1", "Kirkland Large Eggs", { brand: "Kirkland" });
     const plain = food("p1", "Eggs");
     const html = renderFoodsSettingsPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [],
         foods: [plain, solo],
     });
@@ -55,7 +55,7 @@ test("items edit modal includes usual buy controls on a normal page load", () =>
         brand: "Kirkland",
     });
     const html = renderFoodsSettingsPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [
             { id: "s-z", householdId: HH, name: "Zebra", sortOrder: 1 },
             { id: "s-a", householdId: HH, name: "Aldi", sortOrder: 0 },
@@ -77,7 +77,7 @@ test("open food-edit modal shows usual field values from the food row", () => {
         usualAmount: { amount: 6, unit: "g" },
     });
     const html = renderFoodsSettingsPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [{ id: "s-a", householdId: HH, name: "Aldi", sortOrder: 0 }],
         foods: [plain],
         openModalId: "food-edit-p1",

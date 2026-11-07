@@ -5,6 +5,7 @@ import {
     type Food,
     type FoodsStore,
 } from "../domain/foods.js";
+import { cleanupDismissalsForFoodTx } from "./notice-dismissals.js";
 import {
     definedColumns,
     insertReturning,
@@ -155,6 +156,16 @@ export function liveFoodsStore(): FoodsStore {
         async updateFoodRow(row) {
             return run(async (tx) => {
                 try {
+                    const prior = await maybeOne<{ archived_at: unknown }>(
+                        tx,
+                        tx`
+                            select archived_at
+                            from ${tx.unsafe(FOODS)}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                        `,
+                        "read food archive state",
+                    );
                     const { row: patch, keys } = definedColumns(
                         foodRowForWrite(tx, foodToRow(row)),
                     );
@@ -168,6 +179,17 @@ export function liveFoodsStore(): FoodsStore {
                         `,
                         "update food",
                     );
+                    const archiving =
+                        prior?.archived_at == null &&
+                        row.archivedAt != null &&
+                        data != null;
+                    if (archiving) {
+                        await cleanupDismissalsForFoodTx(
+                            tx,
+                            row.householdId,
+                            row.id,
+                        );
+                    }
                     return data ? foodFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("update food", err);

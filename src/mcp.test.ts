@@ -66,6 +66,7 @@ const realDbAnalytics = { ...actualDbAnalytics };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
+const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
 const exportMemoryStore = createMemoryExportArchiveStore();
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
 import {
@@ -98,6 +99,8 @@ import {
     createMemorySettingsStore,
 } from "./domain/settings.js";
 import { addAllergen, createMemoryRulesStore } from "./domain/rules.js";
+import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
+import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
 import {
     TOOLS,
     HOUSEHOLD_SCOPED_TOOL_NAMES,
@@ -292,6 +295,7 @@ const db = {
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
     foodsStore: createMemoryFoodsStore(),
+    dismissalsStore: createMemoryNoticeDismissalsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
@@ -591,6 +595,11 @@ mock.module("./db/foods.js", () => ({
     liveFoodsStore: () => db.foodsStore,
 }));
 
+mock.module("./db/notice-dismissals.js", () => ({
+    ...actualDbNoticeDismissals,
+    liveNoticeDismissalsStore: () => db.dismissalsStore,
+}));
+
 mock.module("./foods.js", () => ({
     ...actualFoods,
     lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
@@ -616,6 +625,7 @@ afterAll(() => {
     mock.module("./db/settings.js", () => realDbSettings);
     mock.module("./db/rules.js", () => realDbRules);
     mock.module("./db/foods.js", () => realDbFoods);
+    mock.module("./db/notice-dismissals.js", () => realDbNoticeDismissals);
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
     mock.module("./db/exports.js", () => realExports);
@@ -655,6 +665,7 @@ beforeEach(() => {
             displayName: "U1",
         },
     ];
+    db.dismissalsStore = createMemoryNoticeDismissalsStore();
     db.fridgeStore = createMemoryFridgeStore();
     db.stockStore = createMemoryStockStore();
     db.groceryStore = createMemoryGroceryStore();
@@ -662,6 +673,10 @@ beforeEach(() => {
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
     db.foodsStore = createMemoryFoodsStore();
+    db.fridgeStore.linkDismissals(db.dismissalsStore);
+    db.groceryStore.linkDismissals(db.dismissalsStore);
+    db.recipesStore.linkDismissals(db.dismissalsStore);
+    db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
     db.foodSearchHits = [];
     db.foodSearchError = null;

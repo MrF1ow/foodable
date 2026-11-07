@@ -21,7 +21,13 @@ function shellPage(
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Household";
-    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+    return renderAppShell({
+        title,
+        active,
+        theme,
+        body: `<h1>${title}</h1>`,
+        attention: { count: 0, tabs: {} },
+    });
 }
 
 const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");

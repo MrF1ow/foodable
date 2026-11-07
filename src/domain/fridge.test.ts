@@ -186,7 +186,7 @@ test("empty fridge page prompts add location then add item", () => {
     const html = renderFridgePage({
         locations: [],
         items: [],
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
     });
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).not.toContain("Coming soon.");
@@ -226,7 +226,7 @@ test("fridge page reuses quantity field and food picker", () => {
                 foodId: null,
             },
         ],
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
     });
     expect(html).toContain('class="quantity-field"');
     expect(html).toContain('class="food-picker"');
@@ -257,7 +257,7 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
         ).map((n) => n.code),
     ).toEqual(["fridge.expiring"]);
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -323,7 +323,7 @@ test("expired fridge row shows pinned Expired pill and data-expiry", () => {
     const today = utcTodayFromDate();
     const expiresOn = addUtcDays(today, -1);
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -348,7 +348,7 @@ test("expired fridge row shows pinned Expired pill and data-expiry", () => {
 
 test("location actions and add-location live in the page header and head rows", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Pantry", sortOrder: 0 },
         ],
@@ -375,7 +375,7 @@ test("location actions and add-location live in the page header and head rows", 
 
 test("expiring soon is a closed details block with a count", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -400,7 +400,7 @@ test("expiring soon is a closed details block with a count", () => {
 
 test("supply items omit the eat icon action", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Pantry", sortOrder: 0 },
         ],
@@ -432,7 +432,7 @@ test("supply items omit the eat icon action", () => {
 
 test("a server error reopens the modal that submitted the form", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [],
         items: [],
         error: "Enter a location name.",
@@ -452,7 +452,7 @@ test("a server error reopens the modal that submitted the form", () => {
 
 test("a server error reopens delete and remove-location confirm modals only", () => {
     const base = {
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -511,7 +511,7 @@ test("a server error reopens delete and remove-location confirm modals only", ()
 
 test("fridge still shows a page banner when openModalId does not match a dialog", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -523,7 +523,7 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     expect(html).toContain("Unknown item.");
     expect(html).not.toMatch(/data-modal-open-on-load/);
     const editGone = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -534,7 +534,7 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     expect(editGone).toContain("Unknown item.");
     expect(editGone).not.toMatch(/data-modal-open-on-load/);
     const locationGone = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -550,7 +550,7 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
 test("a server error reopens the shared edit dialog pre-filled", () => {
     const expiresOn = "2026-11-02";
     const base = {
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
             { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },
@@ -656,7 +656,7 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
         };
     });
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations,
         items,
     } as never);
@@ -693,7 +693,7 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
             sortOrder: index,
         }));
         return renderFridgePage({
-            chrome: { theme: "light" },
+            chrome: { theme: "light", attention: { count: 0, tabs: {} } },
             locations,
             items: [],
         } as never);
@@ -726,7 +726,7 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
 
 test("a server error reopens the shared add-food dialog for that location", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
             { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },

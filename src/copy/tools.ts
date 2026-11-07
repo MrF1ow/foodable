@@ -342,6 +342,29 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "list_notices",
+        category: "rules",
+        badges: ["view"],
+        params: [
+            { name: "code", required: false },
+            { name: "severity", required: false },
+            { name: "subject_kind", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "dismiss_notice",
+        category: "rules",
+        badges: ["edit"],
+        params: [
+            { name: "code", required: true },
+            { name: "subject_kind", required: true },
+            { name: "subject_id", required: true },
+            { name: "related_id", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
         name: "list_members",
         category: "settings-account",
         badges: ["lookup"],
@@ -776,6 +799,8 @@ const TOOLS_BASE: ToolIdentity[] = [
 ];
 
 export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
+    "dismiss_notice",
+    "list_notices",
     "list_members",
     "get_household_config",
     "update_household_config",

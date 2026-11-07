@@ -1,6 +1,6 @@
 import { escapeHtml, renderAppShell } from "../shell.js";
 import { MIN_PASSWORD_LENGTH } from "../../domain/auth.js";
-import type { ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
 import type { HouseholdMember } from "../../household.js";
 import type { GrocerySection, GroceryStore } from "../../domain/settings.js";
 import {
@@ -40,7 +40,7 @@ export type HouseholdMemberRulesView = {
 };
 
 export type HouseholdSettingsView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     householdName: string;
     location: string;
     members: HouseholdMember[];
@@ -606,9 +606,9 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
         ${pageModals}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Household",
         active: "household",
-        theme: view.chrome.theme,
         body,
     });
 }

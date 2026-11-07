@@ -25,7 +25,10 @@ const bob: HouseholdMember = {
     displayName: "Bob",
 };
 
-const chrome = { theme: "light" as const };
+const chrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+};
 
 test("theme save form posts account fields to /settings", () => {
     const html = renderSettingsPage({

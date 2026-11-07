@@ -66,9 +66,13 @@ test("noticeList empty, className, escaping, dedupe, action with ctx", () => {
     const dup: Notice = { ...a, subject: { ...a.subject, id: "i2" } };
     expect(
         noticeList([a, dup], { className: "recipe-macros-reasons" }),
-    ).toMatch(/<li>[^<]*<\/li>/);
+    ).toMatch(/<li class="notice-row">[^<]*<\/li>/);
     expect(
-        (noticeList([a, dup], { className: "x" }).match(/<li>/g) ?? []).length,
+        (
+            noticeList([a, dup], { className: "x" }).match(
+                /<li class="notice-row"/g,
+            ) ?? []
+        ).length,
     ).toBe(1);
 
     const ctx: NoticeRouteContext = {

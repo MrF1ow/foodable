@@ -29,6 +29,12 @@ import {
 } from "./linking.js";
 import type { MemberAllergen } from "./rules.js";
 import type { SettingsStore } from "./settings.js";
+import {
+    cleanupDismissalsForRecipe,
+    cleanupDismissalsForSubject,
+    type MemoryNoticeDismissalsHolder,
+    type NoticeDismissalsStore,
+} from "./notice-dismissals.js";
 
 export type Recipe = {
     id: string;
@@ -127,6 +133,9 @@ export type RecipesStore = {
     listIngredients(
         householdId: string,
         recipeId: string,
+    ): Promise<RecipeIngredient[]>;
+    listIngredientsForHousehold(
+        householdId: string,
     ): Promise<RecipeIngredient[]>;
     insertIngredient(row: RecipeIngredient): Promise<RecipeIngredient>;
     updateIngredient(row: RecipeIngredient): Promise<RecipeIngredient | null>;
@@ -649,11 +658,20 @@ export function macrosForPerson(
     return sum;
 }
 
-export function createMemoryRecipesStore(): RecipesStore {
+export type MemoryRecipesStore = RecipesStore & MemoryNoticeDismissalsHolder;
+
+export function createMemoryRecipesStore(): MemoryRecipesStore {
     const recipes: Recipe[] = [];
     const ingredients: RecipeIngredient[] = [];
     const portions: RecipePortion[] = [];
+    let linkedDismissals: NoticeDismissalsStore | undefined;
     return {
+        linkDismissals(s) {
+            linkedDismissals = s;
+        },
+        dismissalsStore() {
+            return linkedDismissals;
+        },
         async listRecipes(householdId) {
             return recipes
                 .filter((row) => row.householdId === householdId)
@@ -683,6 +701,18 @@ export function createMemoryRecipesStore(): RecipesStore {
             return cloneRecipe(row);
         },
         async deleteRecipe(householdId, id) {
+            const ingIds = ingredients
+                .filter(
+                    (row) =>
+                        row.householdId === householdId && row.recipeId === id,
+                )
+                .map((row) => row.id);
+            await cleanupDismissalsForRecipe(
+                linkedDismissals,
+                householdId,
+                id,
+                ingIds,
+            );
             const before = recipes.length;
             const next = recipes.filter(
                 (row) => !(row.householdId === householdId && row.id === id),
@@ -715,6 +745,17 @@ export function createMemoryRecipesStore(): RecipesStore {
                 .sort((a, b) => a.sortOrder - b.sortOrder)
                 .map(cloneIngredient);
         },
+        async listIngredientsForHousehold(householdId) {
+            return ingredients
+                .filter((row) => row.householdId === householdId)
+                .slice()
+                .sort(
+                    (a, b) =>
+                        a.recipeId.localeCompare(b.recipeId) ||
+                        a.sortOrder - b.sortOrder,
+                )
+                .map(cloneIngredient);
+        },
         async insertIngredient(row) {
             const saved = cloneIngredient(row);
             ingredients.push(saved);
@@ -742,6 +783,14 @@ export function createMemoryRecipesStore(): RecipesStore {
             const removed = next.length < before;
             ingredients.length = 0;
             ingredients.push(...next);
+            if (removed) {
+                await cleanupDismissalsForSubject(
+                    linkedDismissals,
+                    householdId,
+                    "recipe_ingredient",
+                    ingredientId,
+                );
+            }
             return removed;
         },
         async getPortion(householdId, recipeId, userId) {

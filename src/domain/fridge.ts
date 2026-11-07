@@ -1,3 +1,8 @@
+import {
+    cleanupDismissalsForSubject,
+    type MemoryNoticeDismissalsHolder,
+    type NoticeDismissalsStore,
+} from "./notice-dismissals.js";
 import type { FoodResult } from "../foods.js";
 import {
     findFoodById,
@@ -62,7 +67,9 @@ export class FridgeInputError extends Error {
 type MemoryFridgeItem = FridgeItem & { createdAt: string };
 
 /** Memory fridge store plus merge hook so `MemoryFoodsStore.repointFoodRefs` can retarget items. */
-export type MemoryFridgeStore = FridgeStore & MemoryFoodRefHolder;
+export type MemoryFridgeStore = FridgeStore &
+    MemoryFoodRefHolder &
+    MemoryNoticeDismissalsHolder;
 
 // createdAt only orders the memory list, like the live store's
 // `order by created_at`; it is not part of FridgeItem, so it never leaves.
@@ -76,10 +83,17 @@ function publicItem({
 export function createMemoryFridgeStore(): MemoryFridgeStore {
     const locations: FridgeLocation[] = [];
     const items: MemoryFridgeItem[] = [];
+    let linkedDismissals: NoticeDismissalsStore | undefined;
 
     const store: MemoryFridgeStore & {
         __paritySetItemCreatedAt(id: string, createdAt: string): void;
     } = {
+        linkDismissals(s) {
+            linkedDismissals = s;
+        },
+        dismissalsStore() {
+            return linkedDismissals;
+        },
         repointFood(householdId, fromId, toId) {
             for (const item of items) {
                 if (
@@ -190,6 +204,14 @@ export function createMemoryFridgeStore(): MemoryFridgeStore {
             const removed = next.length < before;
             items.length = 0;
             items.push(...next);
+            if (removed) {
+                await cleanupDismissalsForSubject(
+                    linkedDismissals,
+                    householdId,
+                    "fridge_item",
+                    id,
+                );
+            }
             return removed;
         },
         __paritySetItemCreatedAt(id, createdAt) {

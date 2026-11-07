@@ -8,6 +8,10 @@ import {
     type RecipesStore,
 } from "../domain/recipes.js";
 import {
+    cleanupDismissalsForRecipeTx,
+    cleanupDismissalsForSubjectTx,
+} from "./notice-dismissals.js";
+import {
     definedColumns,
     insertReturning,
     maybeOne,
@@ -119,6 +123,7 @@ export function liveRecipesStore(): RecipesStore {
         async deleteRecipe(householdId, id) {
             return run(async (tx) => {
                 try {
+                    await cleanupDismissalsForRecipeTx(tx, householdId, id);
                     const data = await rows<{ id: string }>(
                         tx,
                         tx`
@@ -152,6 +157,26 @@ export function liveRecipesStore(): RecipesStore {
                     );
                 } catch (err) {
                     throw pgError("list recipe ingredients", err);
+                }
+            });
+        },
+        async listIngredientsForHousehold(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_INGREDIENT_COLS)}
+                            from ${tx.unsafe(RECIPE_INGREDIENTS)}
+                            where household_id = ${householdId}
+                            order by recipe_id asc, sort_order asc
+                        `,
+                    );
+                    return data.map((row) =>
+                        recipeIngredientFromRow(row as never),
+                    );
+                } catch (err) {
+                    throw pgError("list recipe ingredients for household", err);
                 }
             });
         },
@@ -201,6 +226,14 @@ export function liveRecipesStore(): RecipesStore {
                             returning id
                         `,
                     );
+                    if (data.length > 0) {
+                        await cleanupDismissalsForSubjectTx(
+                            tx,
+                            householdId,
+                            "recipe_ingredient",
+                            ingredientId,
+                        );
+                    }
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete recipe ingredient", err);

@@ -9,6 +9,8 @@ import * as actualDbRecipes from "../../db/recipes.js";
 import * as actualDbRules from "../../db/rules.js";
 import * as actualDbSettings from "../../db/settings.js";
 import * as actualDbStock from "../../db/stock.js";
+import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
+import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import * as actualFoods from "../../foods.js";
 import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
 import { addLocation, createMemoryFridgeStore } from "../../domain/fridge.js";
@@ -36,6 +38,7 @@ const realDbRecipes = { ...actualDbRecipes };
 const realDbRules = { ...actualDbRules };
 const realDbSettings = { ...actualDbSettings };
 const realDbStock = { ...actualDbStock };
+const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
 const realFoods = { ...actualFoods };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -74,6 +77,7 @@ const db = {
         },
     },
     foodsStore: createMemoryFoodsStore(),
+    dismissalsStore: createMemoryNoticeDismissalsStore(),
     fridgeStore: createMemoryFridgeStore(),
     stockStore: createMemoryStockStore(),
     groceryStore: createMemoryGroceryStore(),
@@ -111,6 +115,10 @@ mock.module("../../db/rules.js", () => ({
     ...realDbRules,
     liveRulesStore: () => db.rulesStore,
 }));
+mock.module("../../db/notice-dismissals.js", () => ({
+    ...realDbNoticeDismissals,
+    liveNoticeDismissalsStore: () => db.dismissalsStore,
+}));
 mock.module("../../db/household.js", () => ({
     ...realDbHousehold,
     getHouseholdMembership: async (userId: string) =>
@@ -139,6 +147,7 @@ afterAll(() => {
     mock.module("../../db/rules.js", () => realDbRules);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/profiles.js", () => realDbProfiles);
+    mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
     mock.module("../../foods.js", () => realFoods);
 });
 
@@ -183,6 +192,7 @@ async function seedEggsCatalog() {
 }
 
 beforeEach(() => {
+    db.dismissalsStore = createMemoryNoticeDismissalsStore();
     db.foodsStore = createMemoryFoodsStore();
     db.fridgeStore = createMemoryFridgeStore();
     db.stockStore = createMemoryStockStore();
@@ -190,6 +200,10 @@ beforeEach(() => {
     db.recipesStore = createMemoryRecipesStore();
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
+    db.fridgeStore.linkDismissals(db.dismissalsStore);
+    db.groceryStore.linkDismissals(db.dismissalsStore);
+    db.recipesStore.linkDismissals(db.dismissalsStore);
+    db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
     db.profile = { ...PROFILE };
     db.members = [

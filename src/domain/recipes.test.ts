@@ -442,7 +442,7 @@ test("create recipe requires a name and a positive yield", async () => {
 
 test("recipes list page is not a stub and detail reuses shared picker", () => {
     const list = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [
             {
                 id: "r1",
@@ -468,7 +468,7 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
     expect(list).toContain('action="/recipes"');
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -558,7 +558,7 @@ test("recipe pages use modals for create and detail actions", async () => {
         cookMinutes: null,
     };
     const list = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [recipe],
         members: [],
         viewerId: "u1",
@@ -581,7 +581,7 @@ test("recipe pages use modals for create and detail actions", async () => {
     );
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         ...emptyRecipeNotices("r1"),
         recipe,
         ingredients: [
@@ -640,7 +640,7 @@ test("recipe pages use modals for create and detail actions", async () => {
 
 test("a server error reopens the recipe modal that submitted the form", () => {
     const list = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: "u1",
@@ -660,7 +660,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(list.indexOf("Enter a recipe name.")).toBeLessThan(newDialogEnd);
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -726,7 +726,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(detail.indexOf(deleteMsg)).toBeLessThan(deleteDialogEnd);
 
     const editIng = renderRecipeDetailPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -789,7 +789,7 @@ test("a server error reopens the recipe modal that submitted the form", () => {
 
 test("recipe detail shows a page banner when openModalId does not match a dialog", () => {
     const html = renderRecipeDetailPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",

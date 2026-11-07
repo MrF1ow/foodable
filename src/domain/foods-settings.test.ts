@@ -5,7 +5,10 @@ import {
     renderFoodsSettingsPage,
 } from "../web/pages/foods.js";
 
-const chrome = { theme: "light" as const };
+const chrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+};
 
 const food = {
     id: "f1",

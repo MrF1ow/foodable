@@ -66,6 +66,48 @@ const SEVERITY_ORDER: Record<NoticeSeverity, number> = {
 };
 
 /** Stable: block, then warn, then info; ties preserve input order. */
+/** Tab prefix → notice code prefix for bottom-nav dots. */
+export const TAB_NOTICE_PREFIXES = {
+    fridge: "fridge.",
+    recipes: "recipe.",
+    household: "food.",
+} as const;
+
+export type AppTabIdForNotices = keyof typeof TAB_NOTICE_PREFIXES;
+
+export function noticeMatchesTab(
+    code: NoticeCode,
+    tab: AppTabIdForNotices,
+): boolean {
+    return code.startsWith(TAB_NOTICE_PREFIXES[tab]);
+}
+
+export function tabDotsFromNotices(
+    notices: readonly Notice[],
+): Partial<Record<AppTabIdForNotices, boolean>> {
+    const tabs = Object.keys(TAB_NOTICE_PREFIXES) as AppTabIdForNotices[];
+    const out: Partial<Record<AppTabIdForNotices, boolean>> = {};
+    for (const tab of tabs) {
+        const prefix = TAB_NOTICE_PREFIXES[tab];
+        if (
+            notices.some(
+                (n) =>
+                    (n.severity === "warn" || n.severity === "info") &&
+                    n.code.startsWith(prefix),
+            )
+        ) {
+            out[tab] = true;
+        }
+    }
+    return out;
+}
+
+/** Count open warnings and suggestions (never blocks) on a filtered notice list. */
+export function needsAttentionCount(notices: readonly Notice[]): number {
+    return notices.filter((n) => n.severity === "warn" || n.severity === "info")
+        .length;
+}
+
 export function sortNotices(notices: readonly Notice[]): Notice[] {
     const indexed = notices.map((n, i) => ({ n, i }));
     indexed.sort((a, b) => {

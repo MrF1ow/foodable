@@ -29,11 +29,19 @@ export function tabIcon(id: AppTabId): string {
     return TAB_ICONS[id];
 }
 
-export function bottomNav(active: AppTabId): string {
+export function bottomNav(
+    active: AppTabId | "none",
+    dots?: Partial<Record<AppTabId, boolean>>,
+): string {
     const links = APP_TABS.map((tab) => {
         const current = tab.id === active ? ' aria-current="page"' : "";
-        const label = escapeHtml(tab.label);
-        return `<a href="${tab.href}"${current} title="${label}" aria-label="${label}">${tabIcon(tab.id)}</a>`;
+        const dot =
+            dots?.[tab.id] === true
+                ? `<span class="tab-dot" aria-hidden="true"></span>`
+                : "";
+        const suffix = dots?.[tab.id] === true ? ", has notices" : "";
+        const label = escapeHtml(tab.label) + suffix;
+        return `<a href="${tab.href}"${current} title="${escapeHtml(tab.label)}" aria-label="${label}">${tabIcon(tab.id)}${dot}</a>`;
     }).join("");
     return `<nav class="bottom-nav" aria-label="App">${links}</nav>`;
 }

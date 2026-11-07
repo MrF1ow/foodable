@@ -68,6 +68,11 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "Arranging the Nutrition page",
         body: "Arrange opens a modal with up and down controls for each card. Tap Save to store the order once. Order is stored on your profile only and applies to your own Nutrition page view. Arrange is not available while you are viewing someone else's data.",
     },
+    {
+        id: "needs-attention",
+        title: "Needs attention",
+        body: "The number beside Settings counts every open warning and suggestion across the household (not allergen blocks). Dismiss hides a suggestion until that thing changes or goes away. Undo dismissed notices under Show dismissed on the Needs attention page.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);

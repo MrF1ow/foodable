@@ -3,7 +3,8 @@ import { FOOD_QUANTITY_UNITS } from "../../domain/quantity.js";
 import type { GroceryStore } from "../../domain/settings.js";
 import type { Food, UsualProductRow } from "../../domain/foods.js";
 import { quantityUnitOptionLabel } from "../display-quantity.js";
-import { escapeHtml, renderAppShell, type ViewerChrome } from "../shell.js";
+import type { AppChromeBase } from "../attention.js";
+import { escapeHtml, renderAppShell } from "../shell.js";
 import { renderFoodPicker } from "../components/food-picker.js";
 import { renderHouseholdNav } from "../components/settings-nav.js";
 import {
@@ -30,7 +31,7 @@ export type UsualProductsAddSearchView = {
 };
 
 export type UsualProductsListView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     rows: UsualProductRow[];
     /** Plain foods with no products yet: the "Add usual product" choices. */
     addable: Food[];
@@ -41,7 +42,7 @@ export type UsualProductsListView = {
 };
 
 export type UsualProductsPickerView = {
-    chrome: ViewerChrome;
+    chrome: AppChromeBase;
     food: Food;
     products: Food[];
     usualProductId: string | null;
@@ -198,9 +199,9 @@ ${searchOutcome}`,
         ${addModal}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Usual products",
         active: "household",
-        theme: view.chrome.theme,
         body,
     });
 }
@@ -284,9 +285,9 @@ ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
         })}
     `;
     return renderAppShell({
+        ...view.chrome,
         title: "Usual product",
         active: "household",
-        theme: view.chrome.theme,
         body,
     });
 }

@@ -15,7 +15,13 @@ function shellPage(
     theme: "system" | "light" | "dark" = "system",
 ): string {
     const title = active === "fridge" ? "Fridge" : "Settings";
-    return renderAppShell({ title, active, theme, body: `<h1>${title}</h1>` });
+    return renderAppShell({
+        title,
+        active,
+        theme,
+        body: `<h1>${title}</h1>`,
+        attention: { count: 0, tabs: {} },
+    });
 }
 
 function scriptBodies(html: string): string[] {
@@ -132,10 +138,10 @@ test("no app page HTML contains a script with a body except widget frames", asyn
             },
         ],
         items: [],
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
     });
     const grocery = renderGroceryPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         stores: [
             {
                 id: "st-1",
@@ -159,7 +165,7 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         ],
     });
     const recipes = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: "11111111-1111-4111-8111-111111111111",
@@ -182,7 +188,7 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -219,7 +225,7 @@ test("the Fridge page ships the picker logic once", async () => {
             },
         ],
         items: [],
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
     });
     expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
     expect(html).not.toContain("/api/foods/search");

@@ -44,7 +44,7 @@ async function renderOrder(order: NutritionCard[], peer = false) {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         cardOrder: order,
         viewMemberId: peer ? bob.userId : undefined,
     });
@@ -98,7 +98,7 @@ test("Arrange modal lists every card with disabled ends", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -171,7 +171,7 @@ test("log meal validation error reopens the log meal modal only", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -203,7 +203,7 @@ test("a layout error reopens the Arrange modal only", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
