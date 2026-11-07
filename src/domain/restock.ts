@@ -12,8 +12,7 @@ import {
 import { dismissedKeySet, isDismissedIn } from "./notice-dismissals.js";
 import type { NoticeDismissalsStore } from "./notice-dismissals.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
-import { fridgeNotices } from "./stock.js";
-import { convertStockAmount } from "./stock.js";
+import { convertStockAmount, daysUntilExpiry, fridgeNotices } from "./stock.js";
 import type {
     GrocerySection,
     GroceryStore,
@@ -33,15 +32,6 @@ export const RESTOCK_CHECK_MS = 15 * 60_000;
 function addCalendarDays(iso: string, days: number): string {
     const [y, m, d] = iso.split("-").map(Number);
     return new Date(Date.UTC(y!, m! - 1, d! + days)).toISOString().slice(0, 10);
-}
-
-function utcDayIndex(isoDate: string): number {
-    const [y, m, d] = isoDate.split("-").map(Number);
-    return Date.UTC(y!, m! - 1, d!) / 86_400_000;
-}
-
-function daysUntil(today: string, expiresOn: string): number {
-    return utcDayIndex(expiresOn) - utcDayIndex(today);
 }
 
 export function localClock(
@@ -348,7 +338,7 @@ export function groceryRestockNotices(
             params.itemName = item.displayName;
             params.expiresOn = item.expiresOn ?? "";
             if (item.expiresOn) {
-                params.daysLeft = daysUntil(today, item.expiresOn);
+                params.daysLeft = daysUntilExpiry(today, item.expiresOn);
             }
             related.push({
                 kind: "fridge_item",
@@ -444,22 +434,15 @@ export async function runRestockCheck(
             if (!restockDue(restock, clock)) continue;
 
             const householdId = household.id;
-            const [items, lines, dismissals, stores, sectionLists] =
-                await Promise.all([
-                    deps.fridge.listItems(householdId),
-                    deps.grocery.listLines(householdId),
-                    deps.dismissals.listForHousehold(householdId),
-                    deps.settings.listStores(householdId),
-                    deps.settings
-                        .listStores(householdId)
-                        .then((storeRows) =>
-                            Promise.all(
-                                storeRows.map((store) =>
-                                    deps.settings.listSections(store.id),
-                                ),
-                            ),
-                        ),
-                ]);
+            const [items, lines, dismissals, stores] = await Promise.all([
+                deps.fridge.listItems(householdId),
+                deps.grocery.listLines(householdId),
+                deps.dismissals.listForHousehold(householdId),
+                deps.settings.listStores(householdId),
+            ]);
+            const sectionLists = await Promise.all(
+                stores.map((store) => deps.settings.listSections(store.id)),
+            );
             const sections = sectionLists.flat();
             const foodIds = new Set<string>();
             for (const item of items) {

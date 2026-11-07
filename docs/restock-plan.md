@@ -89,7 +89,7 @@ restock: {
     - A standalone food names itself.
 - **Already on the list:** a family that has an unchecked line anywhere on the list is skipped, so the run never doubles a line.
 - **Fresh stock:** if the family still has any fridge item that is not expiring within the 7-day window (its `expiresOn` is after `today + 6`, or it has no `expiresOn`), the family is skipped. Already-expired stock in the family does not count as fresh. The person can still tap **Add to grocery list** on the expiring item's notice.
-- **Amount:** the family's effective usual amount, once per family. If there is no usual amount, the expiring amount summed across the family when the units convert (`convertStockAmount`), otherwise the first item's.
+- **Amount:** the family's effective usual amount, once per family. If there is no usual amount, the expiring amount summed across the family when the units convert (`convertStockAmount`), otherwise the soonest-expiring item's.
 - **Placement:** the store chain above, then the aisle rules.
 
 **Runner:** `startRestockRuns()` at boot, modelled on `startExportCleanup`. Every 15 minutes, for each household with restock on:

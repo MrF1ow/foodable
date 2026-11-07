@@ -5747,10 +5747,13 @@ describe("phone-app domain MCP tools", () => {
             ).stores.flatMap((s) => s.sections.flatMap((sec) => sec.lines));
             const hit = lines.find((l) => l.id === "line-restock");
             expect(hit).toBeTruthy();
-            const notice = (hit!.notices as Array<{ code: string }>).find(
-                (n) => n.code === "grocery.restocked",
-            );
+            const notice = (
+                hit!.notices as Array<{ code: string; message: string }>
+            ).find((n) => n.code === "grocery.restocked");
             expect(notice).toBeTruthy();
+            expect(notice!.message).toContain(
+                "Added because Milk pint expires",
+            );
             for (const n of hit!.notices) NOTICE_SCHEMA.parse(n);
         });
     });

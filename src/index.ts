@@ -17,6 +17,7 @@ import {
 import { listHouseholdsForRecipeSweep } from "./db/household.js";
 import { liveRecipesStore } from "./db/recipes.js";
 import { recipeFetchMemory } from "./db/fetch-memory.js";
+import { bootRestockRuns } from "./restock-runner.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
 import { isNutritionCard } from "./domain/layout.js";
@@ -460,7 +461,6 @@ if (import.meta.main) {
         liveRecipesStore(),
     );
     startFetchMemorySweep(recipeFetchMemory());
-    const { bootRestockRuns } = await import("./restock-runner.js");
     bootRestockRuns();
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));

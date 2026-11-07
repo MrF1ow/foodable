@@ -3,12 +3,11 @@ import type { RestockStore } from "../domain/restock.js";
 import { householdTimezone } from "../household.js";
 import { todayInTz } from "../domain/tz.js";
 import { getHouseholdConfig, getHouseholdOwnerProfile } from "./household.js";
+import { GROCERY_LINE_COLS } from "./grocery.js";
 import { insertReturning, maybeOne, rows, run, type Tx } from "./sql.js";
 
 const HOUSEHOLDS = "households";
 const GROCERY_LINES = "grocery_lines";
-export const GROCERY_LINE_COLS =
-    "id, household_id, store_id, section_id, kind, display_name, amount, unit, food_id, checked, source, source_fridge_item_id";
 
 async function insertGroceryLineTx(tx: Tx, row: GroceryLine): Promise<void> {
     await insertReturning(
@@ -61,18 +60,25 @@ export function liveRestockStore(): RestockStore {
     };
 }
 
+export type RestockEnabledHouseholdRow = {
+    id: string;
+    name: unknown;
+    recipe_search_places: unknown;
+    household_preferences: unknown;
+};
+
 export async function listRestockEnabledHouseholds(): Promise<
-    Array<{ id: string; household_preferences: unknown }>
+    RestockEnabledHouseholdRow[]
 > {
     return run(async (tx) => {
         return rows(
             tx,
             tx`
-                select id, household_preferences
+                select id, name, recipe_search_places, household_preferences
                 from ${tx.unsafe(HOUSEHOLDS)}
                 where household_preferences->'restock'->>'enabled' = 'true'
             `,
-        ) as Promise<Array<{ id: string; household_preferences: unknown }>>;
+        ) as Promise<RestockEnabledHouseholdRow[]>;
     });
 }
 

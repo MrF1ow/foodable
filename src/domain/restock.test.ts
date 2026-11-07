@@ -247,6 +247,59 @@ test("restockPlan skips family with unchecked grocery line", async () => {
     ).toHaveLength(1);
 });
 
+test("restockPlan fresh stock skips family with undated sibling product", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    const kirkland = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kirkland Eggs",
+            genericFoodId: plain.id,
+        }),
+    );
+    const greatValue = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Great Value Eggs",
+            genericFoodId: plain.id,
+        }),
+    );
+    const { store, sections } = await seedCostco();
+    const eff = await effectiveFoodsByIds(foods, HH, [
+        plain.id,
+        kirkland.id,
+        greatValue.id,
+    ]);
+    expect(
+        restockPlan({
+            items: [
+                fridgeFood({
+                    id: "k",
+                    foodId: kirkland.id,
+                    expiresOn: addDays(TODAY, 3),
+                }),
+                fridgeFood({
+                    id: "gv",
+                    foodId: greatValue.id,
+                    expiresOn: null,
+                    displayName: "Great Value Eggs",
+                }),
+            ],
+            foodsById: eff,
+            lines: [],
+            dismissed: dismissedKeySet([]),
+            today: TODAY,
+            stores: [store],
+            sections,
+            householdId: HH,
+        }).lines,
+    ).toHaveLength(0);
+});
+
 test("restockPlan fresh stock skips family", async () => {
     const foods = createMemoryFoodsStore();
     const plain = await foods.insertFood(
@@ -349,6 +402,82 @@ test("restockPlan sums convertible amounts without usual", async () => {
     });
     expect(plan.lines[0]!.quantity.amount).toBe(1500);
     expect(plan.lines[0]!.quantity.unit).toBe("ml");
+});
+
+test("restockPlan sums cross-unit volumes without usual", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Cream",
+            gramsPerMl: 1,
+        }),
+    );
+    const { store, sections } = await seedCostco();
+    const eff = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const plan = restockPlan({
+        items: [
+            fridgeFood({
+                id: "cup",
+                foodId: plain.id,
+                expiresOn: addDays(TODAY, 1),
+                quantity: { amount: 1, unit: "cup" },
+            }),
+            fridgeFood({
+                id: "ml",
+                foodId: plain.id,
+                expiresOn: addDays(TODAY, 3),
+                quantity: { amount: 240, unit: "ml" },
+            }),
+        ],
+        foodsById: eff,
+        lines: [],
+        dismissed: dismissedKeySet([]),
+        today: TODAY,
+        stores: [store],
+        sections,
+        householdId: HH,
+    });
+    expect(plan.lines[0]!.quantity).toEqual({ amount: 2, unit: "cup" });
+});
+
+test("restockPlan sums each and mass without usual", async () => {
+    const foods = createMemoryFoodsStore();
+    const plain = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Bars",
+            gramsPerEach: 50,
+        }),
+    );
+    const { store, sections } = await seedCostco();
+    const eff = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const plan = restockPlan({
+        items: [
+            fridgeFood({
+                id: "each",
+                foodId: plain.id,
+                expiresOn: addDays(TODAY, 1),
+                quantity: { amount: 2, unit: "each" },
+            }),
+            fridgeFood({
+                id: "g",
+                foodId: plain.id,
+                expiresOn: addDays(TODAY, 2),
+                quantity: { amount: 100, unit: "g" },
+            }),
+        ],
+        foodsById: eff,
+        lines: [],
+        dismissed: dismissedKeySet([]),
+        today: TODAY,
+        stores: [store],
+        sections,
+        householdId: HH,
+    });
+    expect(plan.lines[0]!.quantity).toEqual({ amount: 4, unit: "each" });
 });
 
 test("restockPlan uses soonest amount when units do not convert", async () => {
@@ -668,23 +797,51 @@ test("groceryRestockNotices sentences and filtering", async () => {
     });
     const n = groceryRestockNotices([line], [item], TODAY)[0]!;
     expect(noticeSentence(n)).toContain("Thursday");
+    const todayItem = fridgeFood({
+        id: "fi-today",
+        foodId: "f",
+        expiresOn: TODAY,
+        displayName: "Whole milk",
+    });
     expect(
-        noticeSentence({
-            ...n,
-            params: { ...n.params, daysLeft: 0 },
-        }),
+        noticeSentence(
+            groceryRestockNotices(
+                [{ ...line, sourceFridgeItemId: todayItem.id }],
+                [todayItem],
+                TODAY,
+            )[0]!,
+        ),
     ).toContain("today");
+    const tomorrow = addDays(TODAY, 1);
+    const tomorrowItem = fridgeFood({
+        id: "fi-tom",
+        foodId: "f",
+        expiresOn: tomorrow,
+        displayName: "Whole milk",
+    });
     expect(
-        noticeSentence({
-            ...n,
-            params: { ...n.params, daysLeft: 1 },
-        }),
+        noticeSentence(
+            groceryRestockNotices(
+                [{ ...line, sourceFridgeItemId: tomorrowItem.id }],
+                [tomorrowItem],
+                TODAY,
+            )[0]!,
+        ),
     ).toContain("tomorrow");
+    const expiredItem = fridgeFood({
+        id: "fi-exp",
+        foodId: "f",
+        expiresOn: addDays(TODAY, -1),
+        displayName: "Whole milk",
+    });
     expect(
-        noticeSentence({
-            ...n,
-            params: { ...n.params, daysLeft: -1 },
-        }),
+        noticeSentence(
+            groceryRestockNotices(
+                [{ ...line, sourceFridgeItemId: expiredItem.id }],
+                [expiredItem],
+                TODAY,
+            )[0]!,
+        ),
     ).toContain("expired");
     expect(
         noticeSentence(
@@ -814,8 +971,8 @@ test("grocery page renders Restocked badge via notices component", () => {
             },
         ],
     });
-    expect(html).toContain("Restocked");
     expect(html).toContain("notice-list");
-    expect(html).toContain('data-notice="grocery.restocked"');
     expect(html).toContain(noticeSentence(notice));
+    expect(html).toContain('name="return_to"');
+    expect(html).not.toContain("grocery-restock-pill");
 });

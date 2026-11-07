@@ -302,6 +302,49 @@ describe("needs-attention routes", () => {
         expect(await page.text()).not.toContain("Soon yogurt");
     });
 
+    test("POST dismiss with return_to=/grocery redirects to grocery", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+                return_to: "/grocery",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/grocery");
+    });
+
+    test("POST dismiss rejects open-redirect return_to", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        for (const returnTo of [
+            "https://evil.example",
+            "//evil.example",
+        ] as const) {
+            const r = await app().request("http://x/needs-attention/dismiss", {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    code: "fridge.expiring",
+                    subject_kind: "fridge_item",
+                    subject_id: yogurt.id,
+                    return_to: returnTo,
+                }).toString(),
+            });
+            expect(r.status).toBe(303);
+            expect(r.headers.get("location")).toBe("/needs-attention");
+        }
+    });
+
     test("POST dismiss on warn notice returns 4xx and keeps state", async () => {
         const today = utcTodayFromDate();
         const loc = await addLocation(db.fridgeStore, HH, "Fridge");

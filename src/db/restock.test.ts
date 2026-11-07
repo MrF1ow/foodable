@@ -1,17 +1,21 @@
 import { afterEach, expect, test } from "bun:test";
 import type { GroceryLine } from "../domain/grocery.js";
 import type { HouseholdConfig } from "../household.js";
+import { runRestockCheck } from "../domain/restock.js";
 import { liveRestockStore } from "./restock.js";
 import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
 import { describeDb } from "./testing/pg.js";
 import {
     seedFood,
+    seedFridgeItem,
+    seedFridgeLocation,
     seedGrocerySection,
     seedGroceryStore,
     seedHousehold,
 } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
+import { liveRestockCheckDeps } from "../restock-runner.js";
 
 const pgAvailable = await findPgBin();
 
@@ -193,5 +197,73 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
             preferences: patch.preferences,
         });
         expect(updated.preferences.restock.lastRunOn).toBe(runOn);
+    });
+
+    test("runRestockCheck live deps inserts restock line when due", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const storeId = await seedGroceryStore(sql, householdId, "Costco");
+        const otherId = crypto.randomUUID();
+        await sql`
+            insert into public.grocery_sections (
+                id,
+                household_id,
+                store_id,
+                name,
+                sort_order,
+                hidden,
+                is_other
+            )
+            values (
+                ${otherId},
+                ${householdId},
+                ${storeId},
+                ${"Other"},
+                ${99},
+                ${false},
+                ${true}
+            )
+        `;
+        const foodId = await seedFood(sql, householdId, { name: "Milk" });
+        const locationId = await seedFridgeLocation(sql, householdId);
+        const itemId = await seedFridgeItem(
+            sql,
+            householdId,
+            locationId,
+            foodId,
+            { displayName: "Milk pint", amount: 1, unit: "l" },
+        );
+        const runOn = "2026-06-06";
+        const expiresOn = "2026-06-09";
+        await sql`
+            update public.fridge_items
+            set expires_on = ${expiresOn}
+            where id = ${itemId}::uuid
+        `;
+        const base = await getHouseholdConfig(householdId);
+        await updateHouseholdConfig(householdId, {
+            ...base,
+            preferences: {
+                ...base.preferences,
+                timezone: "UTC",
+                restock: {
+                    enabled: true,
+                    weekday: 6,
+                    time: "00:00",
+                    lastRunOn: null,
+                },
+            },
+        });
+        const now = new Date("2026-06-06T12:00:00.000Z");
+        await runRestockCheck(liveRestockCheckDeps(), now);
+        const config = await getHouseholdConfig(householdId);
+        expect(config.preferences.restock.lastRunOn).toBe(runOn);
+        const lines = await sql`
+            select source from grocery_lines where household_id = ${householdId}
+        `;
+        expect(lines).toHaveLength(1);
+        expect(lines[0]!.source).toBe("restock");
     });
 });

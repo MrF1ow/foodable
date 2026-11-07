@@ -55,12 +55,6 @@ export function renderGroceryLineRow(opts: {
         metaParts.push(opts.alreadyHaveHtml);
     }
     const meta = metaParts.join(" · ");
-    const restockNotice = opts.notices?.find(
-        (n) => n.code === "grocery.restocked",
-    );
-    const titlePill = restockNotice
-        ? noticeBadge(restockNotice, { className: "grocery-restock-pill" })
-        : "";
     const noticeBlock =
         opts.notices && opts.notices.length > 0
             ? noticeList(opts.notices, {
@@ -72,6 +66,7 @@ export function renderGroceryLineRow(opts: {
                                     code: notice.code,
                                     subject_kind: notice.subject.kind,
                                     subject_id: notice.subject.id,
+                                    return_to: "/grocery",
                                     ...(dismissalKey(notice).relatedKey
                                         ? {
                                               related_id:
@@ -91,7 +86,7 @@ export function renderGroceryLineRow(opts: {
 <button type="submit" class="check-btn" aria-pressed="${checked}"><span class="visually-hidden">${verb} ${escapeHtml(opts.displayName)}</span></button>
 </form>
 <div class="list-row-main">
-<div class="row-title-line"><p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>${titlePill}</div>
+<p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
 ${opts.usualProductName ? `<p class="grocery-line-usual muted">${escapeHtml(opts.usualProductName)}</p>` : ""}
 ${opts.duplicateNoticeHtml ? `<p class="grocery-line-notice muted">${opts.duplicateNoticeHtml}</p>` : ""}
 <p class="grocery-line-meta row-meta">${meta}</p>

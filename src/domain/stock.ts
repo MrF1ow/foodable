@@ -706,7 +706,7 @@ function utcDayIndex(isoDate: string): number {
 }
 
 /** Days from `today` until `expiresOn` (0 = expires today). */
-function daysUntilExpiry(today: string, expiresOn: string): number {
+export function daysUntilExpiry(today: string, expiresOn: string): number {
     return utcDayIndex(expiresOn) - utcDayIndex(today);
 }
 
