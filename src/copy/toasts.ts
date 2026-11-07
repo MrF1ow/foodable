@@ -145,7 +145,15 @@ export const TOASTS = {
         kind: "error",
         text: "The site refused the request. Paste the recipe instead.",
     },
+    "recipes.import.site_refused_recent": {
+        kind: "warning",
+        text: "This site refused Foodable recently. Paste the recipe instead.",
+    },
     "recipes.import.not_found": {
+        kind: "error",
+        text: "That page doesn't exist anymore.",
+    },
+    "recipes.import.not_found_recent": {
         kind: "error",
         text: "That page doesn't exist anymore.",
     },
@@ -164,6 +172,10 @@ export const TOASTS = {
     "household.recipe-settings.saved": {
         kind: "success",
         text: "Recipe settings saved",
+    },
+    "household.fetch-refusal.cleared": {
+        kind: "success",
+        text: "{host} can be read again",
     },
     "household.social-reader.on": {
         kind: "success",

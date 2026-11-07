@@ -28,6 +28,7 @@ import {
     StreamableHTTPClientTransport,
     type VersionNegotiationMode,
 } from "@modelcontextprotocol/client";
+import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
@@ -44,6 +45,7 @@ import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
 import * as actualDbSql from "./db/sql.js";
 import * as actualDbSocialReaders from "./db/social-readers.js";
+import * as actualDbFetchMemory from "./db/fetch-memory.js";
 import * as actualRecipeUrlFetcher from "./recipe-url-fetcher.js";
 import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
@@ -69,6 +71,7 @@ const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
 const realDbSql = { ...actualDbSql };
 const realDbSocialReaders = { ...actualDbSocialReaders };
+const realDbFetchMemory = { ...actualDbFetchMemory };
 const realRecipeUrlFetcher = { ...actualRecipeUrlFetcher };
 const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
@@ -102,6 +105,7 @@ import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
+import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
     importRecipeFromText,
@@ -313,6 +317,7 @@ const db = {
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
+    fetchMemoryStore: createMemoryFetchMemoryStore(),
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
 };
 
@@ -656,6 +661,12 @@ mock.module("./recipe-url-fetcher.js", () => ({
         }
         return db.recipeImportFetcher;
     },
+    recipeFetchMemory: () => db.fetchMemoryStore,
+}));
+
+mock.module("./db/fetch-memory.js", () => ({
+    ...actualDbFetchMemory,
+    recipeFetchMemory: () => db.fetchMemoryStore,
 }));
 
 afterAll(() => {
@@ -677,6 +688,7 @@ afterAll(() => {
     mock.module("./db/exports.js", () => realExports);
     mock.module("./db/sql.js", () => realDbSql);
     mock.module("./db/users.js", () => realDbUsers);
+    mock.module("./db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("./recipe-url-fetcher.js", () => realRecipeUrlFetcher);
 });
 
@@ -730,6 +742,7 @@ beforeEach(() => {
     db.foodSearchHits = [];
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
+    db.fetchMemoryStore = createMemoryFetchMemoryStore();
 });
 
 interface ToolResult {
@@ -5256,6 +5269,63 @@ describe("phone-app domain MCP tools", () => {
                 imported.structuredContent,
             );
             expect(imported.structuredContent?.status).toBe("imported");
+            expect(imported.structuredContent?.from_memory).toBe(false);
+            expect(imported.structuredContent?.remembered_until).toBeNull();
+
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage() {
+                    return {
+                        ok: false as const,
+                        reason: "site_refused" as const,
+                        status: 403,
+                        detail: "Forbidden",
+                        url: "https://mem.example.com/recipe",
+                        host: "mem.example.com",
+                    };
+                },
+            };
+            const refusedFirst = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/recipe",
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                refusedFirst.structuredContent,
+            );
+            expect(refusedFirst.structuredContent?.from_memory).toBe(false);
+            const refusedMem = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/other",
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                refusedMem.structuredContent,
+            );
+            expect(refusedMem.structuredContent?.from_memory).toBe(true);
+            expect(
+                refusedMem.structuredContent?.remembered_until,
+            ).not.toBeNull();
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage() {
+                    return {
+                        ok: true as const,
+                        url: "https://mem.example.com/other",
+                        status: 200,
+                        contentType: "text/html",
+                        body: yoast,
+                    };
+                },
+            };
+            const retried = await call("import_recipe_from_url", {
+                url: "https://mem.example.com/other",
+                retry: true,
+            });
+            IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                retried.structuredContent,
+            );
+            expect(retried.structuredContent?.from_memory).toBe(false);
 
             const paste = await call("import_recipe_from_url", {
                 url: "https://www.instagram.com/p/abc/",
@@ -5324,7 +5394,7 @@ describe("phone-app domain MCP tools", () => {
             (item) => item.name === "import_recipe_from_url",
         );
         expect(tool?.params.map((row) => row.name)).toEqual(
-            expect.arrayContaining(["url", "text", "credit"]),
+            expect.arrayContaining(["url", "text", "credit", "retry"]),
         );
     });
 
@@ -7484,6 +7554,50 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipesHtml).toContain("Add a recipe.");
     });
 
+    test("POST /recipes/import with retry only refetches after remembered refusal", async () => {
+        const denied = createMemoryFetchMemoryStore();
+        await denied.recordRefusal(
+            "hh-1",
+            "memroute.example",
+            403,
+            new Date("2026-06-01T00:00:00.000Z"),
+        );
+        db.fetchMemoryStore = denied;
+        let fetchCalls = 0;
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage(
+                url: string,
+                _opts: { accept: string[] },
+            ): Promise<FetchOutcome> {
+                fetchCalls += 1;
+                expect(url).toContain("memroute.example");
+                return {
+                    ok: false,
+                    reason: "site_refused",
+                    status: 403,
+                    detail: "403",
+                    url,
+                };
+            },
+        };
+        const r = await siteApp.request("http://x/recipes/import", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(alice),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                url: "https://memroute.example/recipe",
+                retry: "1",
+            }).toString(),
+        });
+        expect(r.status).toBe(422);
+        expect(fetchCalls).toBe(1);
+    });
+
     test("shared text_origin survives import 422 retry", async () => {
         const { join } = await import("node:path");
         db.recipeImportFetcher = {
@@ -8227,6 +8341,23 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('action="/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
+    });
+
+    test("GET /household ignores invalid refusals_after cursor", async () => {
+        db.fetchMemoryStore = {
+            ...createMemoryFetchMemoryStore(),
+            async listRefusals(_hh, opts) {
+                expect(opts.after).toBeUndefined();
+                return [];
+            },
+        };
+        const r = await siteApp.request(
+            "http://x/household?refusals_after=not-a-date%7Cexample.com",
+            {
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
+        expect(r.status).toBe(200);
     });
 
     test("GET /household as a member is read-only", async () => {

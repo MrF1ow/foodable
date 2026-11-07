@@ -71,7 +71,10 @@ import {
     recipeSource,
     validateRecipeLink,
 } from "../../domain/recipe-link.js";
-import { recipeImportFetcher } from "../../recipe-url-fetcher.js";
+import {
+    recipeFetchMemory,
+    recipeImportFetcher,
+} from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 
@@ -89,6 +92,7 @@ async function recipeImportDeps(householdId: string) {
         recipes: liveRecipesStore(),
         foods: liveFoodsStore(),
         fetcher: recipeImportFetcher(),
+        memory: recipeFetchMemory(),
         transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
         readers: config.preferences.socialReaders,
         readerStatus: liveSocialReaderStatusStore(),
@@ -179,6 +183,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const credit = formText(body, "credit");
     const textOrigin =
         formText(body, "text_origin") === "shared" ? "shared" : "pasted";
+    const retry = formText(body, "retry") === "1";
     const pinValidated = validateRecipeLink(pinOrPageUrl);
     const cleanedPinUrl = pinValidated.ok
         ? cleanRecipeLink(pinValidated.url)
@@ -273,6 +278,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             importPasteStep: true,
             importPasteText: text,
             importTextOnly: true,
+            importShowRetry: outcome.fromMemory,
             ...importOriginPrefill(textOrigin),
             importSourceKind: "text",
             importSourceLabel: "Recipe text",
@@ -287,6 +293,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         text: websiteUrl ? undefined : text,
         credit: credit.trim() || undefined,
         textOrigin,
+        retry,
     });
     const onPinStep =
         pasteStep &&
@@ -325,10 +332,12 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 importPasteText: text,
                 importCredit: credit,
                 importWebsiteError: websiteError,
+                importWebsiteUrl: websiteUrl,
                 importError:
                     text.trim() !== ""
                         ? importOutcomeMessage(outcome)
                         : undefined,
+                importShowRetry: outcome.fromMemory,
                 importSourceKind: "pinterest",
                 importSourceLabel: "Pinterest",
                 ...importOriginPrefill(textOrigin),
@@ -381,6 +390,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             importPasteText: text,
             importCredit: credit,
             importTextOnly: textOnly || !pinValidated.ok,
+            importShowRetry: outcome.fromMemory,
             importSourceKind: textOnly ? "text" : outcome.source?.kind,
             importSourceLabel: textOnly ? "Recipe text" : outcome.source?.label,
             ...importOriginPrefill(textOrigin),
@@ -396,6 +406,8 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         importPasteStep: pasteRender,
         importPasteText: pasteRender ? text : undefined,
         importCredit: pasteRender ? credit : undefined,
+        importShowRetry: outcome.fromMemory,
+        importRetryDisabled: retry,
         importSourceKind: outcome.source?.kind,
         importSourceLabel: outcome.source?.label,
         ...importOriginPrefill(textOrigin),
