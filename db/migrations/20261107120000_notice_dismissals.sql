@@ -1,9 +1,16 @@
 -- Household-scoped dismissals for info-level notice suggestions. A dismissal
--- hides a notice until its subject changes or is removed. related_key is not
+-- hides a notice until its subject or related thing is removed (merged,
+-- archived or deleted; the writers clean up). related_key is not
 -- null default '' so Postgres unique treats single-subject rows consistently
 -- (nulls are distinct and would allow duplicate single-subject dismissals).
 --
--- Needs attention count measured on a bench copy: TBD
+-- Needs attention count (noticesFor: dismissals, recipes, every ingredient,
+-- the effective food catalog and fridge items, then the filter), measured on
+-- a bench copy of the dev data:
+--   1 household, 10 recipes, 44 ingredients, 20 fridge items    5.1 ms median
+--   same, inflated to 510 recipes, 4,488 ingredients, 1,020 fridge items and
+--   2,000 dismissals                                              33 ms median
+-- so the count is computed per page load and not stored.
 
 create table public.notice_dismissals (
     id uuid primary key default gen_random_uuid(),
