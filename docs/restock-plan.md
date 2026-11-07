@@ -88,12 +88,13 @@ restock: {
     - The line names the **plain food**, so the usual product's nutrition, store and amount apply.
     - A standalone food names itself.
 - **Already on the list:** a family that has an unchecked line anywhere on the list is skipped, so the run never doubles a line.
+- **Fresh stock:** if the family still has any fridge item that is not expiring within the 7-day window (its `expiresOn` is after `today + 6`, or it has no `expiresOn`), the family is skipped. Already-expired stock in the family does not count as fresh. The person can still tap **Add to grocery list** on the expiring item's notice.
 - **Amount:** the family's effective usual amount, once per family. If there is no usual amount, the expiring amount summed across the family when the units convert (`convertStockAmount`), otherwise the first item's.
 - **Placement:** the store chain above, then the aisle rules.
 
 **Runner:** `startRestockRuns()` at boot, modelled on `startExportCleanup`. Every 15 minutes, for each household with restock on:
 
-- It works out the household's local date, weekday and time. A household has no timezone of its own, so it uses the owner's profile timezone, falling back to UTC (see the open questions).
+- It works out the household's local date, weekday and time via `householdTimezone` (the household's own setting, else the owner's, else UTC; #189).
 - It runs when the weekday matches, the local time has reached the chosen time, and `lastRunOn` is before today. A server that was down at 07:00 catches up on its first check after.
 - It inserts the planned lines and writes `lastRunOn = today` **in one transaction**, so a restart, a second instance or a slow check never adds the same week twice.
 - A failed run leaves `lastRunOn` alone and is retried on the next check.
@@ -170,7 +171,7 @@ Plus:
     - the 15-minute runner;
     - the `grocery.restocked` notice.
 
-## Open questions
+## Settled
 
-- **A household timezone:** restock needs to know what day and time it is for the household, and timezones are stored per person, not per household. The plan borrows the owner's. Should the household get its own timezone setting, defaulting to the owner's? Notices' "expires Thursday" and future notifications would use it too.
-- **Stock that isn't expiring:** if one carton of milk expires this week but a second, fresh carton is in the fridge, should restock still add milk? Skipping when the family has enough unexpiring stock seems right, but "enough" needs the usual amount to compare against.
+- **Household timezone:** restock and notice wording use `household_preferences.timezone`, falling back to the owner's profile timezone, then UTC (#189).
+- **Fresh stock:** if the food family has any fresh stock (a fridge item not expiring within the 7-day window, or undated), restock skips the family. Adding more is left to the person via **Add to grocery list** on the expiring item's notice.

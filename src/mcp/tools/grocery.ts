@@ -2,6 +2,8 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { householdToday } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
@@ -23,7 +25,12 @@ import {
     type GroceryAmountPickReason,
     type GroceryStorePickReason,
 } from "../../domain/grocery.js";
+import {
+    dismissedKeySet,
+    isDismissedIn,
+} from "../../domain/notice-dismissals.js";
 import { sortNotices } from "../../domain/notices.js";
+import { groceryRestockNotices } from "../../domain/restock.js";
 import {
     NotedGroceryLineAmountRequiredError,
     putAwayGroceryLines,
@@ -120,6 +127,20 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     );
                     const allergenMembers =
                         await householdAllergenMembers(householdId);
+                    const today = await householdToday(householdId);
+                    const dismissals =
+                        await liveNoticeDismissalsStore().listForHousehold(
+                            householdId,
+                        );
+                    const dismissed = dismissedKeySet(dismissals);
+                    const restockNotices = groceryRestockNotices(
+                        snapshot.lines,
+                        fridge.items,
+                        today,
+                    ).filter((n) => !isDismissedIn(n, dismissed));
+                    const restockByLine = new Map(
+                        restockNotices.map((n) => [n.subject.id, n]),
+                    );
                     const stock = fridge.items.map((item) => ({
                         quantity: item.quantity,
                         foodId: item.foodId,
@@ -138,14 +159,16 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         const eff = line.foodId
                             ? foods.get(line.foodId)
                             : undefined;
-                        const notices = sortNotices(
-                            allergenNotices(
+                        const restock = restockByLine.get(line.id);
+                        const notices = sortNotices([
+                            ...allergenNotices(
                                 { kind: "grocery_line", id: line.id },
                                 line.displayName,
                                 allergenMembers,
                                 eff ? eff.allergens : null,
                             ),
-                        ).map(noticeToWire);
+                            ...(restock ? [restock] : []),
+                        ]).map(noticeToWire);
                         return {
                             id: line.id,
                             store_id: line.storeId,

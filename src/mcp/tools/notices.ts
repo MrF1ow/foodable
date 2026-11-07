@@ -1,3 +1,4 @@
+import { householdToday } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
@@ -69,9 +70,11 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                 "list_notices",
                 async () => {
                     const householdId = await callerHouseholdId();
+                    const today = await householdToday(householdId);
                     const { notices: all } = await noticesFor(
                         noticeDeps(),
                         householdId,
+                        { today },
                     );
                     const count = needsAttentionCount(all);
                     let notices = all;

@@ -5,9 +5,15 @@ import { disclosure, modalTrigger, type ModalFill } from "./ui.js";
 import {
     noticeAction,
     noticeBadge,
+    noticeList,
     type NoticeRouteContext,
 } from "./notices.js";
-import { noticeActionFor, ON_GROCERY_LIST_TEXT } from "../../copy/notices.js";
+import {
+    noticeActionFor,
+    noticeCodeDismissible,
+    ON_GROCERY_LIST_TEXT,
+} from "../../copy/notices.js";
+import { dismissalKey } from "../../domain/notice-dismissals.js";
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
@@ -39,6 +45,7 @@ export function renderGroceryLineRow(opts: {
     usualProductName?: string | null;
     extraActionsHtml?: string;
     duplicateNoticeHtml?: string;
+    notices?: readonly Notice[];
 }): string {
     const checked = opts.checked ? "true" : "false";
     const next = opts.checked ? "0" : "1";
@@ -48,6 +55,35 @@ export function renderGroceryLineRow(opts: {
         metaParts.push(opts.alreadyHaveHtml);
     }
     const meta = metaParts.join(" · ");
+    const restockNotice = opts.notices?.find(
+        (n) => n.code === "grocery.restocked",
+    );
+    const titlePill = restockNotice
+        ? noticeBadge(restockNotice, { className: "grocery-restock-pill" })
+        : "";
+    const noticeBlock =
+        opts.notices && opts.notices.length > 0
+            ? noticeList(opts.notices, {
+                  dismiss: (notice) =>
+                      noticeCodeDismissible(notice.code)
+                          ? {
+                                action: "/needs-attention/dismiss",
+                                hidden: {
+                                    code: notice.code,
+                                    subject_kind: notice.subject.kind,
+                                    subject_id: notice.subject.id,
+                                    ...(dismissalKey(notice).relatedKey
+                                        ? {
+                                              related_id:
+                                                  dismissalKey(notice)
+                                                      .relatedKey,
+                                          }
+                                        : {}),
+                                },
+                            }
+                          : null,
+              })
+            : "";
     return `<li class="grocery-line${opts.checked ? " is-checked" : ""}" data-line-id="${escapeHtml(opts.id)}" data-checked="${checked}" data-kind="${opts.kind}">
 <div class="list-row grocery-line-row">
 <form class="grocery-line-check" method="post" action="/grocery/lines/${escapeHtml(opts.id)}/check">
@@ -55,10 +91,11 @@ export function renderGroceryLineRow(opts: {
 <button type="submit" class="check-btn" aria-pressed="${checked}"><span class="visually-hidden">${verb} ${escapeHtml(opts.displayName)}</span></button>
 </form>
 <div class="list-row-main">
-<p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
+<div class="row-title-line"><p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>${titlePill}</div>
 ${opts.usualProductName ? `<p class="grocery-line-usual muted">${escapeHtml(opts.usualProductName)}</p>` : ""}
 ${opts.duplicateNoticeHtml ? `<p class="grocery-line-notice muted">${opts.duplicateNoticeHtml}</p>` : ""}
 <p class="grocery-line-meta row-meta">${meta}</p>
+${noticeBlock}
 ${opts.extraActionsHtml || opts.putAwayHtml ? `<div class="grocery-line-put-away row-actions">${opts.extraActionsHtml ?? ""}${opts.putAwayHtml ?? ""}</div>` : ""}
 </div>
 </div>

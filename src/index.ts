@@ -460,6 +460,8 @@ if (import.meta.main) {
         liveRecipesStore(),
     );
     startFetchMemorySweep(recipeFetchMemory());
+    const { bootRestockRuns } = await import("./restock-runner.js");
+    bootRestockRuns();
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));

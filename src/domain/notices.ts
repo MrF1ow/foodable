@@ -19,7 +19,8 @@ export type NoticeCode =
     | "recipe.unknown_unit"
     | "recipe.missing_grams_per_each"
     | "recipe.missing_grams_per_ml"
-    | "food.possible_duplicate";
+    | "food.possible_duplicate"
+    | "grocery.restocked";
 
 export const NOTICE_CODES: readonly NoticeCode[] = [
     "fridge.expired",
@@ -34,6 +35,7 @@ export const NOTICE_CODES: readonly NoticeCode[] = [
     "recipe.missing_grams_per_each",
     "recipe.missing_grams_per_ml",
     "food.possible_duplicate",
+    "grocery.restocked",
 ];
 
 export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
@@ -50,6 +52,7 @@ export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
     "recipe.missing_grams_per_each": "warn",
     "recipe.missing_grams_per_ml": "warn",
     "food.possible_duplicate": "info",
+    "grocery.restocked": "info",
 };
 
 export type NoticeRelated = {

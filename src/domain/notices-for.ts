@@ -22,6 +22,7 @@ import type { NoticeSubjectKind } from "./notice-dismissals.js";
 import { NOTICE_SEVERITY, sortNotices } from "./notices.js";
 import { listRecipes, recipeNotices, type RecipesStore } from "./recipes.js";
 import type { GroceryListStore } from "./grocery.js";
+import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices, utcTodayFromDate } from "./stock.js";
 
 export type NoticesForDeps = {
@@ -250,6 +251,15 @@ export async function noticesFor(
             foodDisplayName(food),
         );
     }
+    if (grocery) {
+        for (const line of grocery.lines) {
+            subjectNames.set(
+                subjectNameKey("grocery_line", line.id),
+                line.displayName,
+            );
+            subjectNames.set(`grocery_line:${line.id}`, line.displayName);
+        }
+    }
 
     const noticeFoods = new Map<string, Pick<Food, "genericFoodId">>();
     for (const [id, food] of catalog) {
@@ -308,6 +318,9 @@ export async function noticesFor(
                 );
             }
         }
+    }
+    if (grocery) {
+        raw.push(...groceryRestockNotices(grocery.lines, fridgeItems, today));
     }
 
     let filtered = raw;
