@@ -46,9 +46,26 @@ import {
     APP_UI_MIME_TYPE,
     FRIDGE_WIDGET_URI,
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
     type ToolContext,
 } from "../shared.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
+
+export const ADD_FRIDGE_ITEM_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    id: z.string().nullable(),
+    display_name: z.string().nullable(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+});
 
 function shortfallText(
     rows: { displayName: string; amount: number; unit: string }[],
@@ -317,13 +334,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 barcode: z.string().optional(),
                 food_id: z.string().optional(),
                 unit: z.string().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
-            outputSchema: z.object({
-                id: z.string(),
-                display_name: z.string(),
-                amount: z.number(),
-                unit: z.string(),
-            }),
+            outputSchema: ADD_FRIDGE_ITEM_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
@@ -332,6 +346,17 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const store = liveFridgeStore();
                     const foods = liveFoodsStore();
+                    const onSimilar = onSimilarFor(args);
+                    const similarNull = {
+                        status: "similar_foods" as const,
+                        similar_foods: [] as z.infer<
+                            typeof SIMILAR_FOODS_ENTRY
+                        >[],
+                        id: null,
+                        display_name: null,
+                        amount: null,
+                        unit: null,
+                    };
                     try {
                         const prepared =
                             args.kind === "supply"
@@ -342,6 +367,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                       amount: args.amount,
                                       unit: args.unit ?? "",
                                       foodId: args.food_id,
+                                      onSimilar,
                                   })
                                 : args.food_id
                                   ? await prepareAddFoodById(store, foods, {
@@ -370,6 +396,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                           name: args.name ?? "",
                                           amount: args.amount,
                                           unit: args.unit,
+                                          onSimilar,
                                       });
                         const added = await addFridgeItemAdjust(
                             store,
@@ -395,6 +422,8 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 },
                             ],
                             structuredContent: {
+                                status: "ok" as const,
+                                similar_foods: [],
                                 id: item.id,
                                 display_name: item.displayName,
                                 amount: item.quantity.amount,
@@ -402,6 +431,21 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                             },
                         };
                     } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    ...similarNull,
+                                    similar_foods: wire,
+                                },
+                            };
+                        }
                         if (
                             err instanceof FridgeInputError ||
                             err instanceof StockInputError

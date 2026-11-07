@@ -10,6 +10,9 @@ import {
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
     FoodsInputError,
+    similarFoodsForNames,
+    SimilarFoodsError,
+    type OnSimilar,
     type EffectiveFood,
     type Food,
     type FoodsStore,
@@ -222,6 +225,7 @@ export type RecipeImportIngredient = {
     note?: string | null;
     foodId?: string;
     barcode?: string;
+    newFood?: boolean;
 };
 
 export type IngredientGapKind =
@@ -1451,6 +1455,7 @@ export async function addRecipeManualIngredient(
         name: string;
         amount?: number | null;
         unit?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<RecipeIngredient> {
     const recipe = await requireRecipe(
@@ -1466,6 +1471,7 @@ export async function addRecipeManualIngredient(
             input.householdId,
             "food",
             input.name,
+            { onSimilar: input.onSimilar },
         );
         const quantity = quantityForNewIngredient(
             input.amount,
@@ -1960,6 +1966,7 @@ export async function importRecipeFromText(
         notes?: string | null;
         prepMinutes?: number | null;
         cookMinutes?: number | null;
+        onSimilar?: OnSimilar;
     },
     opts: {
         lookup: (barcode: string) => Promise<FoodResult | null>;
@@ -1985,6 +1992,29 @@ export async function importRecipeFromText(
 
     const lines = input.ingredients ?? [];
     const validated = lines.map((line) => validateImportLine(line));
+
+    const onSimilar = input.onSimilar ?? "create";
+    if (onSimilar === "ask") {
+        const namesToCheck: string[] = [];
+        for (const line of lines) {
+            if (line.foodId?.trim()) continue;
+            if (line.barcode?.trim()) continue;
+            if (line.newFood === true) continue;
+            const n = line.name?.trim() ?? "";
+            if (n) namesToCheck.push(n);
+        }
+        if (namesToCheck.length > 0) {
+            const entries = await similarFoodsForNames(
+                foods,
+                input.householdId,
+                "food",
+                namesToCheck,
+            );
+            if (entries.length > 0) {
+                throw new SimilarFoodsError(entries);
+            }
+        }
+    }
 
     const barcodeHits = new Map<string, FoodResult>();
     for (const line of lines) {
@@ -2040,6 +2070,8 @@ export async function importRecipeFromText(
                         input.householdId,
                         "food",
                         line.name,
+                        // Asked once above for every line; what is left is created.
+                        { onSimilar: "create" },
                     );
                 }
             } catch (err) {

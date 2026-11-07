@@ -42,11 +42,32 @@ import {
     groceryLineExtras,
     householdAllergenMembers,
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
     APP_UI_MIME_TYPE,
     GROCERY_LIST_WIDGET_URI,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
+import { GroceryInputError } from "../../domain/grocery.js";
+
+export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    id: z.string().nullable(),
+    display_name: z.string().nullable(),
+    already_have: z.string().nullable(),
+    warning: z.string().nullable(),
+    store_id: z.string().nullable(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+});
 
 const groceryLineSchema = z.object({
     id: z.string(),
@@ -307,17 +328,10 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 food_id: z.string().optional(),
                 unit: z.string().optional(),
                 section_id: z.string().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
-            outputSchema: z.object({
-                id: z.string(),
-                display_name: z.string(),
-                already_have: z.string().nullable(),
-                // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
-                warning: z.string().nullable(),
-                store_id: z.string(),
-                amount: z.number(),
-                unit: z.string(),
-            }),
+            outputSchema: ADD_GROCERY_LINE_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
@@ -327,65 +341,39 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     const grocery = liveGroceryStore();
                     const settings = liveSettingsStore();
                     const foods = liveFoodsStore();
-                    const stores = await settings.listStores(householdId);
-                    const storeNameById = new Map(
-                        stores.map((row) => [row.id, row.name]),
-                    );
-                    let storeReason: GroceryStorePickReason = "chosen";
-                    let amountReason: GroceryAmountPickReason = "chosen";
-                    const onPicked = (pick: {
-                        storeId: string;
-                        storeReason: GroceryStorePickReason;
-                        quantity: { amount: number; unit: string };
-                        amountReason: GroceryAmountPickReason;
-                    }) => {
-                        storeReason = pick.storeReason;
-                        amountReason = pick.amountReason;
+                    const onSimilar = onSimilarFor(args);
+                    const similarNull = {
+                        status: "similar_foods" as const,
+                        similar_foods: [] as z.infer<
+                            typeof SIMILAR_FOODS_ENTRY
+                        >[],
+                        id: null,
+                        display_name: null,
+                        already_have: null,
+                        warning: null,
+                        store_id: null,
+                        amount: null,
+                        unit: null,
                     };
-                    const line =
-                        args.kind === "supply"
-                            ? await addGrocerySupply(grocery, settings, foods, {
-                                  householdId,
-                                  storeId: args.store_id,
-                                  sectionId: args.section_id,
-                                  name: args.name ?? "",
-                                  amount: args.amount,
-                                  unit: args.unit ?? "",
-                                  foodId: args.food_id,
-                                  onPicked,
-                              })
-                            : args.food_id
-                              ? await addGroceryFoodById(
-                                    grocery,
-                                    settings,
-                                    foods,
-                                    {
-                                        householdId,
-                                        storeId: args.store_id,
-                                        sectionId: args.section_id,
-                                        foodId: args.food_id,
-                                        amount: args.amount,
-                                        unit: args.unit,
-                                        onPicked,
-                                    },
-                                )
-                              : args.barcode
-                                ? await addGroceryFoodByBarcode(
-                                      grocery,
-                                      settings,
-                                      foods,
-                                      {
-                                          householdId,
-                                          storeId: args.store_id,
-                                          sectionId: args.section_id,
-                                          barcode: args.barcode,
-                                          amount: args.amount,
-                                          unit: args.unit,
-                                          onPicked,
-                                      },
-                                      { lookup: lookupBarcode },
-                                  )
-                                : await addGroceryManualFood(
+                    try {
+                        const stores = await settings.listStores(householdId);
+                        const storeNameById = new Map(
+                            stores.map((row) => [row.id, row.name]),
+                        );
+                        let storeReason: GroceryStorePickReason = "chosen";
+                        let amountReason: GroceryAmountPickReason = "chosen";
+                        const onPicked = (pick: {
+                            storeId: string;
+                            storeReason: GroceryStorePickReason;
+                            quantity: { amount: number; unit: string };
+                            amountReason: GroceryAmountPickReason;
+                        }) => {
+                            storeReason = pick.storeReason;
+                            amountReason = pick.amountReason;
+                        };
+                        const line =
+                            args.kind === "supply"
+                                ? await addGrocerySupply(
                                       grocery,
                                       settings,
                                       foods,
@@ -395,51 +383,125 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                           sectionId: args.section_id,
                                           name: args.name ?? "",
                                           amount: args.amount,
-                                          unit: args.unit,
+                                          unit: args.unit ?? "",
+                                          foodId: args.food_id,
                                           onPicked,
+                                          onSimilar,
                                       },
-                                  );
-                    const extras = await groceryLineExtras(householdId, line);
-                    const storeName =
-                        storeNameById.get(line.storeId) ?? line.storeId;
-                    const parenthetical: string[] = [];
-                    if (storeReason !== "chosen") {
-                        if (storeReason === "usual") {
-                            parenthetical.push("usual store");
-                        } else if (storeReason === "list") {
-                            parenthetical.push("already on the list there");
-                        } else if (storeReason === "default") {
-                            parenthetical.push("first store");
+                                  )
+                                : args.food_id
+                                  ? await addGroceryFoodById(
+                                        grocery,
+                                        settings,
+                                        foods,
+                                        {
+                                            householdId,
+                                            storeId: args.store_id,
+                                            sectionId: args.section_id,
+                                            foodId: args.food_id,
+                                            amount: args.amount,
+                                            unit: args.unit,
+                                            onPicked,
+                                        },
+                                    )
+                                  : args.barcode
+                                    ? await addGroceryFoodByBarcode(
+                                          grocery,
+                                          settings,
+                                          foods,
+                                          {
+                                              householdId,
+                                              storeId: args.store_id,
+                                              sectionId: args.section_id,
+                                              barcode: args.barcode,
+                                              amount: args.amount,
+                                              unit: args.unit,
+                                              onPicked,
+                                          },
+                                          { lookup: lookupBarcode },
+                                      )
+                                    : await addGroceryManualFood(
+                                          grocery,
+                                          settings,
+                                          foods,
+                                          {
+                                              householdId,
+                                              storeId: args.store_id,
+                                              sectionId: args.section_id,
+                                              name: args.name ?? "",
+                                              amount: args.amount,
+                                              unit: args.unit,
+                                              onPicked,
+                                              onSimilar,
+                                          },
+                                      );
+                        const extras = await groceryLineExtras(
+                            householdId,
+                            line,
+                        );
+                        const storeName =
+                            storeNameById.get(line.storeId) ?? line.storeId;
+                        const parenthetical: string[] = [];
+                        if (storeReason !== "chosen") {
+                            if (storeReason === "usual") {
+                                parenthetical.push("usual store");
+                            } else if (storeReason === "list") {
+                                parenthetical.push("already on the list there");
+                            } else if (storeReason === "default") {
+                                parenthetical.push("first store");
+                            }
                         }
-                    }
-                    if (amountReason !== "chosen") {
-                        if (amountReason === "usual") {
-                            parenthetical.push("usual amount");
-                        } else if (amountReason === "default") {
-                            parenthetical.push("default amount");
+                        if (amountReason !== "chosen") {
+                            if (amountReason === "usual") {
+                                parenthetical.push("usual amount");
+                            } else if (amountReason === "default") {
+                                parenthetical.push("default amount");
+                            }
                         }
+                        const pickNote =
+                            parenthetical.length > 0
+                                ? ` (${parenthetical.join(", ")})`
+                                : "";
+                        const bits = [
+                            `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
+                        ];
+                        if (extras.alreadyHave) bits.push(extras.alreadyHave);
+                        if (extras.warning) bits.push(extras.warning);
+                        return {
+                            content: [{ type: "text", text: bits.join(". ") }],
+                            structuredContent: {
+                                status: "ok" as const,
+                                similar_foods: [],
+                                id: line.id,
+                                display_name: line.displayName,
+                                already_have: extras.alreadyHave,
+                                warning: extras.warning,
+                                store_id: line.storeId,
+                                amount: line.quantity.amount,
+                                unit: line.quantity.unit,
+                            },
+                        };
+                    } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    ...similarNull,
+                                    similar_foods: wire,
+                                },
+                            };
+                        }
+                        if (err instanceof GroceryInputError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
                     }
-                    const pickNote =
-                        parenthetical.length > 0
-                            ? ` (${parenthetical.join(", ")})`
-                            : "";
-                    const bits = [
-                        `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
-                    ];
-                    if (extras.alreadyHave) bits.push(extras.alreadyHave);
-                    if (extras.warning) bits.push(extras.warning);
-                    return {
-                        content: [{ type: "text", text: bits.join(". ") }],
-                        structuredContent: {
-                            id: line.id,
-                            display_name: line.displayName,
-                            already_have: extras.alreadyHave,
-                            warning: extras.warning,
-                            store_id: line.storeId,
-                            amount: line.quantity.amount,
-                            unit: line.quantity.unit,
-                        },
-                    };
                 },
                 analytics,
             ),

@@ -3,6 +3,9 @@ import {
     findFoodById,
     findOrCreateManualFood,
     FoodsInputError,
+    similarFoodsForNames,
+    SimilarFoodsError,
+    type OnSimilar,
     type Food,
     type FoodsStore,
 } from "./foods.js";
@@ -34,6 +37,7 @@ export type MealItemSpec = {
     amount?: number | null;
     unit?: string | null;
     portions?: number | null;
+    newFood?: boolean;
 };
 
 export type MealNutrients = {
@@ -332,7 +336,31 @@ export async function resolveAndBuildMeal(opts: {
     foods: FoodsStore;
     recipes: RecipesStore;
     items: MealItemSpec[];
+    onSimilar?: OnSimilar;
 }): Promise<{ built: BuiltMealFromItems; specs: MealItemSpec[] }> {
+    const onSimilar = opts.onSimilar ?? "create";
+    if (onSimilar === "ask") {
+        const namesToCheck: string[] = [];
+        for (const spec of opts.items) {
+            if (spec.recipeId?.trim()) continue;
+            if (spec.foodId?.trim()) continue;
+            if (spec.newFood === true) continue;
+            const n = spec.name?.trim() ?? "";
+            if (n) namesToCheck.push(n);
+        }
+        if (namesToCheck.length > 0) {
+            const entries = await similarFoodsForNames(
+                opts.foods,
+                opts.householdId,
+                "food",
+                namesToCheck,
+            );
+            if (entries.length > 0) {
+                throw new SimilarFoodsError(entries);
+            }
+        }
+    }
+
     const resolved: MealItemSpec[] = [];
     const foodIds = new Set<string>();
     const recipeIds = new Set<string>();
@@ -376,6 +404,8 @@ export async function resolveAndBuildMeal(opts: {
             opts.householdId,
             "food",
             name,
+            // Asked once above for every line; what is left is created.
+            { onSimilar: "create" },
         );
         foodIds.add(food.id);
         resolved.push({ ...spec, foodId: food.id, name: food.name });

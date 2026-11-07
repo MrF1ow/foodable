@@ -1124,7 +1124,9 @@ export async function findOrCreateManualFood(
     householdId: string,
     kind: FoodKind,
     name: string,
+    opts?: { onSimilar?: OnSimilar },
 ): Promise<Food> {
+    const onSimilar = opts?.onSimilar ?? "create";
     const trimmed = name.trim();
     if (!trimmed) {
         throw new FoodsInputError(
@@ -1133,6 +1135,14 @@ export async function findOrCreateManualFood(
     }
     const found = await findManualFood(store, householdId, kind, trimmed);
     if (found) return found;
+    if (onSimilar === "ask") {
+        const entries = await similarFoodsForNames(store, householdId, kind, [
+            trimmed,
+        ]);
+        if (entries.length > 0) {
+            throw new SimilarFoodsError(entries);
+        }
+    }
     return store.insertFood(
         newFood({
             householdId,
@@ -1164,6 +1174,7 @@ export async function resolveFoodForWrite(
         name?: string;
     },
     lookup?: (barcode: string) => Promise<FoodResult | null>,
+    opts?: { onSimilar?: OnSimilar },
 ): Promise<Food> {
     const foodId = input.foodId?.trim();
     if (foodId) {
@@ -1195,7 +1206,9 @@ export async function resolveFoodForWrite(
         }
         return food;
     }
-    return findOrCreateManualFood(store, householdId, kind, input.name ?? "");
+    return findOrCreateManualFood(store, householdId, kind, input.name ?? "", {
+        onSimilar: opts?.onSimilar,
+    });
 }
 
 export async function foodsByIds(
@@ -1445,6 +1458,260 @@ export function matchFoodsByWords(
         return a.id.localeCompare(b.id);
     });
     return hits;
+}
+
+export type SimilarFoodWhy = "same_words" | "contains_words" | "word_match";
+export type SimilarFoodCandidate = { food: Food; why: SimilarFoodWhy };
+export type SimilarFoodsEntry = {
+    name: string;
+    candidates: SimilarFoodCandidate[];
+};
+export type OnSimilar = "ask" | "create";
+
+export const SIMILAR_FOODS_LIMIT = 3;
+
+function foodNameTokenSetEqual(
+    a: readonly string[],
+    b: readonly string[],
+): boolean {
+    if (a.length !== b.length) return false;
+    const setA = new Set(a);
+    for (const token of b) {
+        if (!setA.has(token)) return false;
+    }
+    return true;
+}
+
+function nameStrictlyContainsTokenSet(
+    queryTokens: readonly string[],
+    otherTokens: readonly string[],
+): boolean {
+    if (otherTokens.length === 0) return false;
+    if (queryTokens.length <= otherTokens.length) return false;
+    const set = new Set(queryTokens);
+    return otherTokens.every((token) => set.has(token));
+}
+
+function foodResolvesToName(
+    name: string,
+    food: Food,
+    aliases: readonly string[],
+): boolean {
+    const nameNorm = normalizeFoodName(name);
+    const nameLoose = looseFoodKey(name);
+    if (
+        normalizeFoodName(food.name) === nameNorm ||
+        looseFoodKey(food.name) === nameLoose
+    ) {
+        return true;
+    }
+    for (const alias of aliases) {
+        if (normalizeFoodName(alias) === nameNorm) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function similarFoods(
+    name: string,
+    foods: readonly Food[],
+    aliasesByFoodId: ReadonlyMap<string, string[]>,
+    opts: {
+        kind: FoodKind;
+        branded?: boolean;
+        /**
+         * Keep rows whose name or alias already matches. `upsert_food` asks
+         * only after `findUpsertFoodByName` decided to create, and that skips
+         * branded rows `findManualFood` would reuse, so for it those rows are
+         * the likeliest candidates, not resolved names.
+         */
+        keepResolved?: boolean;
+    },
+): SimilarFoodCandidate[] {
+    const isResolved = (food: Food, aliases: readonly string[]) =>
+        !opts.keepResolved && foodResolvesToName(name, food, aliases);
+    const queryTokens = foodNameTokens(name);
+    if (queryTokens.length === 0) return [];
+
+    const eligible = foods.filter(
+        (food) =>
+            food.archivedAt == null &&
+            food.kind === opts.kind &&
+            food.genericFoodId == null,
+    );
+
+    const seen = new Set<string>();
+    const result: SimilarFoodCandidate[] = [];
+
+    const push = (food: Food, why: SimilarFoodWhy) => {
+        if (seen.has(food.id)) return;
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        if (isResolved(food, aliases)) return;
+        seen.add(food.id);
+        result.push({ food, why });
+    };
+
+    const sortByNameId = (a: { food: Food }, b: { food: Food }): number => {
+        const byName = a.food.name.localeCompare(b.food.name);
+        if (byName !== 0) return byName;
+        return a.food.id.localeCompare(b.food.id);
+    };
+
+    const rule1: SimilarFoodCandidate[] = [];
+    for (const food of eligible) {
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        if (isResolved(food, aliases)) continue;
+        const labels = [food.name, ...aliases];
+        for (const label of labels) {
+            if (foodNameTokenSetEqual(queryTokens, foodNameTokens(label))) {
+                rule1.push({ food, why: "same_words" });
+                break;
+            }
+        }
+    }
+    rule1.sort(sortByNameId);
+    for (const candidate of rule1) {
+        push(candidate.food, candidate.why);
+        if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+    }
+
+    if (!opts.branded) {
+        const rule2: SimilarFoodCandidate[] = [];
+        for (const food of eligible) {
+            const aliases = aliasesByFoodId.get(food.id) ?? [];
+            if (isResolved(food, aliases)) continue;
+            const labels = [food.name, ...aliases];
+            for (const label of labels) {
+                const labelTokens = foodNameTokens(label);
+                if (labelTokens.length === 0) continue;
+                if (nameStrictlyContainsTokenSet(queryTokens, labelTokens)) {
+                    rule2.push({ food, why: "contains_words" });
+                    break;
+                }
+            }
+        }
+        rule2.sort(sortByNameId);
+        for (const candidate of rule2) {
+            push(candidate.food, candidate.why);
+            if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+        }
+    }
+
+    for (const food of matchFoodsByWords(name, eligible, aliasesByFoodId)) {
+        push(food, "word_match");
+        if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+    }
+    return result;
+}
+
+export class SimilarFoodsError extends Error {
+    readonly entries: SimilarFoodsEntry[];
+
+    constructor(entries: SimilarFoodsEntry[]) {
+        const parts = entries.map((entry) => {
+            const first = entry.candidates[0];
+            return first
+                ? `"${entry.name}" may be ${first.food.name}`
+                : `"${entry.name}"`;
+        });
+        super(`Similar foods: ${parts.join("; ")}.`);
+        this.name = "SimilarFoodsError";
+        this.entries = entries;
+    }
+}
+
+function findManualFoodInListed(
+    foods: readonly Food[],
+    aliasesByFoodId: ReadonlyMap<string, string[]>,
+    kind: FoodKind,
+    name: string,
+): Food | null {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const normalized = normalizeFoodName(trimmed);
+    const byName = foods.find(
+        (food) =>
+            food.kind === kind &&
+            !food.archivedAt &&
+            food.normalizedName === normalized,
+    );
+    if (byName) return byName;
+    for (const food of foods) {
+        if (food.kind !== kind || food.archivedAt) continue;
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        for (const alias of aliases) {
+            if (normalizeFoodName(alias) === normalized) return food;
+        }
+    }
+    const key = looseFoodKey(trimmed);
+    let matches = foods.filter(
+        (food) =>
+            food.kind === kind &&
+            !food.archivedAt &&
+            looseFoodKey(food.name) === key,
+    );
+    if (matches.length === 0) return null;
+    matches.sort(preferLooseNameMatch);
+    return copyFood(matches[0]!);
+}
+
+/** Names that would create a new food and have similar existing ones. Writes nothing. */
+export async function similarFoodsForNames(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    names: readonly string[],
+): Promise<SimilarFoodsEntry[]> {
+    const [foods, aliasesByFoodId] = await Promise.all([
+        store.listFoods(householdId),
+        store.listAllAliases(householdId),
+    ]);
+    const seenNorm = new Set<string>();
+    const entries: SimilarFoodsEntry[] = [];
+    for (const raw of names) {
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        const norm = normalizeFoodName(trimmed);
+        if (seenNorm.has(norm)) continue;
+        seenNorm.add(norm);
+        if (findManualFoodInListed(foods, aliasesByFoodId, kind, trimmed)) {
+            continue;
+        }
+        const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
+            kind,
+        });
+        if (candidates.length > 0) {
+            entries.push({ name: trimmed, candidates });
+        }
+    }
+    return entries;
+}
+
+/**
+ * Similar foods for one name the caller has already decided to create
+ * (`upsert_food` after `findUpsertFoodByName`). Nothing is skipped as
+ * resolved: any name or alias match left is a row that path will not reuse.
+ */
+export async function similarFoodsForNewName(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    opts?: { branded?: boolean },
+): Promise<SimilarFoodsEntry[]> {
+    const trimmed = name.trim();
+    if (!trimmed) return [];
+    const [foods, aliasesByFoodId] = await Promise.all([
+        store.listFoods(householdId),
+        store.listAllAliases(householdId),
+    ]);
+    const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
+        kind,
+        branded: opts?.branded,
+        keepResolved: true,
+    });
+    return candidates.length > 0 ? [{ name: trimmed, candidates }] : [];
 }
 
 export function foodHasNoNutrition(
