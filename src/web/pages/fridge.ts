@@ -15,6 +15,10 @@ import {
 import { iconPencil, iconTrash } from "../components/icons.js";
 import { sharedDialogItem } from "../components/shared-dialog.js";
 import {
+    didYouMeanModalBlock,
+    type DidYouMeanModal,
+} from "../components/did-you-mean.js";
+import {
     renderLinkProductPrompt,
     type LinkProductPromptView,
 } from "../components/link-product-prompt.js";
@@ -50,6 +54,7 @@ export type FridgePageView = FridgeSnapshot & {
     today: string;
     chrome: AppChromeBase;
     error?: string;
+    didYouMean?: DidYouMeanModal;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
     groceryLines?: readonly Pick<GroceryLine, "foodId" | "checked">[];
@@ -399,7 +404,11 @@ function sharedAddFoodModal(view: FridgePageView): string {
         title: location ? `Add food to ${location.name}` : "Add food",
         openOnLoad: open,
         submitDisabled: location == null,
-        body: `${open ? modalError(view, openId) : ""}${renderFoodPicker({
+        body: `${open ? modalError(view, openId) : ""}${didYouMeanModalBlock(
+            view.didYouMean,
+            openId,
+            view.openModalId,
+        )}${renderFoodPicker({
             id: FRIDGE_FOOD_PICKER_ID,
             action: location ? "/fridge/items" : "",
             method: "post",

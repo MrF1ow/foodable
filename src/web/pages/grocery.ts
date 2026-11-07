@@ -32,6 +32,10 @@ import {
     field,
 } from "../components/ui.js";
 import { noticeInlineLink, noticeList } from "../components/notices.js";
+import {
+    didYouMeanModalBlock,
+    type DidYouMeanModal,
+} from "../components/did-you-mean.js";
 
 export type GroceryLineView = GroceryLine & {
     notices?: Notice[];
@@ -67,6 +71,7 @@ export type GroceryPageView = {
     allergenNotices?: Notice[];
     foodDuplicateNotices?: ReadonlyMap<string, Notice[]>;
     allergenRetry?: GroceryAllergenRetry;
+    didYouMean?: DidYouMeanModal;
     unknownAllergen?: boolean;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
@@ -345,6 +350,14 @@ function sharedAddFoodModal(view: GroceryPageView): string {
         submitDisabled: store == null,
         body: `${open ? modalFormError(view, reopenId) : ""}${
             store ? allergenModalBlock(view, store.id, reopenId) : ""
+        }${
+            store
+                ? didYouMeanModalBlock(
+                      view.didYouMean,
+                      reopenId,
+                      view.openModalId,
+                  )
+                : ""
         }${sectionSlot(store)}
 ${renderFoodPicker({
     id: GROCERY_FOOD_PICKER_ID,

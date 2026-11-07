@@ -1926,3 +1926,34 @@ html.fx .toast-item--out {
         transition: none;
     }
 }
+
+.did-you-mean-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm, 0.75rem);
+    margin-block-end: var(--gap-sm, 0.75rem);
+}
+
+.did-you-mean-heading {
+    margin: 0;
+}
+
+.did-you-mean-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm, 0.75rem);
+}
+
+.did-you-mean-candidates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap-xs, 0.5rem);
+}
+
+.did-you-mean-remember {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--gap-xs, 0.5rem);
+    font-size: var(--fs-sm, 0.875rem);
+    color: var(--text-dim);
+}
