@@ -7,7 +7,8 @@ Foodable is one household's food system: what everyone eats, what is in the frid
 1. **Fewer loose ends in the food data.** One food per real food, every warning shown the same way, and the grocery list filling itself from what runs out.
 2. **Nutrition over time, not just today.** A calendar with goals that can differ by day.
 3. **Less typing.** Scan barcodes, import recipes from links, share recipes instead of re-entering them.
-4. **A deploy that is safe to change.** Staging before production, and features that ship switched off.
+4. **Know what you are buying.** A scanned food's score, weighted the way you choose, and a warning for whoever in the house it does not suit.
+5. **A deploy that is safe to change.** Staging before production, and features that ship switched off.
 
 ## Projects
 
@@ -17,6 +18,7 @@ Foodable is one household's food system: what everyone eats, what is in the frid
 | [Nutrition calendar](planner/calendar/)          | A month view with a goal per day                                                 |
 | [Postgres](planner/postgres/)                    | Cleanup from the move off Supabase, then row level security as the real boundary |
 | [Barcode scanning](planner/barcode/)             | Scan with the phone camera instead of typing digits                              |
+| [Product score](planner/score/)                  | How good a food is, with your own weights, and what it means for each person     |
 | [Sharing](planner/sharing/)                      | Share a recipe or list by link, or send a recipe to another deploy               |
 | [Staging and feature flags](planner/staging/)    | A staging deploy first, and features that ship dark                              |
 | [Recipe import](planner/recipe-import/)          | Shipped; optional ideas left                                                     |
