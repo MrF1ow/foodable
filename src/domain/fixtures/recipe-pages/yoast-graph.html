@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <title>Yoast graph fixture</title>
+        <script type="application/ld+json">
+            {
+                "@context": "https://schema.org",
+                "@graph": [
+                    {
+                        "@type": "WebPage",
+                        "name": "Page"
+                    },
+                    {
+                        "@type": "Person",
+                        "name": "Chef"
+                    },
+                    {
+                        "@type": "Recipe",
+                        "name": "Test Soup",
+                        "recipeIngredient": [
+                            "2 cups broth",
+                            "1&#39; onion",
+                            "Salt &amp; pepper with <a href=\"#\">link</a>"
+                        ],
+                        "recipeInstructions": [
+                            { "@type": "HowToStep", "text": "Simmer broth." },
+                            { "@type": "HowToStep", "text": "Add onion." }
+                        ],
+                        "recipeYield": ["4", "4 servings"],
+                        "prepTime": "PT15M",
+                        "cookTime": "PT1H30M",
+                        "totalTime": "PT0.5H",
+                        "keywords": "comfort, soup"
+                    }
+                ]
+            }
+        </script>
+    </head>
+    <body>
+        <p>Fixture page.</p>
+    </body>
+</html>
