@@ -233,7 +233,7 @@ test("verification segment links keep list filters", () => {
         `/recipes?tag=dinner&can_make_now=1&safe_for=${encodeURIComponent(VIEWER)}`,
     );
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [{ userId: VIEWER, displayName: "Alice" }],
         viewerId: VIEWER,
