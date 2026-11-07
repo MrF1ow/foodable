@@ -6,6 +6,7 @@ import {
     nextItems,
     parsePlanner,
     parsePlannerSection,
+    stripHtmlComments,
     type Planner,
 } from "./planner.ts";
 
@@ -302,6 +303,33 @@ describe("nextItems", () => {
             "CAL-8",
             "CAL-5",
         ]);
+    });
+});
+
+describe("stripHtmlComments", () => {
+    test("removes every comment, including nested-looking and unclosed ones", () => {
+        expect(stripHtmlComments("a<!-- x -->b<!--y-->c")).toBe("abc");
+        expect(stripHtmlComments("a<!<!-- x -->-- y -->b")).toBe("ab");
+        expect(stripHtmlComments("<!<!<!-- 1 -->-- 2 -->-- 3 -->ok")).toBe(
+            "ok",
+        );
+        expect(
+            stripHtmlComments("Closes CAL-1\n<!-- unclosed\nCloses CAL-2"),
+        ).toBe("Closes CAL-1\n");
+        expect(stripHtmlComments("no comments")).toBe("no comments");
+    });
+
+    test("a comment cannot smuggle an item past the parser", () => {
+        expect(parsePlannerSection("None.\n<!-- Closes CAL-2 -->")).toEqual({
+            none: true,
+            closes: [],
+            partOf: [],
+        });
+        expect(parsePlannerSection("None.\n<!-- Closes CAL-2")).toEqual({
+            none: true,
+            closes: [],
+            partOf: [],
+        });
     });
 });
 

@@ -555,6 +555,35 @@ export type PlannerDeclaration = {
     partOf: string[];
 };
 
+// Removes every <!-- … --> comment. An unclosed comment runs to the end of
+// the text, as it does in Markdown. Removing one comment can join the text
+// around it into a new one ("<!<!-- x -->-- y -->"), so it rescans until
+// nothing changes.
+export function stripHtmlComments(text: string): string {
+    const once = (input: string) => {
+        let out = "";
+        let at = 0;
+        while (at < input.length) {
+            const open = input.indexOf("<!--", at);
+            if (open === -1) {
+                out += input.slice(at);
+                break;
+            }
+            out += input.slice(at, open);
+            const close = input.indexOf("-->", open + 4);
+            if (close === -1) break;
+            at = close + 3;
+        }
+        return out;
+    };
+    let current = text;
+    for (;;) {
+        const next = once(current);
+        if (next === current) return current;
+        current = next;
+    }
+}
+
 // Reads the "## Planner" section. Accepted lines (one or more, any order):
 //   None.
 //   Closes CAL-2
@@ -569,7 +598,7 @@ export function parsePlannerSection(
             error: "Missing ## Planner section (Closes <ID>, Part of <ID>, or None.)",
         };
     }
-    const text = section.replace(/<!--[\s\S]*?-->/g, "");
+    const text = stripHtmlComments(section);
     const lines = text
         .split("\n")
         .map((l) => l.trim().replace(/^[-*]\s+/, ""))
