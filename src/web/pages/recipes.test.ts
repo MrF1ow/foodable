@@ -598,7 +598,7 @@ test("a read import shows its caption and spoken transcript", () => {
 
 test("check again submits the import form on screen with the typed text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light" },
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
         recipes: [],
         members: [],
         viewerId: VIEWER,
