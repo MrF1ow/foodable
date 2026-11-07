@@ -110,6 +110,17 @@ export class StockInputError extends Error {
     }
 }
 
+export class NotedGroceryLineAmountRequiredError extends StockInputError {
+    readonly webMessage = "Enter the amount you bought.";
+
+    constructor(displayName: string) {
+        super(
+            `${displayName} is 'to taste' on the list; give the amount you bought.`,
+        );
+        this.name = "NotedGroceryLineAmountRequiredError";
+    }
+}
+
 function roundAmount(amount: number): number {
     return Math.round(amount * 10) / 10;
 }
@@ -862,6 +873,11 @@ export async function putAwayGroceryLines(
         actorUserId?: string | null;
         expiresOn?: string | null;
         productFoodIds?: Record<string, string | null>;
+        /** Overrides line quantity when putting away (e.g. to-taste lines). */
+        amountOverrides?: Record<
+            string,
+            { amount: number; unit?: string | null }
+        >;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
@@ -923,11 +939,28 @@ export async function putAwayGroceryLines(
                 recentLocationForFood(fridgeItems, line.foodId!) ??
                 (await lastUsedLocationId(fridge, input.householdId, chosenId));
         }
+        const override = input.amountOverrides?.[line.id];
+        if (line.note?.trim() && override == null) {
+            throw new NotedGroceryLineAmountRequiredError(line.displayName);
+        }
+        if (
+            override &&
+            !(Number.isFinite(override.amount) && override.amount > 0)
+        ) {
+            throw new StockInputError(
+                `Enter an amount greater than zero for ${line.displayName}.`,
+            );
+        }
+        const delta = override?.amount ?? line.quantity.amount;
+        const unit =
+            override?.unit != null && override.unit !== ""
+                ? override.unit
+                : line.quantity.unit;
         const applied = await applyMovement(fridge, stock, foods, {
             householdId: input.householdId,
             foodId: chosenId,
-            delta: line.quantity.amount,
-            unit: line.quantity.unit,
+            delta,
+            unit,
             reason: "purchase",
             locationId,
             groceryLineId: line.id,
@@ -948,6 +981,7 @@ export async function putAwayGroceryLines(
 export type CookRecipeResult = {
     totalPortions: number;
     shortfalls: StockShortfall[];
+    unmeasured: { foodId: string | null; displayName: string }[];
 };
 
 export async function cookRecipe(
@@ -974,11 +1008,19 @@ export async function cookRecipe(
         recipe.id,
     );
     const shortfalls: StockShortfall[] = [];
-    if (input.deductStock === false) {
-        return { totalPortions, shortfalls };
-    }
+    const unmeasured: CookRecipeResult["unmeasured"] = [];
     const scale = totalPortions / recipe.yieldPortions;
     for (const ingredient of ingredients) {
+        if (ingredient.quantity == null) {
+            unmeasured.push({
+                foodId: ingredient.foodId,
+                displayName: ingredient.displayName,
+            });
+            continue;
+        }
+        if (input.deductStock === false) {
+            continue;
+        }
         if (!ingredient.foodId) {
             shortfalls.push({
                 foodId: "",
@@ -1001,7 +1043,7 @@ export async function cookRecipe(
         });
         if (applied.shortfall) shortfalls.push(applied.shortfall);
     }
-    return { totalPortions, shortfalls };
+    return { totalPortions, shortfalls, unmeasured };
 }
 
 /** Meal logging after an eat movement applies only to catalog foods, not supplies. */

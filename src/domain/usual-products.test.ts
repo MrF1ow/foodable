@@ -313,6 +313,7 @@ test("grocery aisle suggests section from family member line", () => {
             checked: false,
             source: "manual" as const,
             sourceFridgeItemId: null,
+            note: null,
         },
     ];
     const section = suggestGrocerySection({
@@ -989,6 +990,7 @@ test("add recipe to grocery matches section from existing family line", async ()
         checked: false,
         source: "manual",
         sourceFridgeItemId: null,
+        note: null,
     });
     const recipe = await createRecipe(recipes, {
         householdId: HH,

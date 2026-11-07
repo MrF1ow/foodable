@@ -105,6 +105,7 @@ export function sampleGroceryLine(
         checked: false,
         source: "manual",
         sourceFridgeItemId: null,
+        note: null,
         ...overrides,
     };
 }

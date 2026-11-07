@@ -116,6 +116,7 @@ describeDb(pgAvailable !== null, "grocery store contract live", (getCtx) => {
             checked: false,
             source: "restock",
             sourceFridgeItemId: fridgeItemId,
+            note: null,
         });
         expect(line.sourceFridgeItemId).toBe(fridgeItemId);
         const listedBeforeDelete = await grocery.listLines(ctx.householdId);

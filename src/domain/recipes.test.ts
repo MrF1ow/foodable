@@ -1,8 +1,10 @@
 import { test, expect } from "bun:test";
 import {
     addFoodByBarcode,
+    addFoodById,
     addLocation,
     createMemoryFridgeStore,
+    listFridge,
 } from "./fridge.js";
 import { createMemoryGroceryStore, listGrocery } from "./grocery.js";
 import { recipeToGroceryRemainder } from "./linking.js";
@@ -32,6 +34,8 @@ import {
     setPersonPortion,
     updateRecipe,
     updateRecipeIngredient,
+    recipeIngredientFromRow,
+    recipeIngredientToRow,
     type RecipeIngredient,
 } from "./recipes.js";
 import {
@@ -112,8 +116,8 @@ test("yield math splits batch totals into per-portion amounts", async () => {
             amount: 400,
         },
     );
-    expect(perPortionAmount(ingredient.quantity.amount, 4)).toBe(100);
-    expect(amountForPortion(ingredient.quantity.amount, 4, 1)).toBe(100);
+    expect(perPortionAmount(ingredient.quantity!.amount, 4)).toBe(100);
+    expect(amountForPortion(ingredient.quantity!.amount, 4, 1)).toBe(100);
 });
 
 test("person portion override scales that person's amounts and macros", async () => {
@@ -633,7 +637,8 @@ test("recipe pages use modals for create and detail actions", async () => {
     expect(detail).toContain('commandfor="recipe-delete-ingredient"');
     expect(detail).not.toContain('commandfor="recipe-edit-ingredient-ing1"');
     expect(detail).toContain('data-fill-action="/recipes/r1/ingredients/ing1"');
-    expect(detail).toContain('data-fill-field-amount="400"');
+    expect(detail).toContain('data-fill-field-ing_amount="400"');
+    expect(detail).toContain('data-fill-field-ing_unit="g"');
     expect(detail).toContain('action="/recipes/r1/delete"');
     expect(detail).toContain('action="/recipes/r1/ingredients/ing1/delete"');
 });
@@ -870,7 +875,7 @@ test("updateRecipe writes fuller fields and updateRecipeIngredient stores a note
         { note: "grated", amount: 120 },
     );
     expect(noted.note).toBe("grated");
-    expect(noted.quantity.amount).toBe(120);
+    expect(noted.quantity!.amount).toBe(120);
 });
 
 test("remove and reorder recipe ingredients", async () => {
@@ -1022,7 +1027,7 @@ test("importRecipeFromText find-or-creates foods and reports nutrition gaps", as
     expect(result.ingredients).toHaveLength(2);
     expect(result.ingredients[0]?.note).toBe("sifted");
     expect(result.ingredients[0]?.foodId).toBeTruthy();
-    expect(result.ingredients[1]?.quantity.unit).toBe("ml");
+    expect(result.ingredients[1]?.quantity!.unit).toBe("ml");
     expect(
         result.gaps.find((row) => row.displayName === "Flour")?.missing,
     ).toContain("nutrition");
@@ -1534,4 +1539,389 @@ test("recipeSteps wraps unnumbered lines into the numbered step above", () => {
         "Boil the water with salt",
         "Add pasta",
     ]);
+});
+
+test("recipe ingredient null quantity round-trips row mappers", () => {
+    const ingredient = recipeIngredientFromRow({
+        id: "ing-1",
+        household_id: HH,
+        recipe_id: "rec-1",
+        kind: "food",
+        display_name: "Salt",
+        amount: null,
+        unit: null,
+        sort_order: 0,
+        food_id: "food-salt",
+        note: "to taste",
+    });
+    expect(ingredient.quantity).toBeNull();
+    const row = recipeIngredientToRow(ingredient);
+    expect(row.amount).toBeNull();
+    expect(row.unit).toBeNull();
+    expect(recipeIngredientFromRow(row as never).quantity).toBeNull();
+});
+
+test("macrosForPerson counts only measured ingredients when one is unmeasured", async () => {
+    const foods = createMemoryFoodsStore();
+    const flour = await findOrCreateManualFood(foods, HH, "food", "Flour");
+    await updateFood(foods, HH, flour.id, {
+        calories: 364,
+        proteinG: 10,
+        carbsG: 76,
+        fatG: 1,
+    });
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    await updateFood(foods, HH, salt.id, {
+        calories: 9999,
+        proteinG: 999,
+        carbsG: 999,
+        fatG: 999,
+    });
+    const catalog = await effectiveFoodsByIds(foods, HH, [flour.id, salt.id]);
+    const measured = recipeIngredientFromRow({
+        id: "i-flour",
+        household_id: HH,
+        recipe_id: "r1",
+        kind: "food",
+        display_name: "Flour",
+        amount: 100,
+        unit: "g",
+        sort_order: 0,
+        food_id: flour.id,
+    });
+    const unmeasured = recipeIngredientFromRow({
+        id: "i-salt",
+        household_id: HH,
+        recipe_id: "r1",
+        kind: "food",
+        display_name: "Salt",
+        amount: null,
+        unit: null,
+        sort_order: 1,
+        food_id: salt.id,
+        note: "to taste",
+    });
+    const macros = macrosForPerson([measured, unmeasured], 1, 1, catalog);
+    expect(macros.incomplete).toBe(true);
+    const amountGap = macros.gaps.find((g) => g.reason === "no_amount");
+    expect(amountGap?.message).toContain("Salt has no amount");
+    expect(macros.calories).toBe(364);
+    expect(macros.protein_g).toBe(10);
+    expect(macros.carbs_g).toBe(76);
+    expect(macros.fat_g).toBe(1);
+});
+
+test("updateRecipeIngredient uses food default unit when measuring unmeasured ingredient", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+    await updateFood(foods, HH, eggs.id, { defaultUnit: "each" });
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Omelette",
+        yieldPortions: 1,
+    });
+    const ingredient = await store.insertIngredient({
+        id: "ing-eggs",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Eggs",
+        quantity: null,
+        foodId: eggs.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const updated = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 2 },
+        foods,
+    );
+    expect(updated.quantity).toEqual({ amount: 2, unit: "each" });
+    // The web form always posts ing_unit; a blank one is "not given", not grams.
+    await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: null },
+        foods,
+    );
+    const blankUnit = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 3, unit: "", note: "" },
+        foods,
+    );
+    expect(blankUnit.quantity).toEqual({ amount: 3, unit: "each" });
+    // Saving the note alone keeps a measured amount.
+    const noteOnly = await updateRecipeIngredient(
+        store,
+        HH,
+        recipe.id,
+        ingredient.id,
+        { amount: 3, unit: "each", note: "beaten" },
+        foods,
+    );
+    expect(noteOnly.quantity).toEqual({ amount: 3, unit: "each" });
+});
+
+test("unmeasured ingredient per-portion and per-person amounts stay null", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const recipe = await createRecipe(store, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Soup",
+        yieldPortions: 4,
+    });
+    await store.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    for (const portions of [1, 2, 7] as const) {
+        await setPersonPortion(store, {
+            householdId: HH,
+            recipeId: recipe.id,
+            userId: ALICE,
+            portionCount: portions,
+        });
+        const view = await getRecipeView(store, HH, recipe.id, ALICE);
+        expect(view.ingredients[0]?.perPortionAmount).toBeNull();
+        expect(view.ingredients[0]?.personAmount).toBeNull();
+    }
+});
+
+test("addRecipeToGrocery handles unmeasured salt against list and stock", async () => {
+    const recipes = createMemoryRecipesStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const salt = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    await updateFood(foods, HH, salt.id, { defaultUnit: "g" });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Eggs",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: salt.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const catalog = await effectiveFoodsByIds(foods, HH, [salt.id]);
+    const base = {
+        recipes,
+        grocery,
+        settings,
+        foods,
+        householdId: HH,
+        recipeId: recipe.id,
+        storeId: store.id,
+        portionCounts: [1],
+        foodsById: catalog,
+    };
+    const first = await addRecipeToGrocery({
+        ...base,
+        fridgeItems: [],
+    });
+    expect(first.added).toHaveLength(1);
+    expect(first.added[0]?.quantity).toEqual({ amount: 1, unit: "g" });
+    expect(first.added[0]?.note).toBe("to taste");
+    const again = await addRecipeToGrocery({
+        ...base,
+        fridgeItems: [],
+    });
+    expect(again.added).toHaveLength(0);
+    await grocery.deleteLine(HH, first.added[0]!.id);
+    const loc = await addLocation(fridge, HH, "Pantry");
+    await addFoodById(fridge, foods, {
+        householdId: HH,
+        locationId: loc.id,
+        foodId: salt.id,
+        amount: 50,
+        unit: "g",
+    });
+    const saltItem = (await listFridge(fridge, HH)).items.find(
+        (row) => row.foodId === salt.id,
+    );
+    const withStock = await addRecipeToGrocery({
+        ...base,
+        fridgeItems: [{ quantity: saltItem!.quantity, foodId: salt.id }],
+    });
+    expect(withStock.added).toHaveLength(0);
+});
+
+test("addRecipeToGrocery skips unmeasured when usual product is already on the list", async () => {
+    const recipes = createMemoryRecipesStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const plain = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    const morton = await createProduct(foods, HH, plain.id, {
+        name: "Morton Salt",
+        brand: "Morton",
+    });
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const sections = await settings.listSections(store.id);
+    await grocery.insertLine({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        storeId: store.id,
+        sectionId: sections[0]!.id,
+        kind: "food",
+        displayName: "Morton Salt",
+        quantity: { amount: 1, unit: "g" },
+        foodId: morton.id,
+        checked: false,
+        note: "to taste",
+        source: "manual",
+        sourceFridgeItemId: null,
+    });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Eggs",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "ing-salt",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: null,
+        foodId: plain.id,
+        sortOrder: 0,
+        note: "to taste",
+    });
+    const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
+    const result = await addRecipeToGrocery({
+        recipes,
+        grocery,
+        settings,
+        foods,
+        householdId: HH,
+        recipeId: recipe.id,
+        storeId: store.id,
+        portionCounts: [1],
+        foodsById: catalog,
+        fridgeItems: [],
+    });
+    expect(result.added).toHaveLength(0);
+});
+
+test("importRecipeFromText optional amount instructions and rollback", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const lookup = async () => null;
+    const imported = await importRecipeFromText(
+        recipes,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Raw paste\n\nStep 1: mix",
+            instructions: "Step 1: mix\nStep 2: bake",
+            name: "Bread",
+            ingredients: [
+                { name: "Salt" },
+                { name: "Flour", amount: 500, unit: "g" },
+            ],
+        },
+        { lookup },
+    );
+    expect(imported.ingredients[0]?.quantity).toBeNull();
+    expect(imported.ingredients[0]?.note).toBe("to taste");
+    expect(imported.recipe.instructions).toBe("Step 1: mix\nStep 2: bake");
+    const legacy = await importRecipeFromText(
+        recipes,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Title\nBody only",
+            name: "Legacy",
+            ingredients: [],
+        },
+        { lookup },
+    );
+    expect(legacy.recipe.instructions).toBe("Title\nBody only");
+    const supply = await findOrCreateManualFood(foods, HH, "supply", "Spice");
+    const rollback = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const recipeIdsBefore = new Set(
+            (await recipes.listRecipes(HH)).map((row) => row.id),
+        );
+        const foodIdsBefore = new Set(
+            (await foods.listFoods(HH)).map((row) => row.id),
+        );
+        try {
+            return await fn();
+        } catch (err) {
+            for (const row of await recipes.listRecipes(HH)) {
+                if (!recipeIdsBefore.has(row.id)) {
+                    await recipes.deleteRecipe(HH, row.id);
+                }
+            }
+            for (const row of await foods.listFoods(HH)) {
+                if (!foodIdsBefore.has(row.id)) {
+                    await foods.updateFoodRow({
+                        ...row,
+                        archivedAt: new Date().toISOString(),
+                    });
+                }
+            }
+            throw err;
+        }
+    };
+    await expect(
+        importRecipeFromText(
+            recipes,
+            foods,
+            {
+                householdId: HH,
+                creatorId: ALICE,
+                text: "Bad import",
+                name: "Bad",
+                ingredients: [
+                    { name: "Ok", amount: 1, unit: "g" },
+                    { name: "Ok2", amount: 1, unit: "g" },
+                    { name: "Spice", amount: 1, unit: "g", foodId: supply.id },
+                ],
+            },
+            { lookup, transaction: rollback },
+        ),
+    ).rejects.toThrow(/supply/);
+    expect((await recipes.listRecipes(HH)).some((r) => r.name === "Bad")).toBe(
+        false,
+    );
+    expect((await foods.listFoods(HH)).some((f) => f.name === "Ok")).toBe(
+        false,
+    );
+    expect((await foods.listFoods(HH)).some((f) => f.name === "Ok2")).toBe(
+        false,
+    );
 });

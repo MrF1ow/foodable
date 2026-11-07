@@ -211,3 +211,26 @@ test("a failed steps save reopens the Method modal", () => {
     });
     expect(html).toMatch(/id="recipe-method-r1"[^>]*data-modal-open-on-load/);
 });
+
+test("unmeasured recipe ingredient renders to taste", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({}),
+        ingredients: [
+            {
+                id: "ing-salt",
+                householdId: "hh-1",
+                recipeId: "r1",
+                kind: "food",
+                foodId: "f-salt",
+                displayName: "Salt",
+                quantity: null,
+                note: "to taste",
+                sortOrder: 0,
+                perPortionAmount: null,
+                personAmount: null,
+            },
+        ],
+    });
+    expect(html).toContain("Total to taste");
+    expect(html).toContain('placeholder="to taste"');
+});

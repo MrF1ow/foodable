@@ -18,6 +18,8 @@ import {
     createMemoryGroceryStore,
     groceryAllergenWarning,
     GroceryInputError,
+    groceryLineFromRow,
+    groceryLineToRow,
     listGrocery,
     onGroceryList,
     pickGroceryAmount,
@@ -107,6 +109,7 @@ test("pickGroceryStore precedence: chosen, usual, list, default", () => {
                     checked: false,
                     source: "manual",
                     sourceFridgeItemId: null,
+                    note: null,
                 },
             ],
             foodId: "food-plain",
@@ -152,6 +155,7 @@ test("pickGroceryStore: family list uses product line for plain food", () => {
                     checked: false,
                     source: "manual",
                     sourceFridgeItemId: null,
+                    note: null,
                 },
             ],
             foodId: eggsPlain,
@@ -794,6 +798,7 @@ test("grocery page groups by store then section and shows already-have", () => {
                                 checked: false,
                                 source: "manual",
                                 sourceFridgeItemId: null,
+                                note: null,
                                 alreadyHave: { cover: "full" },
                             },
                         ],
@@ -1882,4 +1887,41 @@ test("addFridgeItemToGrocery rejects other household and non-food", async () => 
             itemId: supply.id,
         }),
     ).rejects.toThrow(/Only food can be added/);
+});
+
+test("grocery line note round-trips row mappers and memory store", async () => {
+    const line = groceryLineFromRow({
+        id: "g1",
+        household_id: HH,
+        store_id: "s1",
+        section_id: "sec1",
+        kind: "food",
+        display_name: "Salt",
+        amount: 1,
+        unit: "g",
+        checked: false,
+        food_id: "food-salt",
+        note: "to taste",
+    });
+    expect(line.note).toBe("to taste");
+    expect(groceryLineToRow(line).note).toBe("to taste");
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const section = (await settings.listSections(store.id))[0]!;
+    const saved = await grocery.insertLine({
+        id: "line-note",
+        householdId: HH,
+        storeId: store.id,
+        sectionId: section.id,
+        kind: "food",
+        displayName: "Salt",
+        quantity: { amount: 1, unit: "g" },
+        foodId: "food-salt",
+        checked: false,
+        note: "to taste",
+        source: "manual",
+        sourceFridgeItemId: null,
+    });
+    expect((await grocery.listLines(HH))[0]?.note).toBe(saved.note);
 });

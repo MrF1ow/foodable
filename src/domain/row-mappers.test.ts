@@ -42,10 +42,12 @@ test("a grocery row round-trips through food_id alone", () => {
         food_id: FOOD_ID,
         source: "recipe",
         source_fridge_item_id: "fridge-1",
+        note: null,
     });
     expect(line.foodId).toBe(FOOD_ID);
     expect(line.source).toBe("recipe");
     expect(line.sourceFridgeItemId).toBe("fridge-1");
+    expect(line.note).toBeNull();
     const row = groceryLineToRow(line);
     expect(row.food_id).toBe(FOOD_ID);
     expect(row.source).toBe("recipe");

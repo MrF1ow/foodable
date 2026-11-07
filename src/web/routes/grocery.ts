@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
 
-import { formAmount, formText } from "../form.js";
+import { formAmount, formOptionalNumber, formText } from "../form.js";
 import {
     requireMember,
     requireManager,
@@ -19,7 +19,11 @@ import {
     allergenNotices,
     GroceryInputError,
 } from "../../domain/grocery.js";
-import { putAwayGroceryLines, StockInputError } from "../../domain/stock.js";
+import {
+    NotedGroceryLineAmountRequiredError,
+    putAwayGroceryLines,
+    StockInputError,
+} from "../../domain/stock.js";
 import { createGroceryStore } from "../../domain/settings.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -70,11 +74,13 @@ async function groceryFormError(
     const message =
         err instanceof GroceryInputError
             ? err.message
-            : err instanceof StockInputError
-              ? err.message
-              : err instanceof Error
+            : err instanceof NotedGroceryLineAmountRequiredError
+              ? err.webMessage
+              : err instanceof StockInputError
                 ? err.message
-                : "Could not update the grocery list.";
+                : err instanceof Error
+                  ? err.message
+                  : "Could not update the grocery list.";
     const page = await renderGroceryListPage(userId, {
         error: message,
         openModalId,
@@ -280,6 +286,8 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
             productRaw.trim() === ""
                 ? undefined
                 : { [c.req.param("id")]: productRaw.trim() };
+        const lineId = c.req.param("id");
+        const putAwayAmount = formOptionalNumber(body, "put_away_amount");
         await putAwayGroceryLines(
             liveGroceryStore(),
             liveFridgeStore(),
@@ -287,10 +295,14 @@ groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
             liveFoodsStore(),
             {
                 householdId: member.householdId,
-                lineIds: [c.req.param("id")],
+                lineIds: [lineId],
                 locationId: formText(body, "location_id") || undefined,
                 actorUserId: userId,
                 productFoodIds,
+                amountOverrides:
+                    putAwayAmount != null
+                        ? { [lineId]: { amount: putAwayAmount } }
+                        : undefined,
             },
         );
     } catch (err) {

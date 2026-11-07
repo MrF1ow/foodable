@@ -453,7 +453,7 @@ test("registry sentences match #162 cases and recipeIngredientGaps / missingGram
     expect(noticeSentence(noticeFromGap("r1", eggIng, eggFood, 0))).toBe(
         recipeIngredientGaps(eggIng, eggFood)[0]!.message,
     );
-    const eggGramsMsg = missingGramsReason("Eggs", eggIng.quantity, eggFood);
+    const eggGramsMsg = missingGramsReason("Eggs", eggIng.quantity!, eggFood);
     expect(eggGramsMsg).not.toBeNull();
     expect(noticeSentence(noticeFromGap("r1", eggIng, eggFood, 1))).toBe(
         eggGramsMsg!,
@@ -465,7 +465,7 @@ test("registry sentences match #162 cases and recipeIngredientGaps / missingGram
         displayName: "Spice",
         quantity: { amount: 1, unit: "pinch" },
     };
-    const spiceGrams = missingGramsReason("Spice", badUnit.quantity, eff);
+    const spiceGrams = missingGramsReason("Spice", badUnit.quantity!, eff);
     expect(spiceGrams).not.toBeNull();
     const spiceGaps = recipeIngredientGaps(badUnit, eff);
     const unknownIdx = spiceGaps.findIndex((g) => g.reason === "unknown_unit");
@@ -496,7 +496,7 @@ test("registry sentences match #162 cases and recipeIngredientGaps / missingGram
     expect(oilGaps.map((g) => g.reason)).toEqual(["missing_grams_per_ml"]);
     const oilSentence = noticeSentence(noticeFromGap("r1", oilIng, oilFood, 0));
     expect(oilSentence).toBe(
-        missingGramsReason("Oil", oilIng.quantity, oilFood)!,
+        missingGramsReason("Oil", oilIng.quantity!, oilFood)!,
     );
     expect(oilSentence).toBe("Oil: set grams per millilitre");
 });

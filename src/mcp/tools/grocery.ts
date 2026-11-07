@@ -24,7 +24,11 @@ import {
     type GroceryStorePickReason,
 } from "../../domain/grocery.js";
 import { sortNotices } from "../../domain/notices.js";
-import { putAwayGroceryLines, StockInputError } from "../../domain/stock.js";
+import {
+    NotedGroceryLineAmountRequiredError,
+    putAwayGroceryLines,
+    StockInputError,
+} from "../../domain/stock.js";
 import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
@@ -47,6 +51,7 @@ const groceryLineSchema = z.object({
     checked: z.boolean(),
     source: z.enum(GROCERY_LINE_SOURCES),
     source_fridge_item_id: z.string().nullable(),
+    note: z.string().nullable(),
     already_have: z.string().nullable(),
     product: z
         .object({
@@ -151,6 +156,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             checked: line.checked,
                             source: line.source,
                             source_fridge_item_id: line.sourceFridgeItemId,
+                            note: line.note,
                             already_have:
                                 tag == null
                                     ? null
@@ -215,7 +221,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                                                   ` — ${n.message}`,
                                                           )
                                                           .join("");
-                                                  return `${line.display_name} ${line.amount} ${line.unit}${tag}${blockSuffix}`;
+                                                  const note =
+                                                      line.note?.trim();
+                                                  const lineText = note
+                                                      ? `${line.display_name} · ${note}`
+                                                      : `${line.display_name} ${line.amount} ${line.unit}`;
+                                                  return `${lineText}${tag}${blockSuffix}`;
                                               })
                                               .join("\n"),
                             },
@@ -535,7 +546,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Put Away Grocery Lines",
             description:
-                "Move grocery lines into the fridge as a purchase. Defaults to each food's last-used location. Optional product_food_ids maps each grocery line id to the product actually bought (defaults to the food's usual product); line_ids stays a plain list for backward compatibility. Deletes the lines. Clear checked stays for lines you do not want stocked.",
+                "Move grocery lines into the fridge as a purchase. Defaults to each food's last-used location. Optional product_food_ids maps each grocery line id to the product actually bought (defaults to the food's usual product). Optional amounts gives the real quantity for each line (required for to-taste lines that only carry a placeholder on the list). line_ids stays a plain list for backward compatibility. Deletes the lines. Clear checked stays for lines you do not want stocked.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -551,6 +562,18 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     .describe(
                         "Grocery line id → the product actually bought; defaults to the food's usual product.",
                     ),
+                amounts: z
+                    .array(
+                        z.object({
+                            line_id: z.string(),
+                            amount: z.coerce.number(),
+                            unit: z.string().optional(),
+                        }),
+                    )
+                    .optional()
+                    .describe(
+                        "Real purchased amount per line; required for to-taste grocery lines.",
+                    ),
             }),
             outputSchema: z.object({
                 put_away: z.array(
@@ -561,6 +584,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         product_food_id: z.string(),
                     }),
                 ),
+                failed: z.array(
+                    z.object({
+                        line_id: z.string(),
+                        message: z.string(),
+                    }),
+                ),
             }),
         },
         async (args) =>
@@ -568,50 +597,76 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 "put_away_grocery_lines",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    try {
-                        const results = await putAwayGroceryLines(
-                            liveGroceryStore(),
-                            liveFridgeStore(),
-                            liveStockStore(),
-                            liveFoodsStore(),
-                            {
-                                householdId,
-                                lineIds: args.line_ids,
-                                locationId: args.location_id,
-                                productFoodIds: args.product_food_ids,
-                            },
-                        );
-                        const payload = {
-                            put_away: results.map((row) => ({
-                                line_id: row.line.id,
-                                display_name: row.line.displayName,
-                                fridge_item_id: row.item?.id ?? null,
-                                product_food_id: row.productFoodId,
-                            })),
-                        };
-                        return {
-                            content: [
+                    const amountOverrides = Object.fromEntries(
+                        (args.amounts ?? []).map((row) => [
+                            row.line_id,
+                            { amount: row.amount, unit: row.unit },
+                        ]),
+                    );
+                    const putAway: {
+                        line_id: string;
+                        display_name: string;
+                        fridge_item_id: string | null;
+                        product_food_id: string;
+                    }[] = [];
+                    const failed: { line_id: string; message: string }[] = [];
+                    for (const lineId of args.line_ids) {
+                        try {
+                            const results = await putAwayGroceryLines(
+                                liveGroceryStore(),
+                                liveFridgeStore(),
+                                liveStockStore(),
+                                liveFoodsStore(),
                                 {
-                                    type: "text",
-                                    text:
-                                        results.length === 0
-                                            ? "Nothing to put away."
-                                            : results
-                                                  .map(
-                                                      (row) =>
-                                                          `Put away ${row.line.displayName}.`,
-                                                  )
-                                                  .join("\n"),
+                                    householdId,
+                                    lineIds: [lineId],
+                                    locationId: args.location_id,
+                                    productFoodIds: args.product_food_ids,
+                                    amountOverrides,
                                 },
-                            ],
-                            structuredContent: payload,
-                        };
-                    } catch (err) {
-                        if (err instanceof StockInputError) {
-                            throw new Error(err.message);
+                            );
+                            for (const row of results) {
+                                putAway.push({
+                                    line_id: row.line.id,
+                                    display_name: row.line.displayName,
+                                    fridge_item_id: row.item?.id ?? null,
+                                    product_food_id: row.productFoodId,
+                                });
+                            }
+                        } catch (err) {
+                            if (
+                                err instanceof
+                                    NotedGroceryLineAmountRequiredError ||
+                                err instanceof StockInputError
+                            ) {
+                                failed.push({
+                                    line_id: lineId,
+                                    message: err.message,
+                                });
+                                continue;
+                            }
+                            throw err;
                         }
-                        throw err;
                     }
+                    const payload = { put_away: putAway, failed };
+                    const textParts = [
+                        ...putAway.map(
+                            (row) => `Put away ${row.display_name}.`,
+                        ),
+                        ...failed.map((row) => row.message),
+                    ];
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text:
+                                    textParts.length === 0
+                                        ? "Nothing to put away."
+                                        : textParts.join("\n"),
+                            },
+                        ],
+                        structuredContent: payload,
+                    };
                 },
                 analytics,
             ),
