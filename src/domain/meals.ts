@@ -15,11 +15,15 @@ import {
 } from "./recipes.js";
 
 export class MealItemsError extends Error {
-    readonly code = "meal_items" as const;
+    readonly code: "meal_items" | "recipe_unverified";
 
-    constructor(message: string) {
+    constructor(
+        message: string,
+        code: "meal_items" | "recipe_unverified" = "meal_items",
+    ) {
         super(message);
         this.name = "MealItemsError";
+        this.code = code;
     }
 }
 
@@ -384,6 +388,24 @@ export async function resolveAndBuildMeal(opts: {
     for (const recipeId of recipeIds) {
         const recipe = await opts.recipes.getRecipe(opts.householdId, recipeId);
         if (!recipe) throw new MealItemsError("Unknown recipe.");
+        if (recipe.verification === "unverified") {
+            const { assertRecipeVerified } = await import("./recipe-import.js");
+            try {
+                await assertRecipeVerified(
+                    opts.recipes,
+                    opts.householdId,
+                    recipeId,
+                );
+            } catch (err) {
+                if (
+                    err instanceof Error &&
+                    err.name === "RecipeUnverifiedError"
+                ) {
+                    throw new MealItemsError(err.message, "recipe_unverified");
+                }
+                throw err;
+            }
+        }
         const ingredients = await opts.recipes.listIngredients(
             opts.householdId,
             recipeId,

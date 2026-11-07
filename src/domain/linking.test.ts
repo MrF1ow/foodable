@@ -1,6 +1,12 @@
 import { test, expect } from "bun:test";
 import { alreadyHaveTag, recipeToGroceryRemainder } from "./linking.js";
-import { recipeCanMakeNow, recipeIngredientFromRow } from "./recipes.js";
+import {
+    recipeCanMakeNow,
+    recipeIngredientFromRow,
+    type Recipe,
+} from "./recipes.js";
+
+const verifiedRecipe = { verification: "verified" } as Recipe;
 
 // Matching is by food_id alone. Two foods can share a display name (two
 // cottage cheeses, say), and those must never net against each other.
@@ -292,9 +298,10 @@ test("recipeCanMakeNow treats unmeasured as covered with any stock", () => {
     });
     expect(
         recipeCanMakeNow(
+            verifiedRecipe,
             [salt],
             [{ quantity: { amount: 1, unit: "g" }, foodId: SALT }],
         ),
     ).toBe(true);
-    expect(recipeCanMakeNow([salt], [])).toBe(false);
+    expect(recipeCanMakeNow(verifiedRecipe, [salt], [])).toBe(false);
 });

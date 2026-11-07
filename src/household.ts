@@ -34,12 +34,14 @@ export type HouseholdPreferences = {
     constraints: string[];
     budget: string | null;
     shoppingCadence: string | null;
+    unverifiedRecipeExpiryDays: number | null;
 };
 
 export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     constraints: [],
     budget: null,
     shoppingCadence: null,
+    unverifiedRecipeExpiryDays: null,
 };
 
 export type HouseholdConfig = {
@@ -67,6 +69,7 @@ export type HouseholdConfigWire = {
         constraints: string[];
         budget: string | null;
         shopping_cadence: string | null;
+        unverified_recipe_expiry_days: number | null;
     };
 };
 
@@ -77,6 +80,7 @@ export type HouseholdPreferencesPatch = {
     constraints?: string[];
     budget?: string | null;
     shoppingCadence?: string | null;
+    unverifiedRecipeExpiryDays?: number | null;
 };
 
 export type HouseholdConfigPatch = {
@@ -144,6 +148,8 @@ function copyHousehold(household: Household): Household {
             constraints: [...household.preferences.constraints],
             budget: household.preferences.budget,
             shoppingCadence: household.preferences.shoppingCadence,
+            unverifiedRecipeExpiryDays:
+                household.preferences.unverifiedRecipeExpiryDays,
         },
     };
 }
@@ -479,6 +485,9 @@ export function householdConfigFromRow(row: {
         constraints?: unknown;
         budget?: unknown;
         shoppingCadence?: unknown;
+        shopping_cadence?: unknown;
+        unverifiedRecipeExpiryDays?: unknown;
+        unverified_recipe_expiry_days?: unknown;
     };
     const constraints =
         prefs.constraints === undefined ? [] : asStringArray(prefs.constraints);
@@ -487,16 +496,27 @@ export function householdConfigFromRow(row: {
     }
     const budget =
         prefs.budget === undefined ? null : optionalText(prefs.budget);
+    const cadenceSource =
+        prefs.shoppingCadence !== undefined
+            ? prefs.shoppingCadence
+            : prefs.shopping_cadence;
     const shoppingCadence =
-        prefs.shoppingCadence === undefined
-            ? null
-            : optionalText(prefs.shoppingCadence);
+        cadenceSource === undefined ? null : optionalText(cadenceSource);
     if (budget === undefined || shoppingCadence === undefined) {
         return {
             ok: false,
             error: "Budget and shopping cadence must be text.",
         };
     }
+    const expiryRaw =
+        prefs.unverifiedRecipeExpiryDays !== undefined
+            ? prefs.unverifiedRecipeExpiryDays
+            : prefs.unverified_recipe_expiry_days;
+    const unverifiedRecipeExpiryDays = parseUnverifiedRecipeExpiryDays(
+        expiryRaw === undefined ? null : expiryRaw,
+        true,
+    );
+    if (!unverifiedRecipeExpiryDays.ok) return unverifiedRecipeExpiryDays;
 
     return {
         ok: true,
@@ -507,9 +527,38 @@ export function householdConfigFromRow(row: {
                 constraints,
                 budget,
                 shoppingCadence,
+                unverifiedRecipeExpiryDays: unverifiedRecipeExpiryDays.value,
             },
         },
     };
+}
+
+export function parseUnverifiedRecipeExpiryDays(
+    value: unknown,
+    allowUndefinedAsNull: boolean,
+): ParseResult<number | null> {
+    if (value === undefined || value === null || value === "") {
+        if (allowUndefinedAsNull || value === "" || value === null) {
+            return { ok: true, value: null };
+        }
+        return {
+            ok: false,
+            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
+        };
+    }
+    const n =
+        typeof value === "number"
+            ? value
+            : typeof value === "string"
+              ? Number(value.trim())
+              : NaN;
+    if (!Number.isInteger(n) || n < 1 || n > 3650) {
+        return {
+            ok: false,
+            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
+        };
+    }
+    return { ok: true, value: n };
 }
 
 export function householdConfigToColumns(
@@ -536,6 +585,8 @@ export function householdConfigToWire(
             constraints: config.preferences.constraints,
             budget: config.preferences.budget,
             shopping_cadence: config.preferences.shoppingCadence,
+            unverified_recipe_expiry_days:
+                config.preferences.unverifiedRecipeExpiryDays,
         },
     };
 }
@@ -562,6 +613,8 @@ function parseHouseholdPreferencesPatch(
         budget?: unknown;
         shoppingCadence?: unknown;
         shopping_cadence?: unknown;
+        unverifiedRecipeExpiryDays?: unknown;
+        unverified_recipe_expiry_days?: unknown;
     };
     const patch: HouseholdPreferencesPatch = {};
     if (prefs.constraints !== undefined) {
@@ -596,6 +649,15 @@ function parseHouseholdPreferencesPatch(
             };
         }
         patch.shoppingCadence = shoppingCadence;
+    }
+    const expiryRaw =
+        prefs.unverifiedRecipeExpiryDays !== undefined
+            ? prefs.unverifiedRecipeExpiryDays
+            : prefs.unverified_recipe_expiry_days;
+    if (expiryRaw !== undefined) {
+        const parsed = parseUnverifiedRecipeExpiryDays(expiryRaw, false);
+        if (!parsed.ok) return parsed;
+        patch.unverifiedRecipeExpiryDays = parsed.value;
     }
     return { ok: true, value: patch };
 }
@@ -663,6 +725,10 @@ export function mergeHouseholdConfig(
                 patch.preferences?.shoppingCadence !== undefined
                     ? patch.preferences.shoppingCadence
                     : current.preferences.shoppingCadence,
+            unverifiedRecipeExpiryDays:
+                patch.preferences?.unverifiedRecipeExpiryDays !== undefined
+                    ? patch.preferences.unverifiedRecipeExpiryDays
+                    : current.preferences.unverifiedRecipeExpiryDays,
         },
     };
 }

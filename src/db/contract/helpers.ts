@@ -237,6 +237,8 @@ export function sampleRecipe(
         notes: null,
         prepMinutes: null,
         cookMinutes: null,
+        verification: "verified",
+        updatedAt: "2026-03-01T12:00:00+00:00",
         ...overrides,
     };
 }

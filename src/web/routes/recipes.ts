@@ -18,6 +18,8 @@ import {
     deleteRecipe,
     RecipeForbiddenError,
     RecipeInputError,
+    RecipeUnverifiedError,
+    recheckRecipe,
     removeRecipeIngredient,
     reorderRecipeIngredients,
     setPersonPortion,
@@ -53,6 +55,24 @@ import { redirectWithToast } from "../components/toast.js";
 
 export const recipesRoutes = new Hono();
 
+function redirectIfUnverified(
+    c: Parameters<typeof redirectWithToast>[0],
+    recipeId: string,
+    err: unknown,
+) {
+    if (
+        err instanceof RecipeUnverifiedError ||
+        (err instanceof MealItemsError && err.code === "recipe_unverified")
+    ) {
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            "recipes.unverified.blocked",
+        );
+    }
+    return null;
+}
+
 function formMemberIds(
     body: Record<string, string | File | (string | File)[]>,
 ): string[] {
@@ -73,7 +93,9 @@ async function recipeFormError(
     opts: { member?: string; openModalId?: string } = {},
 ) {
     const message =
-        err instanceof RecipeForbiddenError || err instanceof RecipeInputError
+        err instanceof RecipeForbiddenError ||
+        err instanceof RecipeInputError ||
+        err instanceof RecipeUnverifiedError
             ? err.message
             : err instanceof Error
               ? err.message
@@ -100,6 +122,7 @@ recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
         tag: c.req.query("tag") ?? "",
         canMakeNow: c.req.query("can_make_now") === "1",
         safeFor: c.req.query("safe_for") ?? "",
+        verification: c.req.query("verification") ?? "",
     });
     return c.html(page.html, page.status);
 });
@@ -175,6 +198,8 @@ recipesRoutes.post("/recipes/:id/log-portion", requireMember, async (c) => {
         });
         return redirectWithToast(c, "/", "recipes.portion.logged");
     } catch (err) {
+        const blocked = redirectIfUnverified(c, recipeId, err);
+        if (blocked) return blocked;
         const page = await recipeFormError(
             userId,
             recipeId,
@@ -270,6 +295,8 @@ recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
             flash.params,
         );
     } catch (err) {
+        const blocked = redirectIfUnverified(c, recipeId, err);
+        if (blocked) return blocked;
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-cook-${recipeId}`,
         });
@@ -605,7 +632,39 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
         const flash = addRecipeToGroceryToastFlash(added.added.length);
         return redirectWithToast(c, "/grocery", flash.key, flash.params);
     } catch (err) {
+        const blocked = redirectIfUnverified(c, recipeId, err);
+        if (blocked) return blocked;
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
+    }
+});
+
+recipesRoutes.post("/recipes/:id/verify", requireMember, async (c) => {
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    try {
+        const checked = await recheckRecipe(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+        );
+        if (checked.verified) {
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                "recipes.verify.passed",
+            );
+        }
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            "recipes.verify.failed",
+            { count: String(checked.problems.length) },
+        );
+    } catch (err) {
+        if (err instanceof RecipeInputError) {
+            return redirectWithToast(c, "/recipes", "recipes.not_found");
+        }
+        throw err;
     }
 });

@@ -5,6 +5,7 @@ import {
     householdConfigToColumns,
     mergeHouseholdConfig,
     parseHouseholdConfigPatch,
+    parseUnverifiedRecipeExpiryDays,
     type HouseholdConfig,
 } from "./household.js";
 
@@ -15,6 +16,7 @@ const current: HouseholdConfig = {
         constraints: ["nut-free"],
         budget: "tight",
         shoppingCadence: "weekly",
+        unverifiedRecipeExpiryDays: null,
     },
 };
 
@@ -43,8 +45,22 @@ test("preference merge keeps unspecified fields", () => {
             constraints: ["nut-free"],
             budget: "ok",
             shoppingCadence: "monthly",
+            unverifiedRecipeExpiryDays: null,
         },
     });
+});
+
+test("unverified recipe expiry defaults null and validates range", () => {
+    expect(parseUnverifiedRecipeExpiryDays(undefined, true)).toEqual({
+        ok: true,
+        value: null,
+    });
+    expect(parseUnverifiedRecipeExpiryDays(30, false)).toEqual({
+        ok: true,
+        value: 30,
+    });
+    expect(parseUnverifiedRecipeExpiryDays(0, false).ok).toBe(false);
+    expect(parseUnverifiedRecipeExpiryDays("nope", false).ok).toBe(false);
 });
 
 test("a missing preferences object on a row becomes empty preferences", () => {
