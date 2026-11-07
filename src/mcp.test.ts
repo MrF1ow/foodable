@@ -7485,7 +7485,6 @@ describe("authenticated dashboard HTTP", () => {
     });
 
     test("shared text_origin survives import 422 retry", async () => {
-        const { readFileSync } = await import("node:fs");
         const { join } = await import("node:path");
         db.recipeImportFetcher = {
             async robotsAllows() {
@@ -7513,10 +7512,9 @@ describe("authenticated dashboard HTTP", () => {
         const firstHtml = await first.text();
         expect(firstHtml).toContain('name="text_origin" value="shared"');
 
-        const caption = readFileSync(
+        const caption = await Bun.file(
             join(import.meta.dir, "domain/fixtures/captions/clean-headers.txt"),
-            "utf8",
-        );
+        ).text();
         const second = await siteApp.request("http://x/recipes/import", {
             method: "POST",
             headers: {
