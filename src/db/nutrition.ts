@@ -1,4 +1,11 @@
 import type { SQL } from "bun";
+import {
+    goalDayFromRow,
+    goalsForDate,
+    goalsResolver,
+    type GoalDayStore,
+    type GoalsByDate,
+} from "../domain/insights.js";
 import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
@@ -20,6 +27,7 @@ const MEAL_ITEMS = "meal_items";
 const WATER_LOG = "water_log";
 const WEIGHT_LOG = "weight_log";
 const NUTRITION_GOALS = "nutrition_goals";
+const NUTRITION_GOAL_DAYS = "nutrition_goal_days";
 
 function nutritionFailed(context: string, err: unknown): Error {
     const message = err instanceof Error ? err.message : String(err);
@@ -1074,24 +1082,98 @@ export async function upsertNutritionGoals(
     });
 }
 
+async function fetchNutritionGoals(
+    tx: Tx,
+    userId: string,
+): Promise<NutritionGoals | null> {
+    return await maybeOne<NutritionGoals>(
+        tx,
+        tx`
+            select *
+            from ${tx.unsafe(NUTRITION_GOALS)}
+            where user_id = ${userId}
+        `,
+        "get goals",
+    );
+}
+
 export async function getNutritionGoals(
     userId: string,
 ): Promise<NutritionGoals | null> {
     return run(async (tx) => {
         try {
-            return await maybeOne<NutritionGoals>(
-                tx,
-                tx`
-                    select *
-                    from ${tx.unsafe(NUTRITION_GOALS)}
-                    where user_id = ${userId}
-                `,
-                "get goals",
-            );
+            return await fetchNutritionGoals(tx, userId);
         } catch (err) {
             throw nutritionFailed("get goals", err);
         }
     });
+}
+
+export const pgGoalDayStore: GoalDayStore = {
+    overrideForDate(userId, date) {
+        return run(async (tx) => {
+            try {
+                const row = await maybeOne<Record<string, unknown>>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                        where user_id = ${userId} and date = ${date}::date
+                    `,
+                    "get goal day",
+                );
+                return row ? goalDayFromRow(row) : null;
+            } catch (err) {
+                throw nutritionFailed("get goal day", err);
+            }
+        });
+    },
+    overridesInRange(userId, startDate, endDate) {
+        return run(async (tx) => {
+            try {
+                const list = await rows<Record<string, unknown>>(
+                    tx,
+                    tx`
+                        select *
+                        from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                        where
+                            user_id = ${userId}
+                            and date between ${startDate}::date and ${endDate}::date
+                        order by date
+                    `,
+                );
+                return list.map(goalDayFromRow);
+            } catch (err) {
+                throw nutritionFailed("get goal days", err);
+            }
+        });
+    },
+};
+
+export async function getGoalsForDate(
+    userId: string,
+    date: string,
+): Promise<NutritionGoals | null> {
+    const [defaults, override] = await Promise.all([
+        getNutritionGoals(userId),
+        pgGoalDayStore.overrideForDate(userId, date),
+    ]);
+    return goalsForDate(defaults, override ? [override] : [], date);
+}
+
+export async function getGoalsForRange(
+    userId: string,
+    startDate: string,
+    endDate: string,
+): Promise<{ defaults: NutritionGoals | null; forDate: GoalsByDate }> {
+    const [defaults, overrides] = await Promise.all([
+        getNutritionGoals(userId),
+        pgGoalDayStore.overridesInRange(userId, startDate, endDate),
+    ]);
+    return {
+        defaults,
+        forDate: goalsResolver(defaults, overrides),
+    };
 }
 
 // ---------- Water log ----------

@@ -52,6 +52,11 @@ import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
 import * as actualDbUsers from "./db/users.js";
+import {
+    goalsForDate,
+    goalsResolver,
+    type GoalDayOverride,
+} from "./domain/insights.js";
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
@@ -289,6 +294,7 @@ function storedMeal(input: Record<string, unknown>): Meal {
 const db = {
     profile: null as actualProfiles.Profile | null,
     goals: null as NutritionGoals | null,
+    goalDays: [] as GoalDayOverride[],
     meals: [] as Meal[],
     water: [] as WaterEntry[],
     inserted: [] as Record<string, unknown>[],
@@ -350,6 +356,12 @@ mock.module("./db/nutrition.js", () => ({
         db.members = db.members.filter((member) => member.userId !== userId);
     },
     getNutritionGoals: async () => db.goals,
+    getGoalsForDate: async (_u: string, date: string) =>
+        goalsForDate(db.goals, db.goalDays, date),
+    getGoalsForRange: async () => ({
+        defaults: db.goals,
+        forDate: goalsResolver(db.goals, db.goalDays),
+    }),
     getMealsByDate: async () => db.meals,
     getWaterByDate: async () => [],
     getWeightByDate: async () => [],
@@ -714,6 +726,7 @@ afterAll(() => {
 beforeEach(() => {
     db.profile = { ...PROFILE_BASE };
     db.goals = null;
+    db.goalDays = [];
     db.meals = [];
     db.water = [];
     db.inserted = [];
@@ -1409,6 +1422,76 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
             expect(db.goals!.daily_caffeine_mg).toBe(400);
             await call("set_nutrition_goals", { daily_caffeine_mg: null });
             expect(db.goals!.daily_caffeine_mg).toBeNull();
+        });
+    });
+});
+
+describe("per-day nutrition goal overrides (read path)", () => {
+    test("get_goal_progress uses override calories; target weight stays default", async () => {
+        db.goals = goals({
+            daily_calories: 2000,
+            daily_protein_g: 150,
+            target_weight_g: 80000,
+        });
+        db.goalDays = [
+            {
+                user_id: "u1",
+                date: "2026-07-04",
+                updated_at: "2026-07-04T00:00:00Z",
+                daily_calories: 2500,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            const text = textOf(r);
+            expect(text).toContain("2500");
+            expect(text).not.toMatch(/Calories:.*2000 kcal target/);
+            expect(text).toContain("80 kg");
+            const sc = r.structuredContent as {
+                goals: { calories: number | null };
+            };
+            expect(sc.goals?.calories).toBe(2500);
+        });
+    });
+
+    test("get_trends text shows varies by day when overrides differ", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.meals = [
+            meal({ logged_at: "2026-06-01T12:00:00Z", calories: 2000 }),
+            meal({ logged_at: "2026-06-02T12:00:00Z", calories: 2000 }),
+        ];
+        db.goalDays = [
+            {
+                user_id: "u1",
+                date: "2026-06-02",
+                updated_at: "2026-06-02T00:00:00Z",
+                daily_calories: 3000,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ];
+        await withTools(null, async (call) => {
+            const text = textOf(
+                await call("get_trends", {
+                    days: 2,
+                    end_date: "2026-06-02",
+                }),
+            );
+            expect(text).toContain("varies by day");
         });
     });
 });

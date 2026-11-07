@@ -7,6 +7,144 @@ import type {
 import { dateInTz, hourInTz } from "./tz.js";
 import { formatWeight, fromGrams, type WeightUnit } from "./units.js";
 
+export const GOAL_DAY_FIELDS = [
+    "daily_calories",
+    "daily_protein_g",
+    "daily_carbs_g",
+    "daily_fat_g",
+    "daily_fiber_g",
+    "daily_sugar_g",
+    "daily_alcohol_g",
+    "daily_caffeine_mg",
+    "daily_water_ml",
+] as const;
+export type GoalDayField = (typeof GOAL_DAY_FIELDS)[number];
+export type GoalDayOverride = {
+    user_id: string;
+    date: string;
+    updated_at: string;
+} & Record<GoalDayField, number | null>;
+export type GoalsByDate = (date: string) => NutritionGoals | null;
+
+function goalDateString(value: unknown): string {
+    if (value instanceof Date) {
+        const y = value.getUTCFullYear();
+        const m = String(value.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(value.getUTCDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+    }
+    const s = String(value);
+    return s.slice(0, 10);
+}
+
+function goalNum(value: unknown): number | null {
+    if (value == null) return null;
+    if (typeof value === "number") return value;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+export function goalDayFromRow(row: Record<string, unknown>): GoalDayOverride {
+    const out = {
+        user_id: String(row.user_id),
+        date: goalDateString(row.date),
+        updated_at: String(row.updated_at),
+    } as GoalDayOverride;
+    for (const f of GOAL_DAY_FIELDS) {
+        out[f] = goalNum(row[f]);
+    }
+    return out;
+}
+
+export function goalsForDate(
+    defaults: NutritionGoals | null,
+    overrides: readonly GoalDayOverride[],
+    date: string,
+): NutritionGoals | null {
+    const override = overrides.filter((o) => o.date === date).at(-1);
+    if (!override) return defaults;
+
+    const resolved = {} as Record<GoalDayField, number | null>;
+    let anyDaily = false;
+    for (const f of GOAL_DAY_FIELDS) {
+        const v = override[f] ?? defaults?.[f] ?? null;
+        resolved[f] = v;
+        if (v != null) anyDaily = true;
+    }
+    if (!defaults && !anyDaily) return null;
+
+    return {
+        user_id: defaults?.user_id ?? override.user_id,
+        daily_calories: resolved.daily_calories,
+        daily_protein_g: resolved.daily_protein_g,
+        daily_carbs_g: resolved.daily_carbs_g,
+        daily_fat_g: resolved.daily_fat_g,
+        daily_fiber_g: resolved.daily_fiber_g,
+        daily_sugar_g: resolved.daily_sugar_g,
+        daily_alcohol_g: resolved.daily_alcohol_g,
+        daily_caffeine_mg: resolved.daily_caffeine_mg,
+        daily_water_ml: resolved.daily_water_ml,
+        target_weight_g: defaults?.target_weight_g ?? null,
+        updated_at: defaults?.updated_at ?? override.updated_at,
+    };
+}
+
+export function goalsResolver(
+    defaults: NutritionGoals | null,
+    overrides: readonly GoalDayOverride[],
+): GoalsByDate {
+    const byDate = new Map<string, GoalDayOverride>();
+    for (const o of overrides) byDate.set(o.date, o);
+    return (date: string) => {
+        const o = byDate.get(date);
+        if (!o) return defaults;
+        return goalsForDate(defaults, [o], date);
+    };
+}
+
+export interface GoalDayStore {
+    overrideForDate(
+        userId: string,
+        date: string,
+    ): Promise<GoalDayOverride | null>;
+    overridesInRange(
+        userId: string,
+        startDate: string,
+        endDate: string,
+    ): Promise<GoalDayOverride[]>;
+}
+
+export function createMemoryGoalDayStore(
+    rows: GoalDayOverride[] = [],
+): GoalDayStore & { put(row: GoalDayOverride): void } {
+    const list = [...rows];
+    return {
+        put(row: GoalDayOverride) {
+            const i = list.findIndex(
+                (r) => r.user_id === row.user_id && r.date === row.date,
+            );
+            if (i >= 0) list[i] = row;
+            else list.push(row);
+        },
+        async overrideForDate(userId, date) {
+            return (
+                list.find((r) => r.user_id === userId && r.date === date) ??
+                null
+            );
+        },
+        async overridesInRange(userId, startDate, endDate) {
+            return list
+                .filter(
+                    (r) =>
+                        r.user_id === userId &&
+                        r.date >= startDate &&
+                        r.date <= endDate,
+                )
+                .sort((a, b) => a.date.localeCompare(b.date));
+        },
+    };
+}
+
 export interface DailyBucket {
     date: string; // YYYY-MM-DD
     meals: Meal[];
@@ -172,6 +310,8 @@ interface Trailing {
 interface StatSeries {
     /** Daily values behind every figure on the line. */
     values: number[];
+    /** Per-day target aligned 1:1 with `values` (same filtering as values). */
+    targets: (number | null)[];
     trailing: Trailing[];
     /** True when a day can be absent from `values`, which changes the wording
      * from a bare "3/7" to "3/7 days with data". */
@@ -189,9 +329,11 @@ interface StatSeries {
 function fullSeries(
     buckets: DailyBucket[],
     field: keyof DailyBucket,
+    targetForDate: (date: string) => number | null,
 ): StatSeries {
     return {
         values: buckets.map((b) => b[field] as number),
+        targets: buckets.map((b) => targetForDate(b.date)),
         trailing: WINDOWS.map((n) => {
             const slice = buckets.slice(-n);
             const values = slice.map((b) => b[field] as number);
@@ -211,11 +353,17 @@ function fullSeries(
 function coveredSeries(
     buckets: DailyBucket[],
     nutrient: PartialNutrient,
+    targetForDate: (date: string) => number | null,
 ): StatSeries {
+    const carrying = (bs: DailyBucket[]) =>
+        bs.filter((b) => dayCarries(b.meals, nutrient));
     const valuesOf = (bs: DailyBucket[]) =>
-        bs.filter((b) => dayCarries(b.meals, nutrient)).map((b) => b[nutrient]);
+        carrying(bs).map((b) => b[nutrient]);
+    const targetsOf = (bs: DailyBucket[]) =>
+        carrying(bs).map((b) => targetForDate(b.date));
     return {
         values: valuesOf(buckets),
+        targets: targetsOf(buckets),
         trailing: WINDOWS.map((n) => {
             const slice = buckets.slice(-n);
             const values = valuesOf(slice);
@@ -305,11 +453,29 @@ type StatDirection = "floor" | "ceiling";
  * narrating both in one chat would otherwise report two contradictory "average
  * daily calories" with nothing to reconcile them. The fix is disclosure on
  * both sides, not one shared denominator — the two answer different questions. */
+function formatTargetBand(
+    targets: (number | null)[],
+    direction: StatDirection,
+    unit: string,
+    decimals: number,
+): string | null {
+    const applicable = targets
+        .filter((t) => targetApplies(t, direction))
+        .map((t) => round(t!, decimals));
+    if (applicable.length === 0) return null;
+    const kind = direction === "ceiling" ? "Limit" : "Target";
+    if (applicable.every((t) => t === applicable[0])) {
+        return `  ${kind}: ${applicable[0]}${unit}`;
+    }
+    const min = Math.min(...applicable);
+    const max = Math.max(...applicable);
+    return `  ${kind}: ${min}–${max}${unit} (varies by day)`;
+}
+
 function formatStatLine(
     label: string,
     unit: string,
     series: StatSeries,
-    target: number | null,
     direction: StatDirection = "floor",
     // Decimal places for every figure that carries `unit`. Caffeine passes 0:
     // mcp.ts renders it as whole milligrams everywhere (see formatMg there), and
@@ -318,7 +484,7 @@ function formatStatLine(
     // precision either — no label, export or column in this database carries it.
     decimals = 1,
 ): string | null {
-    const { values, trailing, partial } = series;
+    const { values, targets, trailing, partial } = series;
     if (partial && values.length === 0) return null;
     // A figure drawn from fewer days than the window is said to be, rather than
     // passed off as a full-window average.
@@ -342,26 +508,23 @@ function formatStatLine(
               : "";
         parts.push(`  ${t.n}d avg: ${round(t.avg, decimals)}${unit}${note}`);
     }
-    if (targetApplies(target, direction)) {
-        const limit = target!;
-        // Displayed at the nutrient's own precision; the comparisons below stay
-        // on the raw stored figure, so rounding the label can never move a day
-        // across the line it is being judged against.
-        const shownLimit = round(limit, decimals);
+    const judged = values.map((v, i) => ({ v, t: targets[i] ?? null }));
+    const withTarget = judged.filter(({ t }) => targetApplies(t, direction));
+    const targetLabel = formatTargetBand(targets, direction, unit, decimals);
+    if (targetLabel != null) {
+        parts.push(targetLabel);
+        const denom =
+            withTarget.length === values.length
+                ? of
+                : `/${withTarget.length} days with a target`;
         if (direction === "ceiling") {
-            // A limit is not something to land within ±10% of — hitting a sugar
-            // cap dead-on is not the goal. Count the misses rather than the
-            // wins: "Days under limit" would score every never-logged day as a
-            // success, and a high hit-rate on a cap reads as praise for it.
-            const daysOver = values.filter((v) => v > limit).length;
-            parts.push(`  Limit: ${shownLimit}${unit}`);
-            parts.push(`  Days over limit: ${daysOver}${of}`);
+            const daysOver = withTarget.filter(({ v, t }) => v > t!).length;
+            parts.push(`  Days over limit: ${daysOver}${denom}`);
         } else {
-            const daysOnTarget = values.filter(
-                (v) => v >= limit * 0.9 && v <= limit * 1.1,
+            const daysOnTarget = withTarget.filter(
+                ({ v, t }) => v >= t! * 0.9 && v <= t! * 1.1,
             ).length;
-            parts.push(`  Target: ${shownLimit}${unit}`);
-            parts.push(`  Days within ±10% of target: ${daysOnTarget}${of}`);
+            parts.push(`  Days within ±10% of target: ${daysOnTarget}${denom}`);
         }
     }
     const sd = stdDev(values);
@@ -373,17 +536,40 @@ function formatStatLine(
     return parts.join("\n");
 }
 
+function goalNumber(
+    goalsOn: GoalsByDate,
+    date: string,
+    field: GoalDayField,
+): number | null {
+    return goalsOn(date)?.[field] ?? null;
+}
+
 export function computeTrends(
     buckets: DailyBucket[],
-    goals: NutritionGoals | null,
+    goals: NutritionGoals | null | GoalsByDate,
 ): string {
     if (buckets.length === 0) return "No data in range.";
+
+    const goalsOn: GoalsByDate =
+        typeof goals === "function" ? goals : () => goals;
+    const targetFor =
+        (field: GoalDayField) =>
+        (date: string): number | null =>
+            goalNumber(goalsOn, date, field);
 
     const logged = buckets.filter(nonEmpty);
     // Calories/protein/carbs/fat/water: every day counts, as they always have.
     // Fiber/sugar/alcohol/caffeine: only the days that carry them (coveredSeries).
-    const alcoholSeries = coveredSeries(buckets, "alcohol_g");
-    const caffeineSeries = coveredSeries(buckets, "caffeine_mg");
+    const alcoholSeries = coveredSeries(
+        buckets,
+        "alcohol_g",
+        targetFor("daily_alcohol_g"),
+    );
+    const caffeineSeries = coveredSeries(
+        buckets,
+        "caffeine_mg",
+        targetFor("daily_caffeine_mg"),
+    );
 
     const sections: string[] = [];
     const push = (line: string | null) => {
@@ -409,32 +595,28 @@ export function computeTrends(
         formatStatLine(
             "Calories",
             " kcal",
-            fullSeries(buckets, "calories"),
-            goals?.daily_calories ?? null,
+            fullSeries(buckets, "calories", targetFor("daily_calories")),
         ),
     );
     push(
         formatStatLine(
             "Protein",
             "g",
-            fullSeries(buckets, "protein_g"),
-            goals?.daily_protein_g ?? null,
+            fullSeries(buckets, "protein_g", targetFor("daily_protein_g")),
         ),
     );
     push(
         formatStatLine(
             "Carbs",
             "g",
-            fullSeries(buckets, "carbs_g"),
-            goals?.daily_carbs_g ?? null,
+            fullSeries(buckets, "carbs_g", targetFor("daily_carbs_g")),
         ),
     );
     push(
         formatStatLine(
             "Fat",
             "g",
-            fullSeries(buckets, "fat_g"),
-            goals?.daily_fat_g ?? null,
+            fullSeries(buckets, "fat_g", targetFor("daily_fat_g")),
         ),
     );
     // Fiber and sugar are never gated by a preference, but a window with no
@@ -444,16 +626,14 @@ export function computeTrends(
         formatStatLine(
             "Fiber",
             "g",
-            coveredSeries(buckets, "fiber_g"),
-            goals?.daily_fiber_g ?? null,
+            coveredSeries(buckets, "fiber_g", targetFor("daily_fiber_g")),
         ),
     );
     push(
         formatStatLine(
             "Sugar",
             "g",
-            coveredSeries(buckets, "sugar_g"),
-            goals?.daily_sugar_g ?? null,
+            coveredSeries(buckets, "sugar_g", targetFor("daily_sugar_g")),
             "ceiling",
         ),
     );
@@ -461,15 +641,7 @@ export function computeTrends(
     // flat-zero series is suppressed too (that is also how mcp.ts's opt-in
     // reaches this module: it zeroes the series).
     if (hasAnyPositive(alcoholSeries.values)) {
-        push(
-            formatStatLine(
-                "Alcohol",
-                "g",
-                alcoholSeries,
-                goals?.daily_alcohol_g ?? null,
-                "ceiling",
-            ),
-        );
+        push(formatStatLine("Alcohol", "g", alcoholSeries, "ceiling"));
     }
     // Caffeine is milligrams, and a ceiling: the guidelines people set against
     // it (EFSA's 400 mg/day) are limits, and 0 mg is a meaningful one. It is a
@@ -479,35 +651,29 @@ export function computeTrends(
     // this check is what keeps a pre-feature history from reading "0 mg". The
     // trailing 0 is the decimal count: whole milligrams, matching mcp.ts.
     if (hasAnyPositive(caffeineSeries.values)) {
-        push(
-            formatStatLine(
-                "Caffeine",
-                " mg",
-                caffeineSeries,
-                goals?.daily_caffeine_mg ?? null,
-                "ceiling",
-                0,
-            ),
-        );
+        push(formatStatLine("Caffeine", " mg", caffeineSeries, "ceiling", 0));
     }
     push(
         formatStatLine(
             "Water",
             " ml",
-            fullSeries(buckets, "waterMl"),
-            goals?.daily_water_ml ?? null,
+            fullSeries(buckets, "waterMl", targetFor("daily_water_ml")),
         ),
     );
 
-    // Best / worst day (by calorie target proximity if goals set, else raw extremes on logged days)
+    // Best / worst day: per-day calorie targets when every logged day has one.
     if (logged.length > 0) {
         let best: DailyBucket | null = null;
         let worst: DailyBucket | null = null;
-        const target = goals?.daily_calories ?? null;
-        if (target != null && target > 0) {
+        const perDayTargets = logged.every((b) => {
+            const t = goalNumber(goalsOn, b.date, "daily_calories");
+            return t != null && t > 0;
+        });
+        if (perDayTargets) {
             let bestDist = Infinity;
             let worstDist = -Infinity;
             for (const b of logged) {
+                const target = goalNumber(goalsOn, b.date, "daily_calories")!;
                 const dist = Math.abs(b.calories - target);
                 if (dist < bestDist) {
                     bestDist = dist;
@@ -526,7 +692,7 @@ export function computeTrends(
             sections.push(
                 [
                     "Extremes (by calories):",
-                    `  Closest to ${target != null ? "target" : "lowest"}: ${best.date} — ${best.calories} kcal, ${round(best.protein_g)}g P`,
+                    `  Closest to ${perDayTargets ? "target" : "lowest"}: ${best.date} — ${best.calories} kcal, ${round(best.protein_g)}g P`,
                     `  Furthest / highest: ${worst.date} — ${worst.calories} kcal, ${round(worst.protein_g)}g P`,
                 ].join("\n"),
             );
@@ -771,11 +937,41 @@ export function computeMealPatterns(
     return sections.join("\n\n");
 }
 
+function weeklyDigestTarget(
+    buckets: DailyBucket[],
+    goalsOn: GoalsByDate,
+    field: GoalDayField,
+    direction: StatDirection,
+    partialNutrient?: PartialNutrient,
+    caffeineField = false,
+): { value: number | null; averaged: boolean } {
+    const source = partialNutrient
+        ? buckets.filter((b) => dayCarries(b.meals, partialNutrient))
+        : buckets;
+    const raw = source.map((b) => goalNumber(goalsOn, b.date, field));
+    const applicable = raw.filter(
+        (t): t is number => t != null && targetApplies(t, direction),
+    );
+    if (applicable.length === 0) return { value: null, averaged: false };
+    const display = applicable.map((t) =>
+        caffeineField ? Math.round(t) : round(t),
+    );
+    if (display.every((t) => t === display[0])) {
+        return { value: applicable[0]!, averaged: false };
+    }
+    const avg = mean(applicable);
+    const value = caffeineField ? Math.round(avg) : round(avg);
+    return { value, averaged: true };
+}
+
 export function computeWeeklyDigest(
     buckets: DailyBucket[],
-    goals: NutritionGoals | null,
+    goals: NutritionGoals | null | GoalsByDate,
 ): string {
     if (buckets.length === 0) return "No data in the past week.";
+
+    const goalsOn: GoalsByDate =
+        typeof goals === "function" ? goals : () => goals;
 
     const logged = buckets.filter(nonEmpty);
     const avgCals = round(mean(buckets.map((b) => b.calories)));
@@ -836,6 +1032,7 @@ export function computeWeeklyDigest(
         noun: "target" | "limit" = "target",
         // Days the figure was drawn from, when that can be fewer than the week.
         days?: number,
+        targetAveraged = false,
     ) => {
         const note =
             days != null && days < buckets.length
@@ -850,40 +1047,116 @@ export function computeWeeklyDigest(
             const verdict = val > 0 ? `${val}${unit} over` : "clear";
             return `  ${label}: ${val}${unit} / 0${unit} limit (${verdict})${note}`;
         }
-        const pct = round((val / target!) * 100, 0);
-        return `  ${label}: ${val}${unit} / ${target}${unit} ${noun} (${pct}%)${note}`;
+        const shown =
+            noun === "limit" && label === "Caffeine"
+                ? Math.round(target!)
+                : target!;
+        const pct = round((val / shown) * 100, 0);
+        const vary = targetAveraged ? ` (daily ${noun}s vary; averaged)` : "";
+        return `  ${label}: ${val}${unit} / ${shown}${unit} ${noun} (${pct}%)${vary}${note}`;
     };
-    lines.push(
-        line("Calories", avgCals, " kcal", goals?.daily_calories ?? null),
+    const calT = weeklyDigestTarget(
+        buckets,
+        goalsOn,
+        "daily_calories",
+        "floor",
     );
     lines.push(
-        line("Protein", avgProtein, "g", goals?.daily_protein_g ?? null),
+        line(
+            "Calories",
+            avgCals,
+            " kcal",
+            calT.value,
+            "target",
+            undefined,
+            calT.averaged,
+        ),
     );
-    lines.push(line("Carbs", avgCarbs, "g", goals?.daily_carbs_g ?? null));
-    lines.push(line("Fat", avgFat, "g", goals?.daily_fat_g ?? null));
+    const protT = weeklyDigestTarget(
+        buckets,
+        goalsOn,
+        "daily_protein_g",
+        "floor",
+    );
+    lines.push(
+        line(
+            "Protein",
+            avgProtein,
+            "g",
+            protT.value,
+            "target",
+            undefined,
+            protT.averaged,
+        ),
+    );
+    const carbT = weeklyDigestTarget(
+        buckets,
+        goalsOn,
+        "daily_carbs_g",
+        "floor",
+    );
+    lines.push(
+        line(
+            "Carbs",
+            avgCarbs,
+            "g",
+            carbT.value,
+            "target",
+            undefined,
+            carbT.averaged,
+        ),
+    );
+    const fatT = weeklyDigestTarget(buckets, goalsOn, "daily_fat_g", "floor");
+    lines.push(
+        line(
+            "Fat",
+            avgFat,
+            "g",
+            fatT.value,
+            "target",
+            undefined,
+            fatT.averaged,
+        ),
+    );
     // No fiber/sugar data anywhere in the week -> no row, rather than a "0g"
     // that a pre-feature history would make up out of nothing.
     if (fiber.avg != null) {
+        const fiberT = weeklyDigestTarget(
+            buckets,
+            goalsOn,
+            "daily_fiber_g",
+            "floor",
+            "fiber_g",
+        );
         lines.push(
             line(
                 "Fiber",
                 fiber.avg,
                 "g",
-                goals?.daily_fiber_g ?? null,
+                fiberT.value,
                 "target",
                 fiber.days,
+                fiberT.averaged,
             ),
         );
     }
     if (sugar.avg != null) {
+        const sugarT = weeklyDigestTarget(
+            buckets,
+            goalsOn,
+            "daily_sugar_g",
+            "ceiling",
+            "sugar_g",
+        );
         lines.push(
             line(
                 "Sugar",
                 sugar.avg,
                 "g",
-                goals?.daily_sugar_g ?? null,
+                sugarT.value,
                 "limit",
                 sugar.days,
+                sugarT.averaged,
             ),
         );
     }
@@ -891,14 +1164,22 @@ export function computeWeeklyDigest(
     // keyed on the rendered average rather than the raw series: a row reading
     // "Alcohol: 0g" is exactly the noise the suppression exists to avoid.
     if (alcohol.avg != null && alcohol.avg > 0) {
+        const alcoholT = weeklyDigestTarget(
+            buckets,
+            goalsOn,
+            "daily_alcohol_g",
+            "ceiling",
+            "alcohol_g",
+        );
         lines.push(
             line(
                 "Alcohol",
                 alcohol.avg,
                 "g",
-                goals?.daily_alcohol_g ?? null,
+                alcoholT.value,
                 "limit",
                 alcohol.days,
+                alcoholT.averaged,
             ),
         );
     }
@@ -906,41 +1187,67 @@ export function computeWeeklyDigest(
     // flag by design — see hasAnyPositive). A row reading "Caffeine: 0 mg" for
     // someone who has never recorded a cup is exactly what it exists to avoid.
     if (caffeineAvg != null && caffeineAvg > 0) {
+        const caffeineT = weeklyDigestTarget(
+            buckets,
+            goalsOn,
+            "daily_caffeine_mg",
+            "ceiling",
+            "caffeine_mg",
+            true,
+        );
         lines.push(
             line(
                 "Caffeine",
                 caffeineAvg,
                 " mg",
-                // The limit is rendered at the same whole-milligram precision
-                // as the figure it is compared against, and as formatGoals in
-                // mcp.ts already echoes it. daily_caffeine_mg is numeric(7,2),
-                // so it is the one goal column that can carry a stray decimal.
-                goals?.daily_caffeine_mg != null
-                    ? Math.round(goals.daily_caffeine_mg)
-                    : null,
+                caffeineT.value != null ? Math.round(caffeineT.value) : null,
                 "limit",
                 caffeine.days,
+                caffeineT.averaged,
             ),
         );
     }
-    lines.push(line("Water", avgWater, " ml", goals?.daily_water_ml ?? null));
+    const waterT = weeklyDigestTarget(
+        buckets,
+        goalsOn,
+        "daily_water_ml",
+        "floor",
+    );
+    lines.push(
+        line(
+            "Water",
+            avgWater,
+            " ml",
+            waterT.value,
+            "target",
+            undefined,
+            waterT.averaged,
+        ),
+    );
 
-    // Best and worst day this week (by calorie target if set)
+    // Best and worst day: per-day calorie targets when every logged day has one.
     if (logged.length > 0) {
-        const target = goals?.daily_calories ?? null;
+        const perDayTargets = logged.every((b) => {
+            const t = goalNumber(goalsOn, b.date, "daily_calories");
+            return t != null && t > 0;
+        });
         let best: DailyBucket;
         let worst: DailyBucket;
-        if (target != null && target > 0) {
-            best = logged.reduce((a, b) =>
-                Math.abs(a.calories - target) <= Math.abs(b.calories - target)
+        if (perDayTargets) {
+            best = logged.reduce((a, b) => {
+                const ta = goalNumber(goalsOn, a.date, "daily_calories")!;
+                const tb = goalNumber(goalsOn, b.date, "daily_calories")!;
+                return Math.abs(a.calories - ta) <= Math.abs(b.calories - tb)
                     ? a
-                    : b,
-            );
-            worst = logged.reduce((a, b) =>
-                Math.abs(a.calories - target) >= Math.abs(b.calories - target)
+                    : b;
+            });
+            worst = logged.reduce((a, b) => {
+                const ta = goalNumber(goalsOn, a.date, "daily_calories")!;
+                const tb = goalNumber(goalsOn, b.date, "daily_calories")!;
+                return Math.abs(a.calories - ta) >= Math.abs(b.calories - tb)
                     ? a
-                    : b,
-            );
+                    : b;
+            });
         } else {
             best = logged.reduce((a, b) => (a.calories < b.calories ? a : b));
             worst = logged.reduce((a, b) => (a.calories > b.calories ? a : b));
@@ -954,7 +1261,7 @@ export function computeWeeklyDigest(
         );
     }
 
-    if (!goals) {
+    if (buckets.every((b) => goalsOn(b.date) == null)) {
         lines.push("");
         lines.push(
             "(Tip: call set_nutrition_goals to get target-based coaching in future digests.)",

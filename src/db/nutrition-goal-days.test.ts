@@ -1,8 +1,14 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import {
+    getGoalsForDate,
+    getGoalsForRange,
+    pgGoalDayStore,
+    upsertNutritionGoals,
+} from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
 import { seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { pgCode } from "./sql.js";
+import { pgCode, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -162,5 +168,131 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
         expect(priv!.ins).toBe(true);
         expect(priv!.upd).toBe(true);
         expect(priv!.del).toBe(true);
+    });
+
+    let storeUserId: string;
+    let storeHouseholdId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        ({ userId: storeUserId, householdId: storeHouseholdId } =
+            await seedHousehold(sql));
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+    });
+
+    test("overrideForDate returns typed row", async () => {
+        const date = "2026-09-10";
+        const { sql } = getCtx();
+        await sql`
+                insert into public.nutrition_goal_days (
+                    household_id,
+                    user_id,
+                    date,
+                    daily_calories,
+                    daily_protein_g
+                )
+                values (${storeHouseholdId}, ${storeUserId}, ${date}, ${2200}, ${160})
+            `;
+        const row = await pgGoalDayStore.overrideForDate(storeUserId, date);
+        expect(row!.date).toBe(date);
+        expect(row!.daily_calories).toBe(2200);
+        expect(typeof row!.daily_protein_g).toBe("number");
+        expect(
+            await pgGoalDayStore.overrideForDate(storeUserId, "2026-09-11"),
+        ).toBeNull();
+    });
+
+    test("overridesInRange is inclusive, ordered, user-scoped", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        const seeded = await seedHousehold(sql);
+        const other = crypto.randomUUID();
+        await sql`
+                insert into public.users (id, email)
+                values (${other}, ${`x-${other}@t.test`})
+            `;
+        for (const [d, cals] of [
+            ["2026-10-01", 2000],
+            ["2026-10-05", 2100],
+            ["2026-10-07", 2200],
+        ] as const) {
+            await sql`
+                    insert into public.nutrition_goal_days (
+                        household_id,
+                        user_id,
+                        date,
+                        daily_calories
+                    )
+                    values (${seeded.householdId}, ${seeded.userId}, ${d}, ${cals})
+                `;
+        }
+        await sql`
+                insert into public.nutrition_goal_days (
+                    household_id,
+                    user_id,
+                    date,
+                    daily_calories
+                )
+                values (${seeded.householdId}, ${other}, ${"2026-10-05"}, ${9999})
+            `;
+        const range = await pgGoalDayStore.overridesInRange(
+            seeded.userId,
+            "2026-10-05",
+            "2026-10-07",
+        );
+        expect(range.map((r) => r.date)).toEqual(["2026-10-05", "2026-10-07"]);
+        expect(range[0]!.daily_calories).toBe(2100);
+    });
+
+    test("getGoalsForDate merges override with defaults", async () => {
+        await upsertNutritionGoals(storeUserId, {
+            daily_calories: 2000,
+            daily_protein_g: 150,
+        });
+        const { sql } = getCtx();
+        const date = "2026-11-15";
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id,
+                user_id,
+                date,
+                daily_calories
+            )
+            values (${storeHouseholdId}, ${storeUserId}, ${date}, ${2400})
+        `;
+        const merged = await getGoalsForDate(storeUserId, date);
+        expect(merged!.daily_calories).toBe(2400);
+        expect(merged!.daily_protein_g).toBe(150);
+    });
+
+    test("getGoalsForRange exposes forDate", async () => {
+        await upsertNutritionGoals(storeUserId, { daily_calories: 2000 });
+        const { sql } = getCtx();
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id,
+                user_id,
+                date,
+                daily_calories
+            )
+            values (
+                ${storeHouseholdId},
+                ${storeUserId},
+                ${"2026-12-01"},
+                ${2500}
+            )
+        `;
+        const { forDate } = await getGoalsForRange(
+            storeUserId,
+            "2026-12-01",
+            "2026-12-02",
+        );
+        expect(forDate("2026-12-01")!.daily_calories).toBe(2500);
+        expect(forDate("2026-12-02")!.daily_calories).toBe(2000);
     });
 });
