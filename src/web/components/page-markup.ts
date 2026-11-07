@@ -54,10 +54,14 @@ export function renderGroceryLineRow(opts: {
     if (opts.alreadyHaveHtml) {
         metaParts.push(opts.alreadyHaveHtml);
     }
+    for (const notice of opts.notices ?? []) {
+        metaParts.push(noticeBadge(notice));
+    }
     const meta = metaParts.join(" · ");
     const noticeBlock =
         opts.notices && opts.notices.length > 0
             ? noticeList(opts.notices, {
+                  className: "grocery-line-notices",
                   dismiss: (notice) =>
                       noticeCodeDismissible(notice.code)
                           ? {

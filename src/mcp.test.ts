@@ -5755,6 +5755,8 @@ describe("phone-app domain MCP tools", () => {
                 "Added because Milk pint expires",
             );
             for (const n of hit!.notices) NOTICE_SCHEMA.parse(n);
+            const text = (listed.content as Array<{ text: string }>)[0]!.text;
+            expect(text).toContain("— Added because Milk pint expires");
         });
     });
 

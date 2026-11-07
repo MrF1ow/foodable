@@ -502,8 +502,14 @@ export function startRestockRuns(runCheck: () => Promise<void>): void {
     setInterval(() => {
         if (restockRunning) return;
         restockRunning = true;
-        runCheck().finally(() => {
-            restockRunning = false;
-        });
+        runCheck()
+            .catch((err: unknown) => {
+                console.error(
+                    `[restock] failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+            })
+            .finally(() => {
+                restockRunning = false;
+            });
     }, RESTOCK_CHECK_MS);
 }

@@ -15,6 +15,7 @@
  * The server never imports this file.
  */
 import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
+import { groceryRestockNotices } from "../src/domain/restock.js";
 import {
     needsAttentionCount,
     sortNotices,
@@ -182,6 +183,36 @@ function fridgeView(chrome: unknown) {
     };
 }
 
+/** A line the weekly restock run added, with its "Restocked" notice. */
+function restockLine() {
+    const today = utcTodayFromDate();
+    const row = {
+        id: "g4",
+        householdId: H,
+        storeId: "s1",
+        sectionId: "sec2",
+        kind: "food" as const,
+        displayName: "Milk",
+        quantity: { amount: 2, unit: "l" },
+        foodId: "f-milk",
+        checked: false,
+        source: "restock" as const,
+        sourceFridgeItemId: "i-milk-restock",
+    };
+    const notices = groceryRestockNotices(
+        [row],
+        [
+            {
+                id: "i-milk-restock",
+                displayName: "Milk",
+                expiresOn: addUtcDays(today, 3),
+            } as never,
+        ],
+        today,
+    );
+    return { ...row, alreadyHave: null, notices };
+}
+
 function groceryView(chrome: unknown) {
     const section = (
         storeId: string,
@@ -267,6 +298,7 @@ function groceryView(chrome: unknown) {
                             ],
                             putAwayProductId: "f-kirkland",
                         },
+                        restockLine(),
                     ]),
                 ],
             },

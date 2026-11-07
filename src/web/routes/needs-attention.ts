@@ -38,10 +38,16 @@ needsAttentionRoutes.post(
             false,
             { code, subjectKind, subjectId, relatedId, member },
         );
+        const returnTo = dismissReturnTo(formText(body, "return_to"));
         if (page.status !== 303) {
+            // From another page, go back there: the notice is still shown,
+            // so the person can try again where they were.
+            if (returnTo !== "/needs-attention") {
+                // toast: none
+                return c.redirect(returnTo, 303);
+            }
             return c.html(page.html, page.status);
         }
-        const returnTo = dismissReturnTo(formText(body, "return_to"));
         // toast: none
         return c.redirect(returnTo, 303);
     },

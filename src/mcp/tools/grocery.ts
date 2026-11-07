@@ -237,7 +237,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                                           .filter(
                                                               (n) =>
                                                                   n.severity ===
-                                                                  "block",
+                                                                      "block" ||
+                                                                  n.code ===
+                                                                      "grocery.restocked",
                                                           )
                                                           .map(
                                                               (n) =>

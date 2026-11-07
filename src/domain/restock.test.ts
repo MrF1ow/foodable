@@ -852,6 +852,21 @@ test("groceryRestockNotices sentences and filtering", async () => {
             )[0]!,
         ),
     ).toBe("Added by restock");
+    const undated = fridgeFood({
+        id: "fi-undated",
+        foodId: "f",
+        expiresOn: null,
+        displayName: "Whole milk",
+    });
+    expect(
+        noticeSentence(
+            groceryRestockNotices(
+                [{ ...line, sourceFridgeItemId: undated.id }],
+                [undated],
+                TODAY,
+            )[0]!,
+        ),
+    ).toBe("Added by restock");
     expect(noticeCodeDismissible("grocery.restocked")).toBe(true);
     expect(
         groceryRestockNotices([{ ...line, checked: true }], [item], TODAY),
@@ -975,4 +990,11 @@ test("grocery page renders Restocked badge via notices component", () => {
     expect(html).toContain(noticeSentence(notice));
     expect(html).toContain('name="return_to"');
     expect(html).not.toContain("grocery-restock-pill");
+    // One Restocked pill, in the line's meta, and the sentence list styled
+    // as quiet text rather than a bulleted list.
+    expect(html.split('data-notice="grocery.restocked"')).toHaveLength(2);
+    expect(html).toMatch(
+        /1 l · <span class="pill[^"]*" data-notice="grocery.restocked">Restocked<\/span>/,
+    );
+    expect(html).toContain("notice-list grocery-line-notices");
 });

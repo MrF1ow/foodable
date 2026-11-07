@@ -82,13 +82,18 @@ function groceryRestockedSentence(notice: Notice): string {
         typeof notice.params.itemName === "string"
             ? notice.params.itemName
             : null;
-    if (itemName == null) return "Added by restock";
     const expiresOn =
         typeof notice.params.expiresOn === "string"
             ? notice.params.expiresOn
             : "";
     const daysLeft =
-        typeof notice.params.daysLeft === "number" ? notice.params.daysLeft : 0;
+        typeof notice.params.daysLeft === "number"
+            ? notice.params.daysLeft
+            : null;
+    // No item, or an undated one: there is no expiry to name.
+    if (itemName == null || expiresOn === "" || daysLeft == null) {
+        return "Added by restock";
+    }
     const when = restockWhen(expiresOn, daysLeft);
     if (when === "expired") {
         return `Added because ${itemName} expired`;

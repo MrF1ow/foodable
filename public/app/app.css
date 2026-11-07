@@ -217,6 +217,14 @@ html:has(dialog.modal[open]) {
 .notice-list :is(.notice-action, .notice-dismiss-form) > button {
     width: auto;
 }
+/* A grocery line's notice reads as quiet text under its meta, not a list. */
+ul.notice-list.grocery-line-notices {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    color: var(--text-dim);
+    font-size: var(--fs-13-5);
+}
 .tab-dot {
     position: absolute;
     top: 4px;

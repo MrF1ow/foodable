@@ -379,6 +379,40 @@ describe("needs-attention routes", () => {
         expect(after.notices).toEqual(before.notices);
     });
 
+    test("POST dismiss that fails with return_to=/grocery goes back to grocery", async () => {
+        const today = utcTodayFromDate();
+        const loc = await addLocation(db.fridgeStore, HH, "Fridge");
+        const milk = await addManualFood(db.fridgeStore, db.foodsStore, {
+            householdId: HH,
+            locationId: loc.id,
+            name: "Expired milk",
+            amount: 1,
+            unit: "g",
+        });
+        await db.fridgeStore.updateItem({
+            ...milk,
+            expiresOn: addDaysUtc(today, -1),
+        });
+        const before = await noticesFor(noticeDeps(), HH);
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expired",
+                subject_kind: "fridge_item",
+                subject_id: milk.id,
+                return_to: "/grocery",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/grocery");
+        const after = await noticesFor(noticeDeps(), HH);
+        expect(after.notices).toEqual(before.notices);
+    });
+
     test("POST dismiss for another household subject is rejected", async () => {
         const otherLoc = await addLocation(db.fridgeStore, HH_OTHER, "Other");
         const otherItem = await addManualFood(db.fridgeStore, db.foodsStore, {
