@@ -20,6 +20,8 @@ const EXPECTED: Record<string, string> = {
         "ON public.stock_movements USING btree (fridge_item_id)",
     meal_items_food_idx: "ON public.meal_items USING btree (food_id)",
     meal_items_recipe_idx: "ON public.meal_items USING btree (recipe_id)",
+    grocery_lines_source_fridge_item_idx:
+        "ON public.grocery_lines USING btree (source_fridge_item_id) WHERE (source_fridge_item_id IS NOT NULL)",
 };
 
 async function planOf(sql: SQL, query: string): Promise<string> {

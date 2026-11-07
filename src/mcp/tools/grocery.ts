@@ -18,6 +18,7 @@ import {
     allergenNotices,
     checkGroceryLine,
     clearCheckedLines,
+    GROCERY_LINE_SOURCES,
     listGrocery,
     type GroceryAmountPickReason,
     type GroceryStorePickReason,
@@ -36,25 +37,45 @@ import {
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
+const groceryLineSchema = z.object({
+    id: z.string(),
+    store_id: z.string(),
+    section_id: z.string(),
+    display_name: z.string(),
+    amount: z.number(),
+    unit: z.string(),
+    checked: z.boolean(),
+    source: z.enum(GROCERY_LINE_SOURCES),
+    source_fridge_item_id: z.string().nullable(),
+    already_have: z.string().nullable(),
+    product: z
+        .object({
+            food_id: z.string(),
+            name: z.string(),
+        })
+        .nullable(),
+    notices: z.array(NOTICE_SCHEMA),
+});
+
+export const GROCERY_LIST_OUTPUT_SCHEMA = z.object({
+    locale: z.string(),
+    stores: z.array(
+        z.object({
+            id: z.string(),
+            name: z.string(),
+            sections: z.array(
+                z.object({
+                    id: z.string(),
+                    name: z.string(),
+                    lines: z.array(groceryLineSchema),
+                }),
+            ),
+        }),
+    ),
+});
+
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, analytics, uiMeta } = ctx;
-    const groceryLineSchema = z.object({
-        id: z.string(),
-        store_id: z.string(),
-        section_id: z.string(),
-        display_name: z.string(),
-        amount: z.number(),
-        unit: z.string(),
-        checked: z.boolean(),
-        already_have: z.string().nullable(),
-        product: z
-            .object({
-                food_id: z.string(),
-                name: z.string(),
-            })
-            .nullable(),
-        notices: z.array(NOTICE_SCHEMA),
-    });
     server.registerTool(
         "list_grocery_lines",
         {
@@ -67,22 +88,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 idempotentHint: true,
                 openWorldHint: false,
             },
-            outputSchema: z.object({
-                locale: z.string(),
-                stores: z.array(
-                    z.object({
-                        id: z.string(),
-                        name: z.string(),
-                        sections: z.array(
-                            z.object({
-                                id: z.string(),
-                                name: z.string(),
-                                lines: z.array(groceryLineSchema),
-                            }),
-                        ),
-                    }),
-                ),
-            }),
+            outputSchema: GROCERY_LIST_OUTPUT_SCHEMA,
             ...uiMeta(GROCERY_LIST_WIDGET_URI),
         },
         async () =>
@@ -143,6 +149,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             amount: line.quantity.amount,
                             unit: line.quantity.unit,
                             checked: line.checked,
+                            source: line.source,
+                            source_fridge_item_id: line.sourceFridgeItemId,
                             already_have:
                                 tag == null
                                     ? null

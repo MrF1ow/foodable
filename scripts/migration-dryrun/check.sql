@@ -431,3 +431,127 @@ begin
     end;
 end
 $$;
+
+do $$
+declare
+    hh uuid := '11111111-1111-1111-1111-111111111111';
+    loc uuid := '22222222-2222-2222-2222-222222222222';
+    store_id uuid := '33333333-3333-3333-3333-333333333333';
+    section_id uuid := '44444444-4444-4444-4444-444444444444';
+    line_count int;
+    fridge_item_id uuid;
+    grocery_line_id uuid;
+    food_id uuid;
+begin
+    if not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'grocery_lines'
+          and column_name = 'source'
+    ) or not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'grocery_lines'
+          and column_name = 'source_fridge_item_id'
+    ) then
+        raise exception 'grocery_lines source columns are missing';
+    end if;
+
+    if (
+        select is_nullable from information_schema.columns
+        where table_schema = 'public' and table_name = 'grocery_lines'
+          and column_name = 'source'
+    ) <> 'NO' then
+        raise exception 'grocery_lines.source must be not null';
+    end if;
+
+    if (
+        select column_default from information_schema.columns
+        where table_schema = 'public' and table_name = 'grocery_lines'
+          and column_name = 'source'
+    ) is distinct from '''manual''::text' then
+        raise exception 'grocery_lines.source default must be manual';
+    end if;
+
+    if not exists (
+        select 1 from pg_indexes
+        where schemaname = 'public' and indexname = 'grocery_lines_source_fridge_item_idx'
+    ) then
+        raise exception 'grocery_lines_source_fridge_item_idx is missing';
+    end if;
+
+    if (
+        select indexdef from pg_indexes
+        where schemaname = 'public' and indexname = 'grocery_lines_source_fridge_item_idx'
+    ) is distinct from
+        'CREATE INDEX grocery_lines_source_fridge_item_idx ON public.grocery_lines USING btree (source_fridge_item_id) WHERE (source_fridge_item_id IS NOT NULL)'
+    then
+        raise exception 'grocery_lines_source_fridge_item_idx indexdef mismatch';
+    end if;
+
+    select count(*) into line_count from public.grocery_lines;
+    if line_count < 1 then
+        raise exception 'seed grocery_lines expected';
+    end if;
+
+    if exists (
+        select 1 from public.grocery_lines
+        where household_id = hh
+          and (source <> 'manual' or source_fridge_item_id is not null)
+    ) then
+        raise exception 'seed grocery_lines must default to manual with no fridge item';
+    end if;
+
+    begin
+        begin
+            update public.grocery_lines
+            set source = 'bogus'
+            where id = (
+                select id from public.grocery_lines
+                where household_id = hh
+                limit 1
+            );
+            raise exception 'bogus grocery source saved';
+        exception when check_violation then null;
+        end;
+
+        select f.id into food_id
+        from public.foods f
+        where f.household_id = hh
+        limit 1;
+
+        if food_id is null then
+            raise exception 'seed foods expected for grocery source fk check';
+        end if;
+
+        insert into public.fridge_items (
+            household_id, location_id, kind, display_name, amount, unit, food_id
+        )
+        values (hh, loc, 'food', 'Dryrun restock item', 100, 'g', food_id)
+        returning id into fridge_item_id;
+
+        insert into public.grocery_lines (
+            household_id, store_id, section_id, kind, display_name,
+            amount, unit, food_id, source, source_fridge_item_id
+        )
+        values (
+            hh, store_id, section_id, 'food', 'Restock probe',
+            1, 'g', food_id, 'restock', fridge_item_id
+        )
+        returning id into grocery_line_id;
+
+        delete from public.fridge_items where id = fridge_item_id;
+
+        if not exists (
+            select 1 from public.grocery_lines
+            where id = grocery_line_id
+              and source = 'restock'
+              and source_fridge_item_id is null
+        ) then
+            raise exception 'deleting fridge item did not clear source_fridge_item_id';
+        end if;
+
+        raise exception 'dryrun-rollback';
+    exception when raise_exception then
+        if sqlerrm <> 'dryrun-rollback' then raise; end if;
+    end;
+end;
+$$;

@@ -275,6 +275,8 @@ test("household pages call shared markup helpers for banners, empty states, and 
                                 quantity: { amount: 100, unit: "g" },
                                 foodId: null,
                                 checked: false,
+                                source: "manual",
+                                sourceFridgeItemId: null,
                                 alreadyHave: null,
                             },
                         ],
@@ -518,6 +520,8 @@ test("member multi-select, already-have, and store sections still render", () =>
                                 quantity: { amount: 1360.8, unit: "g" },
                                 foodId: null,
                                 checked: false,
+                                source: "manual",
+                                sourceFridgeItemId: null,
                                 alreadyHave: {
                                     cover: "partial",
                                     have: { amount: 24, unit: "oz" },

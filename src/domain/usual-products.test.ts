@@ -311,6 +311,8 @@ test("grocery aisle suggests section from family member line", () => {
             quantity: { amount: 1, unit: "each" },
             foodId: kirklandId,
             checked: false,
+            source: "manual" as const,
+            sourceFridgeItemId: null,
         },
     ];
     const section = suggestGrocerySection({
@@ -985,6 +987,8 @@ test("add recipe to grocery matches section from existing family line", async ()
         quantity: { amount: 1, unit: "each" },
         foodId: kirkland.id,
         checked: false,
+        source: "manual",
+        sourceFridgeItemId: null,
     });
     const recipe = await createRecipe(recipes, {
         householdId: HH,

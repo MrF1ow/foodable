@@ -53,5 +53,40 @@ export function runGroceryListStoreContract(
                 await store.deleteLine(c.householdId, crypto.randomUUID()),
             ).toBe(false);
         });
+
+        test("source and sourceFridgeItemId round-trip", async () => {
+            await reset();
+            const c = ctx();
+            if (!c.ensureFridgeItem) {
+                throw new Error(
+                    "contract ctx must set ensureFridgeItem for source round-trip",
+                );
+            }
+            const sourceFridgeItemId = await c.ensureFridgeItem();
+            const store = createStore();
+            const recipeLine = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "From recipe",
+                source: "recipe",
+                sourceFridgeItemId: null,
+            });
+            const restockLine = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "Restock milk",
+                source: "restock",
+                sourceFridgeItemId,
+            });
+            expect(await store.insertLine(recipeLine)).toEqual(recipeLine);
+            expect(await store.insertLine(restockLine)).toEqual(restockLine);
+            const listed = await store.listLines(c.householdId);
+            expect(listed).toEqual(
+                expect.arrayContaining([recipeLine, restockLine]),
+            );
+            const updated = await store.updateLine({
+                ...restockLine,
+                source: "notice",
+            });
+            expect(updated).toEqual({ ...restockLine, source: "notice" });
+        });
     });
 }

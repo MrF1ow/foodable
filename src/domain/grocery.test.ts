@@ -6,7 +6,7 @@ import {
     createMemoryFridgeStore,
     listFridge,
 } from "./fridge.js";
-import { createMemoryFoodsStore, newFood } from "./foods.js";
+import { createMemoryFoodsStore, findManualFood, newFood } from "./foods.js";
 import {
     addGroceryFoodByBarcode,
     addGroceryFoodById,
@@ -20,6 +20,7 @@ import {
     listGrocery,
     pickGroceryAmount,
     pickGroceryStore,
+    resolveGroceryLineSource,
     resolveGrocerySectionId,
     type GroceryAmountPickReason,
     type GroceryStorePickReason,
@@ -30,6 +31,7 @@ import { renderGroceryPage } from "../web/pages/grocery.js";
 import { addAllergen, createMemoryRulesStore } from "./rules.js";
 
 const HH = "hh-1";
+const OTHER_HH = "hh-2";
 
 function food(
     over: Partial<FoodResult> & Pick<FoodResult, "name" | "barcode">,
@@ -100,6 +102,8 @@ test("pickGroceryStore precedence: chosen, usual, list, default", () => {
                     quantity: { amount: 1, unit: "L" },
                     foodId: "food-plain",
                     checked: false,
+                    source: "manual",
+                    sourceFridgeItemId: null,
                 },
             ],
             foodId: "food-plain",
@@ -143,6 +147,8 @@ test("pickGroceryStore: family list uses product line for plain food", () => {
                     quantity: { amount: 1, unit: "each" },
                     foodId: kirkland,
                     checked: false,
+                    source: "manual",
+                    sourceFridgeItemId: null,
                 },
             ],
             foodId: eggsPlain,
@@ -279,6 +285,192 @@ test("addGroceryFoodById auto-picks usual store and amount via effectiveFood", a
     });
     expect(line.sectionId).toBeTruthy();
     expect(secondSections.some((s) => s.id === line.sectionId)).toBe(true);
+});
+
+test("lines without source default to manual with no fridge item", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store, dairy } = await seedStore();
+    const byId = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        foodId: (
+            await foods.insertFood(
+                newFood({ householdId: HH, kind: "food", name: "Rye" }),
+            )
+        ).id,
+        amount: 1,
+        unit: "loaf",
+    });
+    expect(byId.source).toBe("manual");
+    expect(byId.sourceFridgeItemId).toBeNull();
+
+    const manual = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        name: "Quinoa",
+        amount: 500,
+        unit: "g",
+    });
+    expect(manual.source).toBe("manual");
+    expect(manual.sourceFridgeItemId).toBeNull();
+});
+
+test("resolveGroceryLineSource and add reject invalid fridge pairings", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const { settings, store, dairy } = await seedStore();
+    await addLocation(fridge, HH, "Pantry");
+    const loc = (await fridge.listLocations(HH))[0]!;
+    const food = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Probe Food" }),
+    );
+    const item = await fridge.insertItem({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        locationId: loc.id,
+        kind: "food",
+        displayName: "Probe",
+        quantity: { amount: 1, unit: "g" },
+        foodId: food.id,
+    });
+
+    await expect(
+        resolveGroceryLineSource(undefined, HH, {
+            source: "manual",
+            sourceFridgeItemId: item.id,
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+
+    await expect(
+        resolveGroceryLineSource(fridge, HH, {
+            source: "recipe",
+            sourceFridgeItemId: item.id,
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+
+    await expect(
+        resolveGroceryLineSource(fridge, HH, {
+            source: "restock",
+            sourceFridgeItemId: item.id,
+        }),
+    ).resolves.toEqual({
+        source: "restock",
+        sourceFridgeItemId: item.id,
+    });
+
+    await expect(
+        resolveGroceryLineSource(fridge, HH, {
+            source: "restock",
+            sourceFridgeItemId: "00000000-0000-0000-0000-00000000dead",
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+
+    await addLocation(fridge, OTHER_HH, "Other");
+    const otherLoc = (await fridge.listLocations(OTHER_HH))[0]!;
+    const otherItem = await fridge.insertItem({
+        id: crypto.randomUUID(),
+        householdId: OTHER_HH,
+        locationId: otherLoc.id,
+        kind: "food",
+        displayName: "Other",
+        quantity: { amount: 1, unit: "g" },
+        foodId: food.id,
+    });
+
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            sectionId: dairy.id,
+            name: "Reject Name A",
+            fridge,
+            source: "restock",
+            sourceFridgeItemId: otherItem.id,
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+
+    // A restock id with no fridge store to check it against is refused, not
+    // a TypeError, and before any catalog row is created.
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            sectionId: dairy.id,
+            name: "Reject Name C",
+            source: "restock",
+            sourceFridgeItemId: item.id,
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+    expect(await findManualFood(foods, HH, "food", "Reject Name C")).toBeNull();
+
+    const before = await foods.listFoods(HH);
+    await expect(
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            sectionId: dairy.id,
+            name: "Reject Name B",
+            source: "manual",
+            sourceFridgeItemId: item.id,
+            fridge,
+        }),
+    ).rejects.toBeInstanceOf(GroceryInputError);
+    const after = await foods.listFoods(HH);
+    expect(after.length).toBe(before.length);
+    expect(await findManualFood(foods, HH, "food", "Reject Name B")).toBeNull();
+});
+
+test("restock and notice lines store a same-household fridge item id", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const fridge = createMemoryFridgeStore();
+    const { settings, store, dairy } = await seedStore();
+    await addLocation(fridge, HH, "Shelf");
+    const loc = (await fridge.listLocations(HH))[0]!;
+    const food = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Stocked" }),
+    );
+    const item = await fridge.insertItem({
+        id: crypto.randomUUID(),
+        householdId: HH,
+        locationId: loc.id,
+        kind: "food",
+        displayName: "Stocked",
+        quantity: { amount: 2, unit: "kg" },
+        foodId: food.id,
+    });
+
+    const restock = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        foodId: food.id,
+        amount: 1,
+        unit: "kg",
+        fridge,
+        source: "restock",
+        sourceFridgeItemId: item.id,
+    });
+    expect(restock.source).toBe("restock");
+    expect(restock.sourceFridgeItemId).toBe(item.id);
+
+    const notice = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        name: "Stocked",
+        amount: 0.5,
+        unit: "kg",
+        fridge,
+        source: "notice",
+        sourceFridgeItemId: item.id,
+    });
+    expect(notice.source).toBe("notice");
+    expect(notice.sourceFridgeItemId).toBe(item.id);
 });
 
 test("add grocery line then lists it under the chosen section", async () => {
@@ -597,6 +789,8 @@ test("grocery page groups by store then section and shows already-have", () => {
                                 quantity: { amount: 1360.8, unit: "g" },
                                 foodId: null,
                                 checked: false,
+                                source: "manual",
+                                sourceFridgeItemId: null,
                                 alreadyHave: { cover: "full" },
                             },
                         ],

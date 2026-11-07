@@ -412,6 +412,8 @@ test("add-to-grocery writes remainder lines and skips full fridge cover", async 
     expect(listed.lines[0]?.displayName).toBe("Cottage Cheese");
     expect(listed.lines[0]?.quantity).toEqual({ amount: 50, unit: "g" });
     expect(listed.lines[0]?.foodId).toBe(cottageLine?.foodId);
+    expect(listed.lines[0]?.source).toBe("recipe");
+    expect(listed.lines[0]?.sourceFridgeItemId).toBeNull();
     const section = listed.sections.find(
         (row) => row.id === listed.lines[0]?.sectionId,
     );
