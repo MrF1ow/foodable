@@ -67,6 +67,40 @@ function fridgeExpiredSentence(notice: Notice): string {
     return fridgeExpirySentence(notice);
 }
 
+function restockWhen(expiresOn: string, daysLeft: number): string {
+    if (daysLeft < 0) return "expired";
+    if (daysLeft === 0) return "today";
+    if (daysLeft === 1) return "tomorrow";
+    return new Date(`${expiresOn}T00:00:00Z`).toLocaleDateString("en-US", {
+        weekday: "long",
+        timeZone: "UTC",
+    });
+}
+
+function groceryRestockedSentence(notice: Notice): string {
+    const itemName =
+        typeof notice.params.itemName === "string"
+            ? notice.params.itemName
+            : null;
+    const expiresOn =
+        typeof notice.params.expiresOn === "string"
+            ? notice.params.expiresOn
+            : "";
+    const daysLeft =
+        typeof notice.params.daysLeft === "number"
+            ? notice.params.daysLeft
+            : null;
+    // No item, or an undated one: there is no expiry to name.
+    if (itemName == null || expiresOn === "" || daysLeft == null) {
+        return "Added by restock";
+    }
+    const when = restockWhen(expiresOn, daysLeft);
+    if (when === "expired") {
+        return `Added because ${itemName} expired`;
+    }
+    return `Added because ${itemName} expires ${when}`;
+}
+
 function fridgeExpiringSentence(notice: Notice): string {
     if (notice.params.onGroceryList === "yes") {
         const name = String(notice.params.name);
@@ -141,6 +175,12 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
         sentence: allergenSentence,
         help: "allergens",
         dismissible: false,
+    },
+    "grocery.restocked": {
+        badge: "Restocked",
+        sentence: groceryRestockedSentence,
+        help: "restock",
+        dismissible: true,
     },
     "recipe.allergen": {
         badge: "Allergen",

@@ -1,3 +1,4 @@
+import { householdToday } from "../db/restock.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { liveFoodsStore } from "../db/foods.js";
@@ -42,6 +43,7 @@ export async function loadHouseholdNotices(
     householdId: string,
     opts?: { refCounts?: ReadonlyMap<string, number> },
 ): Promise<NoticesForResult> {
+    const today = await householdToday(householdId);
     return noticesFor(
         {
             foods: liveFoodsStore(),
@@ -51,7 +53,7 @@ export async function loadHouseholdNotices(
             grocery: liveGroceryStore(),
         },
         householdId,
-        opts,
+        { ...opts, today },
     );
 }
 

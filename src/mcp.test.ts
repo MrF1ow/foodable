@@ -5695,6 +5695,72 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("list_grocery_lines returns grocery.restocked on restock lines", async () => {
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        const sections = await db.settingsStore.listSections(store.id);
+        const sectionId = sections[0]!.id;
+        await withPat(async (call) => {
+            const milk = await call("upsert_food", { name: "Restock Milk" });
+            const foodId = (milk.structuredContent as { id: string }).id;
+            const itemId = crypto.randomUUID();
+            await db.fridgeStore.insertItem({
+                id: itemId,
+                householdId: "hh-1",
+                kind: "food",
+                foodId,
+                displayName: "Milk pint",
+                quantity: { amount: 1, unit: "l" },
+                locationId: "loc-1",
+                expiresOn: "2030-06-03",
+                openedOn: null,
+                purchasedOn: null,
+            });
+            await db.groceryStore.insertLine({
+                id: "line-restock",
+                householdId: "hh-1",
+                storeId: store.id,
+                sectionId,
+                kind: "food",
+                displayName: "Restock Milk",
+                quantity: { amount: 1, unit: "l" },
+                foodId,
+                checked: false,
+                source: "restock",
+                sourceFridgeItemId: itemId,
+                note: null,
+            });
+            const listed = await call("list_grocery_lines");
+            const lines = (
+                listed.structuredContent as {
+                    stores: Array<{
+                        sections: Array<{
+                            lines: Array<{
+                                id: string;
+                                notices: unknown[];
+                            }>;
+                        }>;
+                    }>;
+                }
+            ).stores.flatMap((s) => s.sections.flatMap((sec) => sec.lines));
+            const hit = lines.find((l) => l.id === "line-restock");
+            expect(hit).toBeTruthy();
+            const notice = (
+                hit!.notices as Array<{ code: string; message: string }>
+            ).find((n) => n.code === "grocery.restocked");
+            expect(notice).toBeTruthy();
+            expect(notice!.message).toContain(
+                "Added because Milk pint expires",
+            );
+            for (const n of hit!.notices) NOTICE_SCHEMA.parse(n);
+            const text = (listed.content as Array<{ text: string }>)[0]!.text;
+            expect(text).toContain("— Added because Milk pint expires");
+        });
+    });
+
     test("list_grocery_lines wires grocery.allergen notices on lines", async () => {
         const store = await createGroceryStore(
             db.settingsStore,

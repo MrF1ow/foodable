@@ -5,6 +5,13 @@ import { renderNeedsAttentionInventoryPage } from "../loaders.js";
 
 export const needsAttentionRoutes = new Hono();
 
+const DISMISS_RETURN_ALLOWLIST = new Set(["/grocery", "/needs-attention"]);
+
+function dismissReturnTo(raw: string | undefined): string {
+    if (raw && DISMISS_RETURN_ALLOWLIST.has(raw)) return raw;
+    return "/needs-attention";
+}
+
 needsAttentionRoutes.get("/needs-attention", requireSiteUser, async (c) => {
     const page = await renderNeedsAttentionInventoryPage(
         c.get("userId"),
@@ -31,11 +38,18 @@ needsAttentionRoutes.post(
             false,
             { code, subjectKind, subjectId, relatedId, member },
         );
+        const returnTo = dismissReturnTo(formText(body, "return_to"));
         if (page.status !== 303) {
+            // From another page, go back there: the notice is still shown,
+            // so the person can try again where they were.
+            if (returnTo !== "/needs-attention") {
+                // toast: none
+                return c.redirect(returnTo, 303);
+            }
             return c.html(page.html, page.status);
         }
         // toast: none
-        return c.redirect("/needs-attention", 303);
+        return c.redirect(returnTo, 303);
     },
 );
 

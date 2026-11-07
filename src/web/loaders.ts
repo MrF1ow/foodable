@@ -96,7 +96,10 @@ import {
 } from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
+import { householdToday } from "../db/restock.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
+import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
+import { groceryRestockNotices } from "../domain/restock.js";
 import {
     dismissNotice,
     undoDismissal,
@@ -325,6 +328,19 @@ export async function renderGroceryListPage(
         ...snapshot.lines.map((line) => line.foodId),
         ...fridge.items.map((item) => item.foodId),
     ]);
+    const today = await householdToday(householdId);
+    const dismissals =
+        await liveNoticeDismissalsStore().listForHousehold(householdId);
+    const dismissed = dismissedKeySet(dismissals);
+    const restockByLine = new Map<string, Notice[]>();
+    for (const notice of groceryRestockNotices(
+        snapshot.lines,
+        fridge.items,
+        today,
+    )) {
+        if (isDismissedIn(notice, dismissed)) continue;
+        restockByLine.set(notice.subject.id, [notice]);
+    }
     const stores = snapshot.stores.map((store) => {
         const storeLines = snapshot.lines.filter(
             (line) => line.storeId === store.id,
@@ -370,6 +386,7 @@ export async function renderGroceryListPage(
                                 : null;
                         return {
                             ...line,
+                            notices: restockByLine.get(line.id) ?? [],
                             alreadyHave: alreadyHaveTag(
                                 line,
                                 fridge.items,

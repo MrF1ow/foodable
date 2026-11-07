@@ -34,6 +34,7 @@ import {
 import { noticeInlineLink, noticeList } from "../components/notices.js";
 
 export type GroceryLineView = GroceryLine & {
+    notices?: Notice[];
     alreadyHave: AlreadyHaveTag | null;
     lastLocationId?: string | null;
     usualProductName?: string | null;
@@ -285,6 +286,7 @@ ${noteHint}
         usualProductName: line.usualProductName,
         extraActionsHtml: usualAction,
         duplicateNoticeHtml,
+        notices: line.notices,
     });
 }
 

@@ -357,9 +357,18 @@ export async function updateHouseholdConfig(
                         recipe_search_places = ${JSON.stringify(
                             columns.recipe_search_places,
                         )}::jsonb,
-                        household_preferences = ${JSON.stringify(
-                            columns.household_preferences,
-                        )}::jsonb
+                        household_preferences = jsonb_set(
+                            ${JSON.stringify(
+                                columns.household_preferences,
+                            )}::jsonb,
+                            '{restock,lastRunOn}',
+                            coalesce(
+                                household_preferences
+                                    ->'restock'->'lastRunOn',
+                                'null'::jsonb
+                            ),
+                            true
+                        )
                     where id = ${householdId}
                     returning name, recipe_search_places, household_preferences
                 `,
