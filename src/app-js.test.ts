@@ -46,7 +46,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(9);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(10);
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {
