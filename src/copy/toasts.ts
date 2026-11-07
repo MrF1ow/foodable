@@ -105,6 +105,62 @@ export const TOASTS = {
         kind: "info",
         text: "That recipe was not found.",
     },
+    "recipes.import.imported": {
+        kind: "success",
+        text: "Imported {name} from {site}.",
+    },
+    "recipes.import.unverified_needs_review": {
+        kind: "warning",
+        text: "Imported as unverified: {count} need checking.",
+    },
+    "recipes.import.unverified_needs_review_one": {
+        kind: "warning",
+        text: "Imported as unverified: {count} needs checking.",
+    },
+    "recipes.import.paste_needed": {
+        kind: "info",
+        text: "Paste the {platform} caption below.",
+    },
+    "recipes.import.paste_needed_site": {
+        kind: "info",
+        text: "Paste the recipe from {site} below.",
+    },
+    "recipes.import.paste_needed_reader": {
+        kind: "info",
+        text: "Paste the {platform} caption below. {reason}",
+    },
+    "recipes.import.no_recipe_in_text": {
+        kind: "warning",
+        text: "This caption doesn't contain a recipe. If it's in the photos, type it in or send a screenshot to your agent.",
+    },
+    "recipes.import.no_recipe_on_page": {
+        kind: "warning",
+        text: "This page doesn't publish its recipe in a form we can read. Paste the recipe instead.",
+    },
+    "recipes.import.robots_disallowed": {
+        kind: "warning",
+        text: "This site asks apps not to read this page. Paste the recipe instead.",
+    },
+    "recipes.import.site_refused": {
+        kind: "error",
+        text: "The site refused the request. Paste the recipe instead.",
+    },
+    "recipes.import.not_found": {
+        kind: "error",
+        text: "That page doesn't exist anymore.",
+    },
+    "recipes.import.timeout": {
+        kind: "error",
+        text: "The page took too long to respond.",
+    },
+    "recipes.import.duplicate": {
+        kind: "info",
+        text: "You already imported this.",
+    },
+    "recipes.import.invalid_link": {
+        kind: "error",
+        text: "That doesn't look like a web link.",
+    },
     "household.recipe-settings.saved": {
         kind: "success",
         text: "Recipe settings saved",

@@ -213,6 +213,7 @@ export const APP_JS_SOURCES = [
     "./src/web/client/modal.js",
     "./src/web/client/arrange.js",
     "./src/web/client/copy-prompt.js",
+    "./src/web/client/busy-submit.js",
 ] as const;
 const TURBO_ENTRY = "./src/web/client/turbo-entry.ts";
 let turboBundle: string | undefined;

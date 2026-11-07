@@ -486,5 +486,44 @@ export function liveRecipesStore(): RecipesStore {
                 }
             });
         },
+        async findRecipeBySourceUrl(householdId, urls) {
+            return run(async (tx) => {
+                const cleaned = urls.map((u) => u.trim()).filter(Boolean);
+                if (cleaned.length === 0) return null;
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_COLS)}
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                              and source_url = any(${tx.array(cleaned, "text")})
+                            limit 1
+                        `,
+                        "find recipe by source url",
+                    );
+                    return data ? recipeFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("find recipe by source url", err);
+                }
+            });
+        },
+        async listImports(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_IMPORT_COLS)}
+                            from ${tx.unsafe(RECIPE_IMPORTS)}
+                            where household_id = ${householdId}
+                        `,
+                    );
+                    return data.map((row) => recipeImportFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list recipe imports", err);
+                }
+            });
+        },
     };
 }

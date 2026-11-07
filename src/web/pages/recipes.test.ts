@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
 import {
+    IMPORT_RECIPE_MODAL_ID,
     recipesListHref,
     renderRecipeDetailPage,
     renderRecipesPage,
@@ -311,6 +313,179 @@ test("unverified recipe detail shows problems panel and check again", () => {
     expect(html).toContain('action="/recipes/r1/verify"');
 });
 
+test("import from link modal field and busy submit attributes", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+    });
+    expect(html).toContain('commandfor="recipe-import-url"');
+    expect(html).toContain("Import from link");
+    expect(html).toContain('id="import-url"');
+    expect(html).toContain("data-busy-form");
+    expect(html).toContain('data-busy-label="Importing…"');
+    expect(html).toContain(`id="${IMPORT_RECIPE_MODAL_ID}"`);
+});
+
+test("import modal keeps url and shows error on 422 re-render", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importUrl: "https://example.com/x",
+        importError: "That doesn't look like a web link.",
+    });
+    expect(html).toMatch(
+        new RegExp(
+            `id="${IMPORT_RECIPE_MODAL_ID}"[^>]*data-modal-open-on-load`,
+        ),
+    );
+    expect(html).toContain('value="https://example.com/x"');
+    expect(html).toContain("That doesn't look like a web link.");
+});
+
+test("duplicate import shows open link in modal", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [],
+        members: [],
+        viewerId: VIEWER,
+        openModalId: IMPORT_RECIPE_MODAL_ID,
+        importDuplicateRecipeId: "r-dup",
+    });
+    expect(html).toContain("You already imported this.");
+    expect(html).toContain('href="/recipes/r-dup"');
+});
+
+test("recipe list shows source icon when import row exists", () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [
+            {
+                id: "r-web",
+                householdId: "hh-1",
+                creatorId: VIEWER,
+                name: "Web soup",
+                yieldPortions: 4,
+                instructions: null,
+                sourceUrl: "https://example.com/soup",
+                tags: [],
+                notes: null,
+                prepMinutes: null,
+                cookMinutes: null,
+                verification: "verified",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        ],
+        members: [],
+        viewerId: VIEWER,
+        importByRecipeId: {
+            "r-web": {
+                recipeId: "r-web",
+                sourceKind: "website",
+                sourceUrl: "https://example.com/soup",
+            },
+        },
+    });
+    expect(html).toContain("recipe-source-icon");
+});
+
+test("recipe detail links source with credit", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({
+            sourceUrl: "https://example.com/soup",
+        }),
+        importRow: {
+            recipeId: "r1",
+            householdId: "hh-1",
+            sourceKind: "website",
+            sourceUrl: "https://example.com/soup",
+            sourceText: null,
+            sourceTextOrigin: null,
+            transcript: null,
+            credit: "Chef Pat",
+            unresolvedLines: [],
+            problems: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    expect(html).toContain("recipe-source-line");
+    expect(html).toMatch(
+        /<a[^>]+href="https:\/\/example\.com\/soup"[^>]*>[\s\S]*aria-hidden="true"/,
+    );
+    expect(html).not.toMatch(
+        /recipe-source-line[\s\S]*aria-label="example\.com"[\s\S]*<a/,
+    );
+    expect(html).toContain("by Chef Pat");
+});
+
+test("recipe list source icon is labelled and does not capture clicks above the title link", async () => {
+    const html = renderRecipesPage({
+        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        recipes: [
+            {
+                id: "r-web",
+                householdId: "hh-1",
+                creatorId: VIEWER,
+                name: "Web soup",
+                yieldPortions: 4,
+                instructions: null,
+                sourceUrl: "https://example.com/soup",
+                tags: [],
+                notes: null,
+                prepMinutes: null,
+                cookMinutes: null,
+                verification: "verified",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        ],
+        members: [],
+        viewerId: VIEWER,
+        importByRecipeId: {
+            "r-web": {
+                recipeId: "r-web",
+                sourceKind: "website",
+                sourceUrl: "https://example.com/soup",
+            },
+        },
+    });
+    expect(html).toContain("recipe-source-icon-wrap");
+    expect(html).toContain('aria-label="example.com"');
+    const css = await Bun.file(
+        join(import.meta.dir, "../../../public/app/app.css"),
+    ).text();
+    const wrapRule =
+        css.match(/\.recipe-source-icon-wrap\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(wrapRule).toContain("pointer-events: none");
+    expect(wrapRule).not.toContain("z-index");
+});
+
+test("unmeasured recipe ingredient renders to taste", () => {
+    const html = renderRecipeDetailPage({
+        ...detail({}),
+        ingredients: [
+            {
+                id: "ing-salt",
+                householdId: "hh-1",
+                recipeId: "r1",
+                kind: "food",
+                foodId: "f-salt",
+                displayName: "Salt",
+                quantity: null,
+                note: "to taste",
+                sortOrder: 0,
+                perPortionAmount: null,
+                personAmount: null,
+            },
+        ],
+    });
+    expect(html).toContain("Total to taste");
+    expect(html).toContain('placeholder="to taste"');
+});
+
 test("each unresolved import line can be marked handled", () => {
     const html = renderRecipeDetailPage({
         ...detail({ verification: "unverified", name: "Import" }),
@@ -336,25 +511,11 @@ test("each unresolved import line can be marked handled", () => {
     expect(html).toContain(">Handled</button>");
 });
 
-test("unmeasured recipe ingredient renders to taste", () => {
+test("a stored javascript: source never renders as a link", () => {
     const html = renderRecipeDetailPage({
-        ...detail({}),
-        ingredients: [
-            {
-                id: "ing-salt",
-                householdId: "hh-1",
-                recipeId: "r1",
-                kind: "food",
-                foodId: "f-salt",
-                displayName: "Salt",
-                quantity: null,
-                note: "to taste",
-                sortOrder: 0,
-                perPortionAmount: null,
-                personAmount: null,
-            },
-        ],
+        ...detail({ sourceUrl: "javascript:alert(document.cookie)" }),
+        importRow: null,
     });
-    expect(html).toContain("Total to taste");
-    expect(html).toContain('placeholder="to taste"');
+    expect(html).not.toMatch(/href="javascript:/i);
+    expect(html).not.toContain("recipe-source-line");
 });

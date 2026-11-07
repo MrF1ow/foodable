@@ -1,5 +1,5 @@
 import { parseIngredient, extractMeasurements } from "parse-ingredient";
-import { isNotMeasuredNote, NOT_MEASURED_PHRASES } from "./recipe-import.js";
+import { isNotMeasuredNote, NOT_MEASURED_PHRASES } from "./not-measured.js";
 import type { QuantityUnit } from "./quantity.js";
 
 export type ParsedIngredient = {

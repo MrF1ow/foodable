@@ -74,6 +74,15 @@ export function errorBanner(error?: string): string {
     return error ? `<p class="error-banner">${escapeHtml(error)}</p>` : "";
 }
 
+/** Like errorBanner but allows a single safe inline link (href must be app-relative). */
+export function errorBannerWithLink(
+    message: string,
+    href: string,
+    linkLabel: string,
+): string {
+    return `<p class="error-banner">${escapeHtml(message)} <a href="${escapeHtml(href)}">${escapeHtml(linkLabel)}</a></p>`;
+}
+
 /** Banner when the error is not shown inside a modal (missing or unknown openModalId). */
 export function pageLevelErrorBanner(
     view: { error?: string; openModalId?: string },

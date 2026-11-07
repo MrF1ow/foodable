@@ -1,18 +1,99 @@
-import { test, expect } from "bun:test";
+import { join } from "node:path";
+import { test, expect, describe } from "bun:test";
+import { TOASTS } from "../copy/toasts.js";
+import type { FetchFailure, SafeFetcher } from "../fetch-safe.js";
+import { createMemoryFoodsStore } from "./foods.js";
 import {
+    importOutcomeMessage,
+    importOutcomeToastKey,
+    importRecipeFromUrl,
+    importRecipeFromUrlAnalyticsOutcome,
+    importReviewCount,
     isNotMeasuredNote,
+    outcomeFromFetchFailure,
     recheckRecipe,
+    resolveUnresolvedLines,
+    safeSourceUrl,
+    recipeDisplaySource,
     recipeImportFromRow,
     recipeImportToRow,
-    resolveUnresolvedLines,
     sweepUnverifiedRecipes,
+    type RecipeImportOutcome,
+    type RecipeImportStatus,
     verifyRecipe,
+    prepareImportedRecipe,
 } from "./recipe-import.js";
 import {
     createMemoryRecipesStore,
+    createRecipe,
+    RecipeInputError,
+    updateRecipe,
     type Recipe,
     type RecipeIngredient,
 } from "./recipes.js";
+
+const FIXTURE_DIR = join(import.meta.dir, "fixtures/recipe-pages");
+const FIXTURES = new Map<string, string>();
+for await (const file of new Bun.Glob("*.html").scan(FIXTURE_DIR)) {
+    FIXTURES.set(file, await Bun.file(join(FIXTURE_DIR, file)).text());
+}
+function loadFixture(name: string): string {
+    const html = FIXTURES.get(`${name}.html`);
+    if (html == null) throw new Error(`Missing fixture ${name}.html`);
+    return html;
+}
+
+function fakeFetcher(opts: {
+    robots?: boolean;
+    fetch?: (url: string) =>
+        | {
+              ok: true;
+              body: string;
+          }
+        | {
+              ok: false;
+              reason: FetchFailure;
+          };
+}): SafeFetcher & { calls: { robots: number; fetch: number } } {
+    const calls = { robots: 0, fetch: 0 };
+    return {
+        calls,
+        async robotsAllows() {
+            calls.robots += 1;
+            return opts.robots ?? true;
+        },
+        async fetchPage(url) {
+            calls.fetch += 1;
+            const result = opts.fetch?.(
+                typeof url === "string" ? url : url.href,
+            );
+            if (!result) {
+                return {
+                    ok: true as const,
+                    url: typeof url === "string" ? url : url.href,
+                    status: 200,
+                    contentType: "text/html",
+                    body: loadFixture("array-top-level"),
+                };
+            }
+            if (result.ok) {
+                return {
+                    ok: true as const,
+                    url: typeof url === "string" ? url : url.href,
+                    status: 200,
+                    contentType: "text/html",
+                    body: result.body,
+                };
+            }
+            return {
+                ok: false as const,
+                reason: result.reason,
+                status: result.reason === "not_found" ? 404 : 403,
+                detail: result.reason,
+            };
+        },
+    } as SafeFetcher & { calls: { robots: number; fetch: number } };
+}
 
 const HH = "11111111-1111-1111-1111-111111111111";
 const USER = "00000000-0000-0000-0000-0000000000a1";
@@ -218,6 +299,574 @@ test("recheckRecipe never demotes a hand-made recipe", async () => {
     );
 });
 
+describe("outcomeFromFetchFailure", () => {
+    const cases: [FetchFailure, RecipeImportStatus][] = [
+        ["robots_disallowed", "robots_disallowed"],
+        ["site_refused", "site_refused"],
+        ["not_found", "not_found"],
+        ["timeout", "timeout"],
+        ["network_error", "timeout"],
+        ["invalid_link", "invalid_link"],
+        ["blocked_address", "invalid_link"],
+        ["too_large", "no_recipe_on_page"],
+        ["bad_content_type", "no_recipe_on_page"],
+        ["http_error", "site_refused"],
+        ["too_many_redirects", "site_refused"],
+    ];
+    for (const [reason, status] of cases) {
+        test(`${reason} → ${status}`, () => {
+            expect(outcomeFromFetchFailure(reason)).toBe(status);
+        });
+    }
+});
+
+test("importReviewCount phrasing", () => {
+    expect(
+        importReviewCount([
+            {
+                code: "ingredient_no_amount",
+                message: "a",
+                ingredientId: "1",
+                line: null,
+            },
+            {
+                code: "ingredient_no_amount",
+                message: "b",
+                ingredientId: "2",
+                line: null,
+            },
+        ]),
+    ).toBe("2 ingredients");
+    expect(
+        importReviewCount([
+            {
+                code: "ingredient_no_amount",
+                message: "a",
+                ingredientId: "1",
+                line: null,
+            },
+        ]),
+    ).toBe("1 ingredient");
+    expect(
+        importReviewCount([
+            {
+                code: "no_instructions",
+                message: "Add the steps.",
+                ingredientId: null,
+                line: null,
+            },
+        ]),
+    ).toBe("the steps");
+});
+
+const ALL_IMPORT_STATUSES: RecipeImportStatus[] = [
+    "imported",
+    "unverified_needs_review",
+    "paste_needed",
+    "no_recipe_in_text",
+    "no_recipe_on_page",
+    "robots_disallowed",
+    "site_refused",
+    "not_found",
+    "timeout",
+    "duplicate",
+    "invalid_link",
+];
+
+test("importOutcomeToastKey uses paste_needed_reader when reader failed", () => {
+    const key = importOutcomeToastKey({
+        status: "paste_needed",
+        recipeId: null,
+        recipeName: null,
+        verification: "unverified",
+        problems: [],
+        source: {
+            kind: "instagram",
+            url: "https://www.instagram.com/p/x/",
+            label: "Instagram",
+        },
+        unresolvedLines: [],
+        readerFailure: "Could not read caption.",
+    });
+    expect(key).toBe("recipes.import.paste_needed_reader");
+    const msg = importOutcomeMessage({
+        status: "paste_needed",
+        recipeId: null,
+        recipeName: null,
+        verification: "unverified",
+        problems: [],
+        source: {
+            kind: "instagram",
+            url: "https://www.instagram.com/p/x/",
+            label: "Instagram",
+        },
+        unresolvedLines: [],
+        readerFailure: "Could not read caption.",
+    });
+    expect(msg).toContain("Could not read caption.");
+    expect(msg).not.toMatch(/\{reason\}/);
+});
+
+test("importRecipeFromUrlAnalyticsOutcome treats paste_needed and no_recipe_in_text as success", () => {
+    expect(importRecipeFromUrlAnalyticsOutcome("paste_needed")).toEqual({
+        success: true,
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("no_recipe_in_text")).toEqual({
+        success: true,
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("invalid_link")).toEqual({
+        success: false,
+        errorCategory: "recipe_import",
+    });
+    expect(importRecipeFromUrlAnalyticsOutcome("no_recipe_on_page")).toEqual({
+        success: false,
+        errorCategory: "recipe_import",
+    });
+});
+
+test("every import status has toast copy and importOutcomeMessage", () => {
+    for (const status of ALL_IMPORT_STATUSES) {
+        const outcome: RecipeImportOutcome = {
+            status,
+            recipeId: status === "duplicate" ? "r-dup" : "r1",
+            recipeName: "Test Soup",
+            verification: status === "imported" ? "verified" : "unverified",
+            problems:
+                status === "unverified_needs_review"
+                    ? [
+                          {
+                              code: "ingredient_no_amount",
+                              message: "x",
+                              ingredientId: "i1",
+                              line: null,
+                          },
+                          {
+                              code: "ingredient_no_amount",
+                              message: "y",
+                              ingredientId: "i2",
+                              line: null,
+                          },
+                      ]
+                    : [],
+            source: {
+                kind: status === "paste_needed" ? "instagram" : "website",
+                url: "https://example.com/r",
+                label: "example.com",
+            },
+            unresolvedLines: [],
+            readerFailure: status === "paste_needed" ? null : null,
+        };
+        const msg = importOutcomeMessage(outcome);
+        expect(msg.length).toBeGreaterThan(0);
+        expect(msg).not.toMatch(/\{[a-z_]+\}/);
+    }
+    for (const key of Object.keys(TOASTS)) {
+        if (key.startsWith("recipes.import.")) {
+            expect(
+                TOASTS[key as keyof typeof TOASTS].text.length,
+            ).toBeGreaterThan(0);
+        }
+    }
+});
+
+describe("importRecipeFromUrl", () => {
+    test("imports JSON-LD as verified with ordered ingredients", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({});
+        const result = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://natashaskitchen.com/soup",
+            },
+        );
+        expect(result.status).toBe("imported");
+        expect(result.verification).toBe("verified");
+        expect(fetcher.calls.fetch).toBe(1);
+        const ingredients = await recipes.listIngredients(HH, result.recipeId!);
+        expect(ingredients.map((row) => row.displayName)).toEqual(["rice"]);
+        expect(ingredients[0]?.quantity?.amount).toBe(1);
+        expect(ingredients[0]?.quantity?.unit).toBe("cup");
+        const imp = await recipes.getImport(HH, result.recipeId!);
+        expect(imp?.sourceKind).toBe("website");
+        expect(imp?.sourceText).toBeNull();
+        expect(imp?.sourceUrl).toBe("https://natashaskitchen.com/soup");
+    });
+
+    test("run-together line stays unverified with unresolved lines", async () => {
+        const html = `<!doctype html><html><head><script type="application/ld+json">{"@type":"Recipe","name":"Run Together","recipeIngredient":["2 cups flour","1.5 lb Chicken Breast 50g Egg Whites"],"recipeInstructions":["Mix"]}</script></head></html>`;
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods,
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: true, body: html }),
+                }),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/run-together",
+            },
+        );
+        expect(result.status).toBe("unverified_needs_review");
+        expect(result.unresolvedLines).toEqual([
+            "1.5 lb Chicken Breast 50g Egg Whites",
+        ]);
+        expect(result.problems.length).toBeGreaterThan(0);
+    });
+
+    test("duplicate skips fetcher", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const fetcher = fakeFetcher({});
+        const url = "https://example.com/recipe?utm_source=newsletter";
+        const first = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            { householdId: HH, creatorId: USER, url },
+        );
+        expect(first.status).toBe("imported");
+        const dup = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/recipe?utm_medium=email",
+            },
+        );
+        expect(dup.status).toBe("duplicate");
+        expect(dup.recipeId).toBe(first.recipeId);
+        expect(fetcher.calls.fetch).toBe(1);
+        expect(fetcher.calls.robots).toBe(1);
+    });
+
+    test.each([
+        "https://www.instagram.com/p/abc/?igsh=x",
+        "https://vm.tiktok.com/ZM1/",
+        "https://pin.it/x",
+        "https://fb.watch/x/",
+    ] as const)(
+        "social %s is paste_needed with zero fetcher calls",
+        async (url) => {
+            const fetcher = fakeFetcher({});
+            const result = await importRecipeFromUrl(
+                {
+                    recipes: createMemoryRecipesStore(),
+                    foods: createMemoryFoodsStore(),
+                    fetcher,
+                },
+                { householdId: HH, creatorId: USER, url },
+            );
+            expect(result.status).toBe("paste_needed");
+            expect(fetcher.calls.robots).toBe(0);
+            expect(fetcher.calls.fetch).toBe(0);
+        },
+    );
+
+    test("paste-only site list is paste_needed without fetch", async () => {
+        const fetcher = fakeFetcher({});
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+                pasteOnlySites: ["blocked-recipes.test"],
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://www.blocked-recipes.test/dinner",
+            },
+        );
+        expect(result.status).toBe("paste_needed");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("robots disallow does not fetch page", async () => {
+        const fetcher = fakeFetcher({ robots: false });
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/no-robots",
+            },
+        );
+        expect(result.status).toBe("robots_disallowed");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("403 site_refused", async () => {
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: false, reason: "site_refused" }),
+                }),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/err",
+            },
+        );
+        expect(result.status).toBe("site_refused");
+    });
+
+    test("404 not_found", async () => {
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher: fakeFetcher({
+                    fetch: () => ({ ok: false, reason: "not_found" }),
+                }),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/missing",
+            },
+        );
+        expect(result.status).toBe("not_found");
+    });
+
+    test("timeout from fetch failure", async () => {
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: false, reason: "timeout" }),
+        });
+        const result = await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/slow",
+            },
+        );
+        expect(result.status).toBe("timeout");
+    });
+
+    test("no JSON-LD leaves nothing saved", async () => {
+        const recipes = createMemoryRecipesStore();
+        const fetcher = fakeFetcher({
+            fetch: () => ({ ok: true, body: loadFixture("no-recipe") }),
+        });
+        const result = await importRecipeFromUrl(
+            {
+                recipes,
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/empty",
+            },
+        );
+        expect(result.status).toBe("no_recipe_on_page");
+        expect(await recipes.listRecipes(HH)).toHaveLength(0);
+    });
+
+    test("fetch uses cleaned URL without tracking params", async () => {
+        let robotsUrl = "";
+        let fetchUrl = "";
+        const fetcher = fakeFetcher({
+            fetch: (url) => {
+                fetchUrl = url;
+                return { ok: true, body: loadFixture("array-top-level") };
+            },
+        });
+        const origRobots = fetcher.robotsAllows.bind(fetcher);
+        fetcher.robotsAllows = async (url) => {
+            robotsUrl = typeof url === "string" ? url : url.href;
+            return origRobots(url);
+        };
+        await importRecipeFromUrl(
+            {
+                recipes: createMemoryRecipesStore(),
+                foods: createMemoryFoodsStore(),
+                fetcher,
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                url: "https://example.com/soup?utm_source=x&fbclid=abc",
+            },
+        );
+        expect(robotsUrl).not.toMatch(/utm_|fbclid/);
+        expect(fetchUrl).not.toMatch(/utm_|fbclid/);
+        expect(fetchUrl).toBe("https://example.com/soup");
+    });
+
+    test("throws when an ingredient insert fails inside the transaction", async () => {
+        const base = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        let ingredientInserts = 0;
+        const recipes = {
+            ...base,
+            async insertIngredient(
+                row: Parameters<typeof base.insertIngredient>[0],
+            ) {
+                ingredientInserts += 1;
+                if (ingredientInserts === 3) {
+                    throw new Error("insert failed");
+                }
+                return base.insertIngredient(row);
+            },
+        };
+        await expect(
+            importRecipeFromUrl(
+                {
+                    recipes,
+                    foods,
+                    fetcher: fakeFetcher({
+                        fetch: () => ({
+                            ok: true,
+                            body: loadFixture("yoast-graph"),
+                        }),
+                    }),
+                    transaction: (fn) => fn(),
+                },
+                {
+                    householdId: HH,
+                    creatorId: USER,
+                    url: "https://example.com/rollback",
+                },
+            ),
+        ).rejects.toThrow("insert failed");
+    });
+});
+
+describe("prepareImportedRecipe clamps page values to what the editors accept", () => {
+    const base = {
+        name: "Soup",
+        fallbackName: "example.com",
+        yieldPortions: 4,
+        steps: ["Simmer."],
+        prepMinutes: 10,
+        cookMinutes: 20,
+        parsed: { items: [], unresolved: [] },
+    };
+
+    test("yield out of range becomes 1", () => {
+        for (const y of [0, 0.4, -3, 1e16, Number.NaN, null]) {
+            expect(
+                prepareImportedRecipe({ ...base, yieldPortions: y })
+                    .yieldPortions,
+            ).toBe(1);
+        }
+        expect(
+            prepareImportedRecipe({ ...base, yieldPortions: 6 }).yieldPortions,
+        ).toBe(6);
+    });
+
+    test("names without letters fall back and long text is clipped", () => {
+        expect(prepareImportedRecipe({ ...base, name: "   " }).name).toBe(
+            "example.com",
+        );
+        expect(prepareImportedRecipe({ ...base, name: "​" }).name).toBe(
+            "example.com",
+        );
+        const long = prepareImportedRecipe({ ...base, name: "x".repeat(120) });
+        expect(long.name.length).toBeLessThanOrEqual(80);
+        const steps = prepareImportedRecipe({
+            ...base,
+            steps: Array.from({ length: 500 }, () => "y".repeat(100)),
+        });
+        expect(steps.instructions!.length).toBeLessThanOrEqual(20_000);
+    });
+
+    test("absurd durations are dropped", () => {
+        const out = prepareImportedRecipe({
+            ...base,
+            prepMinutes: 2_880_000_000,
+            cookMinutes: -5,
+        });
+        expect(out.prepMinutes).toBeNull();
+        expect(out.cookMinutes).toBeNull();
+    });
+
+    test("blank names and non-positive amounts go to unresolved", () => {
+        const out = prepareImportedRecipe({
+            ...base,
+            parsed: {
+                items: [
+                    {
+                        line: "1 cup (sifted)",
+                        name: "",
+                        quantity: { amount: 1, unit: "cup" },
+                        note: "sifted",
+                        section: null,
+                    },
+                    {
+                        line: "0 g salt",
+                        name: "salt",
+                        quantity: { amount: 0, unit: "g" },
+                        note: null,
+                        section: null,
+                    },
+                    {
+                        line: "1 cup flour",
+                        name: "flour",
+                        quantity: { amount: 1, unit: "cup" },
+                        note: "n".repeat(600),
+                        section: null,
+                    },
+                ],
+                unresolved: [],
+            },
+        });
+        expect(out.parsed.unresolved).toEqual(["1 cup (sifted)", "0 g salt"]);
+        expect(out.parsed.items.map((i) => i.name)).toEqual(["flour"]);
+        expect(out.parsed.items[0]!.note!.length).toBeLessThanOrEqual(500);
+    });
+});
+
+test("a page with zero yield and a nameless line still imports as an outcome", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const html = `<script type="application/ld+json">${JSON.stringify({
+        "@type": "Recipe",
+        name: "Soup",
+        recipeYield: "0 servings",
+        prepTime: "P2000000D",
+        recipeIngredient: ["1 cup (sifted)", "0 g salt", "2 cups stock"],
+        recipeInstructions: ["Simmer."],
+    })}</script>`;
+    const fetcher = {
+        robotsAllows: async () => true,
+        fetchPage: async () => ({
+            ok: true as const,
+            url: "https://example.com/soup",
+            status: 200,
+            contentType: "text/html",
+            body: html,
+        }),
+    };
+    const out = await importRecipeFromUrl(
+        { recipes, foods, fetcher },
+        { householdId: HH, creatorId: USER, url: "https://example.com/soup" },
+    );
+    expect(out.status).toBe("unverified_needs_review");
+    expect(out.unresolvedLines).toEqual(["1 cup (sifted)", "0 g salt"]);
+    const recipe = await recipes.getRecipe(HH, out.recipeId!);
+    expect(recipe?.yieldPortions).toBe(1);
+    expect(recipe?.prepMinutes).toBeNull();
+});
+
 test("handled unresolved lines can be cleared so a fixed recipe verifies", async () => {
     const store = createMemoryRecipesStore();
     const recipe = await store.insertRecipe(baseRecipe());
@@ -252,4 +901,86 @@ test("handled unresolved lines can be cleared so a fixed recipe verifies", async
     expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
         "verified",
     );
+});
+
+describe("source links", () => {
+    test.each([
+        "javascript:alert(1)",
+        " JavaScript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+        "mailto:a@example.com",
+        "",
+        "   ",
+    ])("safeSourceUrl refuses %p", (raw) => {
+        expect(safeSourceUrl(raw)).toBeNull();
+        expect(recipeDisplaySource({ sourceUrl: raw }, null)).toBeNull();
+    });
+
+    test("an import row's javascript: link is not displayed", () => {
+        expect(
+            recipeDisplaySource(
+                { sourceUrl: null },
+                { sourceKind: "website", sourceUrl: "javascript:alert(1)" },
+            ),
+        ).toBeNull();
+    });
+
+    test("a bare host gets https and an http(s) link is kept", () => {
+        expect(safeSourceUrl("example.com/soup")?.href).toBe(
+            "https://example.com/soup",
+        );
+        expect(
+            recipeDisplaySource({ sourceUrl: "http://example.com/a" }, null)
+                ?.url,
+        ).toBe("http://example.com/a");
+    });
+
+    test("create and update refuse a javascript: source", async () => {
+        const store = createMemoryRecipesStore();
+        await expect(
+            createRecipe(store, {
+                householdId: HH,
+                creatorId: USER,
+                name: "Soup",
+                yieldPortions: 2,
+                sourceUrl: "javascript:alert(1)",
+            }),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+        const recipe = await createRecipe(store, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Soup",
+            yieldPortions: 2,
+            sourceUrl: "example.com/soup",
+        });
+        expect(recipe.sourceUrl).toBe("example.com/soup");
+        await expect(
+            updateRecipe(store, HH, recipe.id, {
+                sourceUrl: "javascript:alert(1)",
+            }),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+    });
+
+    test("a bare stored source still reports a duplicate import", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const recipe = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Soup",
+            yieldPortions: 2,
+            sourceUrl: "example.com/soup",
+        });
+        const fetcher = fakeFetcher({});
+        const dup = await importRecipeFromUrl(
+            { recipes, foods, fetcher },
+            { householdId: HH, creatorId: USER, url: "example.com/soup" },
+        );
+        expect(dup.status).toBe("duplicate");
+        expect(dup.recipeId).toBe(recipe.id);
+        expect(dup.recipeName).toBe("Soup");
+        expect(dup.source?.url).toBe("https://example.com/soup");
+        expect(fetcher.calls.fetch).toBe(0);
+    });
 });

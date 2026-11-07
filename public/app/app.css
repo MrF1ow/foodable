@@ -1016,6 +1016,26 @@ details.more > summary > :is(h2, h3) {
 .recipe-card .row-title {
     color: var(--text);
 }
+.recipe-card .row {
+    align-items: center;
+    gap: 0.5rem;
+}
+.recipe-source-icon-wrap {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+.recipe-source-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0 0 var(--gap-col);
+}
+.recipe-source-line a {
+    position: relative;
+    z-index: 1;
+}
 .recipe-panel-head {
     align-items: center;
     margin-bottom: var(--gap-col);
