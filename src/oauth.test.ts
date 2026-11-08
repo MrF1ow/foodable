@@ -1,4 +1,5 @@
-import { test, expect, mock, afterAll } from "bun:test";
+import { test, expect, mock, afterAll, beforeAll } from "bun:test";
+import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
 
@@ -39,6 +40,16 @@ const {
     siteLoginReturnPath,
 } = await import("./oauth.js");
 const { _resetBuckets } = await import("./rate-limit.js");
+
+beforeAll(() =>
+    setClientIpConfigForTests({
+        source: "x-forwarded-for",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    }),
+);
+afterAll(() => setClientIpConfigForTests(null));
 
 // createOAuthRouter() refuses to build without these; the values are never
 // exercised by the rate-limit tests below.

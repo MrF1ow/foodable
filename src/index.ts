@@ -20,6 +20,8 @@ import { recipeFetchMemory } from "./db/fetch-memory.js";
 import { bootRestockRuns } from "./restock-runner.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
+import { clientIpConfigBootLine, getClientIpConfig } from "./client-ip.js";
+import { clientIp } from "./middleware.js";
 import { isNutritionCard } from "./domain/layout.js";
 import {
     appScriptHref,
@@ -65,7 +67,7 @@ app.use("*", async (c, next) => {
     await next();
     if (c.get("suppressAccessLog")) return;
     const ms = Math.round(performance.now() - start);
-    const ip = maskIp(c.req.header("x-forwarded-for"));
+    const ip = maskIp(clientIp(c));
     // /mcp serves two protocol eras from one endpoint, and the only way to know
     // when the 2025-11-25 leg can be retired is to count who still uses it.
     // handleMcp publishes the era the SDK actually negotiated (not a guess from
@@ -442,6 +444,7 @@ if (import.meta.main) {
     try {
         requireDatabaseUrl();
         resolveSessionSigningSecret();
+        console.log(clientIpConfigBootLine(getClientIpConfig()));
     } catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
