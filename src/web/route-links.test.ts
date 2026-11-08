@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { newFood } from "../domain/foods.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
 import { findLegacyLinks } from "./route-map.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { renderFridgePage } from "./pages/fridge.js";
 import { renderGroceryPage } from "./pages/grocery.js";
 import {
@@ -24,7 +25,11 @@ import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
 import { renderNutritionPage } from "./pages/nutrition.js";
 
 const HH = "hh-fix";
-const chrome = { theme: "light" as const, attention: { count: 0, tabs: {} } };
+const chrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
+};
 const ME = {
     householdId: HH,
     userId: "u1",
