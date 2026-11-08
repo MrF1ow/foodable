@@ -12,3 +12,5 @@ prs: []
 ---
 
 Vegan, vegetarian and palm-oil checks need something to compare with; person rules are free text. Decide whether to add a structured field or leave diet checks out.
+
+The redesign's member cards show allergens, traces, goals and dislikes, and no diet check. SCORE-1 already stores `ingredients_analysis_tags`, so "not now" costs nothing later.
