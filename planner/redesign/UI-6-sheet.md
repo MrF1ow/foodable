@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-A native `<dialog>`: bottom sheet with drag-to-dismiss on phones; on desktop a right-hand panel for editing an item from a list, or a centred dialog for confirmations. Markup and client tests.
+A native `<dialog>`: a bottom sheet with drag-to-dismiss on phones; on desktop a 480-px panel from the right over a dimmed page for editing an item (FigCraft "Desktop · Today · edit a food"), or a centred dialog for confirmations. Markup and client tests.

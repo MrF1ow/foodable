@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-Main page with the profile card and Display (Auto, Light, Dark); Account; Household and members; Stores (list and add); Goals (read only); Saved foods & recipes (what CLN-8 asked); Export data as a web button; Help. Desktop: two panes.
+Main page with the profile card; Account; Household and members (with Display in the Household card on desktop); Display as its own page; Stores (list and add); Goals (read only); Saved foods & recipes (what CLN-8 asked); dismissed notices, possible duplicates and social readers under Household; Export data as a web button; Help. Desktop: two panes.

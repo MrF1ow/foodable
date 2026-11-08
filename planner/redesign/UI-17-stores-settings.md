@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-Rename, delete and reorder stores; add and reorder sections (drag); a default store and "Use each food's usual store" as `household_preferences` keys (no migration). The flag gates the switch in `pickGroceryStore`. Answers the inbox question on where stores are managed.
+Rename, delete and reorder stores; add and reorder sections (drag). Deleting a store with lines on the list asks: move them to the default store, or delete them with it. A default store and "Use each food's usual store" as `household_preferences` keys (no migration). The flag gates the switch in `pickGroceryStore`. Answers the inbox question on where stores are managed.

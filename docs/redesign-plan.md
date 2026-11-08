@@ -108,6 +108,18 @@ Kill switches (permanent, fall back to on): `off-lookups`, `recipe-link-reader`,
 | GEN-6                          | Dropped: the design keeps "Groceries".                                                                 |
 | Inbox: grocery store placement | Answered: Settings › Household › Stores (UI-17).                                                       |
 
-## Open questions
+## Decisions (2026-11-08)
 
-Tracked as decision items UI-28 to UI-30. In short: whether a Today row is a meal or a food; configurable meals of the day; what "low" means for a usual; whether the expiring-food restock stays beside usual schedules; a per-store shopping day; deleting a store with lines on it; hidden sections and store rules; the calories-by-day "near goal" margin; favourites per member or per household; where Display lives in desktop Settings. Flag questions (pin lifetime, the self-hoster override, beta opt-in) are STG-11.
+Recorded in UI-28, UI-29 and UI-30. FigCraft answers every design question it shows; these fill the rest.
+
+- **A Today row is one log.** Logging in the app makes one log per food or recipe, so rows look exactly like FigCraft. An agent's tool call decides the grouping: one meal with several items is one row with its items listed under it. FigCraft does not show that state; build it as close to the single-food row as possible.
+- **On target** is within 120 kcal of that day's goal (FigCraft's Trends legend): green dot, orange when logged but off, grey when nothing is logged.
+- **Desktop editing** is a 480-px panel from the right over a dimmed page; confirmations use a centred dialog.
+- **Display** is its own Settings page and a row in the desktop Household card.
+- **Needs attention** has no badge or page: in place on the phone, a card on desktop Today, a chat widget. Possible duplicates and social reader notices go under Settings › Household.
+- **Usuals:** the schedule lives on the plain food; "low" is a level per usual (default a quarter of the usual amount); the expiring-food restock stays beside schedules; one household restock day.
+- **Stores:** deleting a store with lines asks whether to move them to the default store or delete them; hidden sections and store rules stay on the store's page.
+- **Freeze** moves the item to the Freezer with a new expiry and keeps its bought or made date.
+- **Goals:** "Recomp" is a goal name the member writes, shown with the date the goals were set.
+- **Fixed four meals of the day**; another member's day is viewed from Settings › Household › member; favourites are per member.
+- **Photo of meal** comes after the redesign, without storing images (inbox).
