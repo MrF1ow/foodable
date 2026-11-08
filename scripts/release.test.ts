@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { lintPr } from "./conventions/conventions.ts";
 import {
     bumpVersion,
+    loadMergedPrs,
     prNumbersFromLog,
     releaseBody,
     releaseBranch,
@@ -141,5 +142,45 @@ describe("the release PR passes pr:check", () => {
         });
         expect(body).toContain("back up before updating");
         expect(body).toContain("(#7)");
+    });
+});
+
+describe("loadMergedPrs", () => {
+    const listed = [
+        { number: 210, title: "fix(auth): a", labels: [{ name: "area:auth" }] },
+    ];
+    const stacked = {
+        number: 175,
+        title: "feat(recipes): b",
+        labels: [{ name: "area:recipes" }],
+    };
+
+    test("fetches a PR merged into a stacked branch on its own", async () => {
+        const calls: string[][] = [];
+        const prs = await loadMergedPrs([210, 175], async (args) => {
+            calls.push(args);
+            if (args[1] === "list") return JSON.stringify(listed);
+            if (args[1] === "view" && args[2] === "175")
+                return JSON.stringify(stacked);
+            throw new Error("unexpected");
+        });
+        expect(prs).toEqual([
+            { number: 210, title: "fix(auth): a", labels: ["area:auth"] },
+            {
+                number: 175,
+                title: "feat(recipes): b",
+                labels: ["area:recipes"],
+            },
+        ]);
+        expect(calls.filter((c) => c[1] === "view")).toHaveLength(1);
+    });
+
+    test("fails when a PR cannot be found at all", async () => {
+        await expect(
+            loadMergedPrs([999], async (args) => {
+                if (args[1] === "list") return "[]";
+                throw new Error("not found");
+            }),
+        ).rejects.toThrow("Could not load PR #999 from GitHub");
     });
 });
