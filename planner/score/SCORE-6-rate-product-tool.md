@@ -12,3 +12,5 @@ prs: []
 ---
 
 Barcode or `food_id`, optional member; returns the score, breakdown and checks as `structuredContent`, so an agent can answer "is this ok for Alex?".
+
+Registered through `gatedTool` (`mcp-rate-product`); its card is WID-15.

@@ -2,7 +2,7 @@
 id: STG-2
 title: How production deploys after staging
 status: decide
-priority: low
+priority: high
 size: XS
 type: decision
 areas: [infra]
