@@ -35,6 +35,7 @@ const food = {
     usualProductId: null,
     usualStoreId: null,
     usualAmount: null,
+    offQuality: null,
     createdBy: null,
     archivedAt: null,
     createdAt: "2026-01-01T00:00:00Z",

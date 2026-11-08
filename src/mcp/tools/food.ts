@@ -28,10 +28,12 @@ import {
     linkProduct,
     findUpsertFoodByName,
     newFood,
+    refreshFoodQualityByBarcode,
     similarFoodsForNewName,
     SimilarFoodsError,
     parseUsualPurchase,
     type FoodPatch,
+    type FoodQuality,
     searchFoodCatalog,
     setUsualProduct,
     updateFood,
@@ -54,7 +56,8 @@ import {
 import type { ToolContext } from "../shared.js";
 
 export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
-    const { alcohol, personSchema, actorUserId, analytics } = ctx;
+    const { alcohol, personSchema, actorUserId, callerHouseholdId, analytics } =
+        ctx;
     server.registerTool(
         "lookup_barcode",
         {
@@ -137,6 +140,21 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                                 },
                             ],
                         };
+                    }
+
+                    // Like food_cache upsert: refresh cached OFF product facts on
+                    // an existing household row when the barcode already matches;
+                    // never creates foods or changes user-entered catalog fields.
+                    try {
+                        const householdId = await callerHouseholdId();
+                        await refreshFoodQualityByBarcode(
+                            liveFoodsStore(),
+                            householdId,
+                            normalized,
+                            food,
+                        );
+                    } catch {
+                        // No household member or store error must not change lookup output.
                     }
 
                     return {
@@ -269,9 +287,31 @@ export const UPSERT_FOOD_OUTPUT = z.object({
     usual_unit: z.string().nullable(),
 });
 
+const GET_FOOD_QUALITY = z.object({
+    nutriscore_grade: z.enum(["a", "b", "c", "d", "e"]).nullable(),
+    nova_group: z
+        .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
+        .nullable(),
+    ecoscore_grade: z.enum(["a-plus", "a", "b", "c", "d", "e", "f"]).nullable(),
+    additives: z
+        .array(
+            z.object({
+                tag: z.string(),
+                risk: z.enum(["high", "moderate", "none"]).nullable(),
+            }),
+        )
+        .nullable(),
+    allergens_tags: z.array(z.string()).nullable(),
+    traces_tags: z.array(z.string()).nullable(),
+    ingredients_analysis_tags: z.array(z.string()).nullable(),
+    labels_tags: z.array(z.string()).nullable(),
+    fetched_at: z.string(),
+});
+
 export const GET_FOOD_OUTPUT = FOOD_OUTPUT.extend({
     products: z.array(FOOD_PRODUCT_ITEM),
     effective: EFFECTIVE_FOOD,
+    quality: GET_FOOD_QUALITY.nullable(),
     /** Open `food.possible_duplicate` notices with this food on either side. */
     notices: z.array(NOTICE_SCHEMA),
 });
@@ -331,6 +371,24 @@ function foodPayload(
         usual_store_id: food.usualStoreId,
         usual_amount: food.usualAmount?.amount ?? null,
         usual_unit: food.usualAmount?.unit ?? null,
+    };
+}
+
+function qualityPayload(q: FoodQuality | null) {
+    if (q == null) return null;
+    return {
+        nutriscore_grade: q.nutriscoreGrade,
+        nova_group: q.novaGroup,
+        ecoscore_grade: q.ecoscoreGrade,
+        additives:
+            q.additives == null
+                ? null
+                : q.additives.map((a) => ({ tag: a.tag, risk: a.risk })),
+        allergens_tags: q.allergensTags,
+        traces_tags: q.tracesTags,
+        ingredients_analysis_tags: q.ingredientsAnalysisTags,
+        labels_tags: q.labelsTags,
+        fetched_at: q.fetchedAt,
     };
 }
 
@@ -529,6 +587,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         ...foodPayload(food, aliases, barcodes),
                         products: familyProducts(food, listed),
                         effective: effectivePayload(eff),
+                        quality: qualityPayload(food.offQuality),
                         notices: foodNotices.map((n) => noticeToWire(n)),
                     };
                     return {

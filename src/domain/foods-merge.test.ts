@@ -4,6 +4,7 @@ import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
     mergedFoodFields,
+    mergeFoodPair,
     mergeFoods,
     newFood,
     type Food,
@@ -250,6 +251,44 @@ test("mergedFoodFields: unions allergens with keep order first", () => {
     expect(mergedFoodFields(keep, drop).allergens).toEqual(["milk", "egg"]);
 });
 
+test("mergedFoodFields: offQuality keep wins and arrays prefer keep", () => {
+    const fetchedKeep = "2026-11-08T00:00:00.000Z";
+    const fetchedDrop = "2026-11-07T00:00:00.000Z";
+    const keep = sampleRow({
+        offQuality: {
+            nutriscoreGrade: null,
+            novaGroup: 2,
+            ecoscoreGrade: "c",
+            additives: [],
+            allergensTags: ["en:gluten"],
+            tracesTags: null,
+            ingredientsAnalysisTags: null,
+            labelsTags: null,
+            fetchedAt: fetchedKeep,
+        },
+    });
+    const drop = sampleRow({
+        offQuality: {
+            nutriscoreGrade: "e",
+            novaGroup: 4,
+            ecoscoreGrade: "f",
+            additives: [{ tag: "en:e250", risk: "high" }],
+            allergensTags: ["en:milk"],
+            tracesTags: ["en:nuts"],
+            ingredientsAnalysisTags: null,
+            labelsTags: ["en:organic"],
+            fetchedAt: fetchedDrop,
+        },
+    });
+    const merged = mergedFoodFields(keep, drop);
+    expect(merged.offQuality?.nutriscoreGrade).toBe("e");
+    expect(merged.offQuality?.novaGroup).toBe(2);
+    expect(merged.offQuality?.additives).toEqual([]);
+    expect(merged.offQuality?.allergensTags).toEqual(["en:gluten"]);
+    expect(merged.offQuality?.tracesTags).toEqual(["en:nuts"]);
+    expect(merged.offQuality?.fetchedAt).toBe(fetchedKeep);
+});
+
 test("mergedFoodFields: replaces empty default unit only", () => {
     const keep = sampleRow({ defaultUnit: "   " });
     const drop = sampleRow({ defaultUnit: "g" });
@@ -332,6 +371,37 @@ test("mergeFoods: rejected nesting leaves foods, fridge, stock, refs unchanged",
     expect(ref.foodId).toBe(drop.id);
 });
 
+test("mergeFoodPair carries merged offQuality", async () => {
+    const store = createMemoryFoodsStore();
+    const keep = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Keep qa" }),
+    );
+    const drop = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Drop qa",
+            offQuality: {
+                nutriscoreGrade: "c",
+                novaGroup: 3,
+                ecoscoreGrade: null,
+                additives: [{ tag: "en:e250", risk: "high" }],
+                allergensTags: null,
+                tracesTags: null,
+                ingredientsAnalysisTags: null,
+                labelsTags: null,
+                fetchedAt: "2026-11-07T00:00:00.000Z",
+            },
+        }),
+    );
+    const merged = await mergeFoodPair(store, HH, {
+        keepId: keep.id,
+        dropId: drop.id,
+    });
+    expect(merged.offQuality?.nutriscoreGrade).toBe("c");
+    expect(merged.offQuality?.additives?.[0]?.tag).toBe("en:e250");
+});
+
 function sampleRow(over: Partial<Food>): Food {
     const now = "2026-01-01T00:00:00.000Z";
     return {
@@ -359,6 +429,7 @@ function sampleRow(over: Partial<Food>): Food {
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        offQuality: null,
         createdBy: null,
         archivedAt: null,
         createdAt: now,

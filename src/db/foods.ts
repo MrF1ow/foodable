@@ -3,8 +3,10 @@ import {
     foodToRow,
     mergeFoods,
     mergeFoodPair,
+    offQualityToRowFields,
     type MergeFoodPairInput,
     type Food,
+    type FoodQuality,
     type FoodsStore,
 } from "../domain/foods.js";
 import { cleanupDismissalsForFoodTx } from "./notice-dismissals.js";
@@ -23,7 +25,7 @@ const FOODS = "foods";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",
@@ -38,6 +40,14 @@ function patchKeys(keys: string[]): [string, ...string[]] {
     return keys as [string, ...string[]];
 }
 
+function bindTextArray(
+    tx: Tx,
+    value: string[] | null | undefined,
+): string[] | unknown {
+    if (value == null) return null;
+    return tx.array(value, "text");
+}
+
 function foodRowForWrite(
     tx: Tx,
     row: ReturnType<typeof foodToRow>,
@@ -48,6 +58,14 @@ function foodRowForWrite(
             Array.isArray(row.allergens) ? row.allergens : [],
             "text",
         ),
+        additives_tags: bindTextArray(tx, row.additives_tags),
+        allergens_tags: bindTextArray(tx, row.allergens_tags),
+        traces_tags: bindTextArray(tx, row.traces_tags),
+        ingredients_analysis_tags: bindTextArray(
+            tx,
+            row.ingredients_analysis_tags,
+        ),
+        labels_tags: bindTextArray(tx, row.labels_tags),
     };
 }
 
@@ -195,6 +213,61 @@ export function liveFoodsStore(): FoodsStore {
                     return data ? foodFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("update food", err);
+                }
+            });
+        },
+        async setFoodQuality(householdId, foodId, quality: FoodQuality, opts) {
+            const onlyIfUnset = opts?.onlyIfUnset === true;
+            return run(async (tx) => {
+                try {
+                    const fields = offQualityToRowFields(quality);
+                    const fetchedAt = quality.fetchedAt;
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FOODS)}
+                            set nutriscore_grade = ${fields.nutriscore_grade},
+                                nova_group = ${fields.nova_group},
+                                ecoscore_grade = ${fields.ecoscore_grade},
+                                additives_tags = ${bindTextArray(
+                                    tx,
+                                    fields.additives_tags,
+                                )},
+                                allergens_tags = ${bindTextArray(
+                                    tx,
+                                    fields.allergens_tags,
+                                )},
+                                traces_tags = ${bindTextArray(
+                                    tx,
+                                    fields.traces_tags,
+                                )},
+                                ingredients_analysis_tags = ${bindTextArray(
+                                    tx,
+                                    fields.ingredients_analysis_tags,
+                                )},
+                                labels_tags = ${bindTextArray(
+                                    tx,
+                                    fields.labels_tags,
+                                )},
+                                off_quality_fetched_at = ${fetchedAt}::timestamptz,
+                                updated_at = now()
+                            where household_id = ${householdId}
+                              and id = ${foodId}
+                              and archived_at is null
+                              and (
+                                  off_quality_fetched_at is null
+                                  or (
+                                      not ${onlyIfUnset}::boolean
+                                      and off_quality_fetched_at < ${fetchedAt}::timestamptz
+                                  )
+                              )
+                            returning ${tx.unsafe(FOOD_COLS)}
+                        `,
+                        "set food quality",
+                    );
+                    return data ? foodFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("set food quality", err);
                 }
             });
         },
