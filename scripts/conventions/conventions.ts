@@ -267,6 +267,7 @@ const LOW_REPO_PREFIXES = [
     "scripts/",
     ".cursor/",
     "public/fonts/",
+    "design/",
 ];
 
 const BLAST_RANK: Record<BlastLevel, number> = {
