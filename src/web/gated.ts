@@ -3,7 +3,7 @@ import { buildFlagContext, type FlagName } from "../flags.js";
 import { getHouseholdMembership } from "../db/household.js";
 import type { HouseholdMember } from "../household.js";
 import {
-    evaluateViewerFlags,
+    loadViewerFlags,
     isViewerFlagOn,
     type ViewerFlags,
 } from "../viewer-flags.js";
@@ -53,7 +53,7 @@ export function gatedRoute(
             auth: { kind: "user", userId },
             member,
         });
-        const flags = evaluateViewerFlags(flagCtx);
+        const flags = await loadViewerFlags(flagCtx);
         c.set("viewerFlags", flags);
         if (isViewerFlagOn(flags, flag)) {
             return next();

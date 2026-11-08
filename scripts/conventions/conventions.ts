@@ -220,6 +220,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/net.ts": "platform",
     "src/normalize.ts": "platform",
     "src/flags.ts": "platform",
+    "src/flag-pins.ts": "platform",
+    "src/domain/flag-pins.ts": "platform",
     "src/viewer-flags.ts": "platform",
     "src/mcp/gated.ts": "platform",
     "src/test-support/flag-harness.ts": "platform",

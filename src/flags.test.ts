@@ -73,6 +73,11 @@ function fakeSdk(impl: Partial<RailwayFlagsSdk> = {}): RailwayFlagsSdk {
             reason: "NO_MATCH",
             trace: [],
         }),
+        evaluateNumber: () => ({
+            value: 0,
+            reason: "NO_MATCH",
+            trace: [],
+        }),
         ...impl,
     } as RailwayFlagsSdk;
 }
@@ -663,6 +668,11 @@ describe("initFlags source selection", () => {
             },
             evaluateBoolean: () => ({
                 value: false,
+                reason: "NO_MATCH",
+                trace: [],
+            }),
+            evaluateNumber: () => ({
+                value: 0,
                 reason: "NO_MATCH",
                 trace: [],
             }),

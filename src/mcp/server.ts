@@ -19,7 +19,7 @@ import {
 import { getNutritionGoals } from "../db/nutrition.js";
 import { getHouseholdMembership } from "../db/household.js";
 import { buildFlagContext } from "../flags.js";
-import { evaluateViewerFlags, type ViewerFlags } from "../viewer-flags.js";
+import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import {
     createToolContext,
     NUTRIENT_COVERAGE,
@@ -235,7 +235,7 @@ async function buildMcpServer(
             : [null, undefined, null];
     const drinkUnit = preferredDrinkUnitFromProfile(profile);
     const flagCtx = buildFlagContext({ auth, member });
-    const flags = evaluateViewerFlags(flagCtx);
+    const flags = await loadViewerFlags(flagCtx);
 
     registerTools(
         server,
