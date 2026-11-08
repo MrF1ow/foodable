@@ -409,9 +409,14 @@ let testConfigOverride: ClientIpConfig | null = null;
 export function getClientIpConfig(): ClientIpConfig {
     if (testConfigOverride) return testConfigOverride;
     if (!cachedConfig) {
-        cachedConfig = parseClientIpConfig(
-            process.env as Record<string, string | undefined>,
-        );
+        // Read only the variables this module uses, by name.
+        cachedConfig = parseClientIpConfig({
+            CLIENT_IP_SOURCE: process.env.CLIENT_IP_SOURCE,
+            TRUSTED_PROXY_HOPS: process.env.TRUSTED_PROXY_HOPS,
+            CLOUDFLARE_ORIGIN_SECRET: process.env.CLOUDFLARE_ORIGIN_SECRET,
+            TRUST_CLOUDFLARE: process.env.TRUST_CLOUDFLARE,
+            RAILWAY_ENVIRONMENT_ID: process.env.RAILWAY_ENVIRONMENT_ID,
+        });
     }
     return cachedConfig;
 }
@@ -421,14 +426,22 @@ export function setClientIpConfigForTests(config: ClientIpConfig | null): void {
 }
 
 export function clientIpConfigBootLine(config: ClientIpConfig): string {
-    const sourceNote =
-        config.source === "x-real-ip" && config.sourceIsDefault
-            ? " (Railway default)"
-            : "";
-    const cf = config.cloudflareOriginSecret ? "on" : "off";
-    const hops =
-        config.source === "x-forwarded-for"
-            ? `, hops=${config.trustedHops}`
-            : "";
-    return `[net] client address from ${config.source}${sourceNote}${hops}, cloudflare=${cf}`;
+    // Built from literals and the hop count only, so no configured value
+    // (least of all the origin secret) can reach the log.
+    let source: string;
+    switch (config.source) {
+        case "socket":
+            source = "socket";
+            break;
+        case "x-real-ip":
+            source = config.sourceIsDefault
+                ? "x-real-ip (Railway default)"
+                : "x-real-ip";
+            break;
+        case "x-forwarded-for":
+            source = `x-forwarded-for, hops=${Number(config.trustedHops)}`;
+            break;
+    }
+    const cf = config.cloudflareOriginSecret === null ? "off" : "on";
+    return `[net] client address from ${source}, cloudflare=${cf}`;
 }
