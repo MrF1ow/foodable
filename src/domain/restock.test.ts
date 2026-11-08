@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import {
     createMemoryFoodsStore,
@@ -957,6 +958,7 @@ test("grocery page renders Restocked badge via notices component", () => {
         chrome: {
             theme: "system",
             attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
         },
         stores: [
             {

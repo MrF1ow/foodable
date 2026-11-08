@@ -1,9 +1,14 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import { renderGroceryPage, type GroceryPageView } from "./grocery.js";
 
 test("to-taste grocery line shows note instead of placeholder amount", () => {
     const html = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -50,7 +55,11 @@ test("to-taste grocery line shows note instead of placeholder amount", () => {
 
 test("to-taste put-away asks for an amount prefilled with 1 and shows the unit", () => {
     const html = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",

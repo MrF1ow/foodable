@@ -24,6 +24,7 @@ import { renderSettingsHelpPage } from "../pages/settings-help.js";
 import { renderNutritionPage } from "../pages/nutrition.js";
 import { renderAppShell } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -388,6 +389,7 @@ test("every page's h1 comes from pageHeader once", async () => {
     const appChrome = {
         theme: "light" as const,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     };
     const member = {
         householdId: "hh",

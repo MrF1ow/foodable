@@ -4,10 +4,12 @@ import {
     FOODS_MERGE_MODAL_ID,
     renderFoodsSettingsPage,
 } from "../web/pages/foods.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 const food = {

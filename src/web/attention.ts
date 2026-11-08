@@ -10,6 +10,9 @@ import {
     type Notice,
 } from "../domain/notices.js";
 import { noticesFor, type NoticesForResult } from "../domain/notices-for.js";
+import { buildFlagContext } from "../flags.js";
+import type { HouseholdMember } from "../household.js";
+import { evaluateViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import type { AppTabId, ViewerChrome } from "./shell.js";
 import { resolveTheme } from "./shell.js";
 
@@ -20,6 +23,7 @@ export type AttentionChrome = {
 
 export type AppChromeBase = ViewerChrome & {
     attention: AttentionChrome;
+    flags: ViewerFlags;
     /** Open `food.possible_duplicate` notices (Household sub-nav badge). */
     householdPossibleDuplicates?: number;
 };
@@ -63,16 +67,22 @@ export async function loadHouseholdNotices(
 
 export async function viewerChromeWithAttention(
     profile: { theme?: string | null } | null,
-    householdId: string,
+    viewer: HouseholdMember,
     prefetched?: NoticesForResult,
 ): Promise<AppChromeBase> {
     const noticeResult =
-        prefetched ?? (await loadHouseholdNotices(householdId));
+        prefetched ?? (await loadHouseholdNotices(viewer.householdId));
+    const flagCtx = buildFlagContext({
+        auth: { kind: "user", userId: viewer.userId },
+        member: viewer,
+    });
+    const flags = evaluateViewerFlags(flagCtx);
     return {
         theme: resolveTheme(profile?.theme),
         attention: attentionFromNotices(noticeResult),
         householdPossibleDuplicates: householdPossibleDuplicateCount(
             noticeResult.notices,
         ),
+        flags,
     };
 }

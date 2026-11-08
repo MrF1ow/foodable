@@ -73,6 +73,8 @@ import type { Food, OnSimilar, SimilarFoodsEntry } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
 import { noticeActionFor, noticeSentence } from "../copy/notices.js";
+import type { FlagName } from "../flags.js";
+import { defaultViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -1326,9 +1328,17 @@ export async function groceryLineExtras(
     };
 }
 
+export type GatedToolEntry = {
+    name: string;
+    flag: FlagName;
+    registered: boolean;
+};
+
 export type ToolContext = {
     auth: AuthContext;
     baseUrl: string;
+    flags: ViewerFlags;
+    gatedTools: GatedToolEntry[];
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
     protocolEra?: "legacy" | "modern";
@@ -1375,6 +1385,7 @@ export function createToolContext(
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
     hasGoals = true,
+    flags: ViewerFlags = defaultViewerFlags(auth),
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1555,6 +1566,8 @@ export function createToolContext(
     return {
         auth,
         baseUrl,
+        flags,
+        gatedTools: [],
         widgetsEnabled,
         alcohol,
         protocolEra,

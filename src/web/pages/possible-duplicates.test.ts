@@ -4,8 +4,13 @@ import {
     DUP_MERGE_MODAL_ID,
     renderPossibleDuplicatesPage,
 } from "./possible-duplicates.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
-const chrome = { theme: "light" as const, attention: { count: 0, tabs: {} } };
+const chrome = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
+};
 
 test("open merge modal renders filled form for conflicting pair", () => {
     const subject = {

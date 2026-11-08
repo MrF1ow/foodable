@@ -6,10 +6,12 @@ import {
     householdMemberRulesModalId,
     renderHouseholdSettingsPage,
 } from "../web/pages/household.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 const alice: HouseholdMember = {
     householdId: "hh-1",

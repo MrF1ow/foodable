@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import { newFood } from "../../domain/foods.js";
 import {
@@ -10,7 +11,11 @@ const HH = "hh-web";
 test("usual products list starts empty with an add action", () => {
     const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
     const html = renderUsualProductsListPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         rows: [],
         addable: [eggs],
     });
@@ -34,7 +39,11 @@ test("usual products list shows foods with products", () => {
         genericFoodId: eggs.id,
     });
     const html = renderUsualProductsListPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         rows: [{ food: eggs, products: [kirkland], usual: kirkland }],
         addable: [],
     });
@@ -48,7 +57,11 @@ test("usual products list shows foods with products", () => {
 test("picker page includes search and manual product panels", () => {
     const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         food: eggs,
         products: [],
         usualProductId: null,
@@ -73,7 +86,11 @@ test("picker explains the list and gives each product a Remove that submits its 
         genericFoodId: eggs.id,
     });
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         food: eggs,
         products: [kirkland],
         usualProductId: null,

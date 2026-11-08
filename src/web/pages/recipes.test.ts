@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
@@ -33,7 +34,11 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
         ...recipe,
     };
     return {
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipe: mergedRecipe,
         ingredients: [],
         notices: [],
@@ -235,7 +240,11 @@ test("verification segment links keep list filters", () => {
         `/recipes?tag=dinner&can_make_now=1&safe_for=${encodeURIComponent(VIEWER)}`,
     );
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [{ userId: VIEWER, displayName: "Alice" }],
         viewerId: VIEWER,
@@ -250,7 +259,11 @@ test("verification segment links keep list filters", () => {
 
 test("recipes list shows verification filter and unverified badge", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-open",
@@ -315,7 +328,11 @@ test("unverified recipe detail shows problems panel and check again", () => {
 
 test("import from link modal field and busy submit attributes", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -330,7 +347,11 @@ test("import from link modal field and busy submit attributes", () => {
 
 test("import modal keeps url and shows error on 422 re-render", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -349,7 +370,11 @@ test("import modal keeps url and shows error on 422 re-render", () => {
 
 test("import paste step shows caption field and creator for Instagram", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -370,7 +395,11 @@ test("import paste step shows caption field and creator for Instagram", () => {
 
 test("import paste step for Pinterest lists website link first", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -386,7 +415,11 @@ test("import paste step for Pinterest lists website link first", () => {
 
 test("website failure paste step uses Paste the recipe label", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -404,7 +437,11 @@ test("website failure paste step uses Paste the recipe label", () => {
 
 test("import paste step uses cleaned https link for open post", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -420,7 +457,11 @@ test("import paste step uses cleaned https link for open post", () => {
 
 test("no_recipe_in_text re-render keeps pasted text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -435,7 +476,11 @@ test("no_recipe_in_text re-render keeps pasted text", () => {
 
 test("duplicate import shows open link in modal", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -448,7 +493,11 @@ test("duplicate import shows open link in modal", () => {
 
 test("recipe list shows source icon when import row exists", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-web",
@@ -510,7 +559,11 @@ test("recipe detail links source with credit", () => {
 
 test("recipe list source icon is labelled and does not capture clicks above the title link", async () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-web",
@@ -598,7 +651,11 @@ test("a read import shows its caption and spoken transcript", () => {
 
 test("check again submits the import form on screen with the typed text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
