@@ -33,7 +33,7 @@ const chrome = {
 test("theme save form posts account fields to /settings", () => {
     const html = renderSettingsPage({
         chrome: { theme: "dark" },
-        backHref: "/fridge",
+        backHref: "/kitchen/fridge",
         displayName: "Alice",
         timezone: "America/Los_Angeles",
         weightUnit: "lb",
@@ -42,8 +42,8 @@ test("theme save form posts account fields to /settings", () => {
         drinkUnit: "",
     });
     expect(html).toContain("<h1>Settings</h1>");
-    expect(html).toContain('href="/settings/help?from=%2Ffridge"');
-    expect(html).toContain('class="settings-back" href="/fridge"');
+    expect(html).toContain('href="/settings/help?from=%2Fkitchen%2Ffridge"');
+    expect(html).toContain('class="settings-back" href="/kitchen/fridge"');
     expect(html).toContain(
         '<form method="POST" action="/settings" class="appearance panel" data-turbo="false">',
     );
@@ -118,7 +118,7 @@ test("section rename updates the stored name", async () => {
     ).rejects.toThrow(/already exists/i);
 });
 
-test("owner household page has add-member form on /household only", () => {
+test("owner household page has add-member form on /settings/household only", () => {
     const html = renderHouseholdSettingsPage({
         chrome,
         householdName: "Home",
@@ -135,8 +135,8 @@ test("owner household page has add-member form on /household only", () => {
         unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain("<h1>Household</h1>");
-    expect(html).toContain('href="/household/items"');
-    expect(html).toContain('action="/household"');
+    expect(html).toContain('href="/settings/household/items"');
+    expect(html).toContain('action="/settings/household"');
     expect(html).toContain('commandfor="household-add-member"');
     expect(html).toContain("Alice");
     expect(html).toContain("Bob");
@@ -147,13 +147,17 @@ test("owner household page has add-member form on /household only", () => {
         `<template id="household-member-actions-${bob.userId}">`,
     );
     expect(html).toContain(
-        `data-fill-action="/household/members/${bob.userId}/make-owner"`,
+        `data-fill-action="/settings/household/members/${bob.userId}/make-owner"`,
     );
     expect(html).toContain(
-        `data-fill-action="/household/members/${bob.userId}/remove"`,
+        `data-fill-action="/settings/household/members/${bob.userId}/remove"`,
     );
-    expect(html).not.toContain(`/household/members/${alice.userId}/remove`);
-    expect(html).not.toContain(`/household/members/${alice.userId}/make-owner`);
+    expect(html).not.toContain(
+        `/settings/household/members/${alice.userId}/remove`,
+    );
+    expect(html).not.toContain(
+        `/settings/household/members/${alice.userId}/make-owner`,
+    );
     expect(html).toContain('name="confirm" value="yes" required');
 });
 
@@ -174,9 +178,9 @@ test("member household page is read-only without add-member", () => {
         unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain("Seattle");
-    expect(html).not.toContain('action="/household"');
+    expect(html).not.toContain('action="/settings/household"');
     expect(html).not.toContain('commandfor="household-add-member"');
-    expect(html).not.toContain('action="/household/stores"');
+    expect(html).not.toContain('action="/settings/household/stores"');
     expect(html).not.toContain("/make-owner");
     expect(html).not.toContain("/remove");
 });
@@ -201,7 +205,7 @@ test("household settings groups owner tools into cards and modals", () => {
         viewerUserId: alice.userId,
     } as never);
     expect(html).toContain(
-        '<a href="/household" aria-current="page">Members</a>',
+        '<a href="/settings/household" aria-current="page">Members</a>',
     );
     for (const heading of ["Household", "Members", "Grocery stores", "Rules"]) {
         expect(html).toContain(`<h2>${heading}</h2>`);
@@ -210,7 +214,7 @@ test("household settings groups owner tools into cards and modals", () => {
     expect(html).toContain('<li class="allergen pill pill-bad">');
     expect(html).toContain('<li class="dislike pill pill-dim">Olives</li>');
     expect(html).toContain(
-        '<form method="post" action="/household/name" class="household-name inline-form">',
+        '<form method="post" action="/settings/household/name" class="household-name inline-form">',
     );
 });
 
@@ -228,7 +232,7 @@ test("owner can make a member an admin without giving up ownership", () => {
         unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain(
-        `data-fill-action="/household/members/${bob.userId}/role"`,
+        `data-fill-action="/settings/household/members/${bob.userId}/role"`,
     );
     expect(html).toContain('data-fill-field-role="admin"');
     expect(html).toContain("You stay the owner.");
@@ -256,8 +260,10 @@ test("admin manages the household but not roles, removal or the token", () => {
         unverifiedRecipeExpiryDays: null,
     });
     expect(html).toContain('commandfor="household-add-member"');
-    expect(html).toContain('action="/household/name"');
-    expect(html).toContain(`action="/household/members/${carol.userId}/rules"`);
+    expect(html).toContain('action="/settings/household/name"');
+    expect(html).toContain(
+        `action="/settings/household/members/${carol.userId}/rules"`,
+    );
     expect(html).not.toContain("/role");
     expect(html).not.toContain("/make-owner");
     expect(html).not.toContain("household-rotate-token");
@@ -298,12 +304,14 @@ test("member edits their own rules and only their own", () => {
         viewerUserId: bob.userId,
         unverifiedRecipeExpiryDays: null,
     });
-    expect(html).toContain(`action="/household/members/${bob.userId}/rules"`);
     expect(html).toContain(
-        `action="/household/members/${bob.userId}/rules/r1/remove"`,
+        `action="/settings/household/members/${bob.userId}/rules"`,
+    );
+    expect(html).toContain(
+        `action="/settings/household/members/${bob.userId}/rules/r1/remove"`,
     );
     expect(html).not.toContain(
-        `action="/household/members/${alice.userId}/rules"`,
+        `action="/settings/household/members/${alice.userId}/rules"`,
     );
-    expect(html).not.toContain('action="/household/name"');
+    expect(html).not.toContain('action="/settings/household/name"');
 });

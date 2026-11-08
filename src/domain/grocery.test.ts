@@ -816,9 +816,9 @@ test("grocery page groups by store then section and shows already-have", () => {
     expect(html).toContain("already have");
     expect(html).toContain('class="quantity-field"');
     expect(html).toContain('class="food-picker"');
-    expect(html).toContain('href="/grocery" aria-current="page"');
-    expect(html).toContain('action="/grocery/lines"');
-    expect(html).not.toContain('action="/grocery/clear-checked"');
+    expect(html).toContain('href="/kitchen/groceries" aria-current="page"');
+    expect(html).toContain('action="/kitchen/groceries/lines"');
+    expect(html).not.toContain('action="/kitchen/groceries/clear-checked"');
     expect(html).toContain('commandfor="grocery-add-food"');
     expect(html).toContain('data-fill-field-store_id="st-1"');
     expect(html).not.toMatch(/<details class="more"/);
@@ -827,7 +827,7 @@ test("grocery page groups by store then section and shows already-have", () => {
     expect(html).not.toContain('name="kind" value="supply"');
     expect(html).not.toContain('data-kind="supply"');
     expect(html).not.toContain("grocery-add-store");
-    expect(html).not.toContain('action="/grocery/stores"');
+    expect(html).not.toContain('action="/kitchen/groceries/stores"');
 });
 
 const groceryChrome = {
@@ -843,11 +843,11 @@ test("owner grocery page has a short add-store form and no add-supply", () => {
     });
     expect(html).toContain("<h1>Groceries</h1>");
     expect(html).toContain('class="grocery-add-store"');
-    expect(html).toContain('action="/grocery/stores"');
+    expect(html).toContain('action="/kitchen/groceries/stores"');
     expect(html).toContain('id="grocery_store_name"');
     expect(html).toContain('name="name"');
     expect(html).toContain("Add store");
-    expect(html).toContain('href="/household">Household</a>');
+    expect(html).toContain('href="/settings/household">Household</a>');
     expect(html).toContain("under Household");
     expect(html).not.toContain("<h3>Add supply</h3>");
     expect(html).not.toContain("grocery-add-supply");
@@ -871,7 +871,7 @@ test("owner grocery page keeps the add-store form when a store already exists", 
     });
     expect(html).toContain('<h2 class="row-title">Corner</h2>');
     expect(html).toContain('class="grocery-add-store"');
-    expect(html).toContain('action="/grocery/stores"');
+    expect(html).toContain('action="/kitchen/groceries/stores"');
     expect(html).not.toContain("<h3>Add supply</h3>");
 });
 
@@ -882,10 +882,10 @@ test("member grocery page does not get the add-store form", () => {
         canManage: false,
     });
     expect(html).toContain("<h1>Groceries</h1>");
-    expect(html).toContain('href="/household">Household</a>');
+    expect(html).toContain('href="/settings/household">Household</a>');
     expect(html).toContain("under Household");
     expect(html).not.toContain("grocery-add-store");
-    expect(html).not.toContain('action="/grocery/stores"');
+    expect(html).not.toContain('action="/kitchen/groceries/stores"');
     expect(html).not.toContain("<h3>Add supply</h3>");
 });
 
@@ -899,7 +899,7 @@ test("empty store name error re-renders groceries with the banner", () => {
     expect(html).toContain("<h1>Groceries</h1>");
     expect(html).toContain('class="error-banner"');
     expect(html).toContain("Enter a store name.");
-    expect(html).toContain('action="/grocery/stores"');
+    expect(html).toContain('action="/kitchen/groceries/stores"');
     expect(html).not.toContain("<h3>Add supply</h3>");
 });
 
@@ -957,7 +957,7 @@ test("grocery lines are rows with a labelled round check button", () => {
     expect(html).toContain('id="grocery-add-food"');
     expect(html).not.toContain('id="grocery-add-food-st-1"');
     expect(html).toContain('commandfor="grocery-clear-checked"');
-    expect(html).toContain('action="/grocery/clear-checked"');
+    expect(html).toContain('action="/kitchen/groceries/clear-checked"');
     expect(html).toContain("grocery-clear-checked");
     expect(html).not.toMatch(/<details class="more"/);
 });
@@ -1209,7 +1209,7 @@ test("add-food modal contains the section select with picker forms", () => {
     expect(html).toContain('value="sec-produce"');
     expect(html).toContain('for="grocery-add-section"');
     expect(html).not.toContain("popovertarget=");
-    expect(html).toContain('data-fill-action="/grocery/lines"');
+    expect(html).toContain('data-fill-action="/kitchen/groceries/lines"');
 });
 
 test("owner with no stores does not auto-open the add-store modal", () => {

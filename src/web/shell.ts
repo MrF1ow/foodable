@@ -7,12 +7,14 @@ import { iconLogOut, iconSettings } from "./components/icons.js";
 
 export { bottomNav, escapeHtml };
 
+import { APP_PATHS } from "./route-map.js";
+
 export const APP_TABS = [
-    { id: "fridge", href: "/fridge", label: "Fridge" },
-    { id: "grocery", href: "/grocery", label: "Groceries" },
-    { id: "nutrition", href: "/", label: "Nutrition" },
-    { id: "recipes", href: "/recipes", label: "Recipes" },
-    { id: "household", href: "/household", label: "Household" },
+    { id: "fridge", href: APP_PATHS.kitchenFridge, label: "Fridge" },
+    { id: "grocery", href: APP_PATHS.kitchenGroceries, label: "Groceries" },
+    { id: "nutrition", href: APP_PATHS.nutrition, label: "Nutrition" },
+    { id: "recipes", href: APP_PATHS.recipes, label: "Recipes" },
+    { id: "household", href: APP_PATHS.settingsHousehold, label: "Household" },
 ] as const;
 
 export type AppTabId = (typeof APP_TABS)[number]["id"];

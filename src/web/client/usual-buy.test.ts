@@ -98,7 +98,7 @@ test("picker radios carry each row's own usual store and amount", () => {
         stores: [
             { id: "sams", householdId: "hh", name: "Sam's Club", sortOrder: 0 },
         ],
-        from: "/household/usual-products",
+        from: "/kitchen/usuals",
     } as never);
     expect(html).toContain("data-usual-buy-follow");
     // None carries the plain food's own (empty) values, not the product's.

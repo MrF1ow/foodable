@@ -1,3 +1,5 @@
+import { canonicalAppPath } from "./route-map.js";
+
 const BLOCKED_PREFIXES = [
     "/settings",
     "/logout",
@@ -7,8 +9,15 @@ const BLOCKED_PREFIXES = [
     "/exports",
 ] as const;
 
+function isSettingsHouseholdAppPath(pathname: string): boolean {
+    const lower = pathname.toLowerCase();
+    if (lower === "/settings/household") return true;
+    return lower.startsWith("/settings/household/");
+}
+
 function isBlockedPathname(pathname: string): boolean {
     const lower = pathname.toLowerCase();
+    if (isSettingsHouseholdAppPath(lower)) return false;
     return BLOCKED_PREFIXES.some(
         (blocked) => lower === blocked || lower.startsWith(`${blocked}/`),
     );
@@ -67,12 +76,15 @@ export function settingsBackHref(input: {
     origin: string;
 }): string {
     const from = input.from?.trim();
-    if (from && isSafeAppBackPath(from)) return from;
+    if (from) {
+        const canon = canonicalAppPath(from);
+        if (isSafeAppBackPath(canon)) return canon;
+    }
     if (input.referer) {
         try {
             const url = new URL(input.referer);
             if (url.origin === input.origin) {
-                const candidate = url.pathname + url.search;
+                const candidate = canonicalAppPath(url.pathname + url.search);
                 if (isSafeAppBackPath(candidate)) return candidate;
             }
         } catch {

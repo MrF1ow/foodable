@@ -266,7 +266,7 @@ export async function renderFridgeInventoryPage(
         ? linkProductPromptFromFoods(
               allFoods,
               linkProductId,
-              "/fridge",
+              "/kitchen/fridge",
               true,
               error,
           )
@@ -424,7 +424,7 @@ export async function renderGroceryListPage(
                                               (row) => row.id === line.foodId,
                                           ),
                                       ),
-                                      "/grocery",
+                                      "/kitchen/groceries",
                                   )
                                 : null,
                             putAwayProducts,
@@ -451,7 +451,7 @@ export async function renderGroceryListPage(
         ? linkProductPromptFromFoods(
               allFoods,
               opts.linkProductId,
-              "/grocery",
+              "/kitchen/groceries",
               true,
               opts.error,
           )
@@ -630,7 +630,7 @@ export async function renderSettingsFoodsPage(
         ...food,
         aliases: aliasMap.get(food.id) ?? [],
     }));
-    const from = safeReturnPath(opts.from, "/household/items");
+    const from = safeReturnPath(opts.from, "/settings/household/items");
     const linkProductPrompt = opts.linkProductId
         ? linkProductPromptFromFoods(
               foods,
@@ -723,7 +723,7 @@ export async function renderUsualProductsPickerPage(
     const products = foods
         .filter((row) => row.genericFoodId === foodId && !row.archivedAt)
         .sort((a, b) => a.name.localeCompare(b.name));
-    const from = safeReturnPath(opts.from, "/household/usual-products");
+    const from = safeReturnPath(opts.from, "/kitchen/usuals");
     const listed = foods;
     const catalog = new Map(listed.map((row) => [row.id, row]));
     const usualId = food.usualProductId;
@@ -813,7 +813,7 @@ export async function renderHouseholdSettingsRoute(
     const fetchRefusals = refusalsBatch.slice(0, 20);
     const fetchRefusalsShowMore =
         refusalsBatch.length > 20
-            ? `/household?refusals_after=${encodeURIComponent(
+            ? `/settings/household?refusals_after=${encodeURIComponent(
                   `${fetchRefusals.at(-1)!.refusedAt}|${fetchRefusals.at(-1)!.host}`,
               )}`
             : null;

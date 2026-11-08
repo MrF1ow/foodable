@@ -949,7 +949,12 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             foods: liveFoodsStore(),
         });
         const flash = addRecipeToGroceryToastFlash(added.added.length);
-        return redirectWithToast(c, "/grocery", flash.key, flash.params);
+        return redirectWithToast(
+            c,
+            "/kitchen/groceries",
+            flash.key,
+            flash.params,
+        );
     } catch (err) {
         const blocked = redirectIfUnverified(c, recipeId, err);
         if (blocked) return blocked;

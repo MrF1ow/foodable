@@ -5,7 +5,10 @@ import { renderNeedsAttentionInventoryPage } from "../loaders.js";
 
 export const needsAttentionRoutes = new Hono();
 
-const DISMISS_RETURN_ALLOWLIST = new Set(["/grocery", "/needs-attention"]);
+const DISMISS_RETURN_ALLOWLIST = new Set([
+    "/kitchen/groceries",
+    "/needs-attention",
+]);
 
 function dismissReturnTo(raw: string | undefined): string {
     if (raw && DISMISS_RETURN_ALLOWLIST.has(raw)) return raw;

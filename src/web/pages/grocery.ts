@@ -171,7 +171,7 @@ function sectionSlot(
 
 function storeFill(store: GroceryStoreView): ModalFill {
     return {
-        action: "/grocery/lines",
+        action: "/kitchen/groceries/lines",
         fields: {
             store_id: store.id,
             kind: "food",
@@ -214,7 +214,7 @@ function allergenModalBlock(
         )
         .join("\n");
     return `<div data-fill-transient>${noticeList(view.allergenNotices, { className: "allergen-warning" })}
-<form class="grocery-allergen-override" method="post" action="/grocery/lines">
+<form class="grocery-allergen-override" method="post" action="/kitchen/groceries/lines">
 ${hidden}
 <input type="hidden" name="confirm_allergen" value="1" />
 <button type="submit" class="btn-sm">Add anyway</button>
@@ -266,7 +266,7 @@ function lineRow(
 <input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" inputmode="decimal" value="1" required />
 <span class="muted grocery-put-away-unit">${escapeHtml(quantityUnitOptionLabel(line.quantity.unit))}</span>`
             : "";
-        putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
+        putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/kitchen/groceries/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
 ${productSelect}
@@ -287,7 +287,7 @@ ${noteHint}
             ? dupNotices
                   .map((n) =>
                       noticeInlineLink(n, line.foodId!, {
-                          from: "/grocery",
+                          from: "/kitchen/groceries",
                           foods: new Map(),
                       }),
                   )
@@ -384,7 +384,7 @@ function sharedAddFoodModal(view: GroceryPageView): string {
         }${sectionSlot(store, replayedSection)}
 ${renderFoodPicker({
     id: GROCERY_FOOD_PICKER_ID,
-    action: store ? "/grocery/lines" : "",
+    action: store ? "/kitchen/groceries/lines" : "",
     method: "post",
     hiddenFields: { kind: "food", store_id: store?.id ?? "" },
     formExtras: store ? grocerySectionFieldHtml(store) : "",
@@ -410,7 +410,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
     const empty =
         view.stores.length === 0
             ? `${emptyState("Add a grocery store under Household, then add a line.", "empty-grocery")}
-<p><a href="/household">Household</a></p>`
+<p><a href="/settings/household">Household</a></p>`
             : "";
     const locations = view.locations ?? [];
     const stores = view.stores
@@ -452,7 +452,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
                 id: ADD_STORE_MODAL_ID,
                 title: "Add store",
                 openOnLoad: modalOpen(view, ADD_STORE_MODAL_ID),
-                body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/grocery/stores">
+                body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/kitchen/groceries/stores">
 ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
@@ -466,7 +466,7 @@ ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id=
                 id: CLEAR_CHECKED_MODAL_ID,
                 title: "Clear checked",
                 message: "Remove every checked item from the list?",
-                action: "/grocery/clear-checked",
+                action: "/kitchen/groceries/clear-checked",
                 confirmLabel: "Clear checked",
                 formClass: "modal-confirm grocery-clear-checked",
                 openOnLoad: modalOpen(view, CLEAR_CHECKED_MODAL_ID),

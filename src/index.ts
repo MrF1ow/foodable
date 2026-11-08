@@ -49,6 +49,7 @@ import { createExportsRouter } from "./exports-route.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
 import { initFlags } from "./flags.js";
+import { legacyRedirects } from "./web/legacy-redirects.js";
 
 const app = new Hono();
 
@@ -278,6 +279,8 @@ app.all(
 );
 
 app.use("*", flashToastMiddleware);
+
+app.use("*", legacyRedirects());
 
 app.route("/", nutritionRoutes);
 app.route("/", foodsRoutes);

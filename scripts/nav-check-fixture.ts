@@ -41,7 +41,7 @@ import {
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
-import { legacyHouseholdPath } from "../src/web/routes/household.js";
+import { legacyRedirectTarget } from "../src/web/route-map.js";
 import {
     settingsBackHref,
     settingsUrlWithBack,
@@ -339,7 +339,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
         settings: renderSettingsPage({
             chrome,
-            backHref: "/fridge",
+            backHref: "/kitchen/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
             weightUnit: "kg",
@@ -378,10 +378,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             isOwner: true,
         } as never),
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
-        help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        help: renderSettingsHelpPage({
+            chrome,
+            backHref: "/kitchen/fridge",
+        } as never),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
-            backHref: "/fridge",
+            backHref: "/kitchen/fridge",
             member: { ...ME, role: "owner" },
             preferences: {
                 ...EMPTY_HOUSEHOLD_PREFERENCES,
@@ -438,14 +441,14 @@ for (const theme of ["light", "dark"] as const) {
 
 const ROUTE_BASE: Record<string, string> = {
     "/": "nutrition",
-    "/fridge": "fridge",
-    "/grocery": "grocery",
+    "/kitchen/fridge": "fridge",
+    "/kitchen/groceries": "grocery",
     "/recipes": "recipes",
     "/settings": "settings",
     "/settings/help": "help",
     "/settings/household-settings": "settings-household",
-    "/household": "household",
-    "/household/items": "foods",
+    "/settings/household": "household",
+    "/settings/household/items": "foods",
     "/create-household": "create-household",
 };
 
@@ -572,7 +575,7 @@ function renderFailedModal(pathname: string, modalId: string): string | null {
         ...viewerChromeFromProfile({ theme: themeFileSuffix() }),
         attention: { count: 0, tabs: {} },
     };
-    if (pathname === "/fridge") {
+    if (pathname === "/kitchen/fridge") {
         const view = fridgeView(chrome);
         const itemId = (prefix: string) =>
             modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
@@ -615,7 +618,10 @@ function renderFailedModal(pathname: string, modalId: string): string | null {
             openModalId: modalId,
         } as never);
     }
-    if (pathname === "/household/items" && modalId.startsWith("food-edit-")) {
+    if (
+        pathname === "/settings/household/items" &&
+        modalId.startsWith("food-edit-")
+    ) {
         const id = modalId.slice("food-edit-".length);
         const view = foodsSettingsFixture(chrome);
         if (!id || !view.foods.some((item) => item.id === id)) return null;
@@ -694,7 +700,7 @@ const server = Bun.serve({
     async fetch(req) {
         const url = new URL(req.url);
         const path = url.pathname;
-        const legacyTarget = legacyHouseholdPath(path + url.search);
+        const legacyTarget = legacyRedirectTarget(path + url.search);
         if (legacyTarget) {
             const status =
                 req.method === "GET" || req.method === "HEAD" ? 301 : 308;
@@ -854,7 +860,8 @@ const server = Bun.serve({
             }
             if (postDelay) await sleep(postDelay);
             const referer =
-                req.headers.get("referer") || "http://127.0.0.1:4791/fridge";
+                req.headers.get("referer") ||
+                "http://127.0.0.1:4791/kitchen/fridge";
             const dest = new URL(referer);
             let destKey = dest.pathname + dest.search;
             if (path === "/settings") {
@@ -879,7 +886,8 @@ const server = Bun.serve({
                     headers: { "content-type": "text/html; charset=utf-8" },
                 });
             }
-            const item = path.split("/")[3] || "";
+            const item =
+                /^\/kitchen\/fridge\/items\/([^/]+)/.exec(path)?.[1] ?? "";
             if (postMode === "fail" || postMode === "modal") {
                 const rendered = renderFailedModal(dest.pathname, modalId);
                 if (rendered) {
@@ -899,7 +907,10 @@ const server = Bun.serve({
                 });
             }
             if (path.includes("/delete") && item) html = stripItem(html, item);
-            if (postMode === "ok" && /^\/fridge\/items\/[^/]+$/.test(path)) {
+            if (
+                postMode === "ok" &&
+                new RegExp("^/kitchen/fridge/items/[^/]+$").test(path)
+            ) {
                 const amount = entries.find(([k]) => k === "qty_amount")?.[1];
                 const unit = entries.find(([k]) => k === "qty_unit")?.[1] ?? "";
                 const n = amount == null ? Number.NaN : Number(amount);

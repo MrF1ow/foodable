@@ -157,7 +157,7 @@ test("recipe.no_nutrition renders usual-product link from notices", () => {
         },
     });
     expect(html).toContain(
-        '<p class="recipe-ingredient-usual"><a href="/household/usual-products/f-buttermilk?from=%2Frecipes%2Fr1">Pick usual product</a></p>',
+        '<p class="recipe-ingredient-usual"><a href="/kitchen/usuals/f-buttermilk?from=%2Frecipes%2Fr1">Pick usual product</a></p>',
     );
 });
 

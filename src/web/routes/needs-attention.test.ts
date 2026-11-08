@@ -305,7 +305,7 @@ describe("needs-attention routes", () => {
         expect(await page.text()).not.toContain("Soon yogurt");
     });
 
-    test("POST dismiss with return_to=/grocery redirects to grocery", async () => {
+    test("POST dismiss with return_to=/kitchen/groceries redirects to grocery", async () => {
         const { yogurt } = await seedGroupedNotices();
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
@@ -317,11 +317,11 @@ describe("needs-attention routes", () => {
                 code: "fridge.expiring",
                 subject_kind: "fridge_item",
                 subject_id: yogurt.id,
-                return_to: "/grocery",
+                return_to: "/kitchen/groceries",
             }).toString(),
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/grocery");
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
     });
 
     test("POST dismiss rejects open-redirect return_to", async () => {
@@ -386,7 +386,7 @@ describe("needs-attention routes", () => {
         expect(after.notices).toEqual(before.notices);
     });
 
-    test("POST dismiss that fails with return_to=/grocery goes back to grocery", async () => {
+    test("POST dismiss that fails with return_to=/kitchen/groceries goes back to grocery", async () => {
         const today = utcTodayFromDate();
         const loc = await addLocation(db.fridgeStore, HH, "Fridge");
         const milk = await addManualFood(db.fridgeStore, db.foodsStore, {
@@ -413,11 +413,11 @@ describe("needs-attention routes", () => {
                 code: "fridge.expired",
                 subject_kind: "fridge_item",
                 subject_id: milk.id,
-                return_to: "/grocery",
+                return_to: "/kitchen/groceries",
             }).toString(),
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/grocery");
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
         const after = await noticesFor(noticeDeps(), HH, {
             today: utcTodayFromDate(),
         });
@@ -520,7 +520,7 @@ describe("needs-attention routes", () => {
     });
 
     test("top-bar badge only when count > 0 and settings gear keeps data-turbo", async () => {
-        const empty = await app().request("http://x/fridge", {
+        const empty = await app().request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(ALICE) },
         });
         const emptyHtml = await empty.text();
@@ -533,7 +533,7 @@ describe("needs-attention routes", () => {
         });
         const count = needsAttentionCount(open.notices);
         expect(count).toBeGreaterThan(0);
-        const withBadge = await app().request("http://x/fridge", {
+        const withBadge = await app().request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(ALICE) },
         });
         const badgeHtml = await withBadge.text();
@@ -648,7 +648,7 @@ describe("needs-attention routes", () => {
         });
         const html = await r.text();
         expect(html).toContain(
-            `action="/fridge/items/${yogurt.id}/add-to-grocery"`,
+            `action="/kitchen/fridge/items/${yogurt.id}/add-to-grocery"`,
         );
         expect(html).toContain(
             '<input type="hidden" name="from" value="/needs-attention" />',
@@ -739,14 +739,17 @@ describe("needs-attention routes", () => {
             relatedKey: "",
             dismissedBy: ALICE,
         });
-        await app().request(`http://x/fridge/locations/${loc.id}/delete`, {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        await app().request(
+            `http://x/kitchen/fridge/locations/${loc.id}/delete`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "",
             },
-            body: "",
-        });
+        );
         const rows = await db.dismissalsStore.listForHousehold(HH);
         expect(rows.some((r) => r.subjectId === item.id)).toBe(false);
     });

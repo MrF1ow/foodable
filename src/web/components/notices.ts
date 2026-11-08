@@ -37,13 +37,13 @@ export const NOTICE_ROUTES: Record<
     addFridgeItemToGrocery(notice) {
         const subject = notice.subject;
         if (subject.kind !== "fridge_item") return null;
-        return `/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
+        return `/kitchen/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
     },
     possibleDuplicatePair(notice, _ctx) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         if (notice.subject.kind !== "food" || !foodRel) return null;
         const pair = normalizePairIds(notice.subject.id, foodRel.id);
-        return `/household/possible-duplicates#dup-${encodeURIComponent(pair.subjectId)}-${encodeURIComponent(pair.relatedKey)}`;
+        return `/settings/household/possible-duplicates#dup-${encodeURIComponent(pair.subjectId)}-${encodeURIComponent(pair.relatedKey)}`;
     },
 };
 
