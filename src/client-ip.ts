@@ -208,7 +208,7 @@ export function parseClientIpConfig(
             source = lowered;
         } else {
             throw new Error(
-                `Invalid CLIENT_IP_SOURCE: ${sourceRaw} (expected socket, x-real-ip, or x-forwarded-for)`,
+                "Invalid CLIENT_IP_SOURCE (expected socket, x-real-ip, or x-forwarded-for)",
             );
         }
     }
@@ -218,13 +218,13 @@ export function parseClientIpConfig(
     if (hopsRaw !== "") {
         if (!/^[1-9][0-9]*$/.test(hopsRaw)) {
             throw new Error(
-                `Invalid TRUSTED_PROXY_HOPS: ${hopsRaw} (expected a positive integer without leading zeros)`,
+                "Invalid TRUSTED_PROXY_HOPS (expected a positive integer without leading zeros)",
             );
         }
         const n = Number(hopsRaw);
         if (n > MAX_TRUSTED_HOPS) {
             throw new Error(
-                `Invalid TRUSTED_PROXY_HOPS: ${hopsRaw} (maximum is ${MAX_TRUSTED_HOPS})`,
+                `Invalid TRUSTED_PROXY_HOPS (maximum is ${MAX_TRUSTED_HOPS})`,
             );
         }
         trustedHops = n;
