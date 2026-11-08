@@ -17,6 +17,9 @@ import {
     getProfile,
 } from "../db/profiles.js";
 import { getNutritionGoals } from "../db/nutrition.js";
+import { getHouseholdMembership } from "../db/household.js";
+import { buildFlagContext } from "../flags.js";
+import { evaluateViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import {
     createToolContext,
     NUTRIENT_COVERAGE,
@@ -120,6 +123,7 @@ export function registerTools(
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
     hasGoals = true,
+    flags?: ViewerFlags,
 ) {
     const ctx = createToolContext(
         auth,
@@ -128,6 +132,7 @@ export function registerTools(
         protocolEra,
         baseUrl,
         hasGoals,
+        flags,
     );
     // Original registerTool order is not grouped by domain. Call consecutive
     // runs so tools/list stays byte-identical, including order.
@@ -149,6 +154,7 @@ export function registerTools(
     registerCatalogFoodTools(server, ctx);
     registerNoticeTools(server, ctx);
     registerHouseholdTools(server, ctx);
+    return ctx;
 }
 
 // The bare server: identity, capabilities and instructions, no tools. Shared
@@ -217,14 +223,19 @@ async function buildMcpServer(
     // Goals are read beside the profile, not after it: they only decide whether
     // the meal-logged widget is linked (see ToolContext.hasGoals). A household
     // token has no single member to read goals for, so it keeps the link.
-    const [profile, goals] =
+    const [profile, goals, member] =
         auth.kind === "user"
             ? await Promise.all([
                   getProfile(auth.userId),
                   getNutritionGoals(auth.userId),
+                  // Membership gives household_id and role for flag context on
+                  // user tokens (same fields buildFlagContext uses on the site).
+                  getHouseholdMembership(auth.userId),
               ])
-            : [null, undefined];
+            : [null, undefined, null];
     const drinkUnit = preferredDrinkUnitFromProfile(profile);
+    const flagCtx = buildFlagContext({ auth, member });
+    const flags = evaluateViewerFlags(flagCtx);
 
     registerTools(
         server,
@@ -234,6 +245,7 @@ async function buildMcpServer(
         protocolEra,
         baseUrl,
         goals !== null,
+        flags,
     );
     return server;
 }

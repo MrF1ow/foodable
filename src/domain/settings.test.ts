@@ -9,6 +9,7 @@ import {
 import { renderSettingsPage } from "../web/pages/settings.js";
 import { renderHouseholdSettingsPage } from "../web/pages/household.js";
 import type { HouseholdMember } from "../household.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 const HH = "hh-1";
 
@@ -28,6 +29,7 @@ const bob: HouseholdMember = {
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 test("theme save form posts account fields to /settings", () => {

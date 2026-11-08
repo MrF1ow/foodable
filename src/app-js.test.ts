@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
 import { TOASTS } from "./copy/toasts.js";
@@ -146,10 +147,18 @@ test("no app page HTML contains a script with a body except widget frames", asyn
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -173,7 +182,11 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         ],
     });
     const recipes = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: "11111111-1111-4111-8111-111111111111",
@@ -196,7 +209,11 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -234,7 +251,11 @@ test("the Fridge page ships the picker logic once", async () => {
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
     expect(html).not.toContain("/api/foods/search");

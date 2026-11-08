@@ -226,7 +226,7 @@ export async function renderDashboardPage(
             weight,
             chrome: await viewerChromeWithAttention(
                 viewerProfile,
-                access.subject.householdId,
+                access.viewer,
             ),
             cardOrder: orderCards(viewerProfile?.nutrition_layout),
             viewMemberId,
@@ -278,7 +278,7 @@ export async function renderFridgeInventoryPage(
             today,
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 await loadHouseholdNotices(householdId, { today }),
             ),
             error,
@@ -465,7 +465,7 @@ export async function renderGroceryListPage(
         html: renderGroceryPage({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             foodDuplicateNotices,
@@ -648,7 +648,7 @@ export async function renderSettingsFoodsPage(
         html: renderFoodsSettingsPage({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             foods: withAliases,
@@ -690,7 +690,7 @@ export async function renderUsualProductsListPage(
         html: renderUsualProductsListHtml({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             rows,
@@ -750,7 +750,7 @@ export async function renderUsualProductsPickerPage(
         html: renderUsualProductsPickerHtml({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             food,
@@ -824,7 +824,7 @@ export async function renderHouseholdSettingsRoute(
         html: renderHouseholdSettingsPage({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             householdName: config.name,
@@ -952,7 +952,7 @@ export async function renderRecipesListPage(
     return {
         status: 200,
         html: renderRecipesPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(profile, gate.viewer),
             recipes,
             members: members.map((member) => ({
                 userId: member.userId,
@@ -1104,7 +1104,7 @@ export async function renderRecipeDetailRoute(
         html: renderRecipeDetailPage({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             foodDuplicateNotices,
@@ -1213,7 +1213,7 @@ export async function renderNeedsAttentionInventoryPage(
     const result = await loadHouseholdNotices(householdId, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
-        householdId,
+        gate.viewer,
         result,
     );
     const html = renderNeedsAttentionPage({
@@ -1259,7 +1259,7 @@ export async function renderPossibleDuplicatesRoute(
         html: renderPossibleDuplicatesPage({
             chrome: await viewerChromeWithAttention(
                 profile,
-                householdId,
+                gate.viewer,
                 noticeResult,
             ),
             pairs,

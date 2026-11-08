@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -80,10 +81,18 @@ test("fridge page and grocery page import the same quantity-field and food-picke
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -118,7 +127,11 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(fridge).toContain("Add household item");
     expect(fridge).toContain("fridge-add-supply");
     const recipes = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipe: {
             id: "r1",
             householdId: "hh-1",
@@ -221,7 +234,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
                 foodId: null,
             },
         ],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         error: "Enter a location name.",
     });
     expect(fridge).toContain('class="error-banner"');
@@ -234,14 +251,22 @@ test("household pages call shared markup helpers for banners, empty states, and 
         today: FRIDGE_PAGE_TODAY,
         locations: [],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect(emptyFridge).toContain(
         '<p class="empty-fridge">Add a location, then add an item.</p>',
     );
 
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [],
         canManage: true,
         error: "Enter a store name.",
@@ -255,7 +280,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(grocery).not.toContain("<h3>Add supply</h3>");
 
     const groceryWithLine = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -298,7 +327,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(groceryWithLine).toContain("Cottage Cheese");
 
     const recipes = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: "11111111-1111-4111-8111-111111111111",
@@ -501,7 +534,11 @@ test("member multi-select, already-have, and store sections still render", () =>
     expect(members).toContain("Alice");
     expect(members).toContain("Bob");
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",

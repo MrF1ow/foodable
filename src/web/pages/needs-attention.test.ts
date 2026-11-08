@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 import type { Notice } from "../../domain/notices.js";
 import type { NoticeDismissal } from "../../domain/notice-dismissals.js";
 import { renderNeedsAttentionPage } from "./needs-attention.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 3, tabs: { fridge: true, recipes: true } },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 function expiring(id: string): Notice {

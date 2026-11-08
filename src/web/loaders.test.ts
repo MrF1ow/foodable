@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import { withWidgetData } from "../widgets.js";
 import {
@@ -28,6 +29,7 @@ const bob: HouseholdMember = {
 const lightChrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 test("withWidgetData seeds the existing script, not a second tag", () => {
@@ -145,7 +147,11 @@ test("dashboard frames round-trip widget data and cannot break out of the attrib
         goals,
         trends,
         weight,
-        chrome: { theme: "system", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "system",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: defaultCardOrder,
     });
     for (const key of NUTRITION_CARDS) {

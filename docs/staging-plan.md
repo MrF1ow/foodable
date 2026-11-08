@@ -71,7 +71,7 @@ All rules serve `true`. 0, merged dark (default `false`, flag-off tests green). 
 
 ### What a flag gates
 
-New web routes and tabs, new MCP tools, and the "switch" step of expand, backfill, switch, contract. A schema change is never behind a flag, because migrations always run. Writes are never gated and keep the whole record. A gated route is declared through `gatedRoute`, a gated tool through `gatedTool`; tests check that every gated route answers a redirect or 404 with its flag off, that the flag-off tool list is the snapshot minus the gated tools, and that every page renders with flags all on, all off, and parents on with children off.
+New web routes and tabs, new MCP tools, and the "switch" step of expand, backfill, switch, contract. A schema change is never behind a flag, because migrations always run. Writes are never gated and keep the whole record. A gated route is declared through `gatedRoute` (`src/web/gated.ts`), a gated tool through `gatedTool` (`src/mcp/gated.ts`); `src/test-support/flag-harness.ts` holds the checks, and they already run over everything: `src/web/gated-routes.test.ts` finds every `gatedRoute` in the composed app (through `app.routes`) and requests it with its flag off, and `src/mcp.test.ts` builds `registerTools` with flags off and compares against the snapshot minus `ctx.gatedTools`. A new gated route or tool gets its flag-off tests without writing any. Tests check that every gated route answers a redirect or 404 with its flag off, that the flag-off tool list is the snapshot minus the gated tools, and that every page renders with flags all on, all off, and parents on with children off.
 
 ### Metrics
 

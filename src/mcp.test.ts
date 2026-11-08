@@ -60,6 +60,18 @@ import {
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
+import { z } from "zod";
+import {
+    allFlagsOff,
+    allFlagsOn,
+    buildFlagContext,
+    createMemoryFlags,
+    defaultFlags,
+} from "./flags.js";
+import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
+import { createToolContext } from "./mcp/shared.js";
+import { gatedTool } from "./mcp/gated.js";
+import { toolNamesFor } from "./test-support/flag-harness.js";
 
 // Snapshot BEFORE mock.module runs: Bun patches a mocked module's namespace
 // in place, so restoring from the live import afterwards would hand the next
@@ -3832,6 +3844,265 @@ describe("household config tools", () => {
         ).json()) as string[];
         await withHousehold(async (_call, list) => {
             expect(await list()).toEqual(snapshot);
+        });
+    });
+
+    describe("gated tools and flag-off tool list", () => {
+        const snapshot = (async () =>
+            (await Bun.file(
+                new URL("./mcp/tools-list.snapshot.json", import.meta.url),
+            ).json()) as string[])();
+
+        function viewerFlagCtx() {
+            return buildFlagContext({
+                auth: { kind: "user", userId: "u1" },
+                member: {
+                    userId: "u1",
+                    householdId: "hh-1",
+                    role: "owner",
+                    displayName: "Owner",
+                },
+            });
+        }
+
+        // The snapshot is the all-flags-on list. With a flag off, tools/list
+        // is the snapshot minus exactly the gated tools left unregistered, in
+        // the same order. No real tool is gated yet, so today both are equal.
+        async function listAgainstSnapshot(flags: ViewerFlags) {
+            const { names, gated } = await toolNamesFor(flags);
+            const hidden = new Set(
+                gated.filter((e) => !e.registered).map((e) => e.name),
+            );
+            return {
+                names,
+                expected: (await snapshot).filter((name) => !hidden.has(name)),
+            };
+        }
+
+        test("all flags off is the snapshot minus gated tools", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(allFlagsOff()),
+            );
+            const { names, expected } = await listAgainstSnapshot(flags);
+            expect(names).toEqual(expected);
+        });
+
+        test("all flags on matches snapshot", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(allFlagsOn()),
+            );
+            const { names } = await toolNamesFor(flags);
+            expect(names).toEqual(await snapshot);
+        });
+
+        test("registry defaults match snapshot", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(defaultFlags()),
+            );
+            const { names, expected } = await listAgainstSnapshot(flags);
+            expect(names).toEqual(expected);
+        });
+
+        test("gatedTool stays out of tools/list when off and keeps neighbor order", async () => {
+            const offFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": false }),
+            );
+            const { names, gated } = await toolNamesFor(
+                offFlags,
+                (server, auth) => {
+                    const ctx = createToolContext(
+                        auth,
+                        true,
+                        null,
+                        undefined,
+                        "http://localhost",
+                        true,
+                        offFlags,
+                    );
+                    server.registerTool(
+                        "test_tool_a",
+                        {
+                            title: "A",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "a" }],
+                        }),
+                    );
+                    gatedTool(
+                        server,
+                        ctx,
+                        "ui-v2",
+                        "test_gated_tool",
+                        {
+                            title: "Gated",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "gated" }],
+                        }),
+                    );
+                    server.registerTool(
+                        "test_tool_b",
+                        {
+                            title: "B",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "b" }],
+                        }),
+                    );
+                    return ctx.gatedTools;
+                },
+            );
+            expect(names).toEqual(["test_tool_a", "test_tool_b"]);
+            expect(gated).toEqual([
+                { name: "test_gated_tool", flag: "ui-v2", registered: false },
+            ]);
+        });
+
+        test("gated tool off answers unknown-tool; on is listed and callable", async () => {
+            const offFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": false }),
+            );
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const ctx = createToolContext(
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                offFlags,
+            );
+            gatedTool(
+                server,
+                ctx,
+                "ui-v2",
+                "test_gated_tool",
+                {
+                    title: "Gated",
+                    description: "test",
+                    inputSchema: z.object({ _ping: z.string().optional() }),
+                },
+                async (_args) => ({
+                    content: [{ type: "text" as const, text: "gated" }],
+                }),
+            );
+            const [clientTransport, serverTransport] =
+                InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([
+                server.connect(serverTransport),
+                client.connect(clientTransport),
+            ]);
+            try {
+                await expect(
+                    client.callTool({
+                        name: "test_gated_tool",
+                        arguments: {},
+                    }),
+                ).rejects.toThrow(/not found/i);
+            } finally {
+                await client.close();
+                await server.close();
+            }
+
+            const onFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": true }),
+            );
+            const { names } = await toolNamesFor(onFlags, (server, auth) => {
+                const ctxOn = createToolContext(
+                    auth,
+                    true,
+                    null,
+                    undefined,
+                    "http://localhost",
+                    true,
+                    onFlags,
+                );
+                gatedTool(
+                    server,
+                    ctxOn,
+                    "ui-v2",
+                    "test_gated_tool",
+                    {
+                        title: "Gated",
+                        description: "test",
+                        inputSchema: z.object({ _ping: z.string().optional() }),
+                    },
+                    async () => ({
+                        content: [{ type: "text", text: "gated" }],
+                    }),
+                );
+                return ctxOn.gatedTools;
+            });
+            expect(names).toEqual(["test_gated_tool"]);
+            const onServer = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const ctxOn = createToolContext(
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                onFlags,
+            );
+            gatedTool(
+                onServer,
+                ctxOn,
+                "ui-v2",
+                "test_gated_tool",
+                {
+                    title: "Gated",
+                    description: "test",
+                    inputSchema: z.object({ _ping: z.string().optional() }),
+                },
+                async () => ({
+                    content: [{ type: "text", text: "gated" }],
+                }),
+            );
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            const onClient = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([onServer.connect(st), onClient.connect(ct)]);
+            try {
+                const r = (await onClient.callTool({
+                    name: "test_gated_tool",
+                    arguments: {},
+                })) as ToolResult;
+                expect(r.isError).not.toBe(true);
+                expect(textOf(r)).toBe("gated");
+            } finally {
+                await onClient.close();
+                await onServer.close();
+            }
         });
     });
 

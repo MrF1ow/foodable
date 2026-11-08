@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import {
     addFoodByBarcode,
@@ -477,7 +478,11 @@ test("create recipe requires a name and a positive yield", async () => {
 
 test("recipes list page is not a stub and detail reuses shared picker", () => {
     const list = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r1",
@@ -505,7 +510,11 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
     expect(list).toContain('action="/recipes"');
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -599,7 +608,11 @@ test("recipe pages use modals for create and detail actions", async () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
     };
     const list = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [recipe],
         members: [],
         viewerId: "u1",
@@ -622,7 +635,11 @@ test("recipe pages use modals for create and detail actions", async () => {
     );
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         ...emptyRecipeNotices("r1"),
         recipe,
         ingredients: [
@@ -682,7 +699,11 @@ test("recipe pages use modals for create and detail actions", async () => {
 
 test("a server error reopens the recipe modal that submitted the form", () => {
     const list = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: "u1",
@@ -702,7 +723,11 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(list.indexOf("Enter a recipe name.")).toBeLessThan(newDialogEnd);
 
     const detail = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -770,7 +795,11 @@ test("a server error reopens the recipe modal that submitted the form", () => {
     expect(detail.indexOf(deleteMsg)).toBeLessThan(deleteDialogEnd);
 
     const editIng = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",
@@ -835,7 +864,11 @@ test("a server error reopens the recipe modal that submitted the form", () => {
 
 test("recipe detail shows a page banner when openModalId does not match a dialog", () => {
     const html = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         ...emptyRecipeNotices("r1"),
         recipe: {
             id: "r1",

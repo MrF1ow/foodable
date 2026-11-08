@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import { newFood } from "../../domain/foods.js";
 import { renderUsualProductsPickerPage } from "../pages/usual-products.js";
@@ -89,7 +90,11 @@ test("picker radios carry each row's own usual store and amount", () => {
         usualAmount: { amount: 50, unit: "lb" },
     };
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: null, attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: null,
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         food: { ...flour, usualProductId: almonds.id },
         products: [almonds],
         usualProductId: almonds.id,
