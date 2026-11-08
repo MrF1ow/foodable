@@ -12,3 +12,5 @@ prs: []
 ---
 
 Today a dismissed pair never comes back unless a food is merged; undo lives in Needs attention › Show dismissed. Plan: "Open questions".
+
+Decided 2026-11-08: "Keep separate" never expires; undo stays where dismissed notices are listed (Settings › Household in the redesign).

@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-One migration, never behind a flag: `flag_assignments` (sticky pins per user or household, with epoch and expiry), `flag_snapshot` (last-known kill-switch values), `flag_group_members` and the append-only `flag_group_events`, and `flag_eval_daily`. Row level security and `service_role` grants in the same file.
+One migration, never behind a flag: `flag_assignments` (sticky pins per user or household, with epoch and expiry), `flag_snapshot` (last-known kill-switch values), `flag_beta_members` with an append-only `flag_beta_events`, and `flag_eval_daily`. Row level security and `service_role` grants in the same file. The internal list is not stored here: it lives in Railway (STG-9).

@@ -38,7 +38,7 @@ The overall score is the weighted mean of the parts that are known. A missing pa
 
 Weights are presets with sliders underneath: Balanced (close to Yuka's split), Whole foods (processing heavy), Additive-averse, Planet-friendly, and Custom. They are stored per member, with a household default, and the score is computed on read, so changing weights re-scores everything at once.
 
-Open: the exact penalty per additive tier and the minimum known weight. Pick them with fixtures of real products when SCORE-2 starts.
+Bands, decided 2026-11-08: good is 70 and up, middling 40–69, poor below 40 (`accent/fill`, `status/warn`, `status/over`). Badges use the viewer's own weights; owners and admins edit the household default. Still open: the exact penalty per additive tier and the minimum known weight. Pick them with fixtures of real products when SCORE-2 starts.
 
 ## What it means for each person (SCORE-4)
 

@@ -7,7 +7,7 @@ Add a `staging` environment in the same Railway project that deploys every commi
 ## Environments
 
 - Create `staging` with **Duplicate Environment** from production. That copies services, variables and settings, but not sealed variables, and not data: staging gets its own Postgres, volume and domain.
-- Staging's app service tracks `main` with auto-deploy and "wait for CI". Production stops auto-deploying. It either deploys a chosen commit by hand or tracks a `production` branch that is fast-forwarded to the release tag (`v<version>`, from `bun run release`). Pick one when this ships. The branch is easier to audit.
+- Staging's app service tracks `main` with auto-deploy and "wait for CI". Production stops auto-deploying. It tracks a `production` branch that is fast-forwarded to the release tag (`v<version>`, from `bun run release`), decided 2026-11-08 (STG-2): the branch is easier to audit than deploying a chosen commit by hand.
 - Migrations run as the pre-deploy command in both environments, so every migration reaches staging's database first. That is the main reason to have staging at all.
 - Variables that must differ: `DATABASE_URL`, `PUBLIC_ORIGIN` and the domain, and the session secret, so a staging session or export token is never valid on production. Agents connect to staging over OAuth separately.
 - Staging data: either the fixture data (`scripts/migration-dryrun/seed.sql`), or a copy of production made with `bun run db:import-postgres` into an empty database at the same migration version. A copy is the household's real data, and it stays on staging until it is wiped.
@@ -50,19 +50,20 @@ Each flag declares its unit, `user` or `household`. Anything that acts on shared
 
 ### Consistency and last-known values
 
-- **Sticky pins.** Every temporary flag is pinned per subject in `flag_assignments` the first time it is evaluated from a fresh registry, and the pin holds until it expires or the flag's epoch changes. Web and MCP read the same pin, so a member sees the same answer everywhere and `tools/list` does not change mid-conversation. Pins are cached in memory per subject (`createTtlCache`), so a request makes no extra query. The site session is a signed user id with no session row, so pins are per user, not per session.
+- **Sticky pins.** Every temporary flag is pinned per subject in `flag_assignments` the first time it is evaluated from a fresh registry, and the pin holds for 12 hours or until the flag's epoch changes. Web and MCP read the same pin, so a member sees the same answer everywhere and `tools/list` does not change mid-conversation. Pins are cached in memory per subject (`createTtlCache`), so a request makes no extra query. The site session is a signed user id with no session row, so pins are per user, not per session.
 - **No flicker.** A shell change also changes the content-hashed asset URLs, which Turbo tracks, so the page reloads once instead of morphing.
 - **Rollback.** A numeric `flags-epoch` (global or per flag) makes every pin re-evaluate on its next read.
 - **Railway unreachable.** Sticky flags serve existing pins; a subject with no pin gets the fallback and no pin is written. Kill switches are never pinned: they serve the last value in memory, then the last value saved in `flag_snapshot`, then their fallback.
 
 ### Who is on a flag
 
-- **Groups.** `flag_group_members` and an append-only `flag_group_events`. `internal` (the owner first) is set by an operator with a container script; `beta` is joined by members themselves in Settings › "Try new features". Adding a member clears their pins, so it applies at once. No deploy.
-- **Rules in git.** `flags/rollout.yml` holds each flag's default and rules; `bun run flags:apply` (the `railway flag` CLI) runs from CI when it changes on main, and a drift check compares Railway with the file. Emergency kills are flipped directly in Railway and recorded in the file afterwards.
+- **Internal** is a list of account IDs in `flags/rollout.yml`, starting with the owner's, expanded into each flag's internal rule (`key == "…"`). It lives in Railway, not in our database; git is its audit trail.
+- **Beta** is the one group the app writes: members join or leave it themselves in Settings › "Try new features", stored in `flag_beta_members` with an append-only `flag_beta_events`, and passed as the `groups` attribute. Any member can join, for themselves only. Joining clears that member's pins, so it applies at once. No deploy.
+- **Rules in git.** `flags/rollout.yml` holds each flag's default and rules and the internal list; `bun run flags:apply` (the `railway flag` CLI) runs from CI when it changes on main, and a drift check compares Railway with the file. Emergency kills are flipped directly in Railway and recorded in the file afterwards.
 
 ### A flag's life
 
-All rules serve `true`. 0, merged dark (default `false`, flag-off tests green). 1, staging: `env == "staging"`. 2, internal: `env == "production" && groups contains ",internal,"`. 3, beta: `groups contains ",beta,"`. 4, percentage: `cohort < 10`, then 25 and 50 (`household_cohort` for household flags). 5, everyone: default `true`, rules removed, then a soak of at least one release. 6, a PR removes the check and the old path (this is when self-hosters get it). 7, the flag is deleted in Railway, only after step 6 is deployed. Kill switches stop at step 5 and stay; turning one off takes effect within one refresh.
+All rules serve `true`. 0, merged dark (default `false`, flag-off tests green). 1, staging: `env == "staging"`. 2, internal: `env == "production" && (key == "<owner id>" || …)`, expanded from the internal list. 3, beta: `groups contains ",beta,"`. 4, percentage: `cohort < 10`, then 25 and 50 (`household_cohort` for household flags). 5, everyone: default `true`, rules removed, then a soak of one release with no rollback. 6, a PR removes the check and the old path (this is when self-hosters get it). 7, the flag is deleted in Railway, only after step 6 is deployed. Kill switches stop at step 5 and stay; turning one off takes effect within one refresh.
 
 ### What a flag gates
 
@@ -74,6 +75,6 @@ Evaluations are counted in memory per flag, value, reason and client, and writte
 
 ### Without Railway
 
-Self-hosters and local runs without `RAILWAY_TOKEN` get every temporary flag off and every kill switch on: today's app, until a release removes a flag. A proposed `FOODABLE_FLAGS` variable, read only without a token, would let an owner switch features on for a group (`ui-v2:internal`) or everyone (STG-11 decides). `.env.example` and `docs/self-hosting.md` document both.
+Self-hosters and local runs without `RAILWAY_TOKEN` get every temporary flag off and every kill switch on: today's app, until a release removes a flag. `FOODABLE_FLAGS`, read only without a token, lets an owner switch features on for a group (`ui-v2:internal`, where internal means the deploy's owner accounts) or everyone (`usuals-tab:all`), decided in STG-11. `.env.example` and `docs/self-hosting.md` document both.
 
 Pin the `railway` SDK version only after checking the current release when this is built (`CLAUDE.md`, "Quality and Safety Rules").

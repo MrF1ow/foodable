@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-`flags/rollout.yml` holds every flag's default and rules (all serving `true`); `bun run flags:apply` runs the `railway flag` CLI from a CI job on main, with a drift check against Railway. A new workflow file is a gate file. Emergency kills go straight to Railway and are recorded afterwards.
+`flags/rollout.yml` holds every flag's default and rules (all serving `true`) and one `internal:` list of account IDs, starting with the owner's, which the apply step expands into each flag's internal rule (`key == "…"`). `bun run flags:apply` runs the `railway flag` CLI from a CI job on main, with a drift check against Railway, so git is the audit trail for who is internal and what is on. A new workflow file is a gate file. Emergency kills go straight to Railway and are recorded afterwards.

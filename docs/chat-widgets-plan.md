@@ -28,6 +28,6 @@ The MCP Apps widgets (`ui://` resources returned by tools) move to the app's loo
 
 New tools update `TOOLS` in `src/copy/tools.ts` and `src/mcp/tools-list.snapshot.json` in the same PR.
 
-## Open questions
+## Decisions (2026-11-08)
 
-WID-19: whether import-meals gets a named size allowance; a confirm step and servings on the Recipe card's Cook; whether the week-plan and grocery widgets write (plan, tick off) or only read; when agents should call the restock nudge; extending `list_expiring` versus a new tool; keeping `set_widget_display` as is.
+Recorded in WID-7 and WID-19: import-meals has a named allowance of 80 KB raw and 24 KB gzipped until it is trimmed; Cook on the Recipe card asks first, with servings and a "log a serving" switch; the week-plan and grocery widgets can write (plan or unplan, tick off), hidden when the host cannot call tools; agents call the restock nudge when asked or on the restock day; Use soon extends `list_expiring`; `set_widget_display` stays; no digits-only font.

@@ -11,4 +11,4 @@ plan: null
 prs: []
 ---
 
-`internal` set by an operator with a container script (owner first); `beta` joined by members in Settings › "Try new features" (its own flag, `beta-opt-in`). Every change appends to `flag_group_events`. Adding a member clears their pins.
+Members join or leave beta themselves in Settings › "Try new features" (its own flag, `beta-opt-in`). Every change appends to `flag_beta_events`; joining clears that member's pins so it applies at once. The internal list is not here: it is a Railway rule (STG-9).

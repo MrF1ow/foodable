@@ -12,3 +12,5 @@ prs: []
 ---
 
 A few KB inlined per widget and a subsetting tool on the developer machine, or the system font everywhere.
+
+Decided 2026-11-08: no. The system font everywhere; revisit only if the big numbers look weak.
