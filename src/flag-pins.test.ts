@@ -210,6 +210,24 @@ describe("temporary flags", () => {
         expect(store.calls.upsertPin).toBe(1);
     });
 
+    test("an unknown epoch serves a pin from another epoch and keeps it", async () => {
+        const { store, railway, read } = setup();
+        railway.set("t-user", true);
+        await read("t-user");
+        const before = store.pins.get(`user:${USER}`)?.get("t-user");
+        expect(before?.epoch).toBe(0);
+
+        // Railway now says epoch 9 but the read is unreliable: the epoch-0 pin
+        // can be neither checked nor replaced.
+        railway.setEpoch(9, false);
+        railway.set("t-user", false);
+        const e = await read("t-user");
+        expect(e.value).toBe(true);
+        expect(e.reason).toBe("PINNED");
+        expect(store.calls.upsertPin).toBe(1);
+        expect(store.pins.get(`user:${USER}`)?.get("t-user")).toEqual(before!);
+    });
+
     test("a household-unit flag pins per household and is shared", async () => {
         const { store, railway, read } = setup();
         railway.set("t-hh", true);
@@ -353,6 +371,52 @@ describe("cache", () => {
             ]);
         }
         expect(runtime.cachedSubjects()).toBe(2);
+    });
+
+    test("the cap evicts the least recently used subject", async () => {
+        const { store, railway } = setup();
+        const runtime = createFlagPinRuntime({
+            store,
+            registry: REGISTRY,
+            maxSubjects: 2,
+        });
+        const third = "55555555-5555-4555-8555-555555555555";
+        const readAs = (key: string) =>
+            runtime.evaluateAll(ctxFor({ key }), railway.reader, ["t-user"]);
+        await readAs(USER);
+        await readAs(USER_B);
+        await readAs(USER); // USER is now the most recent, USER_B the oldest.
+        await readAs(third); // Evicts USER_B.
+        expect(store.calls.loadPins).toBe(3);
+
+        await readAs(USER); // Still cached: no query.
+        expect(store.calls.loadPins).toBe(3);
+        await readAs(USER_B); // Was evicted: queried again.
+        expect(store.calls.loadPins).toBe(4);
+    });
+
+    test("a request that loaded pins before clearPins does not write one back", async () => {
+        const { store, railway, runtime } = setup();
+        railway.set("t-user", true);
+        // Hold the pin load open so clearPins lands mid-request.
+        let release!: () => void;
+        const gate = new Promise<void>((r) => (release = r));
+        const loadPins = store.loadPins.bind(store);
+        store.loadPins = async (subject) => {
+            const pins = await loadPins(subject);
+            await gate;
+            return pins;
+        };
+        const inFlight = runtime.evaluateAll(ctxFor(), railway.reader, [
+            "t-user",
+        ]);
+        await Promise.resolve();
+        await runtime.clearPins(userSubject);
+        release();
+        const [e] = await inFlight;
+        expect(e!.value).toBe(true);
+        expect(store.calls.upsertPin).toBe(0);
+        expect(store.pins.size).toBe(0);
     });
 
     test("clearPins removes rows and cache, so the next read re-pins", async () => {

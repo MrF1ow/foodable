@@ -108,12 +108,16 @@ export function createFlagPinRuntime(
         return entry;
     }
 
-    /** null when the load failed: the caller then neither reads nor writes pins. */
+    /**
+     * The subject's pins and the cache entry they came from; null when the load
+     * failed, and the caller then neither reads nor writes pins.
+     */
     async function loadSubjectPins(
         subject: FlagSubject,
-    ): Promise<Map<string, Pin> | null> {
+    ): Promise<LoadedPins | null> {
         try {
-            return (await subjectEntry(subject).get()).data;
+            const entry = subjectEntry(subject);
+            return { entry, pins: (await entry.get()).data };
         } catch (err) {
             logError(`loading pins for ${subject.kind} failed`, err);
             return null;
@@ -129,6 +133,10 @@ export function createFlagPinRuntime(
         }
     }
 
+    // A pin whose save fails lives only in the cached map; the next TTL refresh
+    // replaces that map with the database rows, so the flag is evaluated again
+    // (possibly to a new value if the rollout moved). Acceptable: it is what a
+    // database outage costs, and the request never fails for it.
     function persistPin(subject: FlagSubject, pin: Pin): void {
         store.upsertPin(subject, pin).catch((err: unknown) => {
             logError(`saving pin ${pin.flag} failed`, err);
@@ -201,7 +209,8 @@ export function createFlagPinRuntime(
 
             const subject =
                 def.unit === "user" ? userSubject : householdSubject;
-            const pins = def.unit === "user" ? userPins : householdPins;
+            const loaded = def.unit === "user" ? userPins : householdPins;
+            const pins = loaded?.pins ?? null;
             const decision = decideTemporary({
                 live,
                 fallback: def.fallback,
@@ -211,7 +220,14 @@ export function createFlagPinRuntime(
                 epoch,
                 now,
             });
-            if (decision.write && subject && pins) {
+            // clearPins (or LRU eviction) drops the subject's cache entry. A
+            // request that loaded the old entry must not write a pin back
+            // after a clear, or joining the beta would be undone for 12 hours.
+            const current =
+                subject !== null &&
+                loaded !== null &&
+                subjects.get(subjectKey(subject)) === loaded.entry;
+            if (decision.write && subject && pins && current) {
                 pins.set(name, decision.write);
                 persistPin(subject, decision.write);
             }
@@ -247,6 +263,8 @@ export function createFlagPinRuntime(
 }
 
 type FlagPinDefKind = PinFlagDef["unit"];
+
+type LoadedPins = { entry: SubjectEntry; pins: Map<string, Pin> };
 
 let runtime: FlagPinRuntime | null = null;
 
