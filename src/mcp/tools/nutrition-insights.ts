@@ -4,7 +4,7 @@ import {
     getMealsByDate,
     getMealsInRange,
     searchMeals,
-    getNutritionGoals,
+    getGoalsForRange,
     getWaterInRange,
     type Meal,
 } from "../../db/nutrition.js";
@@ -445,13 +445,16 @@ export function registerNutritionReadTools(
                     );
                     const tz = await getUserTimezone(userId);
                     const locale = WIDGET_LOCALE;
-                    const [meals, water, goals] = await Promise.all([
+                    const [meals, water, { forDate }] = await Promise.all([
                         getMealsInRange(userId, start_date, end_date, tz),
                         getWaterInRange(userId, start_date, end_date, tz),
-                        getNutritionGoals(userId),
+                        getGoalsForRange(userId, start_date, end_date),
                     ]);
 
-                    const goalsPayload = goalsPayloadOf(goals, alcohol);
+                    const goalsPayload = goalsPayloadOf(
+                        forDate(end_date),
+                        alcohol,
+                    );
 
                     if (meals.length === 0 && water.length === 0) {
                         return {
@@ -527,8 +530,9 @@ export function registerNutritionReadTools(
                         // the range average down towards zero.
                         const present = nutrientPresence(dateMeals);
                         const header = `## ${date} (${dateMeals.length} meal${dateMeals.length === 1 ? "" : "s"})`;
+                        const dayGoals = forDate(date);
                         sections.push(
-                            `${header}\n${formatProgress(totals, goals, alcohol, present)}`,
+                            `${header}\n${formatProgress(totals, dayGoals, alcohol, present)}`,
                         );
                         days.push({
                             date,
@@ -584,12 +588,23 @@ export function registerNutritionReadTools(
                         ? `\n\n(Averaged over the days that record each figure, not all ${days.length}: ${partial.join(", ")}.)`
                         : "";
 
+                    const span = Math.max(
+                        0,
+                        dateDiffDays(start_date, end_date),
+                    );
+                    const rangeDates: string[] = [];
+                    for (let i = 0; i <= span; i++) {
+                        rangeDates.push(shiftLocalDate(start_date, i));
+                    }
+                    const noGoalsInRange = rangeDates.every(
+                        (d) => forDate(d) == null,
+                    );
                     const footer =
                         coverageNote +
                         loggedDayAverageNote(days.length, daysInRange) +
-                        (goals
-                            ? ""
-                            : "\n\n(Tip: set daily targets with set_nutrition_goals to see progress percentages.)");
+                        (noGoalsInRange
+                            ? "\n\n(Tip: set daily targets with set_nutrition_goals to see progress percentages.)"
+                            : "");
 
                     return {
                         content: [
@@ -698,10 +713,10 @@ export function registerNutritionInsightTools(
                         endDate,
                         -(seriesDays - 1),
                     );
-                    const [meals, water, goals] = await Promise.all([
+                    const [meals, water, { forDate }] = await Promise.all([
                         getMealsInRange(userId, startDate, endDate, tz),
                         getWaterInRange(userId, startDate, endDate, tz),
-                        getNutritionGoals(userId),
+                        getGoalsForRange(userId, startDate, endDate),
                     ]);
                     const allBuckets = buildDailyBuckets(
                         meals,
@@ -715,7 +730,10 @@ export function registerNutritionInsightTools(
                     const textBuckets = allBuckets.slice(-windowDays);
                     const seriesBuckets = allBuckets.slice(-30);
 
-                    const goalsPayload = goalsPayloadOf(goals, alcohol);
+                    const goalsPayload = goalsPayloadOf(
+                        forDate(endDate),
+                        alcohol,
+                    );
 
                     return {
                         content: [
@@ -723,7 +741,7 @@ export function registerNutritionInsightTools(
                                 type: "text",
                                 text: computeTrends(
                                     gateAlcohol(textBuckets, alcohol),
-                                    goals,
+                                    forDate,
                                 ),
                             },
                         ],
@@ -893,10 +911,10 @@ export function registerNutritionInsightTools(
             const tz = await getUserTimezone(userId);
             const endDate = todayInTz(tz);
             const startDate = shiftLocalDate(endDate, -6);
-            const [meals, water, goals] = await Promise.all([
+            const [meals, water, { forDate }] = await Promise.all([
                 getMealsInRange(userId, startDate, endDate, tz),
                 getWaterInRange(userId, startDate, endDate, tz),
-                getNutritionGoals(userId),
+                getGoalsForRange(userId, startDate, endDate),
             ]);
             const buckets = buildDailyBuckets(
                 meals,
@@ -912,7 +930,7 @@ export function registerNutritionInsightTools(
                         mimeType: "text/plain",
                         text: computeWeeklyDigest(
                             gateAlcohol(buckets, alcohol),
-                            goals,
+                            forDate,
                         ),
                     },
                 ],

@@ -4,7 +4,9 @@ import {
     computeTrends,
     computeWeeklyDigest,
     computeWeightTrend,
+    goalsResolver,
     type DailyBucket,
+    type GoalDayOverride,
 } from "./insights.js";
 import type { Meal, NutritionGoals, WeightEntry } from "../db/nutrition.js";
 
@@ -622,4 +624,162 @@ test("computeWeeklyDigest keeps the plain header on a fully logged week", () => 
     const out = computeWeeklyDigest(buckets, goals());
     expect(out).toContain("Daily averages:");
     expect(out).not.toContain("per calendar day");
+});
+
+// ---------- per-day goal overrides (identity + behaviour) ----------
+
+function goalDayOverride(
+    date: string,
+    patch: Partial<GoalDayOverride> = {},
+): GoalDayOverride {
+    return {
+        user_id: "u1",
+        date,
+        updated_at: "2026-01-01T00:00:00Z",
+        daily_calories: null,
+        daily_protein_g: null,
+        daily_carbs_g: null,
+        daily_fat_g: null,
+        daily_fiber_g: null,
+        daily_sugar_g: null,
+        daily_alcohol_g: null,
+        daily_caffeine_mg: null,
+        daily_water_ml: null,
+        ...patch,
+    };
+}
+
+test("computeTrends matches goalsResolver with empty overrides (g=null)", () => {
+    const buckets = twoDayBuckets({ calories: 1900 }, { calories: 2100 });
+    const plain = computeTrends(buckets, null);
+    const resolved = computeTrends(buckets, goalsResolver(null, []));
+    expect(resolved).toBe(plain);
+});
+
+test("computeTrends matches goalsResolver with empty overrides (defaults)", () => {
+    const g = goals({ daily_calories: 2000 });
+    const buckets = twoDayBuckets({ calories: 1900 }, { calories: 2100 });
+    expect(computeTrends(buckets, g)).toBe(
+        computeTrends(buckets, goalsResolver(g, [])),
+    );
+});
+
+test("computeWeeklyDigest matches goalsResolver identity", () => {
+    const g = goals({ daily_calories: 2000, daily_fiber_g: 30 });
+    const buckets = twoDayBuckets(
+        { calories: 1900, fiber_g: 25 },
+        { calories: 2100, fiber_g: 28 },
+    );
+    expect(computeWeeklyDigest(buckets, g)).toBe(
+        computeWeeklyDigest(buckets, goalsResolver(g, [])),
+    );
+    expect(computeWeeklyDigest(buckets, null)).toBe(
+        computeWeeklyDigest(buckets, goalsResolver(null, [])),
+    );
+});
+
+test("computeTrends varies target label and judges each day", () => {
+    const g = goals({ daily_calories: 2000 });
+    const buckets = buildDailyBuckets(
+        [
+            meal("2026-06-01T12:00:00Z", { calories: 1980 }),
+            meal("2026-06-02T12:00:00Z", { calories: 1980 }),
+            meal("2026-06-03T12:00:00Z", { calories: 2950 }),
+        ],
+        [],
+        "2026-06-01",
+        "2026-06-03",
+        "UTC",
+    );
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-03", { daily_calories: 3000 }),
+    ]);
+    const out = computeTrends(buckets, forDate);
+    expect(out).toContain("Target: 2000–3000 kcal (varies by day)");
+    expect(out).toContain("Days within ±10% of target: 3/3");
+});
+
+test("computeTrends labels zero calorie goal as target, not lowest", () => {
+    const g = goals({ daily_calories: 0 });
+    const buckets = twoDayBuckets({ calories: 1900 }, { calories: 2100 });
+    const plain = computeTrends(buckets, g);
+    const resolved = computeTrends(buckets, goalsResolver(g, []));
+    expect(plain).toBe(resolved);
+    expect(plain).toContain("Closest to target: 2026-06-01 — 1900 kcal");
+});
+
+test("computeWeeklyDigest partial calorie target coverage skips percentage", () => {
+    const buckets = twoDayBuckets({ calories: 2000 }, { calories: 0 });
+    const forDate = goalsResolver(null, [
+        goalDayOverride("2026-06-01", { daily_calories: 2000 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain("  Calories: 1000 kcal — target set on 1 of 2 days");
+    expect(out).not.toContain("/ 2000 kcal target");
+});
+
+test("computeWeeklyDigest partial sugar limit coverage skips percentage", () => {
+    const buckets = twoDayBuckets({ sugar_g: 20 }, { sugar_g: 10 });
+    const forDate = goalsResolver(goals({ daily_sugar_g: null }), [
+        goalDayOverride("2026-06-01", { daily_sugar_g: 25 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain("  Sugar: 15g — target set on 1 of 2 days");
+    expect(out).not.toMatch(/Sugar:.*\/.*limit \(\d+%\)/);
+});
+
+test("computeTrends collapses display-equal protein targets to one label", () => {
+    const g = goals({ daily_protein_g: 30.3 });
+    const buckets = twoDayBuckets({ protein_g: 35 }, { protein_g: 35 });
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-01", { daily_protein_g: 30.34 }),
+        goalDayOverride("2026-06-02", { daily_protein_g: 30.26 }),
+    ]);
+    const out = computeTrends(buckets, forDate);
+    expect(out).toContain("  Target: 30.3g");
+    expect(out).not.toContain("varies by day");
+});
+
+test("computeWeeklyDigest averages display-collapsed protein targets", () => {
+    const g = goals({ daily_protein_g: 30 });
+    const buckets = twoDayBuckets({ protein_g: 100 }, { protein_g: 100 });
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-01", { daily_protein_g: 30.34 }),
+        goalDayOverride("2026-06-02", { daily_protein_g: 30.26 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain(
+        "  Protein: 100g / 30.3g target (330%) (daily targets vary; averaged)",
+    );
+});
+
+test("computeWeeklyDigest appends averaged target suffix", () => {
+    const g = goals({ daily_calories: 2000 });
+    const buckets = buildDailyBuckets(
+        [
+            meal("2026-06-01T12:00:00Z", { calories: 2000 }),
+            meal("2026-06-02T12:00:00Z", { calories: 2000 }),
+            meal("2026-06-03T12:00:00Z", { calories: 2000 }),
+        ],
+        [],
+        "2026-06-01",
+        "2026-06-03",
+        "UTC",
+    );
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-03", { daily_calories: 2500 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain("(daily targets vary; averaged)");
+});
+
+test("computeWeeklyDigest prints a shared target exactly as stored", () => {
+    // One target for every day (no overrides) is not rounded: 150.25 g has
+    // always printed as 150.25 g, and the percentage is taken against it.
+    const buckets = windowBuckets(7, 2, { fiber_g: 30 });
+    const g = goals({ daily_protein_g: 150.25, daily_fiber_g: 30.05 });
+    const out = computeWeeklyDigest(buckets, g);
+    expect(out).toContain("/ 150.25g target");
+    expect(out).toContain("/ 30.05g target");
+    expect(computeWeeklyDigest(buckets, goalsResolver(g, []))).toBe(out);
 });

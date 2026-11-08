@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
     getMealsByDate,
     upsertNutritionGoals,
+    getGoalsForDate,
     getNutritionGoals,
     getWaterByDate,
     getLatestWeight,
@@ -299,7 +300,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         await Promise.all([
                             getMealsByDate(userId, targetDate, tz),
                             getWaterByDate(userId, targetDate, tz),
-                            getNutritionGoals(userId),
+                            getGoalsForDate(userId, targetDate),
                             getLatestWeight(userId),
                         ]);
                     const unit =
