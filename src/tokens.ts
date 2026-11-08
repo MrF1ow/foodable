@@ -9,8 +9,11 @@
 //   public/widgets/src/shared/tokens.css   NEUTRAL, the shared base
 //   public/app/brand.css                   APP, included by app.css and the
 //                                          embed skin, never by a widget
+//   public/app/v2/tokens.css               FigCraft-aligned v2 shell palette
 //
-// src/tokens.test.ts fails when a committed file drifts from this module, so
+// src/tokens.test.ts and src/tokens-v2.test.ts fail when a committed file
+// drifts from this module (the v2 test also checks design/figcraft-
+// variables.json), so
 // a value changes here and nowhere else. --accent is BRAND_GREEN. THEME_COLOR
 // is the APP page background, the same value the login head and appHead emit.
 // Type (--fs-*) and radius (--r-*) scales stay on the shared base. The
@@ -161,6 +164,10 @@ export const APP_FONTS = [
         weight: "200 800",
     },
 ] as const;
+
+// The system stack behind the brand fonts; v2 puts V2_FONT.body in front.
+const FONT_FALLBACK =
+    'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
 const FONT_SANS =
     '"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,\n        Helvetica, Arial, sans-serif';
@@ -381,6 +388,174 @@ ${decl("    ", appEntries("dark"))}
 
 body {
     font-family: var(--font-sans);
+}
+`;
+}
+
+// ---- v2 design tokens (FigCraft Theme + Tokens collections) ----------------
+
+export type V2ColorName =
+    | "surface/bg"
+    | "surface/panel"
+    | "surface/raised"
+    | "surface/track"
+    | "line"
+    | "text/primary"
+    | "text/secondary"
+    | "text/tertiary"
+    | "accent/fill"
+    | "accent/text"
+    | "accent/on"
+    | "macro/protein"
+    | "macro/carbs"
+    | "macro/fat"
+    | "macro/calories"
+    | "nutrient/water"
+    | "nutrient/fiber"
+    | "nutrient/sugar"
+    | "nutrient/caffeine"
+    | "status/over"
+    | "status/warn"
+    | "overlay/glass"
+    | "overlay/scrim"
+    | "overlay/shadow";
+
+/** FigCraft Theme collection, in design variable order. */
+export const V2_THEME: Record<"dark" | "light", Record<V2ColorName, string>> = {
+    dark: {
+        "surface/bg": "#0d0f0e",
+        "surface/panel": "#151817",
+        "surface/raised": "#1c201e",
+        "surface/track": "#232826",
+        line: "#ffffff14",
+        "text/primary": "#f2f6f4",
+        "text/secondary": "#98a19c",
+        "text/tertiary": "#5b6561",
+        "accent/fill": "#28cf8b",
+        "accent/text": "#28cf8b",
+        "accent/on": "#062c1c",
+        "macro/protein": "#a78bfa",
+        "macro/carbs": "#34d399",
+        "macro/fat": "#fb7199",
+        "macro/calories": "#ffab2e",
+        "nutrient/water": "#38bdf8",
+        "nutrient/fiber": "#14b8a6",
+        "nutrient/sugar": "#a3e635",
+        "nutrient/caffeine": "#c69a6d",
+        "status/over": "#ff6b52",
+        "status/warn": "#e0a030",
+        "overlay/glass": "#1c201ec7",
+        "overlay/scrim": "#0000008c",
+        "overlay/shadow": "#00000000",
+    },
+    light: {
+        "surface/bg": "#fbfaf7",
+        "surface/panel": "#ffffff",
+        "surface/raised": "#f1f3f2",
+        "surface/track": "#e4eae6",
+        line: "#dde3df",
+        "text/primary": "#121714",
+        "text/secondary": "#5c6660",
+        "text/tertiary": "#8c9590",
+        "accent/fill": "#28cf8b",
+        "accent/text": "#12875a",
+        "accent/on": "#062c1c",
+        "macro/protein": "#8b5cf6",
+        "macro/carbs": "#10b981",
+        "macro/fat": "#f43f7e",
+        "macro/calories": "#ff9f0a",
+        "nutrient/water": "#0ea5e9",
+        "nutrient/fiber": "#0d9488",
+        "nutrient/sugar": "#65a30d",
+        "nutrient/caffeine": "#8b5e34",
+        "status/over": "#d0452b",
+        "status/warn": "#b26a00",
+        "overlay/glass": "#ffffffd1",
+        "overlay/scrim": "#141e1940",
+        "overlay/shadow": "#0000000f",
+    },
+};
+
+/** FigCraft Tokens collection: radius/* (px literals in CSS). */
+export const V2_RADIUS = {
+    sm: 12,
+    md: 16,
+    lg: 20,
+    sheet: 28,
+    pill: 999,
+} as const;
+
+/** FigCraft Tokens collection: space/* (px literals in CSS). */
+export const V2_SPACE = {
+    gutter: 20,
+    section: 24,
+    row: 11,
+    gap: 8,
+} as const;
+
+/** FigCraft Tokens collection: font/*. */
+export const V2_FONT = {
+    display: "Bricolage Grotesque",
+    body: "Geist",
+} as const;
+
+function v2CssKey(designName: string): string {
+    return designName.replace(/\//g, "-");
+}
+
+function v2ColorDecls(t: "dark" | "light"): [string, string][] {
+    return (Object.entries(V2_THEME[t]) as [V2ColorName, string][]).map(
+        ([name, value]) => [v2CssKey(name), value],
+    );
+}
+
+function v2ThemeBlock(t: "dark" | "light", indent: string): string {
+    return [decl(indent, v2ColorDecls(t)), `${indent}color-scheme: ${t};`].join(
+        "\n",
+    );
+}
+
+function v2StaticDecls(indent: string): string {
+    const radius: [string, string][] = Object.entries(V2_RADIUS).map(
+        ([k, v]) => [`radius-${k}`, `${v}px`],
+    );
+    const space: [string, string][] = Object.entries(V2_SPACE).map(([k, v]) => [
+        `space-${k}`,
+        `${v}px`,
+    ]);
+    return [
+        decl(indent, radius),
+        decl(indent, space),
+        line(indent, "font-body", `"${V2_FONT.body}", ${FONT_FALLBACK}`),
+        line(indent, "font-display", `"${V2_FONT.display}", var(--font-body)`),
+    ].join("\n");
+}
+
+/** public/app/v2/tokens.css — v2 shell; not wired until UI-3. */
+export function renderV2TokensCss(): string {
+    return `/* Generated by scripts/gen-tokens.ts from src/tokens.ts. Edit the values
+ * there, then run \`bun run gen:tokens\`; never edit this file.
+ *
+ * Values mirror design/figcraft-variables.json (FigCraft Theme + Tokens). No
+ * @font-face here — brand.css already declares the faces; UI-3 wires loading.
+ * Nothing loads this file yet; UI-3 adds /app-v2.css. */
+
+:root {
+${v2ThemeBlock("dark", "    ")}
+${v2StaticDecls("    ")}
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+${v2ThemeBlock("light", "        ")}
+    }
+}
+
+:root[data-theme="dark"] {
+${v2ThemeBlock("dark", "    ")}
+}
+:root[data-theme="light"] {
+${v2ThemeBlock("light", "    ")}
 }
 `;
 }

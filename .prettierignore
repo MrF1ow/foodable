@@ -13,3 +13,7 @@ public/map-data.json
 
 # Local Claude Code state — untracked, not ours to format.
 .claude/
+
+# Exported by scripts/export-figcraft-variables.ts from the FigCraft design and
+# compared by src/tokens-v2.test.ts; formatting it makes a re-export look like a diff.
+design/figcraft-variables.json
