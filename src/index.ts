@@ -27,8 +27,12 @@ import { isNutritionCard } from "./domain/layout.js";
 import {
     appScriptHref,
     appStylesheetHref,
+    appV2ScriptHref,
+    appV2StylesheetHref,
     getAppCss,
     getAppJs,
+    getAppV2Css,
+    getAppV2Js,
     getEmbedWidgetHtml,
     warmWidgets,
 } from "./widgets.js";
@@ -334,6 +338,21 @@ app.get("/app.css", async (c) => {
 app.get("/app.js", async (c) => {
     const href = appScriptHref();
     return c.body(await getAppJs(), 200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
+    });
+});
+// The new shell's pair (flag `ui-v2`), served exactly like the old one.
+app.get("/app-v2.css", async (c) => {
+    const href = appV2StylesheetHref();
+    return c.body(await getAppV2Css(), 200, {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
+    });
+});
+app.get("/app-v2.js", async (c) => {
+    const href = appV2ScriptHref();
+    return c.body(await getAppV2Js(), 200, {
         "Content-Type": "text/javascript; charset=utf-8",
         "Cache-Control": appAssetCacheControl(c, href),
     });

@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { getAppCss } from "./widgets.js";
 import { renderAppShell } from "./web/shell.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -14,6 +15,7 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 

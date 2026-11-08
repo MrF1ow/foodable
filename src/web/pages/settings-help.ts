@@ -5,10 +5,14 @@ import {
 } from "../shell.js";
 import { pageHeader, panel, field } from "../components/ui.js";
 import { UNVERIFIED_RECIPES_PROMPT } from "../../copy/agent-prompts.js";
+import type { ViewerFlags } from "../../viewer-flags.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsHelpView = {
     chrome: ViewerChrome;
+    /** The viewer's flags, from the route. `ui-v2` adds the Members link to
+     *  the Settings sub-nav. Absent means off. */
+    flags?: ViewerFlags;
     backHref: string;
 };
 
@@ -120,7 +124,9 @@ ${promptBlock}
 export function renderSettingsHelpPage(view: SettingsHelpView): string {
     const body = `
         ${pageHeader({ title: "Help" })}
-        ${renderSettingsNav("help", view.backHref)}
+        ${renderSettingsNav("help", view.backHref, {
+            v2: view.flags?.uiV2 === true,
+        })}
         ${panel({
             title: "Glossary",
             body: glossaryHtml(),

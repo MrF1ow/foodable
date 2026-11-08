@@ -87,8 +87,11 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
 
 const cache = new Map<string, string>();
 
-async function readSrc(relPath: string): Promise<string> {
-    const file = Bun.file(`${SRC_DIR}/${relPath}`);
+async function readSrc(
+    relPath: string,
+    baseDir: string = SRC_DIR,
+): Promise<string> {
+    const file = Bun.file(`${baseDir}/${relPath}`);
     if (!(await file.exists())) {
         throw new Error(`widget source partial not found: ${relPath}`);
     }
@@ -96,10 +99,13 @@ async function readSrc(relPath: string): Promise<string> {
 }
 
 // Expand every @include marker in `text`, recursively, guarding against cycles.
+// Markers resolve against `baseDir` (public/widgets/src/ unless a caller names
+// another root, as /app-v2.css does with public/app/v2/).
 async function resolveIncludes(
     text: string,
     fromPath: string,
     stack: string[],
+    baseDir: string = SRC_DIR,
 ): Promise<string> {
     const matches = [...text.matchAll(INCLUDE_RE)];
     if (matches.length === 0) return text;
@@ -112,8 +118,11 @@ async function resolveIncludes(
         if (stack.includes(rel)) {
             throw new Error(`@include cycle: ${[...stack, rel].join(" -> ")}`);
         }
-        const raw = await readSrc(rel);
-        resolved.set(rel, await resolveIncludes(raw, rel, [...stack, rel]));
+        const raw = await readSrc(rel, baseDir);
+        resolved.set(
+            rel,
+            await resolveIncludes(raw, rel, [...stack, rel], baseDir),
+        );
     }
     return text.replace(INCLUDE_RE, (_full, rel) => resolved.get(rel) ?? "");
 }
@@ -183,6 +192,14 @@ export function appStylesheetHref(): string {
 
 export function appScriptHref(): string {
     return appJsHash ? `/app.js?v=${appJsHash}` : "/app.js";
+}
+
+export function appV2StylesheetHref(): string {
+    return appV2CssHash ? `/app-v2.css?v=${appV2CssHash}` : "/app-v2.css";
+}
+
+export function appV2ScriptHref(): string {
+    return appV2JsHash ? `/app-v2.js?v=${appV2JsHash}` : "/app-v2.js";
 }
 
 export async function getAppCss(): Promise<string> {
@@ -269,6 +286,59 @@ export async function getAppJs(): Promise<string> {
     appJs = parts.join("\n");
     appJsHash = await shortContentHash(appJs);
     return appJs;
+}
+
+// The new shell's stylesheet and script (flag `ui-v2`), served at /app-v2.css
+// and /app-v2.js next to the old pair, which the new shell also loads. Both are
+// hashed and warmed like the old ones.
+//
+// app-v2.css is assembled from public/app/v2/app-v2.css. Its @include markers
+// resolve against public/app/v2/ (APP_V2_CSS_DIR), not public/widgets/src/:
+// that file holds the one include list (tokens.css, then one partial per area),
+// so a later item adds its partial with a single line there.
+//
+// app-v2.js is an ordered list of plain browser files, one IIFE each, like
+// APP_JS_SOURCES. There is no Turbo bundle here: /app.js already has it.
+export const APP_V2_CSS_DIR = "./public/app/v2";
+export const APP_V2_CSS_SOURCE = `${APP_V2_CSS_DIR}/app-v2.css`;
+let appV2Css: string | undefined;
+let appV2CssHash: string | undefined;
+
+export async function getAppV2Css(): Promise<string> {
+    if (appV2Css !== undefined) return appV2Css;
+    const file = Bun.file(APP_V2_CSS_SOURCE);
+    if (!(await file.exists())) {
+        throw new Error(
+            `app-v2 stylesheet source not found: ${APP_V2_CSS_SOURCE}`,
+        );
+    }
+    appV2Css = await resolveIncludes(
+        await file.text(),
+        "app-v2.css",
+        ["app-v2.css"],
+        APP_V2_CSS_DIR,
+    );
+    appV2CssHash = await shortContentHash(appV2Css);
+    return appV2Css;
+}
+
+export const APP_V2_JS_SOURCES = ["./src/web/client/v2/shell.js"] as const;
+let appV2Js: string | undefined;
+let appV2JsHash: string | undefined;
+
+export async function getAppV2Js(): Promise<string> {
+    if (appV2Js !== undefined) return appV2Js;
+    const parts: string[] = [];
+    for (const path of APP_V2_JS_SOURCES) {
+        const file = Bun.file(path);
+        if (!(await file.exists())) {
+            throw new Error(`app-v2 client source not found: ${path}`);
+        }
+        parts.push(`(function () {\n${(await file.text()).trim()}\n})();`);
+    }
+    appV2Js = parts.join("\n");
+    appV2JsHash = await shortContentHash(appV2Js);
+    return appV2Js;
 }
 
 export type WidgetViewerChrome = {
@@ -397,6 +467,8 @@ export async function warmWidgets(): Promise<void> {
         getAppCss(),
         getEmbedCss(),
         getAppJs(),
+        getAppV2Css(),
+        getAppV2Js(),
     ]);
     // Hashes of the framed documents. After the widgets and the skin are
     // cached, so boot does not assemble them twice.

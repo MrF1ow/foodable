@@ -14,6 +14,7 @@ import {
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -27,6 +28,7 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 

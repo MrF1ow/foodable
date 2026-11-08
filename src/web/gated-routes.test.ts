@@ -7,7 +7,7 @@ import {
     setFlagsForTests,
 } from "../flags.js";
 import type { HouseholdMember } from "../household.js";
-import { viewerChromeWithAttention } from "./attention.js";
+import { viewerChromeWithAttention, viewerFlagsFor } from "./attention.js";
 import { gatedRoute } from "./gated.js";
 import { requireMember, requireSiteUser } from "./middleware.js";
 import {
@@ -167,12 +167,32 @@ describe("viewerChromeWithAttention flags", () => {
             emptyNotices,
         );
         expect(off.flags.uiV2).toBe(false);
+        expect(off.identity).toBeUndefined();
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        let identityLoads = 0;
         const on = await viewerChromeWithAttention(
             { theme: "light" },
             member,
             emptyNotices,
+            async (viewer) => {
+                identityLoads++;
+                return {
+                    viewerName: viewer.displayName,
+                    viewerRole: viewer.role,
+                    householdName: "The Test household",
+                    memberCount: 3,
+                };
+            },
         );
         expect(on.flags.uiV2).toBe(true);
+        expect(identityLoads).toBe(1);
+        expect(on.identity?.householdName).toBe("The Test household");
+    });
+
+    test("viewerFlagsFor evaluates like the tabbed chrome (loadViewerFlags)", async () => {
+        setFlagsForTests(createMemoryFlags());
+        expect((await viewerFlagsFor(member)).uiV2).toBe(false);
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        expect((await viewerFlagsFor(member)).uiV2).toBe(true);
     });
 });

@@ -1,0 +1,16 @@
+/* Household web app, new shell (flag `ui-v2`), served at /app-v2.css.
+ *
+ * Assembled by getAppV2Css() in src/widgets.ts. Unlike app.css, its @include
+ * markers resolve against public/app/v2/ (this folder), so a partial is named
+ * by its file: `@include shell.css`. Loaded after /app.css, which the new
+ * shell still carries for pages that are not redesigned yet.
+ *
+ * This file is the one include list: tokens first, then one partial per area.
+ * A later item adds its partial with a single line below (components.css for
+ * the shared components, sheet.css for the sheet). Every class here starts with
+ * `fd-`; the colours, radii and spacing come from tokens.css.
+ */
+
+/*@include tokens.css@*/
+
+/*@include shell.css@*/

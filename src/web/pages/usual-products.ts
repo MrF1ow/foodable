@@ -204,6 +204,8 @@ ${searchOutcome}`,
         ...view.chrome,
         title: "Usual products",
         active: "household",
+        v2Active: "kitchen",
+        v2Kitchen: "usuals",
         body,
     });
 }
@@ -292,6 +294,8 @@ ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
         ...view.chrome,
         title: "Usual product",
         active: "household",
+        v2Active: "kitchen",
+        v2Kitchen: "usuals",
         body,
     });
 }
