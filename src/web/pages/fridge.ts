@@ -31,11 +31,7 @@ import {
 } from "../components/ui.js";
 import type { Food } from "../../domain/foods.js";
 import type { GroceryLine } from "../../domain/grocery.js";
-import {
-    fridgeNotices,
-    listExpiring,
-    utcTodayFromDate,
-} from "../../domain/stock.js";
+import { fridgeNotices, listExpiring } from "../../domain/stock.js";
 
 const SUPPLY_UNITS = [
     "roll",
@@ -51,6 +47,7 @@ const SUPPLY_UNITS = [
 ] as const;
 
 export type FridgePageView = FridgeSnapshot & {
+    today: string;
     chrome: AppChromeBase;
     error?: string;
     openModalId?: string;
@@ -462,14 +459,14 @@ function sharedRemoveLocationModal(view: FridgePageView): string {
 }
 
 export function renderFridgePage(view: FridgePageView): string {
-    const today = utcTodayFromDate();
+    const today = view.today;
     const addLocationId = "fridge-add-location";
     const emptyPrompt =
         view.locations.length === 0
             ? emptyState("Add a location, then add an item.", "empty-fridge")
             : "";
     const expiring = renderExpiringStrip(
-        listExpiring(view.items, 3).map((item) => ({
+        listExpiring(view.items, today, 3).map((item) => ({
             id: item.id,
             displayName: item.displayName,
             expiresOn: item.expiresOn ?? "",

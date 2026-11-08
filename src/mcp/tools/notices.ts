@@ -134,12 +134,19 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const userId = await actorUserId(undefined);
                     try {
-                        await dismissNotice(noticeDeps(), householdId, userId, {
-                            code: input.code as never,
-                            subjectKind: input.subject_kind,
-                            subjectId: input.subject_id,
-                            relatedId: input.related_id,
-                        });
+                        const today = await householdToday(householdId);
+                        await dismissNotice(
+                            noticeDeps(),
+                            householdId,
+                            userId,
+                            {
+                                code: input.code as never,
+                                subjectKind: input.subject_kind,
+                                subjectId: input.subject_id,
+                                relatedId: input.related_id,
+                            },
+                            { today },
+                        );
                         return {
                             content: [
                                 {

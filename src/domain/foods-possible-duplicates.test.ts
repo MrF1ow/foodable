@@ -33,6 +33,9 @@ import {
     noticeDismissPair,
 } from "../copy/notices.js";
 import { attentionFromNotices } from "../web/attention.js";
+import { utcTodayFromDate } from "./stock.js";
+
+const NOTICE_TODAY = utcTodayFromDate();
 import { needsAttentionCount, tabDotsFromNotices } from "./notices.js";
 import { HELP_GLOSSARY_IDS } from "../web/pages/settings-help.js";
 
@@ -382,6 +385,7 @@ describe("possibleDuplicates", () => {
                 dismissals: createMemoryNoticeDismissalsStore(),
             },
             HH,
+            { today: NOTICE_TODAY },
         );
         expect(
             result.notices.some(
@@ -786,9 +790,9 @@ describe("possibleDuplicateNotices and noticesFor", () => {
             countFoodRefsCalls += 1;
             return origCount(hid);
         };
-        const twoOnly = await noticesFor(deps, HH);
+        const twoOnly = await noticesFor(deps, HH, { today: NOTICE_TODAY });
         expect(countFoodRefsCalls).toBe(0);
-        const open = await noticesFor(deps, HH);
+        const open = await noticesFor(deps, HH, { today: NOTICE_TODAY });
         expect(
             open.notices.some((n) => n.code === "food.possible_duplicate"),
         ).toBe(true);
@@ -799,18 +803,25 @@ describe("possibleDuplicateNotices and noticesFor", () => {
         expect(openCount).toBeGreaterThan(0);
         expect(tabDotsFromNotices(open.notices).household).toBe(true);
         expect(openAttention.tabs.household).toBe(true);
-        await dismissNotice(deps, HH, "u1", {
-            code: "food.possible_duplicate",
-            subjectKind: "food",
-            subjectId: a.id,
-            relatedId: b.id,
-        });
-        const after = await noticesFor(deps, HH);
+        await dismissNotice(
+            deps,
+            HH,
+            "u1",
+            {
+                code: "food.possible_duplicate",
+                subjectKind: "food",
+                subjectId: a.id,
+                relatedId: b.id,
+            },
+            { today: NOTICE_TODAY },
+        );
+        const after = await noticesFor(deps, HH, { today: NOTICE_TODAY });
         expect(
             after.notices.some((n) => n.code === "food.possible_duplicate"),
         ).toBe(false);
         expect(needsAttentionCount(after.notices)).toBe(openCount - 1);
         const withDismissed = await noticesFor(deps, HH, {
+            today: NOTICE_TODAY,
             includeDismissed: true,
         });
         expect(
@@ -847,7 +858,7 @@ describe("possibleDuplicateNotices and noticesFor", () => {
             tripleCountCalls += 1;
             return new Map();
         };
-        await noticesFor(tripleDeps, HH);
+        await noticesFor(tripleDeps, HH, { today: NOTICE_TODAY });
         expect(tripleCountCalls).toBe(1);
     });
 });

@@ -1,7 +1,6 @@
 import { groceryLineToRow, type GroceryLine } from "../domain/grocery.js";
 import type { RestockStore } from "../domain/restock.js";
-import { householdTimezone } from "../household.js";
-import { todayInTz } from "../domain/tz.js";
+import { householdTodayAt } from "../household.js";
 import { getHouseholdConfig, getHouseholdOwnerProfile } from "./household.js";
 import { GROCERY_LINE_COLS } from "./grocery.js";
 import { insertReturning, maybeOne, rows, run, type Tx } from "./sql.js";
@@ -82,11 +81,13 @@ export async function listRestockEnabledHouseholds(): Promise<
     });
 }
 
-export async function householdToday(householdId: string): Promise<string> {
+export async function householdToday(
+    householdId: string,
+    now = new Date(),
+): Promise<string> {
     const [config, owner] = await Promise.all([
         getHouseholdConfig(householdId),
         getHouseholdOwnerProfile(householdId),
     ]);
-    const tz = householdTimezone(config.preferences, owner);
-    return todayInTz(tz);
+    return householdTodayAt(config.preferences, owner, now);
 }

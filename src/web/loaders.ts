@@ -247,9 +247,12 @@ export async function renderFridgeInventoryPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const snapshot = await listFridge(liveFridgeStore(), householdId);
-    const allFoods = await liveFoodsStore().listFoods(householdId);
-    const groceryLines = await liveGroceryStore().listLines(householdId);
+    const [snapshot, allFoods, groceryLines, today] = await Promise.all([
+        listFridge(liveFridgeStore(), householdId),
+        liveFoodsStore().listFoods(householdId),
+        liveGroceryStore().listLines(householdId),
+        householdToday(householdId),
+    ]);
     const foodsById = new Map(
         allFoods.map((row) => [
             row.id,
@@ -269,7 +272,12 @@ export async function renderFridgeInventoryPage(
         status: 200,
         html: renderFridgePage({
             ...snapshot,
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            today,
+            chrome: await viewerChromeWithAttention(
+                profile,
+                householdId,
+                await loadHouseholdNotices(householdId, { today }),
+            ),
             error,
             openModalId,
             linkProductPrompt,
@@ -443,7 +451,7 @@ export async function renderGroceryListPage(
               opts.error,
           )
         : null;
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId, { today });
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -1160,6 +1168,7 @@ export async function renderNeedsAttentionInventoryPage(
     const householdId = gate.viewer.householdId;
     let pageError = error;
     let redirect = false;
+    let today: string | undefined;
 
     if (post?.member) {
         const deps = noticeDeps();
@@ -1168,12 +1177,19 @@ export async function renderNeedsAttentionInventoryPage(
                 await undoDismissal(deps, householdId, post.undoDismissalId);
                 redirect = true;
             } else if (post.code && post.subjectKind && post.subjectId) {
-                await dismissNotice(deps, householdId, post.member.userId, {
-                    code: post.code as NoticeCode,
-                    subjectKind: post.subjectKind as NoticeSubjectKind,
-                    subjectId: post.subjectId,
-                    relatedId: post.relatedId,
-                });
+                today = await householdToday(householdId);
+                await dismissNotice(
+                    deps,
+                    householdId,
+                    post.member.userId,
+                    {
+                        code: post.code as NoticeCode,
+                        subjectKind: post.subjectKind as NoticeSubjectKind,
+                        subjectId: post.subjectId,
+                        relatedId: post.relatedId,
+                    },
+                    { today },
+                );
                 redirect = true;
             }
         } catch (err) {
@@ -1186,7 +1202,7 @@ export async function renderNeedsAttentionInventoryPage(
         }
     }
 
-    const result = await loadHouseholdNotices(householdId);
+    const result = await loadHouseholdNotices(householdId, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         householdId,

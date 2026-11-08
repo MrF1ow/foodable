@@ -13,6 +13,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveRecipesStore } from "../../db/recipes.js";
+import { householdToday } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { noticesFor } from "../../domain/notices-for.js";
 import {
@@ -491,12 +492,13 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         householdId,
                         args.food_id,
                     );
-                    const [aliases, barcodes, listed, effectiveMap] =
+                    const [aliases, barcodes, listed, effectiveMap, today] =
                         await Promise.all([
                             store.listAliases(householdId, food.id),
                             store.listBarcodes(householdId, food.id),
                             store.listFoods(householdId),
                             effectiveFoodsByIds(store, householdId, [food.id]),
+                            householdToday(householdId),
                         ]);
                     const catalog = new Map(listed.map((row) => [row.id, row]));
                     const eff =
@@ -511,6 +513,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             grocery: liveGroceryStore(),
                         },
                         householdId,
+                        { today },
                     );
                     const foodNotices = householdNotices.filter(
                         (n) =>

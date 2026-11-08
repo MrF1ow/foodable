@@ -584,6 +584,7 @@ describe("possible-duplicates routes", () => {
                 grocery: db.groceryStore,
             },
             HH,
+            { today: "2026-01-15" },
         );
         expect(result.possibleDuplicatePairs).toHaveLength(1);
         expect(

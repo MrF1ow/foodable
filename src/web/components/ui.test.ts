@@ -14,6 +14,7 @@ import {
     row,
 } from "./ui.js";
 import { renderFridgePage } from "../pages/fridge.js";
+import { utcTodayFromDate } from "../../domain/stock.js";
 import { renderGroceryPage } from "../pages/grocery.js";
 import { renderRecipesPage } from "../pages/recipes.js";
 import { renderSettingsPage } from "../pages/settings.js";
@@ -418,7 +419,12 @@ test("every page's h1 comes from pageHeader once", async () => {
         ["nutrition", nutrition],
         [
             "fridge",
-            renderFridgePage({ locations: [], items: [], chrome: appChrome }),
+            renderFridgePage({
+                today: utcTodayFromDate(),
+                locations: [],
+                items: [],
+                chrome: appChrome,
+            }),
         ],
         ["grocery", renderGroceryPage({ chrome: appChrome, stores: [] })],
         [

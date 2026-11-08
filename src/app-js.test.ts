@@ -8,6 +8,9 @@ import { renderGroceryPage } from "./web/pages/grocery.js";
 import { renderNutritionPage } from "./web/pages/nutrition.js";
 import { renderRecipesPage } from "./web/pages/recipes.js";
 import type { HouseholdMember } from "./household.js";
+import { utcTodayFromDate } from "./domain/stock.js";
+
+const FRIDGE_PAGE_TODAY = utcTodayFromDate();
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -127,6 +130,7 @@ test("getAppJs client IIFEs evaluate without ReferenceError when stubbed", async
 
 test("no app page HTML contains a script with a body except widget frames", async () => {
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -214,6 +218,7 @@ test("no app page HTML contains a script with a body except widget frames", asyn
 
 test("the Fridge page ships the picker logic once", async () => {
     const html = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",

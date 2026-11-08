@@ -41,6 +41,7 @@ import {
     updateFridgeItemQuantityAdjust,
 } from "./stock.js";
 import { fridgeExpiryLine } from "../copy/notices.js";
+import { householdTodayAt } from "../household.js";
 
 const HH = "hh-1";
 
@@ -351,8 +352,36 @@ test("expiryLevel uses UTC-day boundaries", () => {
     expect(expiryLevel("2026-10-13", today)).toBe(null);
 });
 
+test("listExpiring horizon is today through today+days inclusive", () => {
+    const today = "2026-10-05";
+    const items = [
+        {
+            id: "edge",
+            householdId: HH,
+            locationId: "loc",
+            kind: "food" as const,
+            displayName: "Edge",
+            quantity: { amount: 1, unit: "each" },
+            foodId: "f1",
+            expiresOn: "2026-10-08",
+        },
+        {
+            id: "past",
+            householdId: HH,
+            locationId: "loc",
+            kind: "food" as const,
+            displayName: "Past",
+            quantity: { amount: 1, unit: "each" },
+            foodId: "f2",
+            expiresOn: "2026-10-09",
+        },
+    ];
+    const listed = listExpiring(items, today, 3);
+    expect(listed.map((i) => i.id)).toEqual(["edge"]);
+});
+
 test("list_expiring includes items within the window, oldest first", () => {
-    const now = new Date("2026-10-05T12:00:00.000Z");
+    const today = "2026-10-05";
     const listed = listExpiring(
         [
             {
@@ -385,10 +414,46 @@ test("list_expiring includes items within the window, oldest first", () => {
                 foodId: "f3",
             },
         ],
+        today,
         3,
-        now,
     );
     expect(listed.map((item) => item.id)).toEqual(["soon"]);
+});
+
+test("fridgeNotices respects household today not UTC midnight", () => {
+    const item = {
+        id: "i-la",
+        kind: "food" as const,
+        foodId: "f-milk",
+        displayName: "Milk",
+        quantity: { amount: 1, unit: "l" },
+        expiresOn: "2026-11-07",
+    };
+    const laNow = new Date("2026-11-08T05:00:00.000Z");
+    const householdToday = householdTodayAt(
+        { timezone: "America/Los_Angeles" },
+        null,
+        laNow,
+    );
+    expect(householdToday).toBe("2026-11-07");
+    const householdNotice = fridgeNotices([item], householdToday)[0];
+    expect(householdNotice?.code).toBe("fridge.expiring");
+    const utcToday = utcTodayFromDate(laNow);
+    expect(utcToday).toBe("2026-11-08");
+    const utcNotice = fridgeNotices([item], utcToday)[0];
+    expect(utcNotice?.code).toBe("fridge.expired");
+
+    const aucklandToday = householdTodayAt(
+        { timezone: "Pacific/Auckland" },
+        null,
+        new Date("2026-11-07T12:00:00.000Z"),
+    );
+    expect(aucklandToday).toBe("2026-11-08");
+    const aucklandNotice = fridgeNotices(
+        [{ ...item, expiresOn: "2026-11-07" }],
+        aucklandToday,
+    )[0];
+    expect(aucklandNotice?.code).toBe("fridge.expired");
 });
 
 test("fridgeNotices maps expiry levels to notice codes", () => {

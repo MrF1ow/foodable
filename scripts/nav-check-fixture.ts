@@ -103,6 +103,7 @@ function fridgeView(chrome: unknown) {
     });
     return {
         chrome,
+        today,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
         items: [
             item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
