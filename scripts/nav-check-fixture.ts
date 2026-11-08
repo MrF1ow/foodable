@@ -40,7 +40,14 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
+import {
+    getAppCss,
+    getAppJs,
+    getAppV2Css,
+    getAppV2Js,
+    getEmbedWidgetHtml,
+} from "../src/widgets.js";
+import { defaultViewerFlags } from "../src/viewer-flags.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
 import {
     settingsBackHref,
@@ -289,11 +296,31 @@ function food(id: string, name: string, calories: number | null) {
 
 // Views are cast with `as never`: this script is not typechecked (CI's
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
-async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = {
+// The shell the page renders in: the old one, or the new one (flag ui-v2) for
+// the -v2 renders the v2 scenarios navigate.
+function fixtureChrome(theme: "light" | "dark", v2: boolean) {
+    return {
         ...viewerChromeFromProfile({ theme }),
         attention: { count: 0, tabs: {} },
+        flags: { ...defaultViewerFlags(), uiV2: v2 },
+        ...(v2
+            ? {
+                  identity: {
+                      viewerName: "Ethan Flow",
+                      viewerRole: "owner",
+                      householdName: "The Flow household",
+                      memberCount: 2,
+                  },
+              }
+            : {}),
     };
+}
+
+async function pages(
+    theme: "light" | "dark",
+    v2 = false,
+): Promise<Record<string, string>> {
+    const chrome = fixtureChrome(theme, v2);
     const nutrition = await renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -339,6 +366,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
         settings: renderSettingsPage({
             chrome,
+            flags: chrome.flags,
             backHref: "/kitchen/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
@@ -380,10 +408,12 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
         help: renderSettingsHelpPage({
             chrome,
+            flags: chrome.flags,
             backHref: "/kitchen/fridge",
         } as never),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
+            flags: chrome.flags,
             backHref: "/kitchen/fridge",
             member: { ...ME, role: "owner" },
             preferences: {
@@ -429,6 +459,8 @@ function findChromium(): string | null {
 // mismatch and full-reloads the unfilled page.
 await getAppCss();
 await getAppJs();
+await getAppV2Css();
+await getAppV2Js();
 
 const names: string[] = [];
 for (const theme of ["light", "dark"] as const) {
@@ -436,6 +468,9 @@ for (const theme of ["light", "dark"] as const) {
         const file = `${name}-${theme}`;
         await Bun.write(`${OUT}/${file}.html`, html);
         names.push(file);
+    }
+    for (const [name, html] of Object.entries(await pages(theme, true))) {
+        await Bun.write(`${OUT}/${name}-${theme}-v2.html`, html);
     }
 }
 
@@ -459,9 +494,12 @@ function themeFileSuffix(): "light" | "dark" {
     return accountTheme ?? "light";
 }
 
+/** Which shell the fixture's pages render in; /__control?shell=v2|old. */
+let shellV2 = false;
+
 function routeHtmlFile(pathname: string): string {
     const base = ROUTE_BASE[pathname] || "fridge";
-    return `${base}-${themeFileSuffix()}.html`;
+    return `${base}-${themeFileSuffix()}${shellV2 ? "-v2" : ""}.html`;
 }
 
 function applyAccountTheme(html: string): string {
@@ -500,8 +538,8 @@ function stamp(html: string, path: string) {
     gets.push({ path, n });
     if (!html.includes('class="app-main')) return html;
     return html.replace(
-        '<main class="app-main native">',
-        `<main class="app-main native"><p id="p8-rev" data-rev="${n}" hidden></p>`,
+        /<main class="app-main native( fd-main)?">/,
+        (open) => `${open}<p id="p8-rev" data-rev="${n}" hidden></p>`,
     );
 }
 
@@ -571,10 +609,7 @@ function recipeDetailFixture(chrome: unknown) {
 
 function renderFailedModal(pathname: string, modalId: string): string | null {
     if (!modalId) return null;
-    const chrome = {
-        ...viewerChromeFromProfile({ theme: themeFileSuffix() }),
-        attention: { count: 0, tabs: {} },
-    };
+    const chrome = fixtureChrome(themeFileSuffix(), shellV2);
     if (pathname === "/kitchen/fridge") {
         const view = fridgeView(chrome);
         const itemId = (prefix: string) =>
@@ -740,6 +775,9 @@ const server = Bun.serve({
                 const mode = url.searchParams.get("session");
                 sessionMode = mode === "guest" ? "guest" : "app";
             }
+            if (url.searchParams.has("shell")) {
+                shellV2 = url.searchParams.get("shell") === "v2";
+            }
             if (url.searchParams.has("theme")) {
                 const t = url.searchParams.get("theme");
                 accountTheme =
@@ -775,12 +813,29 @@ const server = Bun.serve({
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
-        if (path === "/app.css" || path === "/app.js") {
-            const css = path === "/app.css";
-            const body = css ? await getAppCss() : await getAppJs();
-            const { appScriptHref, appStylesheetHref } =
-                await import("../src/widgets.js");
-            const href = css ? appStylesheetHref() : appScriptHref();
+        if (
+            path === "/app.css" ||
+            path === "/app.js" ||
+            path === "/app-v2.css" ||
+            path === "/app-v2.js"
+        ) {
+            const css = path.endsWith(".css");
+            const v2 = path.startsWith("/app-v2.");
+            const widgets = await import("../src/widgets.js");
+            const body = v2
+                ? css
+                    ? await getAppV2Css()
+                    : await getAppV2Js()
+                : css
+                  ? await getAppCss()
+                  : await getAppJs();
+            const href = v2
+                ? css
+                    ? widgets.appV2StylesheetHref()
+                    : widgets.appV2ScriptHref()
+                : css
+                  ? widgets.appStylesheetHref()
+                  : widgets.appScriptHref();
             const v = url.searchParams.get("v");
             const expected = new URL(`http://x${href}`).searchParams.get("v");
             const cache =

@@ -36,3 +36,21 @@ test("household nav hides Possible duplicates at zero count", () => {
         "Possible duplicates",
     );
 });
+
+test("renderSettingsNav under ui-v2 adds Members between Household and Help", () => {
+    const html = renderSettingsNav("help", "/", { v2: true });
+    expect(
+        [...html.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map(
+            (m) => `${m[2]} ${m[1]}`,
+        ),
+    ).toEqual([
+        "Account /settings",
+        "Household /settings/household-settings",
+        "Members /settings/household",
+        "Help /settings/help",
+    ]);
+    expect(html).toContain('<a href="/settings/help" aria-current="page">');
+    expect(renderSettingsNav("help", "/", { v2: false })).toBe(
+        renderSettingsNav("help", "/"),
+    );
+});

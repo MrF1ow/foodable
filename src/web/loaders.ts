@@ -93,6 +93,7 @@ import {
 import {
     loadHouseholdNotices,
     viewerChromeWithAttention,
+    viewerFlagsFor,
 } from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
@@ -510,6 +511,7 @@ export async function renderSettingsAccountPage(
         status: 200,
         html: renderSettingsPage({
             chrome,
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
             timezone: profile?.timezone ?? "",
@@ -533,6 +535,7 @@ export async function renderSettingsHelpRoute(
         status: 200,
         html: renderSettingsHelpPageHtml({
             chrome: viewerChromeFromProfile(profile),
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
         }),
     };
@@ -563,6 +566,7 @@ export async function renderSettingsHouseholdRoute(
         status: 200,
         html: renderHouseholdSettingsPrefsPage({
             chrome: viewerChromeFromProfile(profile),
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
             member: gate.viewer,
             preferences: config.preferences,

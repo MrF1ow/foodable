@@ -2,8 +2,9 @@
  * there, then run `bun run gen:tokens`; never edit this file.
  *
  * Values mirror design/figcraft-variables.json (FigCraft Theme + Tokens). No
- * @font-face here — brand.css already declares the faces; UI-3 wires loading.
- * Nothing loads this file yet; UI-3 adds /app-v2.css. */
+ * @font-face here — brand.css already declares the faces, and the new shell
+ * still loads /app.css. Included first by public/app/v2/app-v2.css, which
+ * /app-v2.css is assembled from. */
 
 :root {
     --surface-bg: #0d0f0e;

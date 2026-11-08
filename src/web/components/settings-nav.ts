@@ -30,15 +30,26 @@ const SETTINGS_SECTIONS = [
     { id: "help", href: "/settings/help", label: "Help" },
 ] as const;
 
+/** With `ui-v2` on, the phone has no Household tab, so Settings links to the
+ *  members page too. "Household" stays the preferences page; the members page
+ *  is "Members", as in the household sub-nav. */
+const SETTINGS_SECTIONS_V2 = [
+    SETTINGS_SECTIONS[0],
+    SETTINGS_SECTIONS[1],
+    { id: "members", href: "/settings/household", label: "Members" },
+    SETTINGS_SECTIONS[2],
+] as const;
+
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export function renderSettingsNav(
     active: SettingsSection,
     from?: string,
+    opts?: { v2?: boolean },
 ): string {
     return subnav({
         label: "Settings sections",
-        sections: SETTINGS_SECTIONS,
+        sections: opts?.v2 ? SETTINGS_SECTIONS_V2 : SETTINGS_SECTIONS,
         active,
         query: navQuery(from),
     });

@@ -5,6 +5,10 @@
  *
  *   bun run preview:app            # writes tmp/app-preview/*.html, serves :4787
  *   bun run preview:app --shots    # also writes a 430px and a 1280px PNG per page, then exits
+ *   FOODABLE_FLAGS=ui-v2:all bun run preview:app --shots
+ *                                  # the new shell (flag ui-v2): serves /app-v2.css and
+ *                                  # /app-v2.js and adds a 390x844 phone shot (-v2-390.png)
+ *                                  # and a 1440x960 desktop shot (-v2-1440.png) per page
  *
  * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
  * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
@@ -71,7 +75,15 @@ import {
     DUP_MERGE_MODAL_ID,
     renderPossibleDuplicatesPage,
 } from "../src/web/pages/possible-duplicates.js";
-import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
+import {
+    getAppCss,
+    getAppJs,
+    getAppV2Css,
+    getAppV2Js,
+    getEmbedWidgetHtml,
+} from "../src/widgets.js";
+import { buildFlagContext, initFlags } from "../src/flags.js";
+import { evaluateViewerFlags } from "../src/viewer-flags.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4787;
@@ -483,6 +495,34 @@ function previewNotices(): Notice[] {
     ]);
 }
 
+// The viewer's flags, read the way the server reads them on a deploy without a
+// Railway token: FOODABLE_FLAGS (for example ui-v2:all) switches the new shell on.
+await initFlags();
+const PREVIEW_FLAGS = evaluateViewerFlags(
+    buildFlagContext({
+        auth: { kind: "user", userId: ME.userId },
+        member: ME as never,
+    }),
+);
+const V2 = PREVIEW_FLAGS.uiV2;
+
+// What viewerChromeWithAttention loads when ui-v2 is on.
+const PREVIEW_IDENTITY = {
+    viewerName: "Ethan Flow",
+    viewerRole: "owner",
+    householdName: "The Flow household",
+    memberCount: 3,
+} as const;
+
+function previewChrome(theme: "light" | "dark") {
+    return {
+        ...viewerChromeFromProfile({ theme }),
+        attention: previewAttention(),
+        flags: PREVIEW_FLAGS,
+        ...(V2 ? { identity: PREVIEW_IDENTITY } : {}),
+    };
+}
+
 function previewAttention() {
     const notices = previewNotices();
     return {
@@ -492,10 +532,7 @@ function previewAttention() {
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = {
-        ...viewerChromeFromProfile({ theme }),
-        attention: previewAttention(),
-    };
+    const chrome = previewChrome(theme);
     const { catalog, usual } = previewFoodCatalog();
     const catalogById = new Map(catalog.map((row) => [row.id, row]));
     const eggsPlain = catalog.find((row) => row.id === "f-eggs")!;
@@ -685,6 +722,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         settings: renderSettingsPage({
             chrome,
+            flags: PREVIEW_FLAGS,
             backHref: "/kitchen/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
@@ -811,6 +849,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         })(),
         help: renderSettingsHelpPage({
             chrome,
+            flags: PREVIEW_FLAGS,
             backHref: "/kitchen/fridge",
         } as never),
         "needs-attention": (() => {
@@ -855,6 +894,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         })(),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
+            flags: PREVIEW_FLAGS,
             backHref: "/kitchen/fridge",
             member: { ...ME, role: "owner" },
             preferences: {
@@ -866,6 +906,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "settings-household-member": renderHouseholdSettingsPrefsPage({
             chrome,
+            flags: PREVIEW_FLAGS,
             backHref: "/kitchen/fridge",
             member: { ...SAM, role: "member" },
             preferences: {
@@ -908,10 +949,7 @@ async function nutritionWithModal(
     theme: "light" | "dark",
     openModalId: string,
 ): Promise<string> {
-    const chrome = {
-        ...viewerChromeFromProfile({ theme }),
-        attention: previewAttention(),
-    };
+    const chrome = previewChrome(theme);
     return renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -961,6 +999,9 @@ function didYouMeanSample(
         ),
     };
 }
+
+// The hashed asset hrefs the pages carry only exist once the bundles are built.
+await Promise.all([getAppCss(), getAppJs(), getAppV2Css(), getAppV2Js()]);
 
 const names: string[] = [];
 const modalShotPages: string[] = [];
@@ -1024,6 +1065,16 @@ const server = Bun.serve({
                 headers: { "content-type": "text/javascript; charset=utf-8" },
             });
         }
+        if (path === "/app-v2.css") {
+            return new Response(await getAppV2Css(), {
+                headers: { "content-type": "text/css; charset=utf-8" },
+            });
+        }
+        if (path === "/app-v2.js") {
+            return new Response(await getAppV2Js(), {
+                headers: { "content-type": "text/javascript; charset=utf-8" },
+            });
+        }
         if (path === "/") {
             const links = names
                 .map((n) => `<li><a href="/${n}.html">${n}</a></li>`)
@@ -1060,6 +1111,14 @@ if (process.argv.includes("--shots")) {
         // From 768px the bottom nav becomes the left sidebar.
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1280,900 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-wide.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}-wide.png`);
+        if (V2) {
+            // The new shell's two layouts: the phone nav at 390 wide, the
+            // sidebar and top bar at the design's 1440.
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
+            console.log(`${OUT}/${name}-v2-390.png`);
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1440,960 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
+            console.log(`${OUT}/${name}-v2-1440.png`);
+        }
     }
     for (const name of modalShotPages) {
         const theme = name.endsWith("-dark") ? "dark" : "light";

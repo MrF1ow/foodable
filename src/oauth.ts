@@ -25,6 +25,8 @@ import {
     appStylesheetHref,
     getAppCss,
     getAppJs,
+    getAppV2Css,
+    getAppV2Js,
 } from "./widgets.js";
 import { isSafeShareReturnPath } from "./domain/share.js";
 
@@ -79,6 +81,10 @@ export async function renderLoginPage(
 ): Promise<string> {
     await getAppCss();
     await getAppJs();
+    // The signed-in app may be on the new shell after this login; have its
+    // pair hashed too, so the first page carries ?v= hrefs.
+    await getAppV2Css();
+    await getAppV2Js();
     const template = await Bun.file("./public/login.html").text();
     const errorHtml = error
         ? `<div class="error-banner">${escapeHtml(error)}</div>`
