@@ -274,6 +274,7 @@ const LOW_REPO_PREFIXES = [
     ".github/",
     ".claude/",
     ".agents/",
+    ".flow/",
     "scripts/",
     ".cursor/",
     "public/fonts/",
