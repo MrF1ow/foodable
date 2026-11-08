@@ -30,6 +30,13 @@ import {
 import { createTtlCache, type TtlCacheResult } from "./ttl-cache.js";
 
 const SUBJECT_TTL_MS = 5 * 60 * 1000;
+// A failed pin or snapshot load is retried this many times, after these
+// delays, inside one (coalesced) load. When every attempt fails, that subject
+// (or the snapshot) is not queried again until the cooldown has passed, so a
+// database outage costs at most 1 + LOAD_RETRIES queries per subject per
+// cooldown, not one per request.
+const LOAD_RETRY_DELAYS_MS = [50, 200] as const;
+const LOAD_FAILURE_COOLDOWN_MS = 10_000;
 const SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 const MAX_SUBJECTS = 10_000;
 // Same cadence as the export cleanup tick (startExportCleanup).
@@ -38,6 +45,8 @@ const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 type SubjectEntry = {
     get: () => Promise<TtlCacheResult<Map<string, Pin>>>;
     lastUsed: number;
+    /** No load is attempted before this time (ms) after a failed one. */
+    failedUntil: number;
 };
 
 export type FlagPinRuntimeOptions = {
@@ -46,6 +55,10 @@ export type FlagPinRuntimeOptions = {
     now?: () => number;
     subjectTtlMs?: number;
     maxSubjects?: number;
+    /** Delay before each retry of a failed load; its length is the retry cap. */
+    retryDelaysMs?: readonly number[];
+    failureCooldownMs?: number;
+    sleep?: (ms: number) => Promise<void>;
 };
 
 export type FlagPinRuntime = {
@@ -76,14 +89,34 @@ export function createFlagPinRuntime(
     const clock = opts.now ?? Date.now;
     const subjectTtlMs = opts.subjectTtlMs ?? SUBJECT_TTL_MS;
     const maxSubjects = opts.maxSubjects ?? MAX_SUBJECTS;
+    const retryDelaysMs = opts.retryDelaysMs ?? LOAD_RETRY_DELAYS_MS;
+    const failureCooldownMs =
+        opts.failureCooldownMs ?? LOAD_FAILURE_COOLDOWN_MS;
+    const sleep =
+        opts.sleep ??
+        ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+    /** Runs `load`, retrying a failure after each of retryDelaysMs. */
+    async function withRetries<T>(load: () => Promise<T>): Promise<T> {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await load();
+            } catch (err) {
+                const delay = retryDelaysMs[attempt];
+                if (delay === undefined) throw err;
+                await sleep(delay);
+            }
+        }
+    }
 
     // Insertion order is recency order: an entry is re-inserted on every use.
     const subjects = new Map<string, SubjectEntry>();
     // Process-wide, per flag: the last reliable kill-switch value read.
     const lastKnown = new Map<string, boolean>();
     const snapshotCache = createTtlCache(SNAPSHOT_TTL_MS, () =>
-        store.loadSnapshot(),
+        withRetries(() => store.loadSnapshot()),
     );
+    let snapshotFailedUntil = 0;
 
     function subjectEntry(subject: FlagSubject): SubjectEntry {
         const key = subjectKey(subject);
@@ -93,10 +126,13 @@ export function createFlagPinRuntime(
         } else {
             entry = {
                 get: createTtlCache(subjectTtlMs, async () => {
-                    const pins = await store.loadPins(subject);
+                    const pins = await withRetries(() =>
+                        store.loadPins(subject),
+                    );
                     return new Map(pins.map((p) => [p.flag, p]));
                 }),
                 lastUsed: 0,
+                failedUntil: 0,
             };
             if (subjects.size >= maxSubjects) {
                 const oldest = subjects.keys().next();
@@ -115,20 +151,30 @@ export function createFlagPinRuntime(
     async function loadSubjectPins(
         subject: FlagSubject,
     ): Promise<LoadedPins | null> {
+        const entry = subjectEntry(subject);
+        if (entry.failedUntil > clock()) return null;
         try {
-            const entry = subjectEntry(subject);
             return { entry, pins: (await entry.get()).data };
         } catch (err) {
-            logError(`loading pins for ${subject.kind} failed`, err);
+            entry.failedUntil = clock() + failureCooldownMs;
+            logError(
+                `loading pins for ${subject.kind} failed after ${retryDelaysMs.length + 1} attempts`,
+                err,
+            );
             return null;
         }
     }
 
     async function loadSnapshot(): Promise<Map<string, boolean>> {
+        if (snapshotFailedUntil > clock()) return new Map();
         try {
             return (await snapshotCache()).data;
         } catch (err) {
-            logError("loading the flag snapshot failed", err);
+            snapshotFailedUntil = clock() + failureCooldownMs;
+            logError(
+                `loading the flag snapshot failed after ${retryDelaysMs.length + 1} attempts`,
+                err,
+            );
             return new Map();
         }
     }

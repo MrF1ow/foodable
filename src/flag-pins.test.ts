@@ -85,17 +85,19 @@ function setup(clock = { t: 1_000_000 }) {
     const store: MemoryFlagPinStore = createMemoryFlagPinStore({
         now: () => clock.t,
     });
+    const sleeps: number[] = [];
     const runtime = createFlagPinRuntime({
         store,
         registry: REGISTRY,
         now: () => clock.t,
+        sleep: async (ms) => void sleeps.push(ms),
     });
     const railway = fakeRailway();
     const read = async (flag: string, ctx = ctxFor()) => {
         const [e] = await runtime.evaluateAll(ctx, railway.reader, [flag]);
         return e!;
     };
-    return { store, runtime, railway, read, clock };
+    return { store, runtime, railway, read, clock, sleeps };
 }
 
 const userSubject = { kind: "user", id: USER } as const;
@@ -320,6 +322,59 @@ describe("temporary flags", () => {
         }
     });
 
+    test("a failed pin load is retried with backoff and recovers", async () => {
+        const { store, railway, runtime, sleeps } = setup();
+        const loadPins = store.loadPins.bind(store);
+        let failures = 2;
+        let attempts = 0;
+        store.loadPins = async (subject) => {
+            attempts++;
+            if (failures-- > 0) throw new Error("db blip");
+            return loadPins(subject);
+        };
+        railway.set("t-user", true);
+        const [e] = await runtime.evaluateAll(ctxFor(), railway.reader, [
+            "t-user",
+        ]);
+        expect(attempts).toBe(3);
+        expect(sleeps).toEqual([50, 200]);
+        expect(e!.value).toBe(true);
+        expect(store.calls.upsertPin).toBe(1);
+    });
+
+    test("retries are capped, then the subject cools down", async () => {
+        const { store, railway, runtime, clock, sleeps } = setup();
+        let attempts = 0;
+        store.loadPins = async () => {
+            attempts++;
+            throw new Error("db down");
+        };
+        const err = console.error;
+        console.error = () => {};
+        try {
+            railway.set("t-user", true);
+            const readUser = () =>
+                runtime.evaluateAll(ctxFor(), railway.reader, ["t-user"]);
+            await readUser();
+            expect(attempts).toBe(3);
+            expect(sleeps).toEqual([50, 200]);
+
+            // Within the cooldown: no query at all, live value, no pin.
+            clock.t += 9_999;
+            const [e] = await readUser();
+            expect(attempts).toBe(3);
+            expect(e!.value).toBe(true);
+            expect(store.calls.upsertPin).toBe(0);
+
+            // After it: one more capped round.
+            clock.t += 2;
+            await readUser();
+            expect(attempts).toBe(6);
+        } finally {
+            console.error = err;
+        }
+    });
+
     test("a failed pin write is logged, not thrown", async () => {
         const { store, railway, read } = setup();
         store.upsertPin = async () => {
@@ -525,6 +580,29 @@ describe("kill switches", () => {
         try {
             railway.set("k-hh", false, "STALE");
             expect((await read("k-hh")).value).toBe(true);
+        } finally {
+            console.error = err;
+        }
+    });
+
+    test("a failed snapshot load is retried, capped and cooled down", async () => {
+        const { store, railway, read, clock } = setup();
+        let attempts = 0;
+        store.loadSnapshot = async () => {
+            attempts++;
+            throw new Error("db down");
+        };
+        const err = console.error;
+        console.error = () => {};
+        try {
+            railway.set("k-hh", false, "STALE");
+            await read("k-hh");
+            expect(attempts).toBe(3);
+            await read("k-hh");
+            expect(attempts).toBe(3);
+            clock.t += 10_001;
+            await read("k-hh");
+            expect(attempts).toBe(6);
         } finally {
             console.error = err;
         }
