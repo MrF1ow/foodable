@@ -10,6 +10,7 @@ import {
 } from "./middleware.js";
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
+import { startFlagPinSweep } from "./flag-pins.js";
 import {
     startFetchMemorySweep,
     startUnverifiedRecipeCleanup,
@@ -467,6 +468,7 @@ if (import.meta.main) {
 
     // Periodically delete expired meal-export files from the storage bucket.
     startExportCleanup();
+    startFlagPinSweep();
     startUnverifiedRecipeCleanup(
         () => listHouseholdsForRecipeSweep(),
         liveRecipesStore(),

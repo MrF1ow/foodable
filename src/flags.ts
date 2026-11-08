@@ -89,6 +89,26 @@ export interface FlagReader {
     isEnabled(flag: FlagName, ctx: FlagContext): boolean;
 }
 
+/**
+ * The global numeric Railway flag that rolls sticky pins back (STG-5). Bumping
+ * it makes every pin written under another epoch re-evaluate on its next
+ * reliable read. Not a boolean feature flag, so it stays out of `FLAGS` and
+ * never reaches `ViewerFlags`.
+ */
+export const FLAGS_EPOCH = "flags-epoch";
+
+/** `reliable: false` means the epoch could not be read; `value` is then 0. */
+export type EpochRead = { value: number; reliable: boolean };
+
+/** A reader that can also read the epoch: only the Railway reader. */
+export interface EpochFlagReader extends FlagReader {
+    epoch(ctx: FlagContext): EpochRead;
+}
+
+export function hasEpoch(reader: FlagReader): reader is EpochFlagReader {
+    return typeof (reader as Partial<EpochFlagReader>).epoch === "function";
+}
+
 /** First four bytes of SHA-256(s), big-endian uint32, mod 100 — stable across runtimes. */
 export function bucket(s: string): number {
     const digest = createHash("sha256").update(s, "utf8").digest();
@@ -334,7 +354,8 @@ function wrapReader(
 ): FlagReader {
     const evaluateFn = (flag: FlagName, ctx: FlagContext): FlagEvaluation => {
         // STG-7: evaluation metrics counter attaches at this choke point.
-        // STG-5: sticky pins wrap FlagReader and only persist when
+        // STG-5: sticky pins and kill-switch last-known values wrap this
+        // reader from outside (src/flag-pins.ts) and only persist when
         // isReliable(evaluation) — see UNRELIABLE_REASONS.
         return evaluateWithParent(registry, readLeaf, flag, ctx);
     };
@@ -390,19 +411,52 @@ export function createEnvFlags(
 
 export type RailwayFlagsSdk = Pick<
     typeof railwayFlags,
-    "init" | "evaluateBoolean"
+    "init" | "evaluateBoolean" | "evaluateNumber"
 > & {
     synced: boolean;
 };
 
+// Pins store the epoch in a Postgres integer.
+const MAX_EPOCH = 2_147_483_647;
+
 export function createRailwayFlags(
     sdk: RailwayFlagsSdk,
     registry: Record<string, FlagDef> = FLAGS,
-): FlagReader & { markInitDone: () => void } {
+): EpochFlagReader & { markInitDone: () => void } {
     let initDone = false;
+    let warnedBadEpoch = false;
     return {
         markInitDone() {
             initDone = true;
+        },
+        epoch(ctx) {
+            const unknown: EpochRead = { value: 0, reliable: false };
+            if (!initDone) return unknown;
+            try {
+                const result = sdk.evaluateNumber(
+                    FLAGS_EPOCH,
+                    sdkContext(ctx),
+                    0,
+                );
+                // The flag does not exist in Railway yet: epoch 0, known.
+                if (result.reason === "NOT_FOUND") {
+                    return { value: 0, reliable: true };
+                }
+                if (UNRELIABLE_REASONS.has(result.reason)) return unknown;
+                const v = result.value;
+                if (!Number.isInteger(v) || v < 0 || v > MAX_EPOCH) {
+                    if (!warnedBadEpoch) {
+                        warnedBadEpoch = true;
+                        console.warn(
+                            `[flags] ${FLAGS_EPOCH} must be an integer from 0 to ${MAX_EPOCH}, got ${String(v)}; pins keep serving`,
+                        );
+                    }
+                    return unknown;
+                }
+                return { value: v, reliable: true };
+            } catch {
+                return unknown;
+            }
         },
         ...wrapReader(registry, (flag, ctx) => {
             const def = registry[flag as string];
