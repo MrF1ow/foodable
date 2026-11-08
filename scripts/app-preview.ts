@@ -58,6 +58,7 @@ import {
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import {
+    didYouMeanView,
     matchFoodsByWords,
     possibleDuplicates,
     usualProductRows,
@@ -532,6 +533,94 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ],
         viewMemberId: SAM.userId,
     } as never);
+    const recipeView = {
+        chrome: {
+            ...chrome,
+            householdPossibleDuplicates: 1,
+        },
+        foodDuplicateNotices: possibleDuplicateNoticesByFoodId(
+            possibleDuplicateNotices(catalog, new Map(), new Set(), new Set()),
+        ),
+        recipe: {
+            ...RECIPE,
+            name: "Banana bread",
+            yieldPortions: 10,
+            instructions:
+                "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
+        },
+        notices: [
+            {
+                code: "recipe.no_nutrition",
+                severity: "warn",
+                subject: {
+                    kind: "recipe_ingredient",
+                    id: "ing0",
+                    recipeId: "r1",
+                },
+                related: [],
+                params: { name: "Buttermilk", foodId: "f-buttermilk" },
+            },
+        ],
+        noticeContext: {
+            from: "/recipes/r1",
+            foods: new Map(
+                catalog.map((f) => [f.id, { genericFoodId: f.genericFoodId }]),
+            ),
+        },
+        ingredients: [
+            {
+                id: "ing1",
+                recipeId: "r1",
+                foodId: "f-eggs",
+                displayName: "Eggs · Kirkland Large Eggs",
+                quantity: { amount: 3, unit: "each" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 0.3,
+                personAmount: 0.3,
+            },
+            {
+                id: "ing0",
+                recipeId: "r1",
+                foodId: "f-buttermilk",
+                displayName: "Buttermilk",
+                quantity: { amount: 200, unit: "ml" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 20,
+                personAmount: 20,
+            },
+            {
+                id: "ing2",
+                recipeId: "r1",
+                foodId: "f2",
+                displayName: "All-purpose flour",
+                quantity: { amount: 200, unit: "g" },
+                note: null,
+                sortOrder: 1,
+                perPortionAmount: 20,
+                personAmount: 20,
+            },
+            {
+                id: "ing3",
+                recipeId: "r1",
+                foodId: "f3",
+                displayName: "Sugar",
+                quantity: { amount: 100, unit: "g" },
+                note: null,
+                sortOrder: 2,
+                perPortionAmount: 10,
+                personAmount: 10,
+            },
+        ],
+        members: [ME, SAM],
+        stores: [{ id: "s1", name: "Safeway" }],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: MACROS,
+        isOwner: true,
+    };
     return {
         nutrition,
         "nutrition-peer": nutritionPeer,
@@ -560,107 +649,39 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             },
         } as never),
+        "grocery-did-you-mean": renderGroceryPage({
+            ...(groceryView(chrome) as object),
+            openModalId: "grocery-add-food-s1",
+            didYouMean: didYouMeanSample(
+                "grocery-add-food-s1",
+                "/grocery/lines",
+                { kind: "food", store_id: "s1" },
+            ),
+        } as never),
+        "fridge-did-you-mean": renderFridgePage({
+            ...(fridgeView(chrome) as object),
+            openModalId: "fridge-add-food-l1",
+            didYouMean: didYouMeanSample(
+                "fridge-add-food-l1",
+                "/fridge/items",
+                { kind: "food", location_id: "l1" },
+            ),
+        } as never),
         recipes: renderRecipesPage({
             chrome,
             recipes: [RECIPE, RECIPE_TWO],
             members: [ME, SAM],
             viewerId: "u1",
         } as never),
-        recipe: renderRecipeDetailPage({
-            chrome: {
-                ...chrome,
-                householdPossibleDuplicates: 1,
-            },
-            foodDuplicateNotices: possibleDuplicateNoticesByFoodId(
-                possibleDuplicateNotices(
-                    catalog,
-                    new Map(),
-                    new Set(),
-                    new Set(),
-                ),
+        recipe: renderRecipeDetailPage(recipeView as never),
+        "recipe-did-you-mean": renderRecipeDetailPage({
+            ...recipeView,
+            openModalId: "recipe-add-ingredient-r1",
+            didYouMean: didYouMeanSample(
+                "recipe-add-ingredient-r1",
+                "/recipes/r1/ingredients",
+                {},
             ),
-            recipe: {
-                ...RECIPE,
-                name: "Banana bread",
-                yieldPortions: 10,
-                instructions:
-                    "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
-            },
-            notices: [
-                {
-                    code: "recipe.no_nutrition",
-                    severity: "warn",
-                    subject: {
-                        kind: "recipe_ingredient",
-                        id: "ing0",
-                        recipeId: "r1",
-                    },
-                    related: [],
-                    params: { name: "Buttermilk", foodId: "f-buttermilk" },
-                },
-            ],
-            noticeContext: {
-                from: "/recipes/r1",
-                foods: new Map(
-                    catalog.map((f) => [
-                        f.id,
-                        { genericFoodId: f.genericFoodId },
-                    ]),
-                ),
-            },
-            ingredients: [
-                {
-                    id: "ing1",
-                    recipeId: "r1",
-                    foodId: "f-eggs",
-                    displayName: "Eggs · Kirkland Large Eggs",
-                    quantity: { amount: 3, unit: "each" },
-                    note: null,
-                    sortOrder: 0,
-                    perPortionAmount: 0.3,
-                    personAmount: 0.3,
-                },
-                {
-                    id: "ing0",
-                    recipeId: "r1",
-                    foodId: "f-buttermilk",
-                    displayName: "Buttermilk",
-                    quantity: { amount: 200, unit: "ml" },
-                    note: null,
-                    sortOrder: 0,
-                    perPortionAmount: 20,
-                    personAmount: 20,
-                },
-                {
-                    id: "ing2",
-                    recipeId: "r1",
-                    foodId: "f2",
-                    displayName: "All-purpose flour",
-                    quantity: { amount: 200, unit: "g" },
-                    note: null,
-                    sortOrder: 1,
-                    perPortionAmount: 20,
-                    personAmount: 20,
-                },
-                {
-                    id: "ing3",
-                    recipeId: "r1",
-                    foodId: "f3",
-                    displayName: "Sugar",
-                    quantity: { amount: 100, unit: "g" },
-                    note: null,
-                    sortOrder: 2,
-                    perPortionAmount: 10,
-                    personAmount: 10,
-                },
-            ],
-            members: [ME, SAM],
-            stores: [{ id: "s1", name: "Safeway" }],
-            viewerId: "u1",
-            filterUserId: "u1",
-            portionCount: 1,
-            macros: MACROS,
-            isOwner: true,
         } as never),
         settings: renderSettingsPage({
             chrome,
@@ -906,6 +927,38 @@ async function nutritionWithModal(
     } as never);
 }
 
+function didYouMeanSample(
+    modalId: string,
+    action: string,
+    fields: Record<string, string>,
+) {
+    return {
+        modalId,
+        action,
+        view: didYouMeanView(
+            {
+                name: "chicken egg",
+                candidates: [
+                    {
+                        food: {
+                            id: "f-eggs",
+                            name: "Eggs",
+                            brand: null,
+                        } as never,
+                        why: "contains_words",
+                    },
+                ],
+            },
+            {
+                food_name: "chicken egg",
+                qty_amount: "6",
+                qty_unit: "each",
+                ...fields,
+            },
+        ),
+    };
+}
+
 const names: string[] = [];
 const modalShotPages: string[] = [];
 for (const theme of ["light", "dark"] as const) {
@@ -933,6 +986,9 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-${theme}`,
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
+        `grocery-did-you-mean-${theme}`,
+        `fridge-did-you-mean-${theme}`,
+        `recipe-did-you-mean-${theme}`,
     );
 }
 

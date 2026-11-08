@@ -57,6 +57,13 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
+import {
+    recipeIngredientRetryFields,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
@@ -778,16 +785,23 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
     const amount = formRecipeIngredientAmount(body, "qty_amount");
     try {
         if (formText(body, "food_id")) {
+            const foodId = formText(body, "food_id");
             await addRecipeIngredientById(
                 liveRecipesStore(),
                 liveFoodsStore(),
                 {
                     householdId: member.householdId,
                     recipeId,
-                    foodId: formText(body, "food_id"),
+                    foodId,
                     amount,
                     unit: formText(body, "qty_unit"),
                 },
+            );
+            await rememberAliasIfRequested(
+                liveFoodsStore(),
+                member.householdId,
+                body,
+                foodId,
             );
         } else if (formText(body, "barcode")) {
             const foods = liveFoodsStore();
@@ -826,10 +840,27 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                     name: formText(body, "food_name"),
                     amount,
                     unit: formText(body, "qty_unit"),
+                    onSimilar: manualOnSimilar(body),
                 },
             );
         }
     } catch (err) {
+        if (isSimilarFoodsError(err)) {
+            const modalId = `recipe-add-ingredient-${recipeId}`;
+            const didYouMean = buildDidYouMeanModal(
+                err,
+                recipeIngredientRetryFields(body),
+                modalId,
+                `/recipes/${recipeId}/ingredients`,
+            );
+            if (didYouMean) {
+                const page = await renderRecipeDetailRoute(userId, recipeId, {
+                    openModalId: modalId,
+                    didYouMean,
+                });
+                return c.html(page.html, 409);
+            }
+        }
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-add-ingredient-${recipeId}`,
         });

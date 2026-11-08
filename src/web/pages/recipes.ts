@@ -45,6 +45,10 @@ import {
     noticeList,
     type NoticeRouteContext,
 } from "../components/notices.js";
+import {
+    didYouMeanModalBlock,
+    type DidYouMeanModal,
+} from "../components/did-you-mean.js";
 import { sourceIcon } from "../components/source-icon.js";
 import {
     recipeDisplaySource,
@@ -132,6 +136,7 @@ export type RecipeDetailView = {
     dislikeNote?: string;
     isOwner: boolean;
     error?: string;
+    didYouMean?: DidYouMeanModal;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
     problems?: RecipeProblem[];
@@ -750,7 +755,11 @@ ${field({ id: "recipe-total-portions", label: "Total portions", control: `<input
             id: addIngredientId,
             title: "Add ingredient",
             openOnLoad: modalOpen(view, addIngredientId),
-            body: `${modalFormError(view, addIngredientId)}${renderFoodPicker({
+            body: `${modalFormError(view, addIngredientId)}${didYouMeanModalBlock(
+                view.didYouMean,
+                addIngredientId,
+                view.openModalId,
+            )}${renderFoodPicker({
                 id: pickerId,
                 action: `/recipes/${recipeId}/ingredients`,
                 method: "post",
