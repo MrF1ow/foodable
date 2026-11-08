@@ -6,7 +6,7 @@ priority: med
 size: L
 type: feature
 areas: [grocery, db]
-after: [UI-12, STG-1, UI-29]
+after: [UI-12, STG-12, UI-29]
 plan: null
 prs: []
 ---

@@ -1,12 +1,12 @@
 # Redesign of the household app: plan
 
-Status: proposed 2026-11-08. Planner project: [UI](../planner/redesign/). Chat widgets are a separate track: [chat-widgets-plan.md](./chat-widgets-plan.md). Flags: [staging-plan.md](./staging-plan.md#feature-flags).
+Status: proposed 2026-11-08. Planner project: [UI](../planner/redesign/). Chat widgets are a separate track: [chat-widgets-plan.md](./chat-widgets-plan.md). Flags: [staging-plan.md](./staging-plan.md#feature-flags). Staging is not part of this plan: it is a follow-up once the redesign is finished (STG-1).
 
 A mobile-first redesign of the household web app, with a desktop layout at one breakpoint. It ships behind feature flags, page by page, while the current app stays untouched until the new one has replaced it everywhere. Much of what the design shows needs functionality that does not exist yet; each of those pieces is its own item and its own flag.
 
 ## The design
 
-`~/Documents/Foodable/Foodable Design.figcraft`, opened in the FigCraft app. It is the source of truth for the design.
+`~/Projects/designs/Foodable/Foodable Design.figcraft`, opened in the FigCraft app. It is the source of truth for the design.
 
 **Read-only.** Read it with the FigCraft MCP tools (`inspect_document`, `get_node`, `screenshot`, and read-only `run_command`s such as `variable.list`, `component.list` and `text.loadFont`). Never edit or save it, not even to fix a mismatch. When the code and the design disagree, the code changes, or the design owner changes the design.
 
@@ -18,7 +18,7 @@ A mobile-first redesign of the household web app, with a desktop layout at one b
 | Desktop                          | Today, Trends, Kitchen, Recipes, Settings at 1440 wide, in both themes.                                                       |
 | Chat widgets                     | The MCP widgets in host-light and host-dark, at chat width. See [chat-widgets-plan.md](./chat-widgets-plan.md).               |
 
-Fonts (Geist, Bricolage Grotesque) load per FigCraft session from `~/Documents/Foodable/fonts/`.
+Fonts (Geist, Bricolage Grotesque) load per FigCraft session from `~/Projects/designs/Foodable/fonts/`.
 
 ## Decided
 
@@ -33,7 +33,7 @@ Fonts (Geist, Bricolage Grotesque) load per FigCraft session from `~/Documents/F
 
 ## How it ships
 
-1. **Foundations, no flags** (STG and UI foundation items): the flag adapter and its tables, staging, route moves, design tokens that match the FigCraft variables exactly, the new shell beside the old one, and the shared building blocks.
+1. **Foundations, no flags** (STG and UI foundation items): the flag adapter and its tables, migration rehearsal on a copy of production data (STG-12), route moves, design tokens that match the FigCraft variables exactly, the new shell beside the old one, and the shared building blocks.
 2. **Pages on today's backend**, each behind its own flag, inside the new shell (`ui-v2`).
 3. **New behaviour**, each behind its own flag, each starting with its migration (migrations are never flagged).
 4. **Retire the old app** once every page flag is on for everyone and removed: the old shell, pages, marketing layer, card arranging and embedded widgets go in one series.

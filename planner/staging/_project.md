@@ -1,7 +1,7 @@
 ---
 key: STG
-name: Staging and feature flags
+name: Feature flags
 plan: docs/staging-plan.md
 ---
 
-A staging deploy that every release runs on first, and features that ship switched off until they are ready. The redesign and the chat widgets ship through these flags, so this comes first.
+Features that ship switched off until they are ready, on locally first and then for the owner's account in production. The redesign and the chat widgets ship through these flags, so this comes first. Migrations are rehearsed on a copy of production data. A staging environment is a later follow-up, once the redesign is finished (STG-1).

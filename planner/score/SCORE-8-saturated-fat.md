@@ -6,7 +6,7 @@ priority: med
 size: S
 type: feature
 areas: [foods, db]
-after: [STG-1]
+after: [STG-12]
 plan: null
 prs: []
 ---

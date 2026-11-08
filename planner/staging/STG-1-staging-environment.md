@@ -2,13 +2,15 @@
 id: STG-1
 title: Staging environment on Railway
 status: todo
-priority: high
+priority: low
 size: M
 type: ops
 areas: [infra]
-after: []
+after: [UI-27]
 plan: null
 prs: []
 ---
 
-Duplicate the production environment: its own Postgres, volume and domain, tracking `main` with auto-deploy after CI. Different `DATABASE_URL`, `PUBLIC_ORIGIN` and session secret. Migrations are never behind a flag, so this lands before the first redesign item with a migration (UI-18, UI-21, SCORE-8 and others list it in `after`). Staging has its own tester accounts and groups.
+Duplicate the production environment: its own Postgres, volume and domain, tracking `main` with auto-deploy after CI. Different `DATABASE_URL`, `PUBLIC_ORIGIN` and session secret. Staging has its own tester accounts and groups.
+
+A follow-up to the redesign, deferred for cost (decided 2026-11-08): no paid Railway staging environment until the redesign is finished. Until then, migrations are rehearsed on a copy of production data (STG-12), and flags go local first, then to the owner's account in production.

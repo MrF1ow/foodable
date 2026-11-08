@@ -6,7 +6,7 @@ priority: low
 size: S
 type: feature
 areas: [recipes, db]
-after: [UI-13, STG-1, UI-30]
+after: [UI-13, STG-12, UI-30]
 plan: null
 prs: []
 ---
