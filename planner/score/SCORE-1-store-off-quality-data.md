@@ -1,14 +1,14 @@
 ---
 id: SCORE-1
 title: Store Open Food Facts quality data on foods
-status: todo
+status: done
 priority: med
 size: M
 type: feature
 areas: [foods, db]
 after: []
 plan: null
-prs: []
+prs: [205]
 ---
 
 Nutri-Score, NOVA, Green-Score, additives with their risk tiers, allergens, traces and ingredient-analysis tags, saved on the `foods` row from the barcode lookup. Additive columns; null means unknown.

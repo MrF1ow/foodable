@@ -58,11 +58,7 @@ import {
 export const fridgeRoutes = new Hono();
 
 export async function fridgeBarcodeLookup(barcode: string) {
-    try {
-        return await lookupBarcode(barcode);
-    } catch {
-        return null;
-    }
+    return lookupBarcode(barcode);
 }
 
 async function fridgeFormError(

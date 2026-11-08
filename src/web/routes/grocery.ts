@@ -136,13 +136,15 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                 );
                 catalogAllergens = catalog.get(foodId)?.allergens ?? null;
             } else if (formText(body, "barcode")) {
-                previewName =
-                    (
-                        await fridgeBarcodeLookup(
-                            normalizeBarcode(formText(body, "barcode")) ??
-                                formText(body, "barcode"),
-                        )
-                    )?.name ?? previewName;
+                try {
+                    const hit = await fridgeBarcodeLookup(
+                        normalizeBarcode(formText(body, "barcode")) ??
+                            formText(body, "barcode"),
+                    );
+                    previewName = hit?.name ?? previewName;
+                } catch {
+                    // OFF unreachable; keep the typed name for allergen preview.
+                }
             }
             const notices = allergenNotices(
                 { kind: "grocery_line", id: "" },

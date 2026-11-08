@@ -6279,6 +6279,41 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("get_food emits quality null or full literal", async () => {
+        await withPat(async (call) => {
+            const plain = await call("upsert_food", { name: "Oats" });
+            const plainId = plain.structuredContent?.id as string;
+            const without = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: plainId }))
+                    .structuredContent,
+            );
+            expect(without.quality).toBeNull();
+
+            await db.foodsStore.updateFoodRow({
+                ...(await db.foodsStore.getFood("hh-1", plainId))!,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 1,
+                    ecoscoreGrade: "b",
+                    additives: [{ tag: "en:e250", risk: "high" }],
+                    allergensTags: ["en:gluten"],
+                    tracesTags: [],
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-07T12:00:00.000Z",
+                },
+            });
+            const withQ = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: plainId }))
+                    .structuredContent,
+            );
+            expect(withQ.quality?.nutriscore_grade).toBe("a");
+            expect(withQ.quality?.additives).toEqual([
+                { tag: "en:e250", risk: "high" },
+            ]);
+        });
+    });
+
     test("list_notices count matches household notices; filters narrow notices only", async () => {
         function addDaysUtc(iso: string, delta: number): string {
             const [y, m, d] = iso.split("-").map(Number);

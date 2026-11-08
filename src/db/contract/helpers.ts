@@ -60,6 +60,7 @@ export function sampleFood(
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        offQuality: null,
         createdBy: null,
         archivedAt: null,
         createdAt: now,

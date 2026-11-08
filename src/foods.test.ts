@@ -4,6 +4,7 @@ import {
     fetchProductFromOFF,
     fetchProductsByNameFromOFF,
     formatFoodResult,
+    isBarcodeCacheServable,
     type FoodResult,
 } from "./foods.js";
 
@@ -650,5 +651,49 @@ describe("formatFoodResult", () => {
         expect(text).toContain("Coconut Milk\n");
         expect(text).not.toContain("()");
         expect(text).toContain("Calories: n/a");
+    });
+});
+
+describe("isBarcodeCacheServable", () => {
+    const row: FoodResult = {
+        name: "Cola",
+        brand: null,
+        serving: "100 g",
+        calories: 42,
+        protein_g: 0,
+        carbs_g: 10,
+        fat_g: 0,
+        fiber_g: null,
+        sugar_g: 10,
+        alcohol_g: null,
+        nutriscore_grade: "e",
+        nova_group: null,
+        source: "off:1",
+        source_name: "openfoodfacts",
+        barcode: "1",
+    };
+
+    test("null and missing quality are cache misses", () => {
+        expect(isBarcodeCacheServable(null)).toBe(false);
+        expect(isBarcodeCacheServable(row)).toBe(false);
+    });
+
+    test("payload with quality object is servable", () => {
+        expect(
+            isBarcodeCacheServable({
+                ...row,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            }),
+        ).toBe(true);
     });
 });

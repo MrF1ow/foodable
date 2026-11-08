@@ -1,5 +1,6 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
+import { additiveRisk, type AdditiveRisk } from "./additive-risk.js";
 import { isQuantityUnit } from "./quantity.js";
 import {
     cleanupDismissalsForFood,
@@ -15,6 +16,18 @@ export type NutritionSource =
     "openfoodfacts" | "manual" | "estimate" | "recipe";
 
 export type UsualAmount = { amount: number; unit: string };
+
+export type FoodQuality = {
+    nutriscoreGrade: "a" | "b" | "c" | "d" | "e" | null;
+    novaGroup: 1 | 2 | 3 | 4 | null;
+    ecoscoreGrade: "a-plus" | "a" | "b" | "c" | "d" | "e" | "f" | null;
+    additives: { tag: string; risk: AdditiveRisk | null }[] | null;
+    allergensTags: string[] | null;
+    tracesTags: string[] | null;
+    ingredientsAnalysisTags: string[] | null;
+    labelsTags: string[] | null;
+    fetchedAt: string;
+};
 
 export type Food = {
     id: string;
@@ -41,6 +54,7 @@ export type Food = {
     usualProductId: string | null;
     usualStoreId: string | null;
     usualAmount: UsualAmount | null;
+    offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
@@ -126,6 +140,17 @@ export type FoodsStore = {
         fromId: string,
         toId: string,
     ): Promise<void>;
+    /**
+     * Write only the OFF quality columns. Applies when the row is live and its
+     * stored `fetchedAt` is null or older; with `onlyIfUnset`, only when it is
+     * null (a miss stamp never replaces data written while the lookup ran).
+     */
+    setFoodQuality(
+        householdId: string,
+        foodId: string,
+        quality: FoodQuality,
+        opts?: { onlyIfUnset?: boolean },
+    ): Promise<Food | null>;
 };
 
 export class FoodsInputError extends Error {
@@ -308,6 +333,85 @@ export function catalogNutritionFromOff(food: FoodResult): {
     };
 }
 
+export function foodQualityFromHit(hit: FoodResult): FoodQuality | null {
+    const q = hit.quality;
+    if (q === undefined) return null;
+    return {
+        nutriscoreGrade: q.nutriscore_grade,
+        novaGroup: q.nova_group,
+        ecoscoreGrade: q.ecoscore_grade,
+        additives:
+            q.additives_tags == null
+                ? null
+                : q.additives_tags.map((tag) => ({
+                      tag,
+                      risk: additiveRisk(tag),
+                  })),
+        allergensTags: q.allergens_tags == null ? null : [...q.allergens_tags],
+        tracesTags: q.traces_tags == null ? null : [...q.traces_tags],
+        ingredientsAnalysisTags:
+            q.ingredients_analysis_tags == null
+                ? null
+                : [...q.ingredients_analysis_tags],
+        labelsTags: q.labels_tags == null ? null : [...q.labels_tags],
+        fetchedAt: q.fetched_at,
+    };
+}
+
+function hitQualityIsNewer(food: Food, hit: FoodResult): boolean {
+    const next = foodQualityFromHit(hit);
+    if (next == null) return false;
+    if (food.offQuality == null) return true;
+    return (
+        new Date(next.fetchedAt).getTime() >
+        new Date(food.offQuality.fetchedAt).getTime()
+    );
+}
+
+/** OFF confirmed the barcode exists but returned no usable product-quality fields. */
+export function offQualityMissStamp(fetchedAt: string): FoodQuality {
+    return {
+        nutriscoreGrade: null,
+        novaGroup: null,
+        ecoscoreGrade: null,
+        additives: null,
+        allergensTags: null,
+        tracesTags: null,
+        ingredientsAnalysisTags: null,
+        labelsTags: null,
+        fetchedAt,
+    };
+}
+
+export async function applyHitQualityToFood(
+    store: FoodsStore,
+    food: Food,
+    hit: FoodResult,
+): Promise<Food> {
+    if (!hitQualityIsNewer(food, hit)) return food;
+    const offQuality = foodQualityFromHit(hit);
+    if (offQuality == null) return food;
+    const updated = await store.setFoodQuality(
+        food.householdId,
+        food.id,
+        offQuality,
+    );
+    return updated ?? (await store.getFood(food.householdId, food.id)) ?? food;
+}
+
+export async function refreshFoodQualityByBarcode(
+    store: FoodsStore,
+    householdId: string,
+    barcode: string,
+    hit: FoodResult,
+): Promise<Food | null> {
+    const foodId = await store.getBarcodeFoodId(householdId, barcode);
+    if (!foodId) return null;
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt) return null;
+    return applyHitQualityToFood(store, food, hit);
+}
+
 const OFF_COUNT_UNITS = new Set([
     "",
     "each",
@@ -376,6 +480,26 @@ export function gramsPerEachFromOff(food: {
     return Math.round((labeled / count) * 10) / 10;
 }
 
+function copyQuality(q: FoodQuality): FoodQuality {
+    return {
+        nutriscoreGrade: q.nutriscoreGrade,
+        novaGroup: q.novaGroup,
+        ecoscoreGrade: q.ecoscoreGrade,
+        additives:
+            q.additives == null
+                ? null
+                : q.additives.map((a) => ({ tag: a.tag, risk: a.risk })),
+        allergensTags: q.allergensTags == null ? null : [...q.allergensTags],
+        tracesTags: q.tracesTags == null ? null : [...q.tracesTags],
+        ingredientsAnalysisTags:
+            q.ingredientsAnalysisTags == null
+                ? null
+                : [...q.ingredientsAnalysisTags],
+        labelsTags: q.labelsTags == null ? null : [...q.labelsTags],
+        fetchedAt: q.fetchedAt,
+    };
+}
+
 function copyFood(row: Food): Food {
     return {
         ...row,
@@ -387,6 +511,7 @@ function copyFood(row: Food): Food {
                       amount: row.usualAmount.amount,
                       unit: row.usualAmount.unit,
                   },
+        offQuality: row.offQuality == null ? null : copyQuality(row.offQuality),
     };
 }
 
@@ -508,6 +633,29 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 );
             }
             return copyFood(row);
+        },
+        async setFoodQuality(householdId, foodId, quality, opts) {
+            const idx = foods.findIndex(
+                (food) =>
+                    food.householdId === householdId && food.id === foodId,
+            );
+            if (idx < 0) return null;
+            const row = foods[idx]!;
+            if (row.archivedAt != null) return null;
+            const priorFetched = row.offQuality?.fetchedAt;
+            if (priorFetched != null && opts?.onlyIfUnset) return null;
+            if (
+                priorFetched != null &&
+                new Date(priorFetched).getTime() >=
+                    new Date(quality.fetchedAt).getTime()
+            ) {
+                return null;
+            }
+            const next = copyFood(row);
+            next.offQuality = copyQuality(quality);
+            next.updatedAt = nowIso();
+            foods[idx] = next;
+            return copyFood(next);
         },
         async getByNormalizedName(householdId, kind, normalizedName) {
             const matches = foods.filter(
@@ -769,6 +917,7 @@ export function newFood(input: {
     usualProductId?: string | null;
     usualStoreId?: string | null;
     usualAmount?: UsualAmount | null;
+    offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
     const name = input.name.trim();
@@ -799,6 +948,8 @@ export function newFood(input: {
         usualStoreId: input.usualStoreId ?? null,
         usualAmount:
             input.usualAmount == null ? null : { ...input.usualAmount },
+        offQuality:
+            input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
         archivedAt: null,
         createdAt: stamp,
@@ -1023,13 +1174,15 @@ export async function findOrCreateFoodByBarcodeFromHit(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
-            return { food: existing, created: false };
+            const food = await applyHitQualityToFood(store, existing, hit);
+            return { food, created: false };
         }
     }
     const byOff = await store.getByOffSourceId(householdId, normalized);
     if (byOff) {
         await store.setBarcode(householdId, normalized, byOff.id);
-        return { food: byOff, created: false };
+        const food = await applyHitQualityToFood(store, byOff, hit);
+        return { food, created: false };
     }
     const byName = await existingByNameOrAlias(
         store,
@@ -1039,7 +1192,8 @@ export async function findOrCreateFoodByBarcodeFromHit(
     );
     if (byName) {
         await store.setBarcode(householdId, normalized, byName.id);
-        return { food: byName, created: false };
+        const food = await applyHitQualityToFood(store, byName, hit);
+        return { food, created: false };
     }
     const nutrition = catalogNutritionFromOff(hit);
     const created = await store.insertFood(
@@ -1053,6 +1207,7 @@ export async function findOrCreateFoodByBarcodeFromHit(
             nutritionSource: "openfoodfacts",
             allergens: hit.allergens ?? mapOffAllergenTags(hit.allergens_tags),
             offSourceId: normalized,
+            offQuality: foodQualityFromHit(hit),
         }),
     );
     await store.setBarcode(householdId, normalized, created.id);
@@ -1071,10 +1226,46 @@ export async function findOrCreateFoodByBarcodeResult(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
+            if (existing.offQuality == null) {
+                try {
+                    const hit = await lookup(normalized);
+                    if (hit) {
+                        const food = await applyHitQualityToFood(
+                            store,
+                            existing,
+                            hit,
+                        );
+                        return { food, created: false };
+                    }
+                    const stamped = await store.setFoodQuality(
+                        householdId,
+                        existing.id,
+                        offQualityMissStamp(nowIso()),
+                        { onlyIfUnset: true },
+                    );
+                    const food =
+                        stamped ??
+                        (await store.getFood(householdId, existing.id)) ??
+                        existing;
+                    return { food, created: false };
+                } catch {
+                    const food =
+                        (await store.getFood(householdId, existing.id)) ??
+                        existing;
+                    return { food, created: false };
+                }
+            }
             return { food: existing, created: false };
         }
     }
-    const hit = await lookup(normalized);
+    let hit: FoodResult | null;
+    try {
+        hit = await lookup(normalized);
+    } catch {
+        throw new FoodsInputError(
+            "Couldn't reach Open Food Facts. Try again in a moment, or add the food by name.",
+        );
+    }
     if (hit == null) throw new FoodsInputError("Unknown barcode.");
     return findOrCreateFoodByBarcodeFromHit(
         store,
@@ -1280,6 +1471,43 @@ function nutritionBlockFrom(
     };
 }
 
+function mergeTagArray(
+    keep: string[] | null,
+    drop: string[] | null,
+): string[] | null {
+    if (keep !== null) return [...keep];
+    if (drop !== null) return [...drop];
+    return null;
+}
+
+function mergeOffQuality(
+    keep: FoodQuality | null,
+    drop: FoodQuality | null,
+): FoodQuality | null {
+    if (keep == null && drop == null) return null;
+    if (keep == null) return copyQuality(drop!);
+    if (drop == null) return copyQuality(keep);
+    return {
+        nutriscoreGrade: keep.nutriscoreGrade ?? drop.nutriscoreGrade,
+        novaGroup: keep.novaGroup ?? drop.novaGroup,
+        ecoscoreGrade: keep.ecoscoreGrade ?? drop.ecoscoreGrade,
+        additives:
+            keep.additives !== null
+                ? keep.additives.map((a) => ({ tag: a.tag, risk: a.risk }))
+                : drop.additives !== null
+                  ? drop.additives.map((a) => ({ tag: a.tag, risk: a.risk }))
+                  : null,
+        allergensTags: mergeTagArray(keep.allergensTags, drop.allergensTags),
+        tracesTags: mergeTagArray(keep.tracesTags, drop.tracesTags),
+        ingredientsAnalysisTags: mergeTagArray(
+            keep.ingredientsAnalysisTags,
+            drop.ingredientsAnalysisTags,
+        ),
+        labelsTags: mergeTagArray(keep.labelsTags, drop.labelsTags),
+        fetchedAt: keep.fetchedAt,
+    };
+}
+
 /** Unknown fields on `keep` are filled from `drop` for merge; see `mergeFoods`. */
 export type MergedFoodFieldPick = Pick<
     Food,
@@ -1291,6 +1519,7 @@ export type MergedFoodFieldPick = Pick<
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | "offQuality"
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
@@ -1315,6 +1544,7 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                 : drop.usualAmount != null
                   ? { ...drop.usualAmount }
                   : null,
+        offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
     };
 }
 
@@ -3438,6 +3668,120 @@ export async function searchFoodCatalog(
     return hits;
 }
 
+function rowTextArray(value: unknown): string[] | null {
+    if (value == null) return null;
+    if (!Array.isArray(value)) return null;
+    return value.map((item) => String(item));
+}
+
+function rowQualityTimestamp(value: unknown): string | null {
+    if (value == null) return null;
+    if (value instanceof Date) return value.toISOString();
+    const s = String(value);
+    return s.trim() ? s : null;
+}
+
+function gradeFromRow(value: unknown): FoodQuality["nutriscoreGrade"] {
+    if (value == null) return null;
+    const g = String(value).trim().toLowerCase();
+    if (g === "a" || g === "b" || g === "c" || g === "d" || g === "e") return g;
+    return null;
+}
+
+function ecoscoreFromRow(value: unknown): FoodQuality["ecoscoreGrade"] {
+    if (value == null) return null;
+    const g = String(value).trim().toLowerCase();
+    if (
+        g === "a-plus" ||
+        g === "a" ||
+        g === "b" ||
+        g === "c" ||
+        g === "d" ||
+        g === "e" ||
+        g === "f"
+    ) {
+        return g;
+    }
+    return null;
+}
+
+function novaFromRow(value: unknown): FoodQuality["novaGroup"] {
+    if (value == null) return null;
+    const n = Number(value);
+    return n === 1 || n === 2 || n === 3 || n === 4 ? n : null;
+}
+
+function offQualityFromRow(row: {
+    nutriscore_grade: unknown;
+    nova_group: unknown;
+    ecoscore_grade: unknown;
+    additives_tags: unknown;
+    allergens_tags: unknown;
+    traces_tags: unknown;
+    ingredients_analysis_tags: unknown;
+    labels_tags: unknown;
+    off_quality_fetched_at: unknown;
+}): FoodQuality | null {
+    const fetchedAt = rowQualityTimestamp(row.off_quality_fetched_at);
+    if (fetchedAt == null) return null;
+    const additiveTags = rowTextArray(row.additives_tags);
+    return {
+        nutriscoreGrade: gradeFromRow(row.nutriscore_grade),
+        novaGroup: novaFromRow(row.nova_group),
+        ecoscoreGrade: ecoscoreFromRow(row.ecoscore_grade),
+        additives:
+            additiveTags == null
+                ? null
+                : additiveTags.map((tag) => ({
+                      tag,
+                      risk: additiveRisk(tag),
+                  })),
+        allergensTags: rowTextArray(row.allergens_tags),
+        tracesTags: rowTextArray(row.traces_tags),
+        ingredientsAnalysisTags: rowTextArray(row.ingredients_analysis_tags),
+        labelsTags: rowTextArray(row.labels_tags),
+        fetchedAt,
+    };
+}
+
+export function offQualityToRowFields(q: FoodQuality | null): {
+    nutriscore_grade: string | null;
+    nova_group: number | null;
+    ecoscore_grade: string | null;
+    additives_tags: string[] | null;
+    allergens_tags: string[] | null;
+    traces_tags: string[] | null;
+    ingredients_analysis_tags: string[] | null;
+    labels_tags: string[] | null;
+    off_quality_fetched_at: string | null;
+} {
+    if (q == null) {
+        return {
+            nutriscore_grade: null,
+            nova_group: null,
+            ecoscore_grade: null,
+            additives_tags: null,
+            allergens_tags: null,
+            traces_tags: null,
+            ingredients_analysis_tags: null,
+            labels_tags: null,
+            off_quality_fetched_at: null,
+        };
+    }
+    return {
+        nutriscore_grade: q.nutriscoreGrade,
+        nova_group: q.novaGroup,
+        ecoscore_grade: q.ecoscoreGrade,
+        additives_tags:
+            q.additives == null ? null : q.additives.map((a) => a.tag),
+        allergens_tags: q.allergensTags,
+        traces_tags: q.tracesTags,
+        ingredients_analysis_tags: q.ingredientsAnalysisTags,
+        labels_tags: q.labelsTags,
+        off_quality_fetched_at: q.fetchedAt,
+    };
+}
+
 export function foodFromRow(row: {
     id: unknown;
     household_id: unknown;
@@ -3464,6 +3808,15 @@ export function foodFromRow(row: {
     usual_store_id: unknown;
     usual_amount: unknown;
     usual_unit: unknown;
+    nutriscore_grade?: unknown;
+    nova_group?: unknown;
+    ecoscore_grade?: unknown;
+    additives_tags?: unknown;
+    allergens_tags?: unknown;
+    traces_tags?: unknown;
+    ingredients_analysis_tags?: unknown;
+    labels_tags?: unknown;
+    off_quality_fetched_at?: unknown;
     created_by: unknown;
     archived_at: unknown;
     created_at: unknown;
@@ -3535,6 +3888,17 @@ export function foodFromRow(row: {
                 ? row.usual_store_id
                 : null,
         usualAmount,
+        offQuality: offQualityFromRow({
+            nutriscore_grade: row.nutriscore_grade ?? null,
+            nova_group: row.nova_group ?? null,
+            ecoscore_grade: row.ecoscore_grade ?? null,
+            additives_tags: row.additives_tags ?? null,
+            allergens_tags: row.allergens_tags ?? null,
+            traces_tags: row.traces_tags ?? null,
+            ingredients_analysis_tags: row.ingredients_analysis_tags ?? null,
+            labels_tags: row.labels_tags ?? null,
+            off_quality_fetched_at: row.off_quality_fetched_at ?? null,
+        }),
         createdBy:
             typeof row.created_by === "string" && row.created_by
                 ? row.created_by
@@ -3575,6 +3939,7 @@ export function foodToRow(row: Food) {
         usual_store_id: row.usualStoreId,
         usual_amount: row.usualAmount?.amount ?? null,
         usual_unit: row.usualAmount?.unit ?? null,
+        ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,
         created_at: row.createdAt,
