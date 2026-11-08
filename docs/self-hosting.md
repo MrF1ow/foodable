@@ -155,6 +155,18 @@ On Railway, prefix both with `railway run`. `--json` prints the report as JSON. 
 
 Leave `PUBLIC_ORIGIN` unset on a laptop. Then the request `Host` and `X-Forwarded-*` still win, which is what local dev and a trusted reverse proxy in front of localhost need.
 
+## Client address (rate limits)
+
+OAuth and failed `/mcp` auth share per-address buckets. The server reads `CLIENT_IP_SOURCE`, `TRUSTED_PROXY_HOPS`, and `CLOUDFLARE_ORIGIN_SECRET` once at boot (see `.env.example`).
+
+**Railway** sets `RAILWAY_ENVIRONMENT_ID` and defaults to `x-real-ip`, which Railway’s edge overwrites with the connecting address. That is enough for the default `*.up.railway.app` URL.
+
+**Cloudflare in front of Railway** — Railway’s peer is a Cloudflare egress address, and Cloudflare forwards `CF-Connecting-IP`, but any caller can reach Railway from a Cloudflare IP with a forged `CF-Connecting-IP`. To trust the visitor address, generate a shared secret (`openssl rand -hex 32`), set `CLOUDFLARE_ORIGIN_SECRET` on the server, and in the Cloudflare dashboard add a **Request Header Transform Rule** for your hostname: Rules → Transform Rules → Modify Request Header → set header `x-foodable-origin-secret` to that value. The server honours `CF-Connecting-IP` only when that header matches (constant-time compare), the address Railway put in `X-Real-IP` (the default source on Railway) is in a Cloudflare range, and the secret is configured. Without the rule, rate limits key on the Cloudflare edge address — safe but coarse. **Authenticated Origin Pulls** does not work on Railway because TLS terminates at Railway’s edge; the header secret is the supported mechanism.
+
+**Docker** published directly without a reverse proxy should use `CLIENT_IP_SOURCE=socket` (the default when not on Railway).
+
+**nginx** — the example below uses `$proxy_add_x_forwarded_for`, which **appends** the client address. Use `CLIENT_IP_SOURCE=x-forwarded-for` with `TRUSTED_PROXY_HOPS=1`, or add `proxy_set_header X-Real-IP $remote_addr;` and use `x-real-ip`. With `x-forwarded-for`, **too many** `TRUSTED_PROXY_HOPS` walks left into client-supplied entries and lets them choose their rate-limit key; **too few** keys everyone behind the proxy on one address (coarse but not spoofable). A header your proxy does not overwrite has the same spoofing effect as too many hops.
+
 ## Reverse proxy
 
 Terminate TLS in front of the container or `bun` process. Set `PUBLIC_ORIGIN` to the origin clients actually type, then still pass forwarding headers for client IP (rate limits) and `X-Forwarded-Proto` (the Secure cookie flag). nginx:

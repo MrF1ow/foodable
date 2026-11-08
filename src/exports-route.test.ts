@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    test,
+} from "bun:test";
+import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import { signExportToken } from "./domain/export-link.js";
 import {
@@ -17,6 +26,16 @@ import { _resetBuckets } from "./rate-limit.js";
 import { setSqlForTests } from "./db/sql.js";
 import { describeDb } from "./db/testing/pg.js";
 import { findPgBin } from "./db/testing/pg-temp.js";
+
+beforeAll(() =>
+    setClientIpConfigForTests({
+        source: "x-forwarded-for",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    }),
+);
+afterAll(() => setClientIpConfigForTests(null));
 
 const pgAvailable = await findPgBin();
 const USER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";

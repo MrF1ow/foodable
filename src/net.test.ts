@@ -9,8 +9,8 @@ test("maskIp drops the host octet of an IPv4 address", () => {
     expect(maskIp("203.0.113.42")).toBe("203.0.113.x");
 });
 
-test("maskIp uses only the first hop of x-forwarded-for", () => {
-    expect(maskIp("203.0.113.42, 198.51.100.7, 192.0.2.1")).toBe("203.0.113.x");
+test("maskIp maps unknown to '-'", () => {
+    expect(maskIp("unknown")).toBe("-");
 });
 
 test("maskIp keeps the /48 prefix of an IPv6 address", () => {
@@ -25,6 +25,7 @@ test("maskIp never leaks a full address — malformed/loopback collapse to '-'",
     expect(maskIp("::1")).toBe("-");
     expect(maskIp("garbage")).toBe("-");
     expect(maskIp("203.0.113")).toBe("-");
+    expect(maskIp("203.0.113.9:extra:stuff:more")).toBe("-");
     expect(maskIp("")).toBe("-");
     expect(maskIp(undefined)).toBe("-");
 });
