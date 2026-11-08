@@ -48,6 +48,7 @@ import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
+import { initFlags } from "./flags.js";
 
 const app = new Hono();
 
@@ -451,6 +452,10 @@ if (import.meta.main) {
     }
 
     console.log(`Foodable server listening on 0.0.0.0:${port}`);
+
+    // Load feature flags before widgets; bounded by initFlags timeout and never
+    // fails boot.
+    await initFlags();
 
     // Assemble every MCP Apps widget from its source partials up front, so a
     // broken @include/partial fails fast at boot rather than on a client's

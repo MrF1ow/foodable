@@ -213,6 +213,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/client-ip.test.ts": "platform",
     "src/net.ts": "platform",
     "src/normalize.ts": "platform",
+    "src/flags.ts": "platform",
     "src/rate-limit.ts": "platform",
     "src/routes.ts": "platform",
     "src/search.ts": "platform",
