@@ -47,13 +47,13 @@ import {
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { safeReturnPath } from "../usual-products-path.js";
-import { fridgeItemRetryFields } from "../form-retry-fields.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import {
-    buildDidYouMeanModal,
+    fridgeItemRetryFields,
     isSimilarFoodsError,
     manualOnSimilar,
     rememberAliasIfRequested,
-} from "../similar-foods-route.js";
+} from "../form.js";
 
 export const fridgeRoutes = new Hono();
 

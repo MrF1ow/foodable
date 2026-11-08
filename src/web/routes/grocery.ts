@@ -38,13 +38,13 @@ import {
 } from "../../domain/foods.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
-import { groceryLineRetryFields } from "../form-retry-fields.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import {
-    buildDidYouMeanModal,
+    groceryLineRetryFields,
     isSimilarFoodsError,
     manualOnSimilar,
     rememberAliasIfRequested,
-} from "../similar-foods-route.js";
+} from "../form.js";
 
 export const groceryRoutes = new Hono();
 

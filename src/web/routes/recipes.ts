@@ -57,13 +57,13 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
-import { recipeIngredientRetryFields } from "../form-retry-fields.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import {
-    buildDidYouMeanModal,
+    recipeIngredientRetryFields,
     isSimilarFoodsError,
     manualOnSimilar,
     rememberAliasIfRequested,
-} from "../similar-foods-route.js";
+} from "../form.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,

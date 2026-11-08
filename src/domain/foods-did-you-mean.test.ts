@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createMemoryFoodsStore, findManualFood, newFood } from "./foods.js";
-import { didYouMeanView, rememberAliasForChoice } from "./did-you-mean.js";
+import {
+    createMemoryFoodsStore,
+    didYouMeanView,
+    findManualFood,
+    newFood,
+    rememberAliasForChoice,
+} from "./foods.js";
 
 const HH = "hh-1";
 

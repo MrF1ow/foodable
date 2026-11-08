@@ -1,6 +1,18 @@
 import { escapeHtml } from "../../html.js";
-import type { DidYouMeanView } from "../../domain/did-you-mean.js";
-import { hiddenFieldsHtml } from "../form-retry-fields.js";
+import {
+    didYouMeanView,
+    type DidYouMeanView,
+    type SimilarFoodsError,
+} from "../../domain/foods.js";
+
+export function hiddenFieldsHtml(fields: Record<string, string>): string {
+    return Object.entries(fields)
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
+        )
+        .join("\n");
+}
 
 export type DidYouMeanModal = {
     modalId: string;
@@ -45,4 +57,19 @@ ${hidden}
 <button type="submit" name="new_food" value="1">${escapeHtml(opts.view.newFoodLabel)}</button>
 </form>
 </div>`;
+}
+
+export function buildDidYouMeanModal(
+    err: SimilarFoodsError,
+    fields: Record<string, string>,
+    modalId: string,
+    action: string,
+): DidYouMeanModal | null {
+    const entry = err.entries[0];
+    if (!entry) return null;
+    return {
+        modalId,
+        action,
+        view: didYouMeanView(entry, fields),
+    };
 }
