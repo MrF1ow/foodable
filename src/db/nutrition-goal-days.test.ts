@@ -270,6 +270,31 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
         expect(merged!.daily_protein_g).toBe(150);
     });
 
+    test("getGoalsForDate ignores impossible calendar dates", async () => {
+        await upsertNutritionGoals(storeUserId, {
+            daily_calories: 2000,
+            daily_protein_g: 150,
+        });
+        const merged = await getGoalsForDate(storeUserId, "2026-02-31");
+        expect(merged!.daily_calories).toBe(2000);
+        expect(merged!.daily_protein_g).toBe(150);
+    });
+
+    test("getGoalsForRange ignores impossible calendar bounds", async () => {
+        await upsertNutritionGoals(storeUserId, { daily_calories: 2000 });
+        const { forDate } = await getGoalsForRange(
+            storeUserId,
+            "2026-02-31",
+            "2026-03-01",
+        );
+        expect(forDate("2026-03-01")!.daily_calories).toBe(2000);
+        await expect(
+            getGoalsForRange(storeUserId, "2026-03-01", "2026-13-01"),
+        ).resolves.toMatchObject({
+            forDate: expect.any(Function),
+        });
+    });
+
     test("getGoalsForRange exposes forDate", async () => {
         await upsertNutritionGoals(storeUserId, { daily_calories: 2000 });
         const { sql } = getCtx();

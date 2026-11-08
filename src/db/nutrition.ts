@@ -3,6 +3,7 @@ import {
     goalDayFromRow,
     goalsForDate,
     goalsResolver,
+    isCalendarDate,
     type GoalDayStore,
     type GoalsByDate,
 } from "../domain/insights.js";
@@ -1111,6 +1112,7 @@ export async function getNutritionGoals(
 
 export const pgGoalDayStore: GoalDayStore = {
     overrideForDate(userId, date) {
+        if (!isCalendarDate(date)) return Promise.resolve(null);
         return run(async (tx) => {
             try {
                 const row = await maybeOne<Record<string, unknown>>(
@@ -1129,6 +1131,9 @@ export const pgGoalDayStore: GoalDayStore = {
         });
     },
     overridesInRange(userId, startDate, endDate) {
+        if (!isCalendarDate(startDate) || !isCalendarDate(endDate)) {
+            return Promise.resolve([]);
+        }
         return run(async (tx) => {
             try {
                 const list = await rows<Record<string, unknown>>(
@@ -1154,10 +1159,11 @@ export async function getGoalsForDate(
     userId: string,
     date: string,
 ): Promise<NutritionGoals | null> {
-    const [defaults, override] = await Promise.all([
-        getNutritionGoals(userId),
-        pgGoalDayStore.overrideForDate(userId, date),
-    ]);
+    const defaults = await getNutritionGoals(userId);
+    if (!isCalendarDate(date)) {
+        return goalsForDate(defaults, [], date);
+    }
+    const override = await pgGoalDayStore.overrideForDate(userId, date);
     return goalsForDate(defaults, override ? [override] : [], date);
 }
 
@@ -1166,10 +1172,15 @@ export async function getGoalsForRange(
     startDate: string,
     endDate: string,
 ): Promise<{ defaults: NutritionGoals | null; forDate: GoalsByDate }> {
-    const [defaults, overrides] = await Promise.all([
-        getNutritionGoals(userId),
-        pgGoalDayStore.overridesInRange(userId, startDate, endDate),
-    ]);
+    const defaults = await getNutritionGoals(userId);
+    if (!isCalendarDate(startDate) || !isCalendarDate(endDate)) {
+        return { defaults, forDate: goalsResolver(defaults, []) };
+    }
+    const overrides = await pgGoalDayStore.overridesInRange(
+        userId,
+        startDate,
+        endDate,
+    );
     return {
         defaults,
         forDate: goalsResolver(defaults, overrides),

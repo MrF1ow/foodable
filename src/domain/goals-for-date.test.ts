@@ -5,6 +5,7 @@ import {
     goalDayFromRow,
     goalsForDate,
     goalsResolver,
+    isCalendarDate,
     type GoalDayOverride,
 } from "./insights.js";
 
@@ -108,6 +109,15 @@ test("createMemoryGoalDayStore range and isolation", async () => {
     expect(
         await store.overridesInRange("u1", "2026-05-01", "2026-05-31"),
     ).toEqual([]);
+});
+
+test("isCalendarDate accepts valid ISO dates and rejects impossible ones", () => {
+    expect(isCalendarDate("2026-02-31")).toBe(false);
+    expect(isCalendarDate("2026-13-01")).toBe(false);
+    expect(isCalendarDate("2026-2-1")).toBe(false);
+    expect(isCalendarDate("2024-02-29")).toBe(true);
+    expect(isCalendarDate("2025-02-29")).toBe(false);
+    expect(isCalendarDate("2026-06-01")).toBe(true);
 });
 
 test("goalDayFromRow maps numerics and dates", () => {

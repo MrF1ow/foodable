@@ -699,6 +699,60 @@ test("computeTrends varies target label and judges each day", () => {
     expect(out).toContain("Days within ±10% of target: 3/3");
 });
 
+test("computeTrends labels zero calorie goal as target, not lowest", () => {
+    const g = goals({ daily_calories: 0 });
+    const buckets = twoDayBuckets({ calories: 1900 }, { calories: 2100 });
+    const plain = computeTrends(buckets, g);
+    const resolved = computeTrends(buckets, goalsResolver(g, []));
+    expect(plain).toBe(resolved);
+    expect(plain).toContain("Closest to target: 2026-06-01 — 1900 kcal");
+});
+
+test("computeWeeklyDigest partial calorie target coverage skips percentage", () => {
+    const buckets = twoDayBuckets({ calories: 2000 }, { calories: 0 });
+    const forDate = goalsResolver(null, [
+        goalDayOverride("2026-06-01", { daily_calories: 2000 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain("  Calories: 1000 kcal — target set on 1 of 2 days");
+    expect(out).not.toContain("/ 2000 kcal target");
+});
+
+test("computeWeeklyDigest partial sugar limit coverage skips percentage", () => {
+    const buckets = twoDayBuckets({ sugar_g: 20 }, { sugar_g: 10 });
+    const forDate = goalsResolver(goals({ daily_sugar_g: null }), [
+        goalDayOverride("2026-06-01", { daily_sugar_g: 25 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain("  Sugar: 15g — target set on 1 of 2 days");
+    expect(out).not.toMatch(/Sugar:.*\/.*limit \(\d+%\)/);
+});
+
+test("computeTrends collapses display-equal protein targets to one label", () => {
+    const g = goals({ daily_protein_g: 30.3 });
+    const buckets = twoDayBuckets({ protein_g: 35 }, { protein_g: 35 });
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-01", { daily_protein_g: 30.34 }),
+        goalDayOverride("2026-06-02", { daily_protein_g: 30.26 }),
+    ]);
+    const out = computeTrends(buckets, forDate);
+    expect(out).toContain("  Target: 30.3g");
+    expect(out).not.toContain("varies by day");
+});
+
+test("computeWeeklyDigest averages display-collapsed protein targets", () => {
+    const g = goals({ daily_protein_g: 30 });
+    const buckets = twoDayBuckets({ protein_g: 100 }, { protein_g: 100 });
+    const forDate = goalsResolver(g, [
+        goalDayOverride("2026-06-01", { daily_protein_g: 30.34 }),
+        goalDayOverride("2026-06-02", { daily_protein_g: 30.26 }),
+    ]);
+    const out = computeWeeklyDigest(buckets, forDate);
+    expect(out).toContain(
+        "  Protein: 100g / 30.3g target (330%) (daily targets vary; averaged)",
+    );
+});
+
 test("computeWeeklyDigest appends averaged target suffix", () => {
     const g = goals({ daily_calories: 2000 });
     const buckets = buildDailyBuckets(
