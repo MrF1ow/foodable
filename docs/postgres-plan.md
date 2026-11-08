@@ -41,7 +41,7 @@ What touches Supabase today:
 | Schema            | 16 foreign keys to `auth.users` (9 `on delete cascade`, 3 `on delete set null`, 4 with no action; 4 of them are in the pg_dump file `20260417044712_remote_schema.sql`, written as `"auth"."users"`); 2 versions of `promote_household_owner_on_leave` join `auth.users.created_at`; 15 migrations use `auth.uid()` in policies; `20260620120000_exports_bucket.sql` writes `storage.buckets` |                                                               |
 | Config            | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`; deploy docs use `supabase db push`                                                                                                                                                                                                                                                                                                                     |                                                               |
 
-Already ours, unaffected: OAuth clients, codes, tokens and site sessions are tables in `public`; password rate limiting is `src/rate-limit.ts`.
+Already ours, unaffected: OAuth clients, codes, tokens and site sessions are tables in `public`; password rate limiting is `src/rate-limit.ts`. The OAuth login sessions (`sessions` in `src/oauth.ts`) are still in process memory (see 2.4).
 
 ## Rules every phase keeps
 
@@ -246,7 +246,7 @@ None of this is visible to members. Order matters within 2.1–2.2; the rest is 
 
 **2.3 Auth behind `AuthStore`, hardened.** Decide then between building email verification, password reset and passkeys ourselves, or a library such as Better Auth that keeps users in our Postgres. Either one plugs into the Phase 3 interface.
 
-**2.4 More than one instance.** Move the in-memory rate limits (`src/rate-limit.ts`) and any per-process caches that must agree across instances into Postgres or `Bun.redis`.
+**2.4 More than one instance.** Move the in-memory rate limits (`src/rate-limit.ts`), the OAuth login sessions (`sessions` in `src/oauth.ts`) and any other per-process state that must agree across instances into Postgres or `Bun.redis`.
 
 **2.5 No new single-household assumptions.** `householdExists()` and `authUserCount()` become a sign-up policy setting (`closed`, `invite`, `open`), default `closed`, so today's behaviour holds. Review that every `household_id` column used in a filter has an index.
 

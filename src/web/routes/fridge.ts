@@ -47,6 +47,13 @@ import {
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { safeReturnPath } from "../usual-products-path.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
+import {
+    fridgeItemRetryFields,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 
 export const fridgeRoutes = new Hono();
 
@@ -62,6 +69,9 @@ async function fridgeFormError(
     userId: string,
     err: unknown,
     openModalId?: string,
+    extras?: {
+        didYouMean?: import("../components/did-you-mean.js").DidYouMeanModal;
+    },
 ) {
     const message =
         err instanceof FridgeInputError
@@ -75,7 +85,13 @@ async function fridgeFormError(
                   : err instanceof Error
                     ? err.message
                     : "Could not update the fridge.";
-    const page = await renderFridgeInventoryPage(userId, message, openModalId);
+    const page = await renderFridgeInventoryPage(
+        userId,
+        message,
+        openModalId,
+        undefined,
+        extras,
+    );
     return { html: page.html, status: 400 as const };
 }
 
@@ -179,6 +195,7 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
                           name: formText(body, "food_name"),
                           amount,
                           unit: formText(body, "qty_unit"),
+                          onSimilar: manualOnSimilar(body),
                       });
         await addFridgeItemAdjust(store, liveStockStore(), foods, {
             householdId: prepared.householdId,
@@ -188,6 +205,16 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             locationId: prepared.locationId,
             actorUserId: userId,
         });
+        const pickedFoodId =
+            kind !== "supply" ? formText(body, "food_id").trim() : "";
+        if (pickedFoodId) {
+            await rememberAliasIfRequested(
+                foods,
+                member.householdId,
+                body,
+                pickedFoodId,
+            );
+        }
         const created =
             "barcodeCreated" in prepared && prepared.barcodeCreated === true;
         if (created) {
@@ -207,6 +234,24 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             kind === "supply"
                 ? `fridge-add-supply-${locationId}`
                 : `fridge-add-food-${locationId}`;
+        if (isSimilarFoodsError(err) && kind !== "supply") {
+            const didYouMean = buildDidYouMeanModal(
+                err,
+                fridgeItemRetryFields(body),
+                openModalId,
+                "/fridge/items",
+            );
+            if (didYouMean) {
+                const page = await renderFridgeInventoryPage(
+                    userId,
+                    undefined,
+                    openModalId,
+                    undefined,
+                    { didYouMean },
+                );
+                return c.html(page.html, 409);
+            }
+        }
         const page = await fridgeFormError(userId, err, openModalId);
         return c.html(page.html, page.status);
     }

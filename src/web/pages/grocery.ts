@@ -32,6 +32,10 @@ import {
     field,
 } from "../components/ui.js";
 import { noticeInlineLink, noticeList } from "../components/notices.js";
+import {
+    didYouMeanModalBlock,
+    type DidYouMeanModal,
+} from "../components/did-you-mean.js";
 
 export type GroceryLineView = GroceryLine & {
     notices?: Notice[];
@@ -67,6 +71,7 @@ export type GroceryPageView = {
     allergenNotices?: Notice[];
     foodDuplicateNotices?: ReadonlyMap<string, Notice[]>;
     allergenRetry?: GroceryAllergenRetry;
+    didYouMean?: DidYouMeanModal;
     unknownAllergen?: boolean;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
@@ -118,15 +123,25 @@ function grocerySectionFieldHtml(store: GroceryStoreView): string {
 }
 
 /** Section `<select>` for one store. Rendered in that store's template. */
-function sectionOptionsHtml(store: GroceryStoreView): string {
+function sectionOptionsHtml(
+    store: GroceryStoreView,
+    selectedId?: string,
+): string {
     const other = store.sections.find((section) => section.isOther);
+    const visible = store.sections.filter(
+        (section) => !section.hidden || section.isOther,
+    );
+    const picked = visible.some((section) => section.id === selectedId)
+        ? selectedId
+        : undefined;
     const inferAttr = other
         ? ` data-infer-section="${escapeHtml(other.id)}"`
         : "";
-    const options = store.sections
-        .filter((section) => !section.hidden || section.isOther)
+    const options = visible
         .map((section) => {
-            const sel = section.isOther ? " selected" : "";
+            const sel = (picked ? section.id === picked : section.isOther)
+                ? " selected"
+                : "";
             return `<option value="${escapeHtml(section.id)}"${sel}>${escapeHtml(section.name)}</option>`;
         })
         .join("");
@@ -145,10 +160,13 @@ function sectionTemplate(store: GroceryStoreView): string {
     return `<template id="${escapeHtml(sectionTemplateId(store.id))}">${sectionOptionsHtml(store)}</template>`;
 }
 
-function sectionSlot(store: GroceryStoreView | null): string {
+function sectionSlot(
+    store: GroceryStoreView | null,
+    selectedId?: string,
+): string {
     if (!store) return `<div data-fill-slot="sections"></div>`;
     const id = sectionTemplateId(store.id);
-    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store)}</div>`;
+    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store, selectedId)}</div>`;
 }
 
 function storeFill(store: GroceryStoreView): ModalFill {
@@ -338,6 +356,16 @@ function sharedAddFoodModal(view: GroceryPageView): string {
     const store = reopenStore(view);
     const reopenId = store ? `${ADD_FOOD_PREFIX}${store.id}` : "";
     const open = store != null && modalOpen(view, reopenId);
+    // A re-render that replays the submitted fields (the allergen retry or
+    // "Did you mean") shows the section that was picked, so the select and
+    // the replay form agree; grocery.js keeps them in step from there.
+    const replayedSection = !open
+        ? undefined
+        : view.didYouMean?.modalId === reopenId
+          ? view.didYouMean.view.hiddenFields.section_id
+          : view.allergenRetry?.storeId === store?.id
+            ? view.allergenRetry?.fields.section_id
+            : undefined;
     return modal({
         id: GROCERY_ADD_FOOD_ID,
         title: "Add food",
@@ -345,7 +373,15 @@ function sharedAddFoodModal(view: GroceryPageView): string {
         submitDisabled: store == null,
         body: `${open ? modalFormError(view, reopenId) : ""}${
             store ? allergenModalBlock(view, store.id, reopenId) : ""
-        }${sectionSlot(store)}
+        }${
+            store
+                ? didYouMeanModalBlock(
+                      view.didYouMean,
+                      reopenId,
+                      view.openModalId,
+                  )
+                : ""
+        }${sectionSlot(store, replayedSection)}
 ${renderFoodPicker({
     id: GROCERY_FOOD_PICKER_ID,
     action: store ? "/grocery/lines" : "",
