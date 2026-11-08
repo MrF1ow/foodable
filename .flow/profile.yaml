@@ -1,0 +1,28 @@
+# Flow autonomy profile. Read by every flow skill; never asked per task.
+# profile: hands-off | standard | collaborative | local-only   gates: auto | ask | never
+# Corrections from the user are written here, with a history line saying when and why.
+profile: standard
+spec: auto # auto = write the spec and carry on; review = show it and wait
+max_leads: 5 # leads per conductor running at once
+gates:
+    commit: auto
+    push: auto
+    open_pr: auto
+    merge: never
+    tag: never
+delivery: stack # pr | stack | local
+checks:
+    - "bun run typecheck"
+    - "bun run format:check"
+    - "bun run test"
+rules: # repo rules every delegate brief carries
+    - "Map every new tracked file in scripts/conventions/conventions.ts; the conventions test fails on unmapped paths."
+    - "New or changed SQL needs describeDb tests against real Postgres; in-memory store tests have hidden real jsonb bugs."
+    - "PR bodies keep the template's Planner section (Closes / Part of / None); bun run pr:check enforces it."
+    - "A green PR that shows BLOCKED usually has an unresolved review thread (often CodeQL): list reviewThreads and fix or resolve them before anything else. Never use --admin, never touch rulesets or the gate:approved label."
+    - "Update a gate PR's branch before the user labels it: updating strips gate:approved."
+    - "Fold Dependabot PRs into one tested chore/deps PR instead of merging them one by one."
+    - "Production Postgres is internal-only: reach it with railway ssh, never expose it."
+history:
+    - "2026-11-08: inferred standard (default branch requires review, so the user merges)"
+    - "2026-11-08: delivery stack (multi-phase work ships as one gh stack, from postgres-phase-workflow); rules migrated from Claude memories (composer-gate-reports, pr-blocked-unresolved-threads, gate-label-stripped-on-update, dependabot-roundup, prod-db-via-railway-ssh, kaneo-roadmap)"
