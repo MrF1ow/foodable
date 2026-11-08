@@ -1,0 +1,291 @@
+/* The redesign's sheet (UI-6): dialog.fd-sheet from src/web/components/v2/sheet.ts.
+ * Below 1024px every kind is a bottom sheet. At 1024px and up `edit` is a 480px
+ * panel from the right and `confirm` is a centred dialog. Tokens only, from
+ * tokens.css; nothing here reads /app.css, brand.css or the `.native` element
+ * styles, so it looks the same whether or not they are loaded. The .fd-btn
+ * rules are scoped under .fd-sheet until the shell (UI-3) lifts them. */
+
+.fd-sheet {
+    --fd-sheet-shadow: color-mix(
+        in srgb,
+        var(--overlay-scrim) 45%,
+        transparent
+    );
+    --fd-sheet-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    box-sizing: border-box;
+    margin: auto 0 0;
+    padding: 0;
+    inset: auto 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    overflow: hidden;
+    /* The visible border lives on .fd-sheet-panel, so a click on it is never
+     * a click on the dialog itself (which would read as a backdrop click). */
+    border: 0;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+}
+
+.fd-sheet[open] {
+    display: flex;
+    flex-direction: column;
+    animation: fd-sheet-up 280ms var(--fd-sheet-ease);
+}
+
+.fd-sheet::backdrop {
+    background: var(--overlay-scrim);
+}
+
+.fd-sheet[open]::backdrop {
+    animation: fd-sheet-fade 200ms ease-out;
+}
+
+.fd-sheet *,
+.fd-sheet *::before,
+.fd-sheet *::after {
+    box-sizing: border-box;
+}
+
+.fd-sheet [hidden] {
+    display: none !important;
+}
+
+.fd-sheet-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    padding: 10px var(--space-gutter)
+        calc(40px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    border-radius: inherit;
+}
+
+/* Focus parks here when the sheet has no field; it is not a control. */
+.fd-sheet-panel:focus {
+    outline: none;
+}
+
+.fd-sheet-handle,
+.fd-sheet-head {
+    /* The drag grip: the browser must not claim the touch for scrolling. */
+    touch-action: none;
+}
+
+.fd-sheet-handle {
+    flex: none;
+    width: 40px;
+    height: 5px;
+    margin: 0 auto 14px;
+    border-radius: 3px;
+    background: var(--text-tertiary);
+}
+
+.fd-sheet-head {
+    display: flex;
+    flex: none;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-row);
+    margin-bottom: 14px;
+}
+
+.fd-sheet-heading {
+    min-width: 0;
+}
+
+.fd-sheet-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.fd-sheet-sub {
+    margin: 3px 0 0;
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.fd-sheet .fd-sheet-close {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-sheet-body {
+    /* Sized by its content (the actions follow it); scrolls when it overflows. */
+    flex: 0 1 auto;
+    min-height: 0;
+    /* Room for a field's focus ring, which overflow would otherwise clip. */
+    margin: -4px;
+    padding: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.fd-sheet-message {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.fd-sheet-actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    flex: none;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.fd-sheet .fd-btn {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: 52px;
+    margin: 0;
+    padding: 0 var(--space-gutter);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.fd-sheet .fd-btn--primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+.fd-sheet .fd-btn--danger {
+    color: var(--status-over);
+}
+
+.fd-sheet .fd-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.fd-sheet .fd-sheet-close:focus-visible,
+.fd-sheet .fd-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+@media (min-width: 1024px) {
+    .fd-sheet-handle {
+        display: none;
+    }
+
+    .fd-sheet-panel {
+        padding: 28px;
+    }
+
+    .fd-sheet-head {
+        margin-bottom: 16px;
+    }
+
+    .fd-sheet .fd-sheet-close {
+        width: 34px;
+        height: 34px;
+    }
+
+    /* Edit: a 480px panel from the right edge, full height. */
+    .fd-sheet--edit {
+        inset: 0 0 0 auto;
+        margin: 0;
+        width: 480px;
+        max-width: 480px;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .fd-sheet--edit .fd-sheet-panel {
+        border-top: 0;
+        border-left: 1px solid var(--line);
+        border-radius: 0;
+    }
+
+    .fd-sheet--edit[open] {
+        animation-name: fd-sheet-in-right;
+    }
+
+    /* Confirm: centred, same card as the desktop modals. */
+    .fd-sheet--confirm {
+        inset: 0;
+        margin: auto;
+        width: 480px;
+        max-width: calc(100% - 2 * var(--space-gutter));
+        border-radius: var(--radius-sheet);
+        box-shadow: 0 24px 60px var(--fd-sheet-shadow);
+    }
+
+    .fd-sheet--confirm .fd-sheet-panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sheet);
+    }
+
+    .fd-sheet--confirm[open] {
+        animation-name: fd-sheet-pop;
+    }
+}
+
+@keyframes fd-sheet-up {
+    from {
+        transform: translateY(100%);
+    }
+}
+
+@keyframes fd-sheet-in-right {
+    from {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes fd-sheet-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+}
+
+@keyframes fd-sheet-fade {
+    from {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-sheet[open],
+    .fd-sheet[open]::backdrop {
+        animation: none;
+    }
+}
