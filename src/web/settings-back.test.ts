@@ -3,8 +3,8 @@ import { isSafeAppBackPath, settingsBackHref } from "./settings-back.js";
 
 describe("isSafeAppBackPath", () => {
     test("allows normal app paths", () => {
-        expect(isSafeAppBackPath("/fridge")).toBe(true);
-        expect(isSafeAppBackPath("/household?x=1")).toBe(true);
+        expect(isSafeAppBackPath("/kitchen/fridge")).toBe(true);
+        expect(isSafeAppBackPath("/settings/household?x=1")).toBe(true);
     });
 
     test("refuses unsafe paths", () => {
@@ -15,7 +15,7 @@ describe("isSafeAppBackPath", () => {
         expect(isSafeAppBackPath("/logout")).toBe(false);
         expect(isSafeAppBackPath("/exports/token")).toBe(false);
         expect(isSafeAppBackPath("/" + "a".repeat(512))).toBe(false);
-        expect(isSafeAppBackPath("/fridge/../logout")).toBe(false);
+        expect(isSafeAppBackPath("/kitchen/fridge/../logout")).toBe(false);
         expect(isSafeAppBackPath("/./logout")).toBe(false);
         expect(isSafeAppBackPath("/%2e%2e/logout")).toBe(false);
     });
@@ -36,15 +36,28 @@ describe("isSafeAppBackPath", () => {
 
     test("keeps encoded and query-string app paths", () => {
         for (const ok of [
-            "/fridge?q=1",
+            "/kitchen/fridge?q=1",
             "/recipes/r1?id=1",
-            "/grocery?store=abc&q=milk%26eggs",
-            "/household/usual-products/abc?from=%2Fgrocery",
-            "/household/usual-products/my%20food",
-            "/household/usual-products/50%25off",
+            "/kitchen/groceries?store=abc&q=milk%26eggs",
+            "/kitchen/usuals/abc?from=%2Fkitchen%2Fgroceries",
+            "/kitchen/usuals/my%20food",
+            "/kitchen/usuals/50%25off",
         ]) {
             expect(isSafeAppBackPath(ok)).toBe(true);
         }
+    });
+
+    test("allows settings household app paths only", () => {
+        expect(isSafeAppBackPath("/settings/household")).toBe(true);
+        expect(isSafeAppBackPath("/settings/household/items")).toBe(true);
+        expect(isSafeAppBackPath("/settings/household/members/u1/role")).toBe(
+            true,
+        );
+        expect(isSafeAppBackPath("/settings/household-settings")).toBe(false);
+        expect(isSafeAppBackPath("/settings/householdx")).toBe(false);
+        expect(isSafeAppBackPath("/settings/household/../help")).toBe(false);
+        expect(isSafeAppBackPath("/%73ettings/help")).toBe(false);
+        expect(isSafeAppBackPath("/settings/%68ousehold")).toBe(false);
     });
 });
 
@@ -54,11 +67,11 @@ describe("settingsBackHref", () => {
     test("from wins over referer", () => {
         expect(
             settingsBackHref({
-                from: "/fridge",
-                referer: `${origin}/grocery`,
+                from: "/kitchen/fridge",
+                referer: `${origin}/kitchen/groceries`,
                 origin,
             }),
-        ).toBe("/fridge");
+        ).toBe("/kitchen/fridge");
     });
 
     test("same-origin referer is used", () => {
@@ -73,7 +86,7 @@ describe("settingsBackHref", () => {
     test("other-origin referer is ignored", () => {
         expect(
             settingsBackHref({
-                referer: "https://evil.example/fridge",
+                referer: "https://evil.example/kitchen/fridge",
                 origin,
             }),
         ).toBe("/");
@@ -83,10 +96,10 @@ describe("settingsBackHref", () => {
         expect(
             settingsBackHref({
                 from: "//evil.example",
-                referer: `${origin}/fridge`,
+                referer: `${origin}/kitchen/fridge`,
                 origin,
             }),
-        ).toBe("/fridge");
+        ).toBe("/kitchen/fridge");
         expect(
             settingsBackHref({
                 from: "/settings/help",
@@ -101,5 +114,17 @@ describe("settingsBackHref", () => {
 
     test("default is home", () => {
         expect(settingsBackHref({ origin })).toBe("/");
+    });
+
+    test("canonicalizes legacy from paths", () => {
+        expect(settingsBackHref({ from: "/fridge", origin })).toBe(
+            "/kitchen/fridge",
+        );
+        expect(
+            settingsBackHref({
+                from: "/household/items",
+                origin,
+            }),
+        ).toBe("/settings/household/items");
     });
 });

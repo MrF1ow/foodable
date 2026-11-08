@@ -7549,7 +7549,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('name="log_meal"');
         expect(html).not.toContain('class="facts"');
         expect(html).toContain('class="bottom-nav"');
-        expect(html).toContain('href="/fridge"');
+        expect(html).toContain('href="/kitchen/fridge"');
         expect(html).toMatch(/href="\/app\.css\?v=[a-f0-9]{12}"/);
         expect(html).toMatch(/src="\/app\.js\?v=[a-f0-9]{12}"/);
     });
@@ -7579,8 +7579,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('action="/add-household-member"');
     });
 
-    test("POST /household as owner adds a username member", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household as owner adds a username member", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7589,7 +7589,7 @@ describe("authenticated dashboard HTTP", () => {
             body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.members).toContainEqual({
             householdId: "hh-1",
             userId: "55555555-5555-4555-8555-555555555555",
@@ -7602,8 +7602,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(await home.text()).toContain("Kid");
     });
 
-    test("POST /household as a member is 403 and adds nobody", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household as a member is 403 and adds nobody", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -7616,11 +7616,14 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.addedLogins).toEqual([]);
     });
 
-    test("POST /household/rotate-token as owner issues a token once", async () => {
-        const r = await siteApp.request("http://x/household/rotate-token", {
-            method: "POST",
-            headers: { cookie: cookieFor(alice) },
-        });
+    test("POST /settings/household/rotate-token as owner issues a token once", async () => {
+        const r = await siteApp.request(
+            "http://x/settings/household/rotate-token",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("Household bot token (shown once):");
@@ -7643,9 +7646,12 @@ describe("authenticated dashboard HTTP", () => {
     }
 
     test("the owner can make another member the owner", async () => {
-        const r = await postForm(`/household/members/${bob}/make-owner`, alice);
+        const r = await postForm(
+            `/settings/household/members/${bob}/make-owner`,
+            alice,
+        );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.ownershipTransfers).toEqual([{ from: alice, to: bob }]);
         expect(
             db.members.map((m) => `${m.displayName}:${m.role}`).sort(),
@@ -7653,14 +7659,17 @@ describe("authenticated dashboard HTTP", () => {
     });
 
     test("a member cannot take or hand out ownership", async () => {
-        const r = await postForm(`/household/members/${bob}/make-owner`, bob);
+        const r = await postForm(
+            `/settings/household/members/${bob}/make-owner`,
+            bob,
+        );
         expect(r.status).toBe(403);
         expect(db.ownershipTransfers).toEqual([]);
     });
 
     test("ownership cannot go to someone outside the household", async () => {
         const r = await postForm(
-            `/household/members/${outsider}/make-owner`,
+            `/settings/household/members/${outsider}/make-owner`,
             alice,
         );
         expect(r.status).toBe(400);
@@ -7672,18 +7681,21 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner removes a member after confirming", async () => {
         const r = await postForm(
-            `/household/members/${bob}/remove`,
+            `/settings/household/members/${bob}/remove`,
             alice,
             "confirm=yes",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.wipedUsers).toEqual([bob]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice"]);
     });
 
     test("removing a member without the confirm box erases nothing", async () => {
-        const r = await postForm(`/household/members/${bob}/remove`, alice);
+        const r = await postForm(
+            `/settings/household/members/${bob}/remove`,
+            alice,
+        );
         expect(r.status).toBe(400);
         expect(await r.text()).toContain(
             "Tick the box to confirm removing Bob.",
@@ -7693,7 +7705,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner cannot remove themselves", async () => {
         const r = await postForm(
-            `/household/members/${alice}/remove`,
+            `/settings/household/members/${alice}/remove`,
             alice,
             "confirm=yes",
         );
@@ -7704,7 +7716,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("a member cannot remove anyone", async () => {
         const r = await postForm(
-            `/household/members/${alice}/remove`,
+            `/settings/household/members/${alice}/remove`,
             bob,
             "confirm=yes",
         );
@@ -7714,7 +7726,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("removing someone outside the household erases nothing", async () => {
         const r = await postForm(
-            `/household/members/${outsider}/remove`,
+            `/settings/household/members/${outsider}/remove`,
             alice,
             "confirm=yes",
         );
@@ -7722,17 +7734,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.wipedUsers).toEqual([]);
     });
 
-    test("POST /household/rotate-token as a member is 403", async () => {
-        const r = await siteApp.request("http://x/household/rotate-token", {
-            method: "POST",
-            headers: { cookie: cookieFor(bob) },
-        });
+    test("POST /settings/household/rotate-token as a member is 403", async () => {
+        const r = await siteApp.request(
+            "http://x/settings/household/rotate-token",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(bob) },
+            },
+        );
         expect(r.status).toBe(403);
         expect(db.tokenRotations).toHaveLength(0);
     });
 
-    test("POST /household with a short password stays on the page", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household with a short password stays on the page", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7743,7 +7758,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("Password must be at least 12 characters.");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(html).toMatch(
             /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
         );
@@ -7751,8 +7766,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /household logged out does not add a member", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household logged out does not add a member", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 "content-type": "application/x-www-form-urlencoded",
@@ -7762,13 +7777,13 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(401);
         const html = await r.text();
         expect(html).toContain('action="/approve"');
-        expect(html).not.toContain('action="/household"');
+        expect(html).not.toContain('action="/settings/household"');
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /household duplicate username stays on the page", async () => {
-        await siteApp.request("http://x/household", {
+    test("POST /settings/household duplicate username stays on the page", async () => {
+        await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7776,7 +7791,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "display_name=Kid&password=password1234&username=kid",
         });
-        const r = await siteApp.request("http://x/household", {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7787,28 +7802,28 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("That login is already in use.");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(
             db.members.filter((m) => m.displayName.startsWith("Kid")),
         ).toHaveLength(1);
     });
 
-    test("GET /fridge returns the inventory page with Fridge active", async () => {
-        const r = await siteApp.request("http://x/fridge", {
+    test("GET /kitchen/fridge returns the inventory page with Fridge active", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Fridge</h1>");
         expect(html).toContain("Add a location, then add an item.");
-        expect(html).toContain('action="/fridge/locations"');
+        expect(html).toContain('action="/kitchen/fridge/locations"');
         expect(html).not.toContain("Coming soon.");
-        expect(html).toContain('href="/fridge" aria-current="page"');
+        expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
         expect(html).not.toContain('class="facts"');
     });
 
-    test("POST /fridge/locations adds Pantry for any member", async () => {
-        const r = await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/locations adds Pantry for any member", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -7817,8 +7832,8 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Pantry",
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/fridge");
-        const page = await siteApp.request("http://x/fridge", {
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7828,8 +7843,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Add an item to Pantry.");
     });
 
-    test("POST /fridge/items adds a supply with the entered unit", async () => {
-        await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/items adds a supply with the entered unit", async () => {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7839,7 +7854,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         const listed = await db.fridgeStore.listLocations("hh-1");
         const locationId = listed[0]!.id;
-        const add = await siteApp.request("http://x/fridge/items", {
+        const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7848,7 +7863,7 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=supply&location_id=${locationId}&name=Foil&qty_amount=2&qty_unit=roll`,
         });
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/fridge", {
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7869,7 +7884,7 @@ describe("authenticated dashboard HTTP", () => {
         ).toBe(true);
     });
 
-    test("POST /fridge/items adds barcode food in grams", async () => {
+    test("POST /kitchen/fridge/items adds barcode food in grams", async () => {
         db.barcodeFoods["070852010016"] = {
             name: "Good Culture Cottage Cheese",
             brand: "Good Culture",
@@ -7887,7 +7902,7 @@ describe("authenticated dashboard HTTP", () => {
             source_name: "openfoodfacts",
             barcode: "070852010016",
         };
-        await siteApp.request("http://x/fridge/locations", {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7896,7 +7911,7 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Fridge",
         });
         const locationId = (await db.fridgeStore.listLocations("hh-1"))[0]!.id;
-        const add = await siteApp.request("http://x/fridge/items", {
+        const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7905,7 +7920,7 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=food&location_id=${locationId}&barcode=070852010016&qty_amount=1360.8&qty_unit=g`,
         });
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/fridge", {
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7913,8 +7928,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("1360.8 g");
     });
 
-    test("POST /fridge/items/:id updates quantity and move, then delete removes it", async () => {
-        await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/items/:id updates quantity and move, then delete removes it", async () => {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7922,7 +7937,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "name=Fridge",
         });
-        await siteApp.request("http://x/fridge/locations", {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7933,7 +7948,7 @@ describe("authenticated dashboard HTTP", () => {
         const locations = await db.fridgeStore.listLocations("hh-1");
         const fridge = locations.find((l) => l.name === "Fridge")!;
         const pantry = locations.find((l) => l.name === "Pantry")!;
-        await siteApp.request("http://x/fridge/items", {
+        await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7942,14 +7957,17 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=supply&location_id=${fridge.id}&name=Foil&qty_amount=2&qty_unit=roll`,
         });
         const item = (await db.fridgeStore.listItems("hh-1"))[0]!;
-        const save = await siteApp.request(`http://x/fridge/items/${item.id}`, {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
+        const save = await siteApp.request(
+            `http://x/kitchen/fridge/items/${item.id}`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: `qty_amount=1&qty_unit=roll&location_id=${pantry.id}`,
             },
-            body: `qty_amount=1&qty_unit=roll&location_id=${pantry.id}`,
-        });
+        );
         expect(save.status).toBe(303);
         const moved = (await db.fridgeStore.listItems("hh-1"))[0]!;
         expect(moved.quantity.amount).toBe(1);
@@ -7963,7 +7981,7 @@ describe("authenticated dashboard HTTP", () => {
             ),
         ).toBe(true);
         const del = await siteApp.request(
-            `http://x/fridge/items/${item.id}/delete`,
+            `http://x/kitchen/fridge/items/${item.id}/delete`,
             {
                 method: "POST",
                 headers: { cookie: cookieFor(alice) },
@@ -7983,10 +8001,10 @@ describe("authenticated dashboard HTTP", () => {
         ).toBe(true);
     });
 
-    test("POST /fridge/items/:id rejects an item that is already gone", async () => {
+    test("POST /kitchen/fridge/items/:id rejects an item that is already gone", async () => {
         const missing = "00000000-0000-4000-8000-000000000099";
         const edit = await postForm(
-            `/fridge/items/${missing}`,
+            `/kitchen/fridge/items/${missing}`,
             alice,
             "qty_amount=1",
         );
@@ -8012,7 +8030,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
 
         const withMove = await postForm(
-            `/fridge/items/${missing}`,
+            `/kitchen/fridge/items/${missing}`,
             alice,
             "qty_amount=1&qty_unit=g&location_id=not-a-location&expires_on=2026-12-01",
         );
@@ -8030,9 +8048,12 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
 
-    test("POST /fridge/items/:id/delete rejects an item that is already gone", async () => {
+    test("POST /kitchen/fridge/items/:id/delete rejects an item that is already gone", async () => {
         const missing = "00000000-0000-4000-8000-000000000099";
-        const del = await postForm(`/fridge/items/${missing}/delete`, alice);
+        const del = await postForm(
+            `/kitchen/fridge/items/${missing}/delete`,
+            alice,
+        );
         expect(del.status).toBe(400);
         expect(del.headers.get("location")).toBeNull();
         expect(del.headers.get("set-cookie") ?? "").not.toContain(
@@ -8055,8 +8076,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
 
-    test("GET /fridge is 403 for a non-member", async () => {
-        const r = await siteApp.request("http://x/fridge", {
+    test("GET /kitchen/fridge is 403 for a non-member", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(outsider) },
         });
         expect(r.status).toBe(403);
@@ -8065,18 +8086,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("<h1>Fridge</h1>");
     });
 
-    test("GET /grocery lists by store and GET /recipes is the cookbook", async () => {
-        const grocery = await siteApp.request("http://x/grocery", {
+    test("GET /kitchen/groceries lists by store and GET /recipes is the cookbook", async () => {
+        const grocery = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(grocery.status).toBe(200);
         const groceryHtml = await grocery.text();
         expect(groceryHtml).toContain("<h1>Groceries</h1>");
-        expect(groceryHtml).toContain('href="/grocery" aria-current="page"');
+        expect(groceryHtml).toContain(
+            'href="/kitchen/groceries" aria-current="page"',
+        );
         expect(groceryHtml).not.toContain("Coming soon.");
         expect(groceryHtml).toContain("Add a grocery store");
         expect(groceryHtml).toContain('class="grocery-add-store"');
-        expect(groceryHtml).toContain('action="/grocery/stores"');
+        expect(groceryHtml).toContain('action="/kitchen/groceries/stores"');
         expect(groceryHtml).not.toContain("<h3>Add supply</h3>");
 
         const recipes = await siteApp.request("http://x/recipes", {
@@ -8633,7 +8656,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
     });
 
-    test("POST /grocery/lines adds a supply and checking it does not insert fridge stock", async () => {
+    test("POST /kitchen/groceries/lines adds a supply and checking it does not insert fridge stock", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8641,7 +8664,7 @@ describe("authenticated dashboard HTTP", () => {
         );
         const sections = await db.settingsStore.listSections(store.id);
         const other = sections.find((row) => row.isOther)!;
-        const add = await siteApp.request("http://x/grocery/lines", {
+        const add = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8654,7 +8677,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(lines).toHaveLength(1);
         expect(lines[0]?.displayName).toBe("Foil");
         const check = await siteApp.request(
-            `http://x/grocery/lines/${lines[0]!.id}/check`,
+            `http://x/kitchen/groceries/lines/${lines[0]!.id}/check`,
             {
                 method: "POST",
                 headers: {
@@ -8669,7 +8692,7 @@ describe("authenticated dashboard HTTP", () => {
             true,
         );
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
-        const page = await siteApp.request("http://x/grocery", {
+        const page = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -8680,15 +8703,18 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Add food</button>");
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");
-        const clear = await siteApp.request("http://x/grocery/clear-checked", {
-            method: "POST",
-            headers: { cookie: cookieFor(alice) },
-        });
+        const clear = await siteApp.request(
+            "http://x/kitchen/groceries/clear-checked",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
         expect(clear.status).toBe(303);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
-    test("POST /grocery/lines warns on peanut for an affected member", async () => {
+    test("POST /kitchen/groceries/lines warns on peanut for an affected member", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8699,7 +8725,7 @@ describe("authenticated dashboard HTTP", () => {
             userId: bob,
             allergen: "peanut",
         });
-        const add = await siteApp.request("http://x/grocery/lines", {
+        const add = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8723,7 +8749,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
-    test("POST /grocery/lines confirm_allergen override succeeds after allergen block", async () => {
+    test("POST /kitchen/groceries/lines confirm_allergen override succeeds after allergen block", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8734,7 +8760,7 @@ describe("authenticated dashboard HTTP", () => {
             userId: bob,
             allergen: "peanut",
         });
-        const ok = await siteApp.request("http://x/grocery/lines", {
+        const ok = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8748,8 +8774,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(lines[0]?.displayName).toBe("Peanut Butter");
     });
 
-    test("GET /grocery is 403 for a non-member", async () => {
-        const r = await siteApp.request("http://x/grocery", {
+    test("GET /kitchen/groceries is 403 for a non-member", async () => {
+        const r = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(outsider) },
         });
         expect(r.status).toBe(403);
@@ -8758,8 +8784,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("<h1>Groceries</h1>");
     });
 
-    test("POST /grocery/stores as owner adds Corner on the grocery page", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores as owner adds Corner on the grocery page", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8768,10 +8794,10 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Corner",
         });
         expect(add.status).toBe(303);
-        expect(add.headers.get("location")).toBe("/grocery");
+        expect(add.headers.get("location")).toBe("/kitchen/groceries");
         const stores = await db.settingsStore.listStores("hh-1");
         expect(stores.map((row) => row.name)).toEqual(["Corner"]);
-        const page = await siteApp.request("http://x/grocery", {
+        const page = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -8781,8 +8807,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("grocery-add-supply");
     });
 
-    test("POST /grocery/stores with an empty name re-renders grocery with the error", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores with an empty name re-renders grocery with the error", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8795,26 +8821,26 @@ describe("authenticated dashboard HTTP", () => {
         const html = await add.text();
         expect(html).toContain("<h1>Groceries</h1>");
         expect(html).toContain("Enter a store name.");
-        expect(html).toContain('action="/grocery/stores"');
+        expect(html).toContain('action="/kitchen/groceries/stores"');
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
     });
 
-    test("GET /grocery as a member has no add-store form", async () => {
+    test("GET /kitchen/groceries as a member has no add-store form", async () => {
         db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/grocery", {
+        const r = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(bob) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Groceries</h1>");
         expect(html).not.toContain("grocery-add-store");
-        expect(html).not.toContain('action="/grocery/stores"');
+        expect(html).not.toContain('action="/kitchen/groceries/stores"');
         expect(html).not.toContain("<h3>Add supply</h3>");
     });
 
-    test("POST /grocery/stores as a member is refused", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores as a member is refused", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -8844,14 +8870,16 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("coming-soon");
     });
 
-    test("GET /household/items lists the catalog", async () => {
-        const r = await siteApp.request("http://x/household/items", {
+    test("GET /settings/household/items lists the catalog", async () => {
+        const r = await siteApp.request("http://x/settings/household/items", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Items</h1>");
-        expect(html).toContain('href="/household/items" aria-current="page"');
+        expect(html).toContain(
+            'href="/settings/household/items" aria-current="page"',
+        );
         expect(html).toContain("No foods in the catalog yet.");
     });
 
@@ -8868,19 +8896,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(outsiderRes.status).toBe(403);
     });
 
-    test("GET /household shows owner add-member form", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("GET /settings/household shows owner add-member form", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
     });
 
-    test("GET /household ignores invalid refusals_after cursor", async () => {
+    test("GET /settings/household ignores invalid refusals_after cursor", async () => {
         db.fetchMemoryStore = {
             ...createMemoryFetchMemoryStore(),
             async listRefusals(_hh, opts) {
@@ -8889,7 +8917,7 @@ describe("authenticated dashboard HTTP", () => {
             },
         };
         const r = await siteApp.request(
-            "http://x/household?refusals_after=not-a-date%7Cexample.com",
+            "http://x/settings/household?refusals_after=not-a-date%7Cexample.com",
             {
                 headers: { cookie: cookieFor(alice) },
             },
@@ -8897,16 +8925,16 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
     });
 
-    test("GET /household as a member is read-only", async () => {
+    test("GET /settings/household as a member is read-only", async () => {
         db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/household", {
+        const r = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(bob) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
         expect(html).not.toContain('commandfor="household-add-member"');
-        expect(html).not.toContain('action="/household/stores"');
+        expect(html).not.toContain('action="/settings/household/stores"');
     });
 
     test("GET /settings/help is available to members", async () => {
@@ -8920,17 +8948,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('id="food-vs-household-item"');
     });
 
-    test("POST /household/stores seeds default sections", async () => {
-        const add = await siteApp.request("http://x/household/stores", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
+    test("POST /settings/household/stores seeds default sections", async () => {
+        const add = await siteApp.request(
+            "http://x/settings/household/stores",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Safeway",
             },
-            body: "name=Safeway",
-        });
+        );
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/household", {
+        const page = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -9069,17 +9100,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("--accent");
     });
 
-    test("POST /settings with from=/fridge redirects back with query", async () => {
+    test("POST /settings with from=/kitchen/fridge redirects back with query", async () => {
         const save = await siteApp.request("http://x/settings", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "group=account&theme=light&from=%2Ffridge",
+            body: "group=account&theme=light&from=%2Fkitchen%2Ffridge",
         });
         expect(save.status).toBe(303);
-        expect(save.headers.get("location")).toBe("/settings?from=%2Ffridge");
+        expect(save.headers.get("location")).toBe(
+            "/settings?from=%2Fkitchen%2Ffridge",
+        );
     });
 
     test("POST /settings ignores unsafe from in redirect", async () => {

@@ -259,7 +259,7 @@ describe("did-you-mean web forms", () => {
             qty_amount: "2",
             qty_unit: "each",
         };
-        const ask = await app().request("http://x/grocery/lines", {
+        const ask = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -279,14 +279,17 @@ describe("did-you-mean web forms", () => {
         expect((await db.foodsStore.listFoods(HH)).length).toBe(1);
         expect((await db.groceryStore.listLines(HH)).length).toBe(0);
 
-        const createNew = await app().request("http://x/grocery/lines", {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
+        const createNew = await app().request(
+            "http://x/kitchen/groceries/lines",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: formBody({ ...base, new_food: "1" }),
             },
-            body: formBody({ ...base, new_food: "1" }),
-        });
+        );
         expect(createNew.status).toBe(303);
         expect(
             (await db.foodsStore.listFoods(HH)).some(
@@ -306,7 +309,7 @@ describe("did-you-mean web forms", () => {
             await db.groceryStore.deleteLine(HH, line.id);
         }
 
-        const pick = await app().request("http://x/grocery/lines", {
+        const pick = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -326,50 +329,59 @@ describe("did-you-mean web forms", () => {
 
         await db.groceryStore.deleteLine(HH, lines[0]!.id);
 
-        const remember = await app().request("http://x/grocery/lines", {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
+        const remember = await app().request(
+            "http://x/kitchen/groceries/lines",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: formBody({
+                    ...base,
+                    food_id: eggs.id,
+                    alias_name: "chicken egg",
+                    remember_alias: "1",
+                }),
             },
-            body: formBody({
-                ...base,
-                food_id: eggs.id,
-                alias_name: "chicken egg",
-                remember_alias: "1",
-            }),
-        });
+        );
         expect(remember.status).toBe(303);
         const aliasMap = await db.foodsStore.listAllAliases(HH);
         expect([...aliasMap.values()].flat()).toContain("chicken egg");
 
-        const straight = await app().request("http://x/grocery/lines", {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
+        const straight = await app().request(
+            "http://x/kitchen/groceries/lines",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: formBody(base),
             },
-            body: formBody(base),
-        });
+        );
         expect(straight.status).toBe(303);
 
         const foods = await db.foodsStore.listFoods(HH);
         expect(foods.some((f) => f.name === "chicken egg")).toBe(false);
 
-        const noMatch = await app().request("http://x/grocery/lines", {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
+        const noMatch = await app().request(
+            "http://x/kitchen/groceries/lines",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: formBody({
+                    kind: "food",
+                    store_id: store.id,
+                    food_name: "tofu",
+                    qty_amount: "1",
+                    qty_unit: "g",
+                }),
             },
-            body: formBody({
-                kind: "food",
-                store_id: store.id,
-                food_name: "tofu",
-                qty_amount: "1",
-                qty_unit: "g",
-            }),
-        });
+        );
         expect(noMatch.status).toBe(303);
         expect(
             await findManualFood(db.foodsStore, HH, "food", "tofu"),
@@ -387,7 +399,7 @@ describe("did-you-mean web forms", () => {
             qty_amount: "3",
             qty_unit: "each",
         };
-        const ask = await app().request("http://x/fridge/items", {
+        const ask = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -410,7 +422,7 @@ describe("did-you-mean web forms", () => {
         expect(await db.foodsStore.listFoods(HH)).toHaveLength(1);
 
         // new_food=1 before any alias exists: the flag alone creates the row.
-        const createNew = await app().request("http://x/fridge/items", {
+        const createNew = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -425,7 +437,7 @@ describe("did-you-mean web forms", () => {
         await db.fridgeStore.deleteItem(HH, fresh[0]!.id);
         await archiveFoodNamed("chicken egg");
 
-        const pick = await app().request("http://x/fridge/items", {
+        const pick = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -444,7 +456,7 @@ describe("did-you-mean web forms", () => {
 
         await db.fridgeStore.deleteItem(HH, items[0]!.id);
 
-        const remember = await app().request("http://x/fridge/items", {
+        const remember = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -458,7 +470,7 @@ describe("did-you-mean web forms", () => {
             }),
         });
         expect(remember.status).toBe(303);
-        const direct = await app().request("http://x/fridge/items", {
+        const direct = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -468,7 +480,7 @@ describe("did-you-mean web forms", () => {
         });
         expect(direct.status).toBe(303);
 
-        const newFood = await app().request("http://x/fridge/items", {
+        const newFood = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -478,7 +490,7 @@ describe("did-you-mean web forms", () => {
         });
         expect(newFood.status).toBe(303);
 
-        const tofu = await app().request("http://x/fridge/items", {
+        const tofu = await app().request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -685,7 +697,7 @@ describe("did-you-mean allergen replay", () => {
             qty_amount: "1",
             qty_unit: "g",
         };
-        const ask = await app().request("http://x/grocery/lines", {
+        const ask = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -701,7 +713,7 @@ describe("did-you-mean allergen replay", () => {
         expect(didYouMean).toBeDefined();
         expect(didYouMean!).not.toContain('name="confirm_allergen"');
 
-        const block = await app().request("http://x/grocery/lines", {
+        const block = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -733,7 +745,7 @@ describe("did-you-mean allergen replay", () => {
             qty_amount: "1",
             qty_unit: "g",
         };
-        const block = await app().request("http://x/grocery/lines", {
+        const block = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -750,7 +762,7 @@ describe("did-you-mean allergen replay", () => {
         const html = await block.text();
         expect(html).toContain('name="remember_alias" value="1"');
         expect(html).toContain('name="alias_name" value="egg noodles"');
-        const ok = await app().request("http://x/grocery/lines", {
+        const ok = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),
@@ -778,7 +790,7 @@ describe("did-you-mean grocery section", () => {
         const sections = await db.settingsStore.listSections(store.id);
         const dairy = sections.find((s) => !s.isOther && !s.hidden)!;
         expect(dairy).toBeDefined();
-        const res = await app().request("http://x/grocery/lines", {
+        const res = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 Cookie: cookieFor(ALICE),

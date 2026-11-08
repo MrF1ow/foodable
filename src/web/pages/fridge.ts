@@ -183,12 +183,12 @@ function editReopenItem(
 function itemFill(item: FridgeItem, mode: "edit" | "delete"): ModalFill {
     if (mode === "delete") {
         return {
-            action: `/fridge/items/${item.id}/delete`,
+            action: `/kitchen/fridge/items/${item.id}/delete`,
             message: `Remove ${item.displayName} from the fridge?`,
         };
     }
     return {
-        action: `/fridge/items/${item.id}`,
+        action: `/kitchen/fridge/items/${item.id}`,
         title: `Edit ${item.displayName}`,
         fields: {
             qty_amount: item.quantity.amount,
@@ -225,7 +225,7 @@ function itemRow(
             : undefined;
     const noticeCtx =
         view.foodsById != null
-            ? { from: "/fridge", foods: view.foodsById }
+            ? { from: "/kitchen/fridge", foods: view.foodsById }
             : undefined;
     return renderFridgeItemRow({
         id: item.id,
@@ -280,7 +280,7 @@ function sharedEditModal(
     const item = editReopenItem(view, kind);
     const openId = item ? `fridge-edit-${item.id}` : "";
     const open = item != null && modalOpen(view, openId);
-    const action = item ? `/fridge/items/${item.id}` : "";
+    const action = item ? `/kitchen/fridge/items/${item.id}` : "";
     const title = item ? `Edit ${item.displayName}` : "Edit item";
     return modal({
         id,
@@ -308,7 +308,7 @@ function sharedDeleteModal(view: FridgePageView): string {
         message: item
             ? `Remove ${item.displayName} from the fridge?`
             : "Remove this item from the fridge?",
-        action: item ? `/fridge/items/${item.id}/delete` : "",
+        action: item ? `/kitchen/fridge/items/${item.id}/delete` : "",
         confirmLabel: "Delete",
         openOnLoad: open,
         bodyPrefix: open ? modalError(view, openId) : "",
@@ -322,13 +322,13 @@ function locationFill(
 ): ModalFill {
     if (mode === "remove") {
         return {
-            action: `/fridge/locations/${location.id}/delete`,
+            action: `/kitchen/fridge/locations/${location.id}/delete`,
             message: `Remove ${location.name} and everything in it?`,
         };
     }
     if (mode === "supply") {
         return {
-            action: "/fridge/items",
+            action: "/kitchen/fridge/items",
             title: `Add household item to ${location.name}`,
             fields: {
                 location_id: location.id,
@@ -340,7 +340,7 @@ function locationFill(
         };
     }
     return {
-        action: "/fridge/items",
+        action: "/kitchen/fridge/items",
         title: `Add food to ${location.name}`,
         fields: {
             location_id: location.id,
@@ -410,7 +410,7 @@ function sharedAddFoodModal(view: FridgePageView): string {
             view.openModalId,
         )}${renderFoodPicker({
             id: FRIDGE_FOOD_PICKER_ID,
-            action: location ? "/fridge/items" : "",
+            action: location ? "/kitchen/fridge/items" : "",
             method: "post",
             hiddenFields: { kind: "food", location_id: location?.id ?? "" },
             includeQuantity: true,
@@ -423,7 +423,7 @@ function sharedAddSupplyModal(view: FridgePageView): string {
     const location = reopenLocation(view, ADD_SUPPLY_PREFIX);
     const openId = location ? `${ADD_SUPPLY_PREFIX}${location.id}` : "";
     const open = location != null && modalOpen(view, openId);
-    const action = location ? "/fridge/items" : "";
+    const action = location ? "/kitchen/fridge/items" : "";
     return modal({
         id: FRIDGE_ADD_SUPPLY_ID,
         title: location
@@ -459,7 +459,9 @@ function sharedRemoveLocationModal(view: FridgePageView): string {
         message: location
             ? `Remove ${location.name} and everything in it?`
             : "Remove this location and everything in it?",
-        action: location ? `/fridge/locations/${location.id}/delete` : "",
+        action: location
+            ? `/kitchen/fridge/locations/${location.id}/delete`
+            : "",
         confirmLabel: "Remove",
         openOnLoad: open,
         bodyPrefix: open ? modalError(view, openId) : "",
@@ -496,7 +498,7 @@ export function renderFridgePage(view: FridgePageView): string {
             id: addLocationId,
             title: "Add location",
             openOnLoad: modalOpen(view, addLocationId),
-            body: `${modalError(view, addLocationId)}<form class="fridge-add-location" method="post" action="/fridge/locations">
+            body: `${modalError(view, addLocationId)}<form class="fridge-add-location" method="post" action="/kitchen/fridge/locations">
 ${field({ id: "location_name", label: "Location name", control: `<input id="location_name" name="name" type="text" required maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add location</button>
 </form>`,

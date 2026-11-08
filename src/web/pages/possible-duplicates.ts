@@ -164,7 +164,7 @@ function mergeFormBody(
             .join("\n");
         conflictFields = fieldsets;
     }
-    return `<form method="post" action="/household/possible-duplicates/merge" class="field-grid">
+    return `<form method="post" action="/settings/household/possible-duplicates/merge" class="field-grid">
 <input type="hidden" name="food_a" value="${escapeHtml(pair.subject.id)}" />
 <input type="hidden" name="food_b" value="${escapeHtml(pair.related.id)}" />
 <fieldset class="field-grid"><legend>Name to keep</legend>${keepRadios}</fieldset>
@@ -209,7 +209,7 @@ function pairRow(
         className: "btn-sm",
         fill: mergeFill(pair),
     });
-    const keepSeparate = `<form method="post" action="/household/possible-duplicates/keep-separate" class="row-actions">
+    const keepSeparate = `<form method="post" action="/settings/household/possible-duplicates/keep-separate" class="row-actions">
 <input type="hidden" name="subject_id" value="${escapeHtml(pair.subject.id)}" />
 <input type="hidden" name="related_id" value="${escapeHtml(pair.related.id)}" />
 <button type="submit" class="btn-sm">Keep separate</button>

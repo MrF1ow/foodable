@@ -52,7 +52,7 @@ test("household settings use modals instead of add/edit disclosures", () => {
     );
     expect(html).toContain(`commandfor="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
     expect(html).toContain(`commandfor="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
-    expect(html).toContain('action="/household"');
+    expect(html).toContain('action="/settings/household"');
     expect(html).toContain('class="add-member"');
     expect(html).toContain('commandfor="household-manage"');
     expect(html).not.toContain('commandfor="household-manage-u2"');
@@ -64,7 +64,7 @@ test("household settings use modals instead of add/edit disclosures", () => {
     expect(html).toContain(
         'data-fill-template-member-actions="household-member-actions-u2"',
     );
-    expect(html).toContain("/household/members/u2/remove");
+    expect(html).toContain("/settings/household/members/u2/remove");
     expect(html).toContain('name="confirm" value="yes" required');
     expect(html.match(/name="confirm" value="yes" required/g)?.length).toBe(1);
     const remove = dialogHtml(html, "household-remove");
@@ -212,7 +212,9 @@ test("household modal errors render inside the reopening dialog", () => {
     );
     const manageDialog = dialogHtml(manage, "household-manage");
     expect(manageDialog).toContain(">Manage Bob</h2>");
-    expect(manageDialog).toContain('action="/household/members/u2/role"');
+    expect(manageDialog).toContain(
+        'action="/settings/household/members/u2/role"',
+    );
     expect(manageDialog).toContain('name="role" value="admin"');
     expect(manageDialog).toContain("Make Bob an admin");
     expect(manageDialog).toContain(">Make admin</button>");

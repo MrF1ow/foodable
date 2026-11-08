@@ -39,17 +39,17 @@ function groupOpenLink(
     }
     switch (sample.subject.kind) {
         case "fridge_item":
-            return { href: "/fridge", label: "Open fridge" };
+            return { href: "/kitchen/fridge", label: "Open fridge" };
         case "grocery_line":
-            return { href: "/grocery", label: "Open grocery" };
+            return { href: "/kitchen/groceries", label: "Open grocery" };
         case "food":
             if (sample.code === "food.possible_duplicate") {
                 return {
-                    href: "/household/possible-duplicates",
+                    href: "/settings/household/possible-duplicates",
                     label: "Open possible duplicates",
                 };
             }
-            return { href: "/household/items", label: "Open items" };
+            return { href: "/settings/household/items", label: "Open items" };
         default:
             return null;
     }

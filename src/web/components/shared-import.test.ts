@@ -407,14 +407,14 @@ test("food picker HTML has barcode, search, and manual tabs", () => {
 
 test("post picker search hits submit food_id or barcode with hidden fields and qty", () => {
     const html = renderFoodPicker({
-        action: "/fridge/items",
+        action: "/kitchen/fridge/items",
         method: "post",
         hiddenFields: { kind: "food", location_id: "loc-1" },
         includeQuantity: true,
     });
     const form = searchFormHtml(html);
     expect(form).toContain('method="post"');
-    expect(form).toContain('action="/fridge/items"');
+    expect(form).toContain('action="/kitchen/fridge/items"');
     expect(form).toContain('name="kind" value="food"');
     expect(form).toContain('name="location_id" value="loc-1"');
     expect(form).toContain('name="qty_amount"');
@@ -479,7 +479,7 @@ test("get picker search hits stay non-submitting text", () => {
 
 test("post picker without quantity still posts food_id and hidden fields", () => {
     const html = renderFoodPicker({
-        action: "/fridge/items",
+        action: "/kitchen/fridge/items",
         method: "post",
         hiddenFields: { kind: "food", location_id: "loc-1" },
     });

@@ -183,6 +183,8 @@ Invariants worth keeping:
 
 ## Login HTML and the household app
 
+**Routes.** Canonical app paths live in `src/web/route-map.ts` (`APP_PATHS`). Old paths (`/fridge`, `/grocery`, `/household`, `/household/usual-products`, `/settings/foods`) redirect via app middleware: GET/HEAD → 301, other methods → 308, query string preserved.
+
 Generated public HTML is the OAuth login template: `public/login.html`, written by `scripts/gen-login.ts` from `src/copy/login.ts`. English only. `GET /` without a site session is that login page. `GET /authorize` with a valid OAuth query is the same template. Signed-in `/` is the household web app (nutrition, fridge, grocery, recipes, household). Do not add marketing routes, and do not restore `gen-index.ts`, `gen-tools.ts`, `gen-legal.ts`, `gen-alternatives.ts`, or `gen-sitemap.ts`.
 
 `package.json` `gen:pages` still runs only `gen-login.ts`. `gen:all` runs `gen:tokens` then `gen:pages`. `src/public-site.test.ts` fails if the marketing generators come back or if marketing paths return HTML.

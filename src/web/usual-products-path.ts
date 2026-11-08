@@ -1,4 +1,5 @@
 import type { Food } from "../domain/foods.js";
+import { APP_PATHS, canonicalAppPath } from "./route-map.js";
 import { isSafeAppBackPath } from "./settings-back.js";
 
 /** Plain food id for the usual-product picker (products link to their parent). */
@@ -14,14 +15,18 @@ export function safeReturnPath(
     fallback: string,
 ): string {
     const trimmed = from?.trim();
-    if (trimmed && isSafeAppBackPath(trimmed)) return trimmed;
+    if (trimmed) {
+        const canon = canonicalAppPath(trimmed);
+        if (isSafeAppBackPath(canon)) return canon;
+    }
     return fallback;
 }
 
 export function usualProductsPickerHref(foodId: string, from?: string): string {
-    let href = `/household/usual-products/${encodeURIComponent(foodId)}`;
-    if (from && isSafeAppBackPath(from)) {
-        href += `?from=${encodeURIComponent(from)}`;
+    let href = `${APP_PATHS.kitchenUsuals}/${encodeURIComponent(foodId)}`;
+    const canon = from ? canonicalAppPath(from.trim()) : "";
+    if (canon && isSafeAppBackPath(canon)) {
+        href += `?from=${encodeURIComponent(canon)}`;
     }
     return href;
 }

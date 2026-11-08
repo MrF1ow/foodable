@@ -255,7 +255,7 @@ describe("possible-duplicates routes", () => {
     test("Keep separate removes pair and badge", async () => {
         const { egg, eggs } = await seedDuplicatePair();
         const before = await app().request(
-            "http://x/household/possible-duplicates",
+            "http://x/settings/household/possible-duplicates",
             {
                 headers: { Cookie: cookieFor(ALICE) },
             },
@@ -264,7 +264,7 @@ describe("possible-duplicates routes", () => {
         expect(await before.text()).toContain("chicken egg");
 
         const keep = await app().request(
-            "http://x/household/possible-duplicates/keep-separate",
+            "http://x/settings/household/possible-duplicates/keep-separate",
             {
                 method: "POST",
                 headers: {
@@ -276,14 +276,14 @@ describe("possible-duplicates routes", () => {
         );
         expect(keep.status).toBe(303);
         const after = await app().request(
-            "http://x/household/possible-duplicates",
+            "http://x/settings/household/possible-duplicates",
             {
                 headers: { Cookie: cookieFor(ALICE) },
             },
         );
         const html = await after.text();
         expect(html).toContain("No possible duplicates");
-        const items = await app().request("http://x/household/items", {
+        const items = await app().request("http://x/settings/household/items", {
             headers: { Cookie: cookieFor(ALICE) },
         });
         expect(await items.text()).not.toContain("Possible duplicates");
@@ -298,7 +298,7 @@ describe("possible-duplicates routes", () => {
             newFood({ householdId: HH_OTHER, kind: "food", name: "eggs" }),
         );
         const res = await app().request(
-            "http://x/household/possible-duplicates/keep-separate",
+            "http://x/settings/household/possible-duplicates/keep-separate",
             {
                 method: "POST",
                 headers: {
@@ -340,7 +340,7 @@ describe("possible-duplicates routes", () => {
             locationId: loc.id,
         });
         const page = await app().request(
-            "http://x/household/possible-duplicates",
+            "http://x/settings/household/possible-duplicates",
             { headers: { Cookie: cookieFor(ALICE) } },
         );
         const html = await page.text();
@@ -360,7 +360,7 @@ describe("possible-duplicates routes", () => {
             pick_protein_g: egg.id,
         });
         const merged = await app().request(
-            "http://x/household/possible-duplicates/merge",
+            "http://x/settings/household/possible-duplicates/merge",
             {
                 method: "POST",
                 headers: {
@@ -413,7 +413,7 @@ describe("possible-duplicates routes", () => {
             locationId: loc.id,
         });
         const res = await app().request(
-            "http://x/household/possible-duplicates/merge",
+            "http://x/settings/household/possible-duplicates/merge",
             {
                 method: "POST",
                 headers: {
@@ -443,7 +443,7 @@ describe("possible-duplicates routes", () => {
         const { egg, eggs } = await seedDuplicatePair();
         const foodsBefore = await db.foodsStore.listFoods(HH);
         const res = await app().request(
-            "http://x/household/possible-duplicates/merge",
+            "http://x/settings/household/possible-duplicates/merge",
             {
                 method: "POST",
                 headers: {
@@ -481,7 +481,7 @@ describe("possible-duplicates routes", () => {
             newFood({ householdId: HH, kind: "food", name: "solo" }),
         );
         const res = await app().request(
-            "http://x/household/possible-duplicates/merge",
+            "http://x/settings/household/possible-duplicates/merge",
             {
                 method: "POST",
                 headers: {
@@ -500,12 +500,12 @@ describe("possible-duplicates routes", () => {
     });
 
     test("sub-nav shows Possible duplicates only when list is non-empty", async () => {
-        const empty = await app().request("http://x/household/items", {
+        const empty = await app().request("http://x/settings/household/items", {
             headers: { Cookie: cookieFor(ALICE) },
         });
         expect(await empty.text()).not.toContain("Possible duplicates");
         await seedDuplicatePair();
-        const members = await app().request("http://x/household", {
+        const members = await app().request("http://x/settings/household", {
             headers: { Cookie: cookieFor(ALICE) },
         });
         expect(await members.text()).toContain("Possible duplicates");
@@ -545,9 +545,9 @@ describe("possible-duplicates routes", () => {
             })
         ).text();
         expect(recipeHtml).toContain("Possible duplicate of");
-        expect(recipeHtml).toContain("/household/possible-duplicates");
+        expect(recipeHtml).toContain("/settings/household/possible-duplicates");
         const groceryHtml = await (
-            await app().request("http://x/grocery", {
+            await app().request("http://x/kitchen/groceries", {
                 headers: { Cookie: cookieFor(ALICE) },
             })
         ).text();

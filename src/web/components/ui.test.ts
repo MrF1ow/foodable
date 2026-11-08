@@ -203,13 +203,13 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "del-item",
         title: "Delete item?",
         message: "Remove <b>eggs</b> from the fridge.",
-        action: "/fridge/items/1/delete",
+        action: "/kitchen/fridge/items/1/delete",
         confirmLabel: "Delete",
         hiddenFields: { csrf: "tok" },
     });
     expect(confirm).toContain('id="del-item"');
     expect(confirm).toContain(
-        '<form class="modal-confirm" method="post" action="/fridge/items/1/delete">',
+        '<form class="modal-confirm" method="post" action="/kitchen/fridge/items/1/delete">',
     );
     expect(confirm).toContain(
         '<input type="hidden" name="csrf" value="tok" />',
@@ -278,13 +278,13 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         target: "fridge-edit-food",
         label: "Edit",
         fill: {
-            action: "/fridge/items/1",
+            action: "/kitchen/fridge/items/1",
             title: `Edit ${hostile}`,
             message: "Remove it?",
             fields: { qty_amount: 6, archived: true, note: null },
         },
     });
-    expect(filled).toContain('data-fill-action="/fridge/items/1"');
+    expect(filled).toContain('data-fill-action="/kitchen/fridge/items/1"');
     expect(filled).toContain(
         'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
@@ -326,7 +326,7 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "household-make-owner",
         title: "Transfer ownership",
         message: "Bob becomes the owner.",
-        action: "/household/members/u2/make-owner",
+        action: "/settings/household/members/u2/make-owner",
         confirmLabel: "Make Bob the owner",
         submitSlot: "owner-label",
         submitDisabled: true,

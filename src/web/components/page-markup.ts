@@ -70,7 +70,7 @@ export function renderGroceryLineRow(opts: {
                                     code: notice.code,
                                     subject_kind: notice.subject.kind,
                                     subject_id: notice.subject.id,
-                                    return_to: "/grocery",
+                                    return_to: "/kitchen/groceries",
                                     ...(dismissalKey(notice).relatedKey
                                         ? {
                                               related_id:
@@ -85,7 +85,7 @@ export function renderGroceryLineRow(opts: {
             : "";
     return `<li class="grocery-line${opts.checked ? " is-checked" : ""}" data-line-id="${escapeHtml(opts.id)}" data-checked="${checked}" data-kind="${opts.kind}">
 <div class="list-row grocery-line-row">
-<form class="grocery-line-check" method="post" action="/grocery/lines/${escapeHtml(opts.id)}/check">
+<form class="grocery-line-check" method="post" action="/kitchen/groceries/lines/${escapeHtml(opts.id)}/check">
 <input type="hidden" name="checked" value="${next}" />
 <button type="submit" class="check-btn" aria-pressed="${checked}"><span class="visually-hidden">${verb} ${escapeHtml(opts.displayName)}</span></button>
 </form>

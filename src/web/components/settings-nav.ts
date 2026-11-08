@@ -45,11 +45,11 @@ export function renderSettingsNav(
 }
 
 const HOUSEHOLD_SECTIONS = [
-    { id: "members", href: "/household", label: "Members" },
-    { id: "items", href: "/household/items", label: "Items" },
+    { id: "members", href: "/settings/household", label: "Members" },
+    { id: "items", href: "/settings/household/items", label: "Items" },
     {
         id: "usual-products",
-        href: "/household/usual-products",
+        href: "/kitchen/usuals",
         label: "Usual products",
     },
 ] as const;
@@ -70,7 +70,7 @@ export function renderHouseholdNav(
             count > 0 ? ` <span class="pill pill-dim">${count}</span>` : "";
         sections.push({
             id: "possible-duplicates",
-            href: "/household/possible-duplicates",
+            href: "/settings/household/possible-duplicates",
             label: `Possible duplicates${badge}`,
         });
     }

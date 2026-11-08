@@ -99,6 +99,6 @@ test("a food group links to the household items page", () => {
     const n = expiring("f1");
     n.subject = { kind: "food", id: "f1" };
     const html = render([n], [["food:f1", "Eggs"]], []);
-    expect(html).toContain('href="/household/items"');
-    expect(html).not.toContain("/settings/foods");
+    expect(html).toContain('href="/settings/household/items"');
+    expect(html).not.toContain('href="/household');
 });

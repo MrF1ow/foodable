@@ -91,7 +91,7 @@ async function fridgeFormError(
     return { html: page.html, status: 400 as const };
 }
 
-fridgeRoutes.get("/fridge", requireSiteUser, async (c) => {
+fridgeRoutes.get("/kitchen/fridge", requireSiteUser, async (c) => {
     const page = await renderFridgeInventoryPage(
         c.get("userId"),
         undefined,
@@ -101,7 +101,7 @@ fridgeRoutes.get("/fridge", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-fridgeRoutes.post("/fridge/locations", requireMember, async (c) => {
+fridgeRoutes.post("/kitchen/fridge/locations", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
@@ -115,27 +115,35 @@ fridgeRoutes.post("/fridge/locations", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err, "fridge-add-location");
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/fridge", "fridge.location.added");
+    return redirectWithToast(c, "/kitchen/fridge", "fridge.location.added");
 });
 
-fridgeRoutes.post("/fridge/locations/:id/delete", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const id = c.req.param("id");
-    try {
-        await deleteLocation(liveFridgeStore(), member.householdId, id);
-    } catch (err) {
-        const page = await fridgeFormError(
-            userId,
-            err,
-            `fridge-remove-location-${id}`,
+fridgeRoutes.post(
+    "/kitchen/fridge/locations/:id/delete",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const id = c.req.param("id");
+        try {
+            await deleteLocation(liveFridgeStore(), member.householdId, id);
+        } catch (err) {
+            const page = await fridgeFormError(
+                userId,
+                err,
+                `fridge-remove-location-${id}`,
+            );
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/kitchen/fridge",
+            "fridge.location.removed",
         );
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/fridge", "fridge.location.removed");
-});
+    },
+);
 
-fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
+fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
@@ -218,7 +226,7 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
             const prompt = linkProductPromptPath(
                 prepared.food,
                 catalog,
-                "/fridge",
+                "/kitchen/fridge",
             );
             if (prompt) {
                 // toast: none (link-product prompt on destination)
@@ -235,7 +243,7 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
                 err,
                 fridgeItemRetryFields(body),
                 openModalId,
-                "/fridge/items",
+                "/kitchen/fridge/items",
             );
             if (didYouMean) {
                 const page = await renderFridgeInventoryPage(
@@ -251,38 +259,44 @@ fridgeRoutes.post("/fridge/items", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err, openModalId);
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/fridge", "fridge.item.added");
+    return redirectWithToast(c, "/kitchen/fridge", "fridge.item.added");
 });
 
-fridgeRoutes.post("/fridge/items/:id/delete", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    try {
-        const removed = await deleteFridgeItemAdjust(
-            liveFridgeStore(),
-            liveStockStore(),
-            liveFoodsStore(),
-            {
-                householdId: member.householdId,
-                itemId: c.req.param("id"),
-                actorUserId: userId,
-            },
-        );
-        if (!removed) {
-            throw new StockInputError("That item is no longer in the fridge.");
+fridgeRoutes.post(
+    "/kitchen/fridge/items/:id/delete",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        try {
+            const removed = await deleteFridgeItemAdjust(
+                liveFridgeStore(),
+                liveStockStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    itemId: c.req.param("id"),
+                    actorUserId: userId,
+                },
+            );
+            if (!removed) {
+                throw new StockInputError(
+                    "That item is no longer in the fridge.",
+                );
+            }
+        } catch (err) {
+            const page = await fridgeFormError(
+                userId,
+                err,
+                `fridge-delete-${c.req.param("id")}`,
+            );
+            return c.html(page.html, page.status);
         }
-    } catch (err) {
-        const page = await fridgeFormError(
-            userId,
-            err,
-            `fridge-delete-${c.req.param("id")}`,
-        );
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/fridge", "fridge.item.removed");
-});
+        return redirectWithToast(c, "/kitchen/fridge", "fridge.item.removed");
+    },
+);
 
-fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
+fridgeRoutes.post("/kitchen/fridge/items/:id", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
@@ -325,10 +339,10 @@ fridgeRoutes.post("/fridge/items/:id", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/fridge", "fridge.item.updated");
+    return redirectWithToast(c, "/kitchen/fridge", "fridge.item.updated");
 });
 
-fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
+fridgeRoutes.post("/kitchen/fridge/items/:id/eat", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     try {
@@ -351,7 +365,11 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
                 foodId,
             );
             if (!fridgeEatLogsMeal(food)) {
-                return redirectWithToast(c, "/fridge", "fridge.item.eaten");
+                return redirectWithToast(
+                    c,
+                    "/kitchen/fridge",
+                    "fridge.item.eaten",
+                );
             }
             const { built, specs } = await resolveAndBuildMeal({
                 householdId: member.householdId,
@@ -392,18 +410,18 @@ fridgeRoutes.post("/fridge/items/:id/eat", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err);
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/fridge", "fridge.item.eaten");
+    return redirectWithToast(c, "/kitchen/fridge", "fridge.item.eaten");
 });
 
 fridgeRoutes.post(
-    "/fridge/items/:id/add-to-grocery",
+    "/kitchen/fridge/items/:id/add-to-grocery",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);
         const body = await c.req.parseBody();
         const from = formText(body, "from");
-        const target = safeReturnPath(from, "/fridge");
+        const target = safeReturnPath(from, "/kitchen/fridge");
         try {
             const result = await addFridgeItemToGrocery(
                 liveGroceryStore(),
@@ -429,23 +447,27 @@ fridgeRoutes.post(
     },
 );
 
-fridgeRoutes.post("/fridge/items/:id/discard", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    try {
-        await discardFridgeItem(
-            liveFridgeStore(),
-            liveStockStore(),
-            liveFoodsStore(),
-            {
-                householdId: member.householdId,
-                itemId: c.req.param("id"),
-                actorUserId: userId,
-            },
-        );
-    } catch (err) {
-        const page = await fridgeFormError(userId, err);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/fridge", "fridge.item.discarded");
-});
+fridgeRoutes.post(
+    "/kitchen/fridge/items/:id/discard",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        try {
+            await discardFridgeItem(
+                liveFridgeStore(),
+                liveStockStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    itemId: c.req.param("id"),
+                    actorUserId: userId,
+                },
+            );
+        } catch (err) {
+            const page = await fridgeFormError(userId, err);
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(c, "/kitchen/fridge", "fridge.item.discarded");
+    },
+);

@@ -291,7 +291,7 @@ function groceryView(chrome: unknown) {
                             ),
                             usualProductName: "Kirkland Large Eggs",
                             usualPickerHref:
-                                "/household/usual-products/f-eggs?from=%2Fgrocery",
+                                "/kitchen/usuals/f-eggs?from=%2Fkitchen%2Fgroceries",
                             putAwayProducts: [
                                 { id: "f-eggs", label: "Eggs" },
                                 {
@@ -654,7 +654,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             openModalId: "grocery-add-food-s1",
             didYouMean: didYouMeanSample(
                 "grocery-add-food-s1",
-                "/grocery/lines",
+                "/kitchen/groceries/lines",
                 { kind: "food", store_id: "s1" },
             ),
         } as never),
@@ -663,7 +663,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             openModalId: "fridge-add-food-l1",
             didYouMean: didYouMeanSample(
                 "fridge-add-food-l1",
-                "/fridge/items",
+                "/kitchen/fridge/items",
                 { kind: "food", location_id: "l1" },
             ),
         } as never),
@@ -685,7 +685,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         } as never),
         settings: renderSettingsPage({
             chrome,
-            backHref: "/fridge",
+            backHref: "/kitchen/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
             weightUnit: "kg",
@@ -742,7 +742,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             prefillStoreId: catalogById.get("f-kirkland")!.usualStoreId,
             prefillAmount: catalogById.get("f-kirkland")!.usualAmount,
             stores: PREVIEW_STORES,
-            from: "/household/usual-products",
+            from: "/kitchen/usuals",
         } as never),
         "usual-products": renderUsualProductsListPage({
             chrome,
@@ -809,7 +809,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
-        help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        help: renderSettingsHelpPage({
+            chrome,
+            backHref: "/kitchen/fridge",
+        } as never),
         "needs-attention": (() => {
             const fridgeItems = fridgeView(null).items;
             return renderNeedsAttentionPage({
@@ -852,7 +855,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         })(),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
-            backHref: "/fridge",
+            backHref: "/kitchen/fridge",
             member: { ...ME, role: "owner" },
             preferences: {
                 ...EMPTY_HOUSEHOLD_PREFERENCES,
@@ -863,7 +866,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "settings-household-member": renderHouseholdSettingsPrefsPage({
             chrome,
-            backHref: "/fridge",
+            backHref: "/kitchen/fridge",
             member: { ...SAM, role: "member" },
             preferences: {
                 ...EMPTY_HOUSEHOLD_PREFERENCES,

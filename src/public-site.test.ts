@@ -261,12 +261,12 @@ describe("runtime surfaces that stay", () => {
     test("unauthenticated app routes return login HTML", async () => {
         for (const path of [
             "/",
-            "/fridge",
-            "/grocery",
+            "/kitchen/fridge",
+            "/kitchen/groceries",
             "/recipes",
             "/settings",
-            "/household",
-            "/household/items",
+            "/settings/household",
+            "/settings/household/items",
             "/share?text=hello",
         ]) {
             const r = await app.request(`http://x${path}`);
