@@ -42,7 +42,6 @@ The app is set up to run on [Railway](docs/self-hosting.md#railway) with Railway
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Postgres and migrations, Railway, Cloudflare, and the first-user flow |
 | [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                               |
-| [ROADMAP.md](ROADMAP.md)                             | Where Foodable is heading; every planned item is a file in [roadmap/](planner/)    |
 | [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                              |
 
 ## Connecting an agent

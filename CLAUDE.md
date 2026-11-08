@@ -31,9 +31,9 @@ Host-agnostic config: optional `PUBLIC_ORIGIN` (see `.env.example` and `docs/sel
 
 PR titles, blast radius, branch naming, and migration lint live in [`scripts/conventions/`](scripts/conventions/) and [`CONTRIBUTING.md`](CONTRIBUTING.md). Repo-specific agent workflows are in [`.claude/skills/`](.claude/skills/).
 
-**Design source of truth.** `~/Projects/designs/Foodable/Foodable Design.figcraft` (fonts in `~/Projects/designs/Foodable/fonts/`), open in the FigCraft app, holds every screen, the chat widgets and the design tokens. It is **read-only**: read it with the FigCraft MCP tools (`inspect_document`, `get_node`, `screenshot`, read-only `run_command`s such as `variable.list`), and never edit or save it. When the code and the design disagree, change the code or ask the design owner. See [`docs/redesign-plan.md`](docs/redesign-plan.md).
+**Design source of truth.** `~/Projects/designs/Foodable/Foodable Design.figcraft` (fonts in `~/Projects/designs/Foodable/fonts/`), open in the FigCraft app, holds every screen, the chat widgets and the design tokens. It is **read-only**: read it with the FigCraft MCP tools (`inspect_document`, `get_node`, `screenshot`, read-only `run_command`s such as `variable.list`), and never edit or save it. When the code and the design disagree, change the code or ask the design owner.
 
-**Planner.** [`ROADMAP.md`](ROADMAP.md) is the overview; every planned item is a file under [`planner/`](planner/) (YAML frontmatter: id, status, priority, size, type, areas, after, plan, prs). `bun run planner --next` says what is next. Every PR body has a `## Planner` section (`Closes <ID>`, `Part of <ID>`, or `None.`), and a PR that names an item updates it in the same PR with `bun run planner --close <ID> --pr <number>` (or `--start`); closing a project's last item deletes the project folder and retires its key in `planner/retired.yml`. `bun run pr:check` fails when the body and the files disagree (`scripts/conventions/planner.ts`). Use the `foodable-planner` skill.
+**Planning.** Plans and planned work are kept outside this repo. PR bodies, commits and code comments do not reference them.
 
 ## Household data model
 

@@ -28,7 +28,7 @@ export const FLAGS = {
         fallback: false,
         why: "The new mobile-first shell (UI-3).",
         removeWhen:
-            "Every ui-v2 page flag is at everyone for one release, and the old shell is deleted.",
+            "ui-v2 is on for everyone with no rollback for a few days, and the old app is deleted.",
     },
     "off-lookups": {
         type: "bool",

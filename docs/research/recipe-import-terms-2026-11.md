@@ -1,4 +1,4 @@
-> Research memo produced on 2026-11-04 by a Grok 4.7 research task for the recipe import plan ([recipe-import-plan.md](../recipe-import-plan.md)). Kept as the record behind the "no server fetch of social posts" decision. Not legal advice; platform terms change, so re-check before relying on any single clause.
+> Research memo produced on 2026-11-04 by a Grok 4.7 research task for the recipe import plan. Kept as the record behind the "no server fetch of social posts" decision. Not legal advice; platform terms change, so re-check before relying on any single clause.
 
 # Foodable recipe import: what the platforms actually allow
 

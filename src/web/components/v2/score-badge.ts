@@ -1,5 +1,5 @@
 /**
- * Product score badges (docs/product-score-plan.md): a 0-100 score in three
+ * Product score badges: a 0-100 score in three
  * bands, shown as a small pill beside a title, a verdict pill and the big
  * score number. Colour is never the only signal: the band is in the accessible
  * name (badge, big score) or in the visible word (verdict).
