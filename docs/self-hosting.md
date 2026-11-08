@@ -150,10 +150,24 @@ On Railway, prefix both with `railway run`. `--json` prints the report as JSON. 
 | `PUBLIC_ORIGIN`         | production   | Canonical public origin, `https://foodable.example.com`                                                                     |
 | `ALLOWED_ORIGINS`       | no           | Extra CORS origins, comma-separated. Localhost is already allowed.                                                          |
 | `ALLOWED_REDIRECT_URIS` | no           | Extra OAuth redirect URIs (comma-separated), exact match after URL normalization                                            |
+| `RAILWAY_TOKEN`         | no           | Railway project token for feature flags (see [Feature flags](#feature-flags) below)                                         |
+| `FOODABLE_FLAGS`        | no           | Self-hosted flag overrides when `RAILWAY_TOKEN` is unset (see [Feature flags](#feature-flags))                              |
 
 `PUBLIC_ORIGIN` is how the server stays host-agnostic. When it is set, `getBaseUrl` in `src/url.ts` returns that origin and **ignores** `X-Forwarded-Host` / `X-Forwarded-Proto`. OAuth metadata (`/.well-known/oauth-authorization-server`), the `/authorize` URLs inside it, the 401 `resource_metadata` challenge, and the MCP icon URL all stay on your origin even if a client sends a different forwarded host.
 
 Leave `PUBLIC_ORIGIN` unset on a laptop. Then the request `Host` and `X-Forwarded-*` still win, which is what local dev and a trusted reverse proxy in front of localhost need.
+
+## Feature flags
+
+Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service. Every **temporary** flag is off and every **kill switch** stays on — the same behavior as today's app until a release removes a flag. Set `RAILWAY_TOKEN` to a Railway **project token** if you deploy on Railway and manage flags in the project UI (a checked-in rollout file arrives in a later release).
+
+`FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `ui-v2:internal` or `ui-v2:all`. Modes:
+
+- `all` — on for every request.
+- `off` — off for every request (this is how you disable a kill switch locally).
+- `internal` — on for the deploy's owner accounts: for a per-user flag, only when the signed-in member's role is `owner`; for a per-household flag, whenever the request has a household id (household token, background jobs, or a member's household).
+
+Unknown flag names and unknown modes log a warning once at startup and are ignored. Flags you omit use their registry fallback.
 
 ## Client address (rate limits)
 
