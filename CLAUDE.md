@@ -57,6 +57,7 @@ Schema lives only in `db/migrations/`. Apply them with `bun run db:migrate` (`--
 - `bun run format` - Format code with Prettier (4-space indentation)
 - `bun run format:check` - Verify the tree is prettier-clean (CI runs this on every PR)
 - `bun run db:dryrun` - Apply the pending migrations to a throwaway local Postgres and check the backfill (see "Migrations" below)
+- `bun run db:rehearse` - Dry-run what production has not applied on a copy of its data, through `railway ssh`; deletes the copy afterwards (`--list` only reports; see "Rehearsing migrations on a production copy" in `docs/self-hosting.md`)
 - `bun run db:dev` - Persistent local Postgres for development (`init`, `start`, `stop`, `status`, `url`, `migrate`)
 - `bun run db:import-postgres` - Copy the `public` data of a migrated Postgres (`--from`) into an empty one at the same migration version (`--to`, default: `db:dev` URL; `--check-only` checks preconditions)
 - `bun run typecheck` - Typecheck `src/` (CI runs this on every PR; it is scoped to `src/`, so a type error in a test file or under `scripts/` will not be caught)

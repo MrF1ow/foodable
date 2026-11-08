@@ -60,6 +60,21 @@ git push origin main
 
 3. Apply migrations, then run the matching code. The new code expects the new schema, so do not run it first. On Railway the pre-deploy command does this for you (see [Railway](#railway)).
 
+### Rehearsing migrations on a production copy
+
+There is no staging deploy yet, so every pull request that adds a migration is rehearsed on a copy of production's data before it merges. On Railway, where Postgres is internal-only, one command does it:
+
+```bash
+bun run db:rehearse            # needs the Railway CLI, logged in, and an ssh key Railway knows
+bun run db:rehearse --list     # only print what production has not applied
+```
+
+It reads production's applied versions from `foodable_migrations.schema_migrations` and compares them with `db/migrations/`. When nothing is pending it says so and stops. Otherwise it streams a data-only `pg_dump` of the `public` schema from the `Postgres` service container (`railway ssh`; both calls only read) into a fresh private directory outside the repo (mode 700, dump 600) and runs `db:dryrun --data <dump> --pending-from <first pending>`. The throwaway cluster lives in the same directory, and the directory is deleted when the run ends, on success, failure or Ctrl-C.
+
+Flags: `--key <path>` is the ssh identity (default `~/.ssh/id_github_personal`); `--project`, `--service` and `--environment` name a different deploy (defaults: this deploy's project, `Postgres`, `production`). There is no `--pending-from`: the dump carries production's current schema, so it only loads into a baseline that stops exactly where production does. It fails, without dumping, when the checkout is behind production (rebase) or when a new migration sorts before one production already has (renumber it).
+
+The dump is the household's real data. Never copy it elsewhere, and never paste rows or failing statements' values into a pull request or an issue: the repository is public. Report counts and pass or fail only. The `foods` circular foreign key warning from `pg_dump` is harmless here.
+
 ### Local Postgres (no Docker)
 
 For day-to-day development, use a persistent local cluster:
