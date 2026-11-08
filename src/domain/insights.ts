@@ -986,9 +986,11 @@ function weeklyDigestTarget(
         return { kind: "partial", covered: applicable.length, total };
     }
     if (applicable.every((t) => t === applicable[0])) {
+        // One shared target prints exactly as stored (150.25g stays 150.25g),
+        // as it always has; only caffeine is shown in whole milligrams.
         const value = caffeineField
             ? Math.round(applicable[0]!)
-            : round(applicable[0]!);
+            : applicable[0]!;
         return { kind: "full", value, averaged: false };
     }
     const avg = mean(applicable);
@@ -1085,13 +1087,9 @@ export function computeWeeklyDigest(
             const verdict = val > 0 ? `${val}${unit} over` : "clear";
             return `  ${label}: ${val}${unit} / 0${unit} limit (${verdict})${note}`;
         }
-        const shown =
-            noun === "limit" && label === "Caffeine"
-                ? Math.round(value)
-                : value;
-        const pct = round((val / shown) * 100, 0);
+        const pct = round((val / value) * 100, 0);
         const vary = target.averaged ? ` (daily ${noun}s vary; averaged)` : "";
-        return `  ${label}: ${val}${unit} / ${shown}${unit} ${noun} (${pct}%)${vary}${note}`;
+        return `  ${label}: ${val}${unit} / ${value}${unit} ${noun} (${pct}%)${vary}${note}`;
     };
     const calT = weeklyDigestTarget(
         buckets,
@@ -1157,7 +1155,11 @@ export function computeWeeklyDigest(
     // flag by design — see hasAnyPositive). A row reading "Caffeine: 0 mg" for
     // someone who has never recorded a cup is exactly what it exists to avoid.
     if (caffeineAvg != null && caffeineAvg > 0) {
-        const caffeineT = weeklyDigestTarget(
+        // The limit is rendered at the same whole-milligram precision as the
+        // figure it is compared against (weeklyDigestTarget rounds it), as
+        // formatGoals in mcp.ts already echoes it: daily_caffeine_mg is
+        // numeric(7,2), the one goal column that can carry a stray decimal.
+        const caffeineTarget = weeklyDigestTarget(
             buckets,
             goalsOn,
             "daily_caffeine_mg",
@@ -1165,13 +1167,6 @@ export function computeWeeklyDigest(
             "caffeine_mg",
             true,
         );
-        const caffeineTarget: WeeklyDigestTarget =
-            caffeineT.kind === "full"
-                ? {
-                      ...caffeineT,
-                      value: Math.round(caffeineT.value),
-                  }
-                : caffeineT;
         lines.push(
             line(
                 "Caffeine",

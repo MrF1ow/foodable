@@ -772,3 +772,14 @@ test("computeWeeklyDigest appends averaged target suffix", () => {
     const out = computeWeeklyDigest(buckets, forDate);
     expect(out).toContain("(daily targets vary; averaged)");
 });
+
+test("computeWeeklyDigest prints a shared target exactly as stored", () => {
+    // One target for every day (no overrides) is not rounded: 150.25 g has
+    // always printed as 150.25 g, and the percentage is taken against it.
+    const buckets = windowBuckets(7, 2, { fiber_g: 30 });
+    const g = goals({ daily_protein_g: 150.25, daily_fiber_g: 30.05 });
+    const out = computeWeeklyDigest(buckets, g);
+    expect(out).toContain("/ 150.25g target");
+    expect(out).toContain("/ 30.05g target");
+    expect(computeWeeklyDigest(buckets, goalsResolver(g, []))).toBe(out);
+});
