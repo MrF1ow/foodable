@@ -2,8 +2,8 @@
 //
 //   bun run gen:tokens
 //
-// src/tokens.test.ts fails when either committed file differs from what this
-// would write, so an edit to a stylesheet instead of the module is caught.
+// src/tokens.test.ts and src/tokens-v2.test.ts fail when a committed file
+// differs from what this would write, so an edit to a stylesheet instead of the module is caught.
 import {
     renderBrandCss,
     renderTokensCss,

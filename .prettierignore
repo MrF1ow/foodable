@@ -15,5 +15,5 @@ public/map-data.json
 .claude/
 
 # Exported by scripts/export-figcraft-variables.ts from the FigCraft design and
-# compared by src/tokens.test.ts; formatting it makes a re-export look like a diff.
+# compared by src/tokens-v2.test.ts; formatting it makes a re-export look like a diff.
 design/figcraft-variables.json

@@ -11,7 +11,9 @@
 //                                          embed skin, never by a widget
 //   public/app/v2/tokens.css               FigCraft-aligned v2 shell palette
 //
-// src/tokens.test.ts fails when a committed file drifts from this module, so
+// src/tokens.test.ts and src/tokens-v2.test.ts fail when a committed file
+// drifts from this module (the v2 test also checks design/figcraft-
+// variables.json), so
 // a value changes here and nowhere else. --accent is BRAND_GREEN. THEME_COLOR
 // is the APP page background, the same value the login head and appHead emit.
 // Type (--fs-*) and radius (--r-*) scales stay on the shared base. The
@@ -162,6 +164,10 @@ export const APP_FONTS = [
         weight: "200 800",
     },
 ] as const;
+
+// The system stack behind the brand fonts; v2 puts V2_FONT.body in front.
+const FONT_FALLBACK =
+    'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
 const FONT_SANS =
     '"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,\n        Helvetica, Arial, sans-serif';
@@ -520,7 +526,7 @@ function v2StaticDecls(indent: string): string {
     return [
         decl(indent, radius),
         decl(indent, space),
-        line(indent, "font-body", FONT_SANS),
+        line(indent, "font-body", `"${V2_FONT.body}", ${FONT_FALLBACK}`),
         line(indent, "font-display", `"${V2_FONT.display}", var(--font-body)`),
     ].join("\n");
 }

@@ -8,4 +8,4 @@
 bun scripts/export-figcraft-variables.ts [path-to.figcraft]
 ```
 
-After the export changes, update `src/tokens.ts` (`V2_*` and `renderV2TokensCss`) to match, then run `bun run gen:tokens`. `src/tokens-v2.test.ts` compares the module to the JSON and fails if either the generated `public/app/v2/tokens.css` drifts.
+After the export changes, update `src/tokens.ts` (`V2_*` and `renderV2TokensCss`) to match, then run `bun run gen:tokens`. `src/tokens-v2.test.ts` fails when the module differs from the JSON or when the committed `public/app/v2/tokens.css` differs from what the generator writes.

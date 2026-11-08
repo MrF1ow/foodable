@@ -4,7 +4,7 @@
 //
 // The design file is read-only: a .figcraft file is a zip, and this only
 // streams its document.json out with `unzip -p`. It never writes to, unzips
-// beside, or re-saves the design. src/tokens.test.ts compares src/tokens.ts
+// beside, or re-saves the design. src/tokens-v2.test.ts compares src/tokens.ts
 // to the JSON, so after a design change: re-export, then update the tokens.
 //
 // Output order is stable: collections and variables in the design's id order,

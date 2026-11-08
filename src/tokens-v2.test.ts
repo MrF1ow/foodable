@@ -106,12 +106,59 @@ test("V2_RADIUS, V2_SPACE, V2_FONT match design Tokens collection", () => {
     );
 });
 
-test("v2 tokens.css emits every theme variable and defaults to dark color-scheme", () => {
-    const css = renderV2TokensCss();
-    const names = Object.keys(V2_THEME.dark) as V2ColorName[];
-    for (const name of names) {
-        expect(css).toContain(`${v2CssVar(name)}: ${V2_THEME.dark[name]};`);
-        expect(css).toContain(`${v2CssVar(name)}: ${V2_THEME.light[name]};`);
+// The body of the first rule whose selector line is exactly `selector {`.
+function block(css: string, selector: string): string {
+    const lines = css.split("\n");
+    const start = lines.findIndex((l) => l.trim() === `${selector} {`);
+    expect(start, `missing ${selector}`).toBeGreaterThanOrEqual(0);
+    const end = lines.findIndex((l, i) => i > start && l.trim() === "}");
+    return lines.slice(start + 1, end).join("\n");
+}
+
+function declsOf(body: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const m of body.matchAll(/(--[a-z0-9-]+|color-scheme):\s*([^;]+);/g)) {
+        out[m[1]!] = m[2]!.replace(/\s+/g, " ").trim();
     }
-    expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*dark;/s);
+    return out;
+}
+
+function themeDecls(t: "dark" | "light"): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(V2_THEME[t])) {
+        out[v2CssVar(name)] = value;
+    }
+    out["color-scheme"] = t;
+    return out;
+}
+
+test("v2 tokens.css: dark by default, light by media query, data-theme wins both ways", () => {
+    const css = renderV2TokensCss();
+    const media = css.indexOf("@media (prefers-color-scheme: light) {");
+    expect(media).toBeGreaterThan(0);
+    const statics: Record<string, string> = {};
+    for (const [k, v] of Object.entries(V2_RADIUS)) {
+        statics[`--radius-${k}`] = `${v}px`;
+    }
+    for (const [k, v] of Object.entries(V2_SPACE)) {
+        statics[`--space-${k}`] = `${v}px`;
+    }
+    const root = declsOf(block(css, ":root"));
+    expect(root).toMatchObject({ ...themeDecls("dark"), ...statics });
+    expect(root["--font-body"]).toStartWith(`"${V2_FONT.body}", `);
+    expect(root["--font-display"]).toBe(
+        `"${V2_FONT.display}", var(--font-body)`,
+    );
+    expect(declsOf(block(css.slice(media), ":root"))).toEqual(
+        themeDecls("light"),
+    );
+    expect(declsOf(block(css, ':root[data-theme="dark"]'))).toEqual(
+        themeDecls("dark"),
+    );
+    expect(declsOf(block(css, ':root[data-theme="light"]'))).toEqual(
+        themeDecls("light"),
+    );
+    // The explicit overrides come after the media query, so equal
+    // specificity would still resolve in their favour.
+    expect(css.indexOf(':root[data-theme="dark"]')).toBeGreaterThan(media);
 });
