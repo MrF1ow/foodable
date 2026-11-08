@@ -54,7 +54,7 @@ ${heading}
 ${hidden}
 <label class="did-you-mean-remember"><input type="checkbox" name="remember_alias" value="1" /> ${escapeHtml(opts.view.aliasLabel)}</label>
 <div class="did-you-mean-candidates">${candidateButtons}</div>
-<button type="submit" name="new_food" value="1">${escapeHtml(opts.view.newFoodLabel)}</button>
+<button type="submit" name="new_food" value="1" class="btn-sm">${escapeHtml(opts.view.newFoodLabel)}</button>
 </form>
 </div>`;
 }

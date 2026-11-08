@@ -1927,33 +1927,32 @@ html.fx .toast-item--out {
     }
 }
 
+/* "Did you mean" (web add forms): the question sits above the picker as its
+   own card, so it does not read as part of the picker below it. */
 .did-you-mean-block {
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-sm, 0.75rem);
-    margin-block-end: var(--gap-sm, 0.75rem);
+    padding: 11px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--r-10);
+    background: var(--panel);
 }
-
 .did-you-mean-heading {
     margin: 0;
+    font-weight: 600;
 }
-
 .did-you-mean-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-sm, 0.75rem);
+    display: grid;
+    gap: var(--gap-field);
+    justify-items: start;
 }
-
 .did-you-mean-candidates {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--gap-xs, 0.5rem);
+    gap: 8px;
 }
-
 .did-you-mean-remember {
     display: flex;
-    align-items: flex-start;
-    gap: var(--gap-xs, 0.5rem);
-    font-size: var(--fs-sm, 0.875rem);
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-13-5);
     color: var(--text-dim);
 }
