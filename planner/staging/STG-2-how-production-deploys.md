@@ -14,3 +14,5 @@ prs: [208]
 Either deploy a chosen commit by hand, or track a `production` branch fast-forwarded to the release tag. The plan leans towards the branch: it is easier to audit.
 
 Decided 2026-11-08: production tracks a `production` branch, fast-forwarded to each release tag from `bun run release`.
+
+The `production` branch applies only once staging exists (STG-1, a follow-up to the redesign). Until then production keeps auto-deploying `main` after CI.

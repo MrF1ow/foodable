@@ -1,13 +1,17 @@
-# Staging environment and feature flags: plan
+# Feature flags, and staging later: plan
 
 Status: proposed 2026-11-05. Moved out of [ROADMAP.md](../ROADMAP.md) on 2026-11-07.
 
-Add a `staging` environment in the same Railway project that deploys every commit on main, and stop production deploying on its own: a release goes out only after it has run on staging. New features ship dark behind Railway feature flags and are switched on without a deploy. Checked against the Railway docs on 2026-11-05 ([Environments](https://docs.railway.com/environments), [Feature Flags](https://docs.railway.com/feature-flags)).
+**Staging is a follow-up after the redesign** (decided 2026-11-08). There is no paid Railway staging environment until the redesign is finished, so it is not part of the redesign plan. Until then production keeps auto-deploying `main` after CI, migrations are rehearsed on a copy of production data (`bun run db:dryrun --data`, item STG-12), and a flag goes on locally first, then for the owner's account in production. Feature flags stay in the plan: new features ship dark behind Railway feature flags and are switched on without a deploy.
 
-## Environments
+The later staging environment: a `staging` environment in the same Railway project that deploys every commit on main, with production no longer deploying on its own, so a release goes out only after it has run on staging. Checked against the Railway docs on 2026-11-05 ([Environments](https://docs.railway.com/environments), [Feature Flags](https://docs.railway.com/feature-flags)).
+
+## Environments (later, STG-1)
+
+None of this exists yet; it is the follow-up once the redesign is finished.
 
 - Create `staging` with **Duplicate Environment** from production. That copies services, variables and settings, but not sealed variables, and not data: staging gets its own Postgres, volume and domain.
-- Staging's app service tracks `main` with auto-deploy and "wait for CI". Production stops auto-deploying. It tracks a `production` branch that is fast-forwarded to the release tag (`v<version>`, from `bun run release`), decided 2026-11-08 (STG-2): the branch is easier to audit than deploying a chosen commit by hand.
+- Staging's app service tracks `main` with auto-deploy and "wait for CI". Production stops auto-deploying. It tracks a `production` branch that is fast-forwarded to the release tag (`v<version>`, from `bun run release`), decided 2026-11-08 (STG-2): the branch is easier to audit than deploying a chosen commit by hand. It applies only once staging exists.
 - Migrations run as the pre-deploy command in both environments, so every migration reaches staging's database first. That is the main reason to have staging at all.
 - Variables that must differ: `DATABASE_URL`, `PUBLIC_ORIGIN` and the domain, and the session secret, so a staging session or export token is never valid on production. Agents connect to staging over OAuth separately.
 - Staging data: either the fixture data (`scripts/migration-dryrun/seed.sql`), or a copy of production made with `bun run db:import-postgres` into an empty database at the same migration version. A copy is the household's real data, and it stays on staging until it is wiped.
@@ -63,7 +67,7 @@ Each flag declares its unit, `user` or `household`. Anything that acts on shared
 
 ### A flag's life
 
-All rules serve `true`. 0, merged dark (default `false`, flag-off tests green). 1, staging: `env == "staging"`. 2, internal: `env == "production" && (key == "<owner id>" || …)`, expanded from the internal list. 3, beta: `groups contains ",beta,"`. 4, percentage: `cohort < 10`, then 25 and 50 (`household_cohort` for household flags). 5, everyone: default `true`, rules removed, then a soak of one release with no rollback. 6, a PR removes the check and the old path (this is when self-hosters get it). 7, the flag is deleted in Railway, only after step 6 is deployed. Kill switches stop at step 5 and stay; turning one off takes effect within one refresh.
+All rules serve `true`. 0, merged dark (default `false`, flag-off tests green). 1, local: `env == "local"`, a development run with a `RAILWAY_TOKEN`. 2, the owner's account in production, then the rest of internal: `env == "production" && (key == "<owner id>" || …)`, expanded from the internal list. 3, beta: `groups contains ",beta,"`. 4, percentage: `cohort < 10`, then 25 and 50 (`household_cohort` for household flags). 5, everyone: default `true`, rules removed, then a soak of one release with no rollback. 6, a PR removes the check and the old path (this is when self-hosters get it). 7, the flag is deleted in Railway, only after step 6 is deployed. Kill switches stop at step 5 and stay; turning one off takes effect within one refresh.
 
 ### What a flag gates
 

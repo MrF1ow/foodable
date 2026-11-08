@@ -6,7 +6,7 @@ priority: med
 size: M
 type: feature
 areas: [nutrition, web]
-after: [UI-15, STG-1]
+after: [UI-15, STG-12]
 plan: null
 prs: []
 ---

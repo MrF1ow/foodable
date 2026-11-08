@@ -6,7 +6,7 @@ priority: med
 size: M
 type: feature
 areas: [household, web]
-after: [SCORE-2, UI-15, STG-1]
+after: [SCORE-2, UI-15, STG-12]
 plan: null
 prs: []
 ---

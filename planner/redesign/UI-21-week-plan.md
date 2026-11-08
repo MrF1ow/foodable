@@ -6,7 +6,7 @@ priority: med
 size: L
 type: feature
 areas: [recipes, db]
-after: [UI-13, STG-1]
+after: [UI-13, STG-12]
 plan: null
 prs: []
 ---

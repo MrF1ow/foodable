@@ -6,7 +6,7 @@ priority: low
 size: M
 type: feature
 areas: [household, db]
-after: [UI-15, STG-1]
+after: [UI-15, STG-12]
 plan: null
 prs: []
 ---
