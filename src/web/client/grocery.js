@@ -6,7 +6,6 @@ function syncGrocerySection(select) {
     const inferId = select.getAttribute("data-infer-section");
     const val = select.value;
     dialog.querySelectorAll("form").forEach(function (form) {
-        if (form.closest("[data-fill-transient]")) return;
         var existing = form.querySelector('input[name="section_id"]');
         if (inferId && val === inferId) {
             if (existing) existing.remove();

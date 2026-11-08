@@ -39,7 +39,7 @@ function makeForm(
     };
 }
 
-test("syncGrocerySection leaves section_id on transient replay forms", async () => {
+async function runSync(selectValue: string) {
     const inferId = "sec-other";
     const transientSection: SectionInput = {
         name: "section_id",
@@ -79,7 +79,7 @@ test("syncGrocerySection leaves section_id on transient replay forms", async () 
     };
 
     const select: Stub = {
-        value: inferId,
+        value: selectValue,
         attrs: { "data-infer-section": inferId },
         listeners: {},
         addEventListener(type, fn) {
@@ -116,7 +116,20 @@ test("syncGrocerySection leaves section_id on transient replay forms", async () 
     new Function("window", "document", src)(window, document);
 
     for (const fn of select.listeners.change ?? []) fn();
+    return { mainSection, transientSection };
+}
 
+// The "Did you mean" and allergen replay forms sit in the same dialog as the
+// section select, so they follow it like the picker forms do: the page
+// preselects the replayed section, and a change before answering wins.
+test("syncGrocerySection moves replay forms to the picked section", async () => {
+    const { mainSection, transientSection } = await runSync("produce");
+    expect(mainSection.value).toBe("produce");
+    expect(transientSection.value).toBe("produce");
+});
+
+test("syncGrocerySection drops section_id everywhere for Other", async () => {
+    const { mainSection, transientSection } = await runSync("sec-other");
     expect(mainSection.value).toBe("");
-    expect(transientSection.value).toBe("dairy");
+    expect(transientSection.value).toBe("");
 });

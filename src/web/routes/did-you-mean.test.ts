@@ -221,6 +221,32 @@ beforeEach(() => {
     ];
 });
 
+function expectQuestion(
+    html: string,
+    foodId: string,
+    replayed: Record<string, string>,
+): void {
+    expect(html).toContain("Did you mean");
+    expect(html).toContain(`name="food_id" value="${foodId}"`);
+    expect(html).toContain('name="new_food" value="1"');
+    expect(html).toContain('name="remember_alias" value="1"');
+    expect(html).toContain('name="alias_name" value="chicken egg"');
+    for (const [name, value] of Object.entries(replayed)) {
+        expect(html).toContain(`name="${name}" value="${value}"`);
+    }
+}
+
+async function archiveFoodNamed(name: string): Promise<void> {
+    const row = (await db.foodsStore.listFoods(HH)).find(
+        (f) => f.name === name && !f.archivedAt,
+    );
+    expect(row).toBeDefined();
+    await db.foodsStore.updateFoodRow({
+        ...row!,
+        archivedAt: new Date().toISOString(),
+    });
+}
+
 describe("did-you-mean web forms", () => {
     test("grocery manual add", async () => {
         const eggs = await seedEggs();
@@ -373,7 +399,31 @@ describe("did-you-mean web forms", () => {
         const html = await ask.text();
         expect(html).toContain(modalId);
         expect(html).toContain("data-modal-open-on-load");
-        expect(html).toContain(`name="food_id" value="${eggs.id}"`);
+        expectQuestion(html, eggs.id, {
+            kind: "food",
+            location_id: loc.id,
+            food_name: "chicken egg",
+            qty_amount: "3",
+            qty_unit: "each",
+        });
+        expect(await db.fridgeStore.listItems(HH)).toHaveLength(0);
+        expect(await db.foodsStore.listFoods(HH)).toHaveLength(1);
+
+        // new_food=1 before any alias exists: the flag alone creates the row.
+        const createNew = await app().request("http://x/fridge/items", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({ ...base, new_food: "1" }),
+        });
+        expect(createNew.status).toBe(303);
+        const fresh = await db.fridgeStore.listItems(HH);
+        expect(fresh).toHaveLength(1);
+        expect(fresh[0]!.foodId).not.toBe(eggs.id);
+        await db.fridgeStore.deleteItem(HH, fresh[0]!.id);
+        await archiveFoodNamed("chicken egg");
 
         const pick = await app().request("http://x/fridge/items", {
             method: "POST",
@@ -472,7 +522,32 @@ describe("did-you-mean web forms", () => {
         const html = await ask.text();
         expect(html).toContain(modalId);
         expect(html).toContain("data-modal-open-on-load");
-        expect(html).toContain(`name="food_id" value="${eggs.id}"`);
+        expectQuestion(html, eggs.id, {
+            food_name: "chicken egg",
+            qty_amount: "1",
+            qty_unit: "each",
+        });
+        expect(await db.foodsStore.listFoods(HH)).toHaveLength(1);
+
+        // new_food=1 before any alias exists: the flag alone creates the row.
+        const createNew = await app().request(`http://x${path}`, {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({ ...base, new_food: "1" }),
+        });
+        expect(createNew.status).toBe(303);
+        const created = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "chicken egg",
+        );
+        expect(created).toBeDefined();
+        const added = await db.recipesStore.listIngredients(HH, recipe.id);
+        expect(added).toHaveLength(1);
+        expect(added[0]!.foodId).toBe(created!.id);
+        await db.recipesStore.deleteIngredient(HH, added[0]!.id);
+        await archiveFoodNamed("chicken egg");
 
         const pick = await app().request(`http://x${path}`, {
             method: "POST",
@@ -693,5 +768,43 @@ describe("did-you-mean allergen replay", () => {
         const aliasMap = await db.foodsStore.listAllAliases(HH);
         expect([...aliasMap.values()].flat()).toContain("egg noodles");
         expect((await db.groceryStore.listLines(HH)).length).toBe(1);
+    });
+});
+
+describe("did-you-mean grocery section", () => {
+    test("the reopened dialog selects the section that was submitted", async () => {
+        const eggs = await seedEggs();
+        const store = await createGroceryStore(db.settingsStore, HH, "Shop");
+        const sections = await db.settingsStore.listSections(store.id);
+        const dairy = sections.find((s) => !s.isOther && !s.hidden)!;
+        expect(dairy).toBeDefined();
+        const res = await app().request("http://x/grocery/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                kind: "food",
+                store_id: store.id,
+                section_id: dairy.id,
+                food_name: "chicken egg",
+                qty_amount: "2",
+                qty_unit: "each",
+            }),
+        });
+        expect(res.status).toBe(409);
+        const html = await res.text();
+        expectQuestion(html, eggs.id, { section_id: dairy.id });
+        // The open dialog's slot, not the per-store <template> copies.
+        const slot = html.slice(
+            html.indexOf('data-fill-slot="sections" data-filled-template'),
+        );
+        const select = slot.match(
+            /<select id="grocery-add-section"[^>]*>([\s\S]*?)<\/select>/,
+        );
+        expect(select).not.toBeNull();
+        expect(select![1]).toContain(`<option value="${dairy.id}" selected>`);
+        expect(select![1]!.match(/ selected>/g)).toHaveLength(1);
     });
 });
