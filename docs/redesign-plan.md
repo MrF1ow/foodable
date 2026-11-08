@@ -6,7 +6,9 @@ A mobile-first redesign of the household web app, with a desktop layout at one b
 
 ## The design
 
-`~/Documents/Foodable/Foodable Design.figcraft`, opened in the FigCraft app (read it with the FigCraft MCP tools; do not edit it from code work).
+`~/Documents/Foodable/Foodable Design.figcraft`, opened in the FigCraft app. It is the source of truth for the design.
+
+**Read-only.** Read it with the FigCraft MCP tools (`inspect_document`, `get_node`, `screenshot`, and read-only `run_command`s such as `variable.list`, `component.list` and `text.loadFont`). Never edit or save it, not even to fix a mismatch. When the code and the design disagree, the code changes, or the design owner changes the design.
 
 | Page                             | What it holds                                                                                                                 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |

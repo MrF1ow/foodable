@@ -2,7 +2,7 @@
 
 Status: proposed 2026-11-08. Planner project: [WID](../planner/chat-widgets/). Separate from the [app redesign](./redesign-plan.md).
 
-The MCP Apps widgets (`ui://` resources returned by tools) move to the app's look and gain six new cards. They are only for MCP: the household web app never shows them, and its pages stop embedding them when the old app is retired (UI-27). Design: the "Chat widgets" page of Foodable Design, every card in host-light and host-dark at chat width.
+The MCP Apps widgets (`ui://` resources returned by tools) move to the app's look and gain six new cards. They are only for MCP: the household web app never shows them, and its pages stop embedding them when the old app is retired (UI-27). Design: the "Chat widgets" page of Foodable Design, every card in host-light and host-dark at chat width. The design file is read-only and the source of truth ([redesign-plan.md](./redesign-plan.md#the-design)).
 
 ## Rules
 
