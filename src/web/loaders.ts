@@ -242,6 +242,9 @@ export async function renderFridgeInventoryPage(
     error?: string,
     openModalId?: string,
     linkProductId?: string,
+    extras?: {
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
+    },
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -280,6 +283,7 @@ export async function renderFridgeInventoryPage(
             ),
             error,
             openModalId,
+            didYouMean: extras?.didYouMean,
             linkProductPrompt,
             groceryLines,
             foodsById,
@@ -293,6 +297,7 @@ export async function renderGroceryListPage(
         error?: string;
         allergenNotices?: Notice[];
         allergenRetry?: GroceryAllergenRetry;
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
         openModalId?: string;
         linkProductId?: string;
     } = {},
@@ -469,6 +474,7 @@ export async function renderGroceryListPage(
             error: opts.error,
             allergenNotices: opts.allergenNotices,
             allergenRetry: opts.allergenRetry,
+            didYouMean: opts.didYouMean,
             unknownAllergen: unknownAllergen && !opts.allergenNotices?.length,
             openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({
@@ -990,6 +996,7 @@ export async function renderRecipeDetailRoute(
         error?: string;
         openModalId?: string;
         linkProductId?: string;
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -1134,6 +1141,7 @@ export async function renderRecipeDetailRoute(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             openModalId: opts.openModalId,
+            didYouMean: opts.didYouMean,
             linkProductPrompt,
         }),
     };

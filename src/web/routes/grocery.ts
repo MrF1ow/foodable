@@ -38,33 +38,15 @@ import {
 } from "../../domain/foods.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
+import {
+    groceryLineRetryFields,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 
 export const groceryRoutes = new Hono();
-
-function groceryAllergenRetryFields(
-    body: Record<string, File | string>,
-    storeId: string,
-): Record<string, string> {
-    const fields: Record<string, string> = {
-        kind: formText(body, "kind") || "food",
-        store_id: storeId,
-    };
-    const sectionId = formText(body, "section_id");
-    if (sectionId) fields.section_id = sectionId;
-    const foodId = formText(body, "food_id");
-    if (foodId) fields.food_id = foodId;
-    const foodName = formText(body, "food_name");
-    if (foodName) fields.food_name = foodName;
-    const barcode = formText(body, "barcode");
-    if (barcode) fields.barcode = barcode;
-    const amount = formText(body, "qty_amount");
-    if (amount) fields.qty_amount = amount;
-    const unit = formText(body, "qty_unit");
-    if (unit) fields.qty_unit = unit;
-    const name = formText(body, "name");
-    if (name) fields.name = name;
-    return fields;
-}
 
 async function groceryFormError(
     userId: string,
@@ -176,7 +158,7 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     openModalId: `grocery-add-food-${storeId}`,
                     allergenRetry: {
                         storeId,
-                        fields: groceryAllergenRetryFields(body, storeId),
+                        fields: groceryLineRetryFields(body, storeId),
                     },
                 });
                 return c.html(page.html, 400);
@@ -190,6 +172,12 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     amount,
                     unit: formText(body, "qty_unit"),
                 });
+                await rememberAliasIfRequested(
+                    foods,
+                    member.householdId,
+                    body,
+                    foodId,
+                );
             } else if (formText(body, "barcode")) {
                 const { food, created } = await findOrCreateFoodByBarcodeResult(
                     foods,
@@ -225,10 +213,27 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     name: formText(body, "food_name"),
                     amount,
                     unit: formText(body, "qty_unit"),
+                    onSimilar: manualOnSimilar(body),
                 });
             }
         }
     } catch (err) {
+        if (isSimilarFoodsError(err)) {
+            const modalId = `grocery-add-food-${storeId}`;
+            const didYouMean = buildDidYouMeanModal(
+                err,
+                groceryLineRetryFields(body, storeId),
+                modalId,
+                "/grocery/lines",
+            );
+            if (didYouMean) {
+                const page = await renderGroceryListPage(userId, {
+                    openModalId: modalId,
+                    didYouMean,
+                });
+                return c.html(page.html, 409);
+            }
+        }
         const page = await groceryFormError(
             userId,
             err,
