@@ -685,6 +685,26 @@ describe("household usual products and items routes", () => {
         expect(kirkland.id).not.toBe(solo.id);
     });
 
+    test("GET ?food= shortcut carries a pre-move from as its new path", async () => {
+        const { eggs } = await seedEggsCatalog();
+        const get = (path: string) =>
+            app().request(`http://x${path}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            });
+        for (const [from, want] of [
+            ["/grocery", "%2Fkitchen%2Fgroceries"],
+            ["/settings/foods", "%2Fsettings%2Fhousehold%2Fitems"],
+        ] as const) {
+            const r = await get(
+                `/kitchen/usuals?food=${eggs.id}&from=${encodeURIComponent(from)}`,
+            );
+            expect(r.status).toBe(302);
+            expect(r.headers.get("location")).toBe(
+                `/kitchen/usuals/${eggs.id}?from=${want}`,
+            );
+        }
+    });
+
     test("POST pick adds a product to the list and keeps the current usual", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         await db.foodsStore.updateFoodRow({
