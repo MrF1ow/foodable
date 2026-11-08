@@ -3,7 +3,23 @@ import { isSafeAppBackPath } from "./settings-back.js";
 import {
     plainFoodIdForUsualPicker,
     safeReturnPath,
+    usualProductsPickerHref,
 } from "./usual-products-path.js";
+
+test("usualProductsPickerHref carries a pre-move from as its new path", () => {
+    expect(usualProductsPickerHref("F1", "/settings/foods")).toBe(
+        "/kitchen/usuals/F1?from=%2Fsettings%2Fhousehold%2Fitems",
+    );
+    expect(usualProductsPickerHref("F1", "/grocery")).toBe(
+        "/kitchen/usuals/F1?from=%2Fkitchen%2Fgroceries",
+    );
+    expect(usualProductsPickerHref("F1", "/settings/help")).toBe(
+        "/kitchen/usuals/F1",
+    );
+    expect(usualProductsPickerHref("F1", "//evil.example")).toBe(
+        "/kitchen/usuals/F1",
+    );
+});
 
 test("safeReturnPath rejects unsafe from values", () => {
     expect(safeReturnPath("//evil.com", "/settings/household/items")).toBe(

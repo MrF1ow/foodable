@@ -24,8 +24,9 @@ export function safeReturnPath(
 
 export function usualProductsPickerHref(foodId: string, from?: string): string {
     let href = `${APP_PATHS.kitchenUsuals}/${encodeURIComponent(foodId)}`;
-    if (from && isSafeAppBackPath(from)) {
-        href += `?from=${encodeURIComponent(from)}`;
+    const canon = from ? canonicalAppPath(from.trim()) : "";
+    if (canon && isSafeAppBackPath(canon)) {
+        href += `?from=${encodeURIComponent(canon)}`;
     }
     return href;
 }

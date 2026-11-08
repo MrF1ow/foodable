@@ -291,7 +291,7 @@ function groceryView(chrome: unknown) {
                             ),
                             usualProductName: "Kirkland Large Eggs",
                             usualPickerHref:
-                                "/kitchen/usuals/f-eggs?from=%2Fgrocery",
+                                "/kitchen/usuals/f-eggs?from=%2Fkitchen%2Fgroceries",
                             putAwayProducts: [
                                 { id: "f-eggs", label: "Eggs" },
                                 {

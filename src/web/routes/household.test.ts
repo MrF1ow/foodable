@@ -701,7 +701,7 @@ describe("household usual products and items routes", () => {
         expect(r.status).toBe(303);
         // Back to the list, with the return path kept.
         expect(r.headers.get("location")).toBe(
-            `/kitchen/usuals/${eggs.id}?from=%2Fgrocery`,
+            `/kitchen/usuals/${eggs.id}?from=%2Fkitchen%2Fgroceries`,
         );
         expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
             eggs.id,
@@ -746,7 +746,7 @@ describe("household usual products and items routes", () => {
         );
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe(
-            `/kitchen/usuals/${eggs.id}?from=%2Fgrocery`,
+            `/kitchen/usuals/${eggs.id}?from=%2Fkitchen%2Fgroceries`,
         );
         const product = await db.foodsStore.getFood(HH, kirkland.id);
         expect(product?.genericFoodId).toBeNull();

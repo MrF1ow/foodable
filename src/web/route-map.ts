@@ -51,7 +51,9 @@ export function legacyRedirectTarget(pathWithQuery: string): string | null {
     const query = q >= 0 ? pathWithQuery.slice(q) : "";
     const match = legacyPrefixMatch(pathname);
     if (!match) return null;
-    const rest = pathname.slice(match.from.length);
+    // Routes are registered without a trailing slash, so `/fridge/` lands
+    // on `/kitchen/fridge`, not on a 404.
+    const rest = pathname.slice(match.from.length).replace(/\/+$/, "");
     const target = `${match.to}${rest}${query}`;
     const targetPath = target.includes("?")
         ? target.slice(0, target.indexOf("?"))

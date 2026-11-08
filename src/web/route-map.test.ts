@@ -10,7 +10,9 @@ import {
 describe("legacyRedirectTarget", () => {
     const cases: { in: string; want: string | null }[] = [
         { in: "/fridge", want: APP_PATHS.kitchenFridge },
-        { in: "/fridge/", want: "/kitchen/fridge/" },
+        { in: "/fridge/", want: APP_PATHS.kitchenFridge },
+        { in: "/household/items/?a=1", want: "/settings/household/items?a=1" },
+        { in: "/settings/foods/", want: APP_PATHS.settingsHouseholdItems },
         { in: "/fridge/items/abc/eat", want: "/kitchen/fridge/items/abc/eat" },
         { in: "/fridge?q=1", want: "/kitchen/fridge?q=1" },
         {
@@ -93,50 +95,36 @@ describe("findLegacyLinks", () => {
 });
 
 describe("legacy path literals in source", () => {
-    const NEEDLES = [
-        '"/fridge',
-        "'/fridge",
-        "`/fridge",
-        '"/grocery',
-        "'/grocery",
-        '"/household',
-        "'/household",
-        '"/settings/foods',
-        "'/settings/foods",
-        "/household/usual-products",
-    ];
-    const SKIP = new Set(["src/web/route-map.ts", "src/web/route-map.test.ts"]);
-    const SKIP_SUFFIX = [".test.ts"];
+    const OLD = ["/fridge", "/grocery", "/household", "/settings/foods"];
+    const NEEDLES = OLD.flatMap((path) => [
+        `"${path}`,
+        `'${path}`,
+        `\`${path}`,
+    ]);
+    /** route-map.ts holds the old paths on purpose; nav-check.ts drives
+     *  one legacy URL to prove the redirect. */
+    const SKIP = new Set(["src/web/route-map.ts", "scripts/nav-check.ts"]);
 
-    async function* files(dir: string): AsyncGenerator<string> {
-        for (const e of await Array.fromAsync(
-            new Bun.Glob("**/*").scan({ cwd: dir, onlyFiles: true }),
-        )) {
-            if (!/\.(ts|js)$/.test(e)) continue;
-            yield `${dir}/${e}`;
-        }
-    }
-
-    test("src and client trees", async () => {
+    async function hitsUnder(dir: string): Promise<string[]> {
         const hits: string[] = [];
-        for await (const path of files("src")) {
-            if (SKIP.has(path)) continue;
-            if (path.endsWith(".test.ts")) continue;
-            if (path.startsWith("src/web/client/")) {
-                /* always scan client */
-            } else if (
-                path.startsWith("public/widgets/src/") ||
-                path.startsWith("public/app/")
-            ) {
-                continue;
-            }
+        for await (const rel of new Bun.Glob("**/*.{ts,js}").scan({
+            cwd: dir,
+            onlyFiles: true,
+        })) {
+            const path = `${dir}/${rel}`;
+            if (SKIP.has(path) || path.endsWith(".test.ts")) continue;
             const text = await Bun.file(path).text();
             for (const needle of NEEDLES) {
-                if (text.includes(needle)) {
-                    hits.push(`${path}: ${needle}`);
-                }
+                if (text.includes(needle)) hits.push(`${path}: ${needle}`);
             }
         }
-        expect(hits).toEqual([]);
+        return hits;
+    }
+
+    test("src (incl. client JS) and scripts name no old path", async () => {
+        expect([
+            ...(await hitsUnder("src")),
+            ...(await hitsUnder("scripts")),
+        ]).toEqual([]);
     });
 });

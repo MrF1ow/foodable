@@ -324,6 +324,25 @@ describe("needs-attention routes", () => {
         expect(r.headers.get("location")).toBe("/kitchen/groceries");
     });
 
+    test("POST dismiss with a pre-move return_to=/grocery still goes back to grocery", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+                return_to: "/grocery",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
+    });
+
     test("POST dismiss rejects open-redirect return_to", async () => {
         const { yogurt } = await seedGroupedNotices();
         for (const returnTo of [

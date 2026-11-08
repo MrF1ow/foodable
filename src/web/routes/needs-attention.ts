@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { renderNeedsAttentionInventoryPage } from "../loaders.js";
+import { canonicalAppPath } from "../route-map.js";
 
 export const needsAttentionRoutes = new Hono();
 
@@ -11,7 +12,8 @@ const DISMISS_RETURN_ALLOWLIST = new Set([
 ]);
 
 function dismissReturnTo(raw: string | undefined): string {
-    if (raw && DISMISS_RETURN_ALLOWLIST.has(raw)) return raw;
+    const path = raw ? canonicalAppPath(raw) : raw;
+    if (path && DISMISS_RETURN_ALLOWLIST.has(path)) return path;
     return "/needs-attention";
 }
 

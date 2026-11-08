@@ -21,6 +21,7 @@ import {
 } from "./pages/usual-products.js";
 import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
 import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
+import { renderNutritionPage } from "./pages/nutrition.js";
 
 const HH = "hh-fix";
 const chrome = { theme: "light" as const, attention: { count: 0, tabs: {} } };
@@ -93,7 +94,27 @@ function assertNoLegacy(label: string, html: string) {
 }
 
 describe("rendered pages have no legacy links", () => {
-    test("kitchen and nutrition tabs", () => {
+    test("nutrition tab", async () => {
+        const html = await renderNutritionPage({
+            access: { ok: true, mode: "self", viewer: ME, subject: ME },
+            members: [ME],
+            summary: { locale: "en" },
+            goals: { locale: "en" },
+            trends: { locale: "en" },
+            weight: { locale: "en" },
+            chrome,
+            cardOrder: [
+                "nutrition-summary",
+                "goal-progress",
+                "trends",
+                "weight-trends",
+            ],
+        } as never);
+        expect(html).toContain('aria-current="page"');
+        assertNoLegacy("nutrition", html);
+    });
+
+    test("kitchen and recipes tabs", () => {
         assertNoLegacy(
             "fridge",
             renderFridgePage({

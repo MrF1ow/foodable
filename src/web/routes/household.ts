@@ -94,6 +94,7 @@ import {
     safeReturnPath,
     usualProductsPickerHref,
 } from "../usual-products-path.js";
+import { canonicalAppPath } from "../route-map.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
@@ -174,7 +175,8 @@ householdRoutes.get("/settings/household/items", requireSiteUser, async (c) => {
 householdRoutes.get("/kitchen/usuals", requireSiteUser, async (c) => {
     const food = c.req.query("food");
     if (food) {
-        const from = c.req.query("from");
+        const raw = c.req.query("from");
+        const from = raw ? canonicalAppPath(raw) : raw;
         const target = `/kitchen/usuals/${encodeURIComponent(food)}${from ? `?from=${encodeURIComponent(from)}` : ""}`;
         // toast: none (picker shortcut)
         return c.redirect(target, 302);
