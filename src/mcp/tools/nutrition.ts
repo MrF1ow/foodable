@@ -6,7 +6,7 @@ import {
     getWaterByDate,
     deleteMeal,
     updateMeal,
-    getNutritionGoals,
+    getGoalsForDate,
     countMeals,
     existingIdempotencyKeys,
     existingMealIds,
@@ -273,7 +273,7 @@ export async function buildMealProgress(
     const [meals, waterEntries, goals] = await Promise.all([
         getMealsByDate(userId, mealDate, tz),
         getWaterByDate(userId, mealDate, tz),
-        getNutritionGoals(userId),
+        getGoalsForDate(userId, mealDate),
     ]);
     const totals = sumMeals(meals);
     totals.water_ml = sumWater(waterEntries);

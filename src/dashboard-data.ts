@@ -13,6 +13,8 @@ import {
     getLatestWeight,
     getMealsByDate,
     getMealsInRange,
+    getGoalsForDate,
+    getGoalsForRange,
     getNutritionGoals,
     getWaterByDate,
     getWaterInRange,
@@ -43,7 +45,7 @@ export async function getGoalProgressPayload(
     const [meals, water, goals, latestWeight] = await Promise.all([
         getMealsByDate(userId, targetDate, tz),
         getWaterByDate(userId, targetDate, tz),
-        getNutritionGoals(userId),
+        getGoalsForDate(userId, targetDate),
         getLatestWeight(userId),
     ]);
     const unit = preferredWeightUnitFromProfile(profile) ?? "kg";
@@ -90,12 +92,12 @@ export async function getNutritionSummaryPayload(
     const endDate = todayInTz(tz);
     const startDate = shiftLocalDate(endDate, -(days - 1));
     const daysInRange = Math.max(1, dateDiffDays(startDate, endDate) + 1);
-    const [meals, water, goals] = await Promise.all([
+    const [meals, water, { forDate }] = await Promise.all([
         getMealsInRange(userId, startDate, endDate, tz),
         getWaterInRange(userId, startDate, endDate, tz),
-        getNutritionGoals(userId),
+        getGoalsForRange(userId, startDate, endDate),
     ]);
-    const goalsPayload = goalsPayloadOf(goals, alcohol);
+    const goalsPayload = goalsPayloadOf(forDate(endDate), alcohol);
     if (meals.length === 0 && water.length === 0) {
         const empty = sumMeals([]);
         return {
@@ -185,10 +187,10 @@ export async function getTrendsPayload(
     const locale = "en";
     const endDate = todayInTz(tz);
     const startDate = shiftLocalDate(endDate, -29);
-    const [meals, water, goals] = await Promise.all([
+    const [meals, water, { forDate }] = await Promise.all([
         getMealsInRange(userId, startDate, endDate, tz),
         getWaterInRange(userId, startDate, endDate, tz),
-        getNutritionGoals(userId),
+        getGoalsForRange(userId, startDate, endDate),
     ]);
     const buckets = buildDailyBuckets(meals, water, startDate, endDate, tz);
     return {
@@ -196,7 +198,7 @@ export async function getTrendsPayload(
         default_range: 7,
         drink_unit: alcohol,
         locale,
-        goals: goalsPayloadOf(goals, alcohol),
+        goals: goalsPayloadOf(forDate(endDate), alcohol),
         days: buckets.map((b) => trendsDayPayloadOf(b, alcohol)),
     };
 }
