@@ -1,6 +1,6 @@
 {
     "name": "foodable",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Self-hosted MCP platform for one household: fridge, groceries, nutrition, recipes, and settings.",
     "author": "Ethan Flow",
     "license": "MIT",
