@@ -1,6 +1,6 @@
 ---
 id: STG-4
-title: "Flag tables: pins, snapshot, groups, events, daily counts"
+title: "Flag tables: pins, snapshot, beta members, daily counts"
 status: todo
 priority: high
 size: S
