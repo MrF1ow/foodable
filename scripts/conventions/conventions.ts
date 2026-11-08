@@ -92,6 +92,7 @@ const HIGH_PREFIXES = [
     "scripts/conventions/",
     "scripts/migration-safety/",
     "scripts/migration-dryrun",
+    "scripts/db-rehearse",
     "public/widgets/src/shared/",
 ];
 

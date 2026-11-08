@@ -84,6 +84,19 @@ describe("classifyPath mapped", () => {
         expect(unmapped).toEqual([]);
     });
 
+    test("the production rehearsal script is high", () => {
+        for (const path of [
+            "scripts/db-rehearse.ts",
+            "scripts/db-rehearse.test.ts",
+        ]) {
+            expect(classifyPath(path)).toEqual({
+                level: "high",
+                area: "high",
+                mapped: true,
+            });
+        }
+    });
+
     test("agent skill paths are low", () => {
         expect(classifyPath(".claude/settings.json")).toEqual({
             level: "low",
