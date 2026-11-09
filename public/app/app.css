@@ -1,9 +1,8 @@
 /* Household web app stylesheet, served at /app.css.
  *
- * Assembled by getAppCss() in src/widgets.ts from the same shared partials the
- * in-chat widgets inline, so the app and the widgets share one set of tokens
- * and components (spec: public/widgets/STYLE_GUIDE.md). Anything both surfaces
- * use belongs in a shared/ partial. Only app layout lives below.
+ * Assembled by getAppCss() in src/widgets.ts. Design tokens come from the
+ * generated shared/tokens.css partial; base, form, table, and seg live in
+ * public/app/ as app-owned copies that may drift from the chat widgets.
  *
  * App markup is plain HTML inside <main class="native">: form.css styles its
  * controls through zero-specificity :where(.native …) hooks, and the rules
@@ -16,16 +15,16 @@
 
 /*@include shared/tokens.css@*/
 
-/*@include shared/base.css@*/
+/*@include ../../app/base.css@*/
 
-/*@include shared/form.css@*/
+/*@include ../../app/form.css@*/
 
-/*@include shared/table.css@*/
+/*@include ../../app/table.css@*/
 
-/*@include shared/seg.css@*/
+/*@include ../../app/seg.css@*/
 
-/* App-only brand layer (palette, type) and motion primitives. After the shared
-   partials so they win; never included by a widget. */
+/* App-only brand layer (palette, type) and motion primitives. After the
+   component partials so they win; never included by a widget. */
 /*@include ../../app/brand.css@*/
 /*@include ../../app/motion.css@*/
 
