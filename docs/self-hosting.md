@@ -174,9 +174,15 @@ Leave `PUBLIC_ORIGIN` unset on a laptop. Then the request `Host` and `X-Forwarde
 
 ## Feature flags
 
-Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service. Every **temporary** flag is off and every **kill switch** stays on — the same behavior as today's app until a release removes a flag. Set `RAILWAY_TOKEN` to a Railway **project token** if you deploy on Railway and manage flags in the project UI (a checked-in rollout file arrives in a later release).
+`flags/rollout.yml` is the record of every flag's default and rules. Change rollout by opening a pull request that edits that file; merging to `main` runs GitHub Actions (`.github/workflows/flags.yml`) to apply the file to Railway and verify it stayed in sync.
 
-`FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `ui-v2:internal` or `ui-v2:all`. Modes:
+On Railway, set the repository secret `RAILWAY_TOKEN` to a **project token** from the project's token settings (the same kind of token the app reads at runtime). CI and `bun run flags:apply` use it to list and update flags in that project.
+
+Locally, with `RAILWAY_TOKEN` exported, run `bun run flags:apply --dry-run` to see what Railway would change without applying. Add `--check` to exit with an error when the file and Railway disagree (the scheduled drift job on `main` does only this).
+
+**Emergency kill:** flip the flag off in Railway first (`railway flag set <name> false`), then update `flags/rollout.yml` in a follow-up pull request. Until the file matches Railway, the drift check fails — that is intentional.
+
+Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service at runtime. Every **temporary** flag is off and every **kill switch** stays on. `FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `ui-v2:internal` or `ui-v2:all`. Modes:
 
 - `all` — on for every request.
 - `off` — off for every request (this is how you disable a kill switch locally).

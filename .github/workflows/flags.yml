@@ -1,0 +1,150 @@
+name: Flags
+
+# flags/rollout.yml is the record of Railway feature flags. On merge to main,
+# apply brings Railway in line with the file; drift fails when they diverge.
+# Pull requests get a dry-run plan when the secret is available.
+
+on:
+    pull_request:
+        paths:
+            - flags/rollout.yml
+            - scripts/flags-apply.ts
+            - src/flags-rollout.ts
+    push:
+        branches: ["main"]
+    schedule:
+        - cron: "0 6 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    plan:
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Skip without Railway token on fork pull requests
+              if: github.event.pull_request.head.repo.full_name != github.repository
+              run: |
+                  echo "::notice::Skipping flag plan: RAILWAY_TOKEN is not available on fork pull requests."
+
+            - name: Install Railway CLI
+              if: github.event.pull_request.head.repo.full_name == github.repository
+              run: npm install -g @railway/cli@5.71.0
+
+            - name: Plan merge (dry-run)
+              if: github.event.pull_request.head.repo.full_name == github.repository
+              env:
+                  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+              run: bun run flags:apply --dry-run
+
+    rollout-changed:
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        outputs:
+            changed: ${{ steps.diff.outputs.changed }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+                  fetch-depth: 0
+
+            - name: Detect rollout-related changes
+              id: diff
+              env:
+                  BEFORE: ${{ github.event.before }}
+                  AFTER: ${{ github.sha }}
+              run: |
+                  set -euo pipefail
+                  pattern='^(flags/rollout\.yml|scripts/flags-apply\.ts|src/flags-rollout\.ts)$'
+                  if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                      echo "changed=true" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  if git diff --name-only "$BEFORE" "$AFTER" | grep -qE "$pattern"; then
+                      echo "changed=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "changed=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+    apply:
+        needs: [rollout-changed]
+        if: |
+            always() && (
+              github.event_name == 'workflow_dispatch' ||
+              (needs.rollout-changed.result == 'success' && needs.rollout-changed.outputs.changed == 'true')
+            )
+        runs-on: ubuntu-latest
+        concurrency:
+            group: flags-apply
+            cancel-in-progress: false
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Install Railway CLI
+              run: npm install -g @railway/cli@5.71.0
+
+            - name: Apply rollout to Railway
+              env:
+                  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  bun run flags:apply
+                  bun run flags:apply --check
+
+    drift:
+        needs: [rollout-changed, apply]
+        if: |
+            always() && (
+              github.event_name == 'schedule' ||
+              (github.event_name == 'push' && needs.rollout-changed.result == 'success' && needs.rollout-changed.outputs.changed != 'true') ||
+              (github.event_name == 'workflow_dispatch' && (needs.apply.result == 'skipped' || needs.apply.result == 'failure'))
+            )
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Install Railway CLI
+              run: npm install -g @railway/cli@5.71.0
+
+            - name: Check Railway matches rollout file
+              env:
+                  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+              run: bun run flags:apply --check
