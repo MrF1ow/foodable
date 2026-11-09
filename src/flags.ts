@@ -18,8 +18,9 @@ type FlagDef = {
     removeWhen: string;
 };
 
-// Kill switches are global (no per-subject rules in Railway) until STG-13: their
-// last-known value (src/flag-pins.ts, flag_snapshot) is one value per flag.
+// Kill switches remember last-known values per subject in flag_snapshot: a
+// household-unit flag keys by household id, a user-unit flag by user id, and
+// a caller with no subject uses the global row (see src/flag-pins.ts).
 export const FLAGS = {
     "ui-v2": {
         type: "bool",

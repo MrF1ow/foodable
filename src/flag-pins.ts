@@ -13,11 +13,14 @@ import {
     decideKillSwitch,
     decideTemporary,
     flagSubject,
+    killSwitchSnapshotSubject,
+    snapshotSubjectKey,
     subjectKey,
     type FlagPinStore,
     type FlagSubject,
     type Pin,
     type PinFlagDef,
+    type SnapshotSubject,
 } from "./domain/flag-pins.js";
 import {
     FLAGS,
@@ -48,6 +51,15 @@ type SubjectEntry = {
     /** No load is attempted before this time (ms) after a failed one. */
     failedUntil: number;
 };
+
+type SnapshotEntry = {
+    get: () => Promise<TtlCacheResult<Map<string, boolean>>>;
+    failedUntil: number;
+};
+
+function lastKnownKey(flag: string, subject: SnapshotSubject): string {
+    return `${flag}:${snapshotSubjectKey(subject)}`;
+}
 
 export type FlagPinRuntimeOptions = {
     store: FlagPinStore;
@@ -111,12 +123,9 @@ export function createFlagPinRuntime(
 
     // Insertion order is recency order: an entry is re-inserted on every use.
     const subjects = new Map<string, SubjectEntry>();
-    // Process-wide, per flag: the last reliable kill-switch value read.
+    // Per flag and snapshot subject: the last reliable kill-switch value read.
     const lastKnown = new Map<string, boolean>();
-    const snapshotCache = createTtlCache(SNAPSHOT_TTL_MS, () =>
-        withRetries(() => store.loadSnapshot()),
-    );
-    let snapshotFailedUntil = 0;
+    const snapshotCaches = new Map<string, SnapshotEntry>();
 
     function subjectEntry(subject: FlagSubject): SubjectEntry {
         const key = subjectKey(subject);
@@ -165,14 +174,32 @@ export function createFlagPinRuntime(
         }
     }
 
-    async function loadSnapshot(): Promise<Map<string, boolean>> {
-        if (snapshotFailedUntil > clock()) return new Map();
+    function snapshotCacheEntry(subject: SnapshotSubject): SnapshotEntry {
+        const key = snapshotSubjectKey(subject);
+        let entry = snapshotCaches.get(key);
+        if (!entry) {
+            entry = {
+                get: createTtlCache(SNAPSHOT_TTL_MS, () =>
+                    withRetries(() => store.loadSnapshot(subject)),
+                ),
+                failedUntil: 0,
+            };
+            snapshotCaches.set(key, entry);
+        }
+        return entry;
+    }
+
+    async function loadSnapshot(
+        subject: SnapshotSubject,
+    ): Promise<Map<string, boolean>> {
+        const entry = snapshotCacheEntry(subject);
+        if (entry.failedUntil > clock()) return new Map();
         try {
-            return (await snapshotCache()).data;
+            return (await entry.get()).data;
         } catch (err) {
-            snapshotFailedUntil = clock() + failureCooldownMs;
+            entry.failedUntil = clock() + failureCooldownMs;
             logError(
-                `loading the flag snapshot failed after ${retryDelaysMs.length + 1} attempts`,
+                `loading the flag snapshot for ${subject.kind} failed after ${retryDelaysMs.length + 1} attempts`,
                 err,
             );
             return new Map();
@@ -190,13 +217,14 @@ export function createFlagPinRuntime(
     }
 
     function persistSnapshot(
+        subject: SnapshotSubject,
         snapshot: Map<string, boolean>,
         flag: string,
         value: boolean,
     ): void {
         // Updated in place so the next read does not write it again.
         snapshot.set(flag, value);
-        store.saveSnapshot(flag, value).catch((err: unknown) => {
+        store.saveSnapshot(flag, value, subject).catch((err: unknown) => {
             logError(`saving snapshot ${flag} failed`, err);
         });
     }
@@ -218,19 +246,36 @@ export function createFlagPinRuntime(
         const wants = (kind: FlagPinDefKind, subject: FlagSubject | null) =>
             subject !== null &&
             defs.some((d) => d?.kind === "temporary" && d.unit === kind);
-        const needsSnapshot = defs.some((d) => d?.kind === "kill-switch");
+        const killSnapshotSubjects = new Map<string, SnapshotSubject>();
+        const snapshotSubjects = new Map<string, SnapshotSubject>();
+        for (const name of names) {
+            const def = registry[name];
+            if (def?.kind !== "kill-switch") continue;
+            const snapSubj = killSwitchSnapshotSubject(def.unit, ctx);
+            killSnapshotSubjects.set(name, snapSubj);
+            snapshotSubjects.set(snapshotSubjectKey(snapSubj), snapSubj);
+        }
 
-        const [userPins, householdPins, snapshot] = await Promise.all([
-            wants("user", userSubject) && userSubject
-                ? loadSubjectPins(userSubject)
-                : null,
-            wants("household", householdSubject) && householdSubject
-                ? loadSubjectPins(householdSubject)
-                : null,
-            needsSnapshot
-                ? loadSnapshot()
-                : Promise.resolve(new Map<string, boolean>()),
-        ]);
+        const [userPins, householdPins, ...loadedSnapshots] = await Promise.all(
+            [
+                wants("user", userSubject) && userSubject
+                    ? loadSubjectPins(userSubject)
+                    : null,
+                wants("household", householdSubject) && householdSubject
+                    ? loadSubjectPins(householdSubject)
+                    : null,
+                ...[...snapshotSubjects.values()].map((subj) =>
+                    loadSnapshot(subj),
+                ),
+            ],
+        );
+        const snapshotByKey = new Map<string, Map<string, boolean>>();
+        for (const [i, subj] of [...snapshotSubjects.values()].entries()) {
+            snapshotByKey.set(
+                snapshotSubjectKey(subj),
+                loadedSnapshots[i] as Map<string, boolean>,
+            );
+        }
 
         return names.map((name) => {
             const live = read(name);
@@ -238,17 +283,27 @@ export function createFlagPinRuntime(
             if (!def) return live;
 
             if (def.kind === "kill-switch") {
+                const snapSubj = killSnapshotSubjects.get(name)!;
+                const snapKey = snapshotSubjectKey(snapSubj);
+                const snapshot =
+                    snapshotByKey.get(snapKey) ?? new Map<string, boolean>();
+                const memoryKey = lastKnownKey(name, snapSubj);
                 const decision = decideKillSwitch({
                     live,
                     fallback: def.fallback,
-                    memory: lastKnown.get(name),
+                    memory: lastKnown.get(memoryKey),
                     snapshot: snapshot.get(name),
                 });
                 if (decision.remember !== undefined) {
-                    lastKnown.set(name, decision.remember);
+                    lastKnown.set(memoryKey, decision.remember);
                 }
                 if (decision.saveSnapshot !== undefined) {
-                    persistSnapshot(snapshot, name, decision.saveSnapshot);
+                    persistSnapshot(
+                        snapSubj,
+                        snapshot,
+                        name,
+                        decision.saveSnapshot,
+                    );
                 }
                 return decision.evaluation;
             }

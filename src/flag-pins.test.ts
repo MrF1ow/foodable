@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
     PIN_TTL_MS,
     createMemoryFlagPinStore,
+    snapshotSubjectKey,
     type MemoryFlagPinStore,
+    type SnapshotSubject,
 } from "./domain/flag-pins.js";
 import {
     FLAGS,
@@ -30,6 +32,8 @@ const REGISTRY = {
 const USER = "11111111-1111-4111-8111-111111111111";
 const USER_B = "22222222-2222-4222-8222-222222222222";
 const HOUSEHOLD = "33333333-3333-4333-8333-333333333333";
+const HH_SNAPSHOT: SnapshotSubject = { kind: "household", id: HOUSEHOLD };
+const USER_SNAPSHOT: SnapshotSubject = { kind: "user", id: USER };
 
 function ctxFor(overrides: Partial<FlagContext> = {}): FlagContext {
     return {
@@ -521,7 +525,7 @@ describe("kill switches", () => {
 
     test("a fresh process with only a snapshot serves the snapshot", async () => {
         const { store, railway, read } = setup();
-        store.snapshot.set("k-hh", false);
+        await store.saveSnapshot("k-hh", false, HH_SNAPSHOT);
         railway.set("k-hh", true, "STALE");
         const e = await read("k-hh");
         expect(e.value).toBe(false);
@@ -542,7 +546,9 @@ describe("kill switches", () => {
         railway.set("k-hh", true);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(1);
-        expect(store.snapshot.get("k-hh")).toBe(true);
+        expect(
+            store.snapshots.get(snapshotSubjectKey(HH_SNAPSHOT))?.get("k-hh"),
+        ).toBe(true);
         await read("k-hh");
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(1);
@@ -550,12 +556,17 @@ describe("kill switches", () => {
         railway.set("k-hh", false);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(2);
-        expect(store.snapshot.get("k-hh")).toBe(false);
+        expect(
+            store.snapshots.get(snapshotSubjectKey(HH_SNAPSHOT))?.get("k-hh"),
+        ).toBe(false);
     });
 
     test("a value equal to the loaded snapshot is not written again", async () => {
         const { store, railway, read } = setup();
-        store.snapshot.set("k-hh", true);
+        store.snapshots.set(
+            snapshotSubjectKey(HH_SNAPSHOT),
+            new Map([["k-hh", true]]),
+        );
         railway.set("k-hh", true);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(0);
@@ -583,6 +594,59 @@ describe("kill switches", () => {
         } finally {
             console.error = err;
         }
+    });
+
+    test("alternating households keep separate snapshots and last-known values", async () => {
+        const HH_A = "44444444-4444-4444-8444-444444444444";
+        const HH_B = "55555555-5555-4555-8555-555555555555";
+        const { store, railway, read } = setup();
+        railway.set("k-hh", false);
+        await read("k-hh", ctxFor({ household_id: HH_A }));
+        railway.set("k-hh", true);
+        await read("k-hh", ctxFor({ household_id: HH_B }));
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: HH_A,
+                })
+            ).get("k-hh"),
+        ).toBe(false);
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: HH_B,
+                })
+            ).get("k-hh"),
+        ).toBe(true);
+
+        railway.set("k-hh", false, "STALE");
+        const a = await read("k-hh", ctxFor({ household_id: HH_A }));
+        const b = await read("k-hh", ctxFor({ household_id: HH_B }));
+        expect(a.value).toBe(false);
+        expect(b.value).toBe(true);
+        expect(a.reason).toBe("LAST_KNOWN");
+        expect(b.reason).toBe("LAST_KNOWN");
+    });
+
+    test("a user-unit kill switch snapshots per user", async () => {
+        const { store, railway, read } = setup();
+        railway.set("k-user", false);
+        await read("k-user", ctxFor({ key: USER }));
+        railway.set("k-user", true);
+        await read("k-user", ctxFor({ key: USER_B }));
+        expect((await store.loadSnapshot(USER_SNAPSHOT)).get("k-user")).toBe(
+            false,
+        );
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "user",
+                    id: USER_B,
+                })
+            ).get("k-user"),
+        ).toBe(true);
     });
 
     test("a failed snapshot load is retried, capped and cooled down", async () => {

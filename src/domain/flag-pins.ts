@@ -27,6 +27,27 @@ export const LAST_KNOWN_REASON = "LAST_KNOWN";
 export type FlagSubject =
     { kind: "user"; id: string } | { kind: "household"; id: string };
 
+export type SnapshotSubject =
+    | { kind: "global"; id: string }
+    | { kind: "household"; id: string }
+    | { kind: "user"; id: string };
+
+export const GLOBAL_SNAPSHOT: SnapshotSubject = { kind: "global", id: "" };
+
+export function snapshotSubjectKey(subject: SnapshotSubject): string {
+    return `${subject.kind}:${subject.id}`;
+}
+
+/** The snapshot row a kill switch reads and writes, from its unit and context. */
+export function killSwitchSnapshotSubject(
+    unit: PinFlagDef["unit"],
+    ctx: Pick<FlagContext, "key" | "household_id">,
+): SnapshotSubject {
+    const pinSubject = flagSubject(unit, ctx);
+    if (!pinSubject) return GLOBAL_SNAPSHOT;
+    return { kind: pinSubject.kind, id: pinSubject.id };
+}
+
 export type Pin = {
     flag: string;
     value: boolean;
@@ -43,8 +64,12 @@ export interface FlagPinStore {
     clearPins(subject: FlagSubject): Promise<void>;
     /** Deletes pins expired at `now` (ms) and returns how many. */
     sweepExpired(now: number): Promise<number>;
-    loadSnapshot(): Promise<Map<string, boolean>>;
-    saveSnapshot(flag: string, value: boolean): Promise<void>;
+    loadSnapshot(subject?: SnapshotSubject): Promise<Map<string, boolean>>;
+    saveSnapshot(
+        flag: string,
+        value: boolean,
+        subject?: SnapshotSubject,
+    ): Promise<void>;
 }
 
 /** The registry fields the pin layer reads (`FLAGS` entries satisfy it). */
@@ -250,7 +275,8 @@ export function decideKillSwitch(input: {
 
 export type MemoryFlagPinStore = FlagPinStore & {
     pins: Map<string, Map<string, Pin>>;
-    snapshot: Map<string, boolean>;
+    /** Per snapshotSubjectKey, the saved kill-switch values. */
+    snapshots: Map<string, Map<string, boolean>>;
     calls: {
         loadPins: number;
         upsertPin: number;
@@ -266,7 +292,7 @@ export function createMemoryFlagPinStore(
 ): MemoryFlagPinStore {
     const now = opts.now ?? Date.now;
     const pins = new Map<string, Map<string, Pin>>();
-    const snapshot = new Map<string, boolean>();
+    const snapshots = new Map<string, Map<string, boolean>>();
     const calls = {
         loadPins: 0,
         upsertPin: 0,
@@ -277,7 +303,7 @@ export function createMemoryFlagPinStore(
     };
     return {
         pins,
-        snapshot,
+        snapshots,
         calls,
         async loadPins(subject) {
             calls.loadPins++;
@@ -310,13 +336,18 @@ export function createMemoryFlagPinStore(
             }
             return removed;
         },
-        async loadSnapshot() {
+        async loadSnapshot(subject = GLOBAL_SNAPSHOT) {
             calls.loadSnapshot++;
-            return new Map(snapshot);
+            const key = snapshotSubjectKey(subject);
+            const mine = snapshots.get(key);
+            return new Map(mine);
         },
-        async saveSnapshot(flag, value) {
+        async saveSnapshot(flag, value, subject = GLOBAL_SNAPSHOT) {
             calls.saveSnapshot++;
-            snapshot.set(flag, value);
+            const key = snapshotSubjectKey(subject);
+            const mine = snapshots.get(key) ?? new Map<string, boolean>();
+            mine.set(flag, value);
+            snapshots.set(key, mine);
         },
     };
 }

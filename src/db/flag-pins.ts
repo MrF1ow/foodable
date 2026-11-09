@@ -1,33 +1,23 @@
 import {
+    GLOBAL_SNAPSHOT,
     pinFromRow,
     snapshotFromRows,
     type FlagPinStore,
     type FlagSubject,
     type Pin,
+    type SnapshotSubject,
 } from "../domain/flag-pins.js";
 import { rows, run } from "./sql.js";
 
+export type { SnapshotSubject };
+
 const PIN_COLS = "flag_name, value, reason, epoch, assigned_at, expires_at";
-
-export type SnapshotSubject =
-    | { kind: "global"; id: string }
-    | { kind: "household"; id: string }
-    | { kind: "user"; id: string };
-
-const GLOBAL_SNAPSHOT: SnapshotSubject = { kind: "global", id: "" };
 
 function snapshotSubject(subject?: SnapshotSubject): SnapshotSubject {
     return subject ?? GLOBAL_SNAPSHOT;
 }
 
-export type DbFlagPinStore = FlagPinStore & {
-    loadSnapshot(subject?: SnapshotSubject): Promise<Map<string, boolean>>;
-    saveSnapshot(
-        flag: string,
-        value: boolean,
-        subject?: SnapshotSubject,
-    ): Promise<void>;
-};
+export type DbFlagPinStore = FlagPinStore;
 
 export function liveFlagPinStore(): DbFlagPinStore {
     return {
