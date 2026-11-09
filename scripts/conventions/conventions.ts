@@ -117,6 +117,7 @@ const HIGH_EXACT = new Set([
     "src/auth-context.ts",
     "src/domain/auth.ts",
     "src/oauth.ts",
+    "src/oauth-login-sessions.ts",
     "src/oauth-redirect.ts",
     "src/web/middleware.ts",
     "src/mcp/server.ts",

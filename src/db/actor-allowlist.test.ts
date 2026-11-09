@@ -13,10 +13,12 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     "src/flag-pins.ts",
     // Bearer token and household membership resolution before the actor is known.
     "src/household-token.ts",
-    // Export sweep, unverified recipe sweep and fetch memory sweep timers.
+    // Export sweep, login session sweep, unverified recipe sweep, fetch memory sweep.
     "src/index.ts",
     // OAuth sign-in, authorization codes, token exchange, client registration.
     "src/oauth.ts",
+    // Postgres-backed OAuth login session rows before a member is known.
+    "src/oauth-login-sessions.ts",
     // Listing the households whose restock run is due.
     "src/restock-runner.ts",
     // Site session membership lookup before the actor is known.

@@ -30,41 +30,22 @@ import {
     getAppV2Js,
 } from "./widgets.js";
 import { isSafeShareReturnPath } from "./domain/share.js";
+import {
+    getLoginSessionStore,
+    MAX_SITE_LOGIN_SESSIONS_POSTGRES,
+    siteLoginSessionCountSync,
+    type OAuthSessionPayload,
+} from "./oauth-login-sessions.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 /** Bounds memory held by signed-out site logins (each up to 64 KiB). */
 export const MAX_SITE_LOGIN_SESSIONS = 32;
 
-interface OAuthSession {
-    state: string;
-    redirectUri: string;
-    codeChallenge?: string;
-    clientId: string;
-    purpose: "mcp" | "site";
-}
+type OAuthSession = OAuthSessionPayload;
 
-// In-memory session store (sessions are short-lived, 10min TTL)
-const sessions = new Map<
-    string,
-    { session: OAuthSession; expiresAt: number }
->();
-
-function cleanExpiredSessions() {
-    const now = Date.now();
-    for (const [key, value] of sessions) {
-        if (value.expiresAt < now) sessions.delete(key);
-    }
-}
-
-setInterval(cleanExpiredSessions, 60 * 1000);
-
-/** Test hook: how many site-login sessions are held. */
+/** Test hook: how many site-login sessions are held (in-memory store only). */
 export function siteLoginSessionCount(): number {
-    let count = 0;
-    for (const value of sessions.values()) {
-        if (value.session.purpose === "site") count += 1;
-    }
-    return count;
+    return siteLoginSessionCountSync();
 }
 
 function base64URLEncode(buffer: Buffer): string {
@@ -109,12 +90,9 @@ export async function renderLoginPage(
 
 async function finishAuthorization(
     c: Context,
-    sessionId: string,
     session: OAuthSession,
     userId: string,
 ): Promise<Response> {
-    sessions.delete(sessionId);
-
     if (session.purpose === "site") {
         const secure =
             getBaseUrl(c).startsWith("https://") ||
@@ -359,9 +337,7 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_request" }, 400);
         }
 
-        cleanExpiredSessions();
-
-        // Store session and show login page
+        const store = getLoginSessionStore();
         const sessionId = crypto.randomUUID();
         const session: OAuthSession = {
             state,
@@ -370,10 +346,7 @@ export function createOAuthRouter() {
             clientId: reqClientId,
             purpose: "mcp",
         };
-        sessions.set(sessionId, {
-            session,
-            expiresAt: Date.now() + SESSION_TTL_MS,
-        });
+        await store.put(sessionId, session, SESSION_TTL_MS);
 
         return c.html(await renderLoginPage(sessionId, session));
     });
@@ -389,9 +362,10 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_request" }, 400);
         }
 
-        const entry = sessions.get(sessionId);
-        if (!entry || entry.expiresAt < Date.now()) {
-            sessions.delete(sessionId);
+        const store = getLoginSessionStore();
+        const session = await store.get(sessionId);
+        if (!session) {
+            await store.del(sessionId);
             return c.json({ error: "session_expired" }, 400);
         }
 
@@ -412,12 +386,17 @@ export function createOAuthRouter() {
             const message =
                 err instanceof Error ? err.message : "Authentication failed";
             return c.html(
-                await renderLoginPage(sessionId, entry.session, message),
+                await renderLoginPage(sessionId, session, message),
                 400,
             );
         }
 
-        return finishAuthorization(c, sessionId, entry.session, userId);
+        const consumed = await store.take(sessionId);
+        if (!consumed) {
+            return c.json({ error: "session_expired" }, 400);
+        }
+
+        return finishAuthorization(c, consumed, userId);
     });
 
     // Token endpoint
@@ -559,22 +538,12 @@ export async function beginSiteLogin(
     // A signed-out share keeps up to 64 KiB of return path in memory, and
     // GET /share is not rate limited, so site-login sessions are capped: the
     // oldest one goes first. MCP authorization sessions are never evicted.
-    let siteSessions = 0;
-    for (const value of sessions.values()) {
-        if (value.session.purpose === "site") siteSessions += 1;
-    }
-    if (siteSessions >= MAX_SITE_LOGIN_SESSIONS) {
-        for (const [key, value] of sessions) {
-            if (value.session.purpose === "site") {
-                sessions.delete(key);
-                break;
-            }
-        }
-    }
-    sessions.set(sessionId, {
-        session,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-    });
+    const store = getLoginSessionStore();
+    const cap =
+        store.kind === "postgres"
+            ? MAX_SITE_LOGIN_SESSIONS_POSTGRES
+            : MAX_SITE_LOGIN_SESSIONS;
+    await store.putSiteSession(sessionId, session, SESSION_TTL_MS, cap);
     const status = error ? 400 : c.req.method === "GET" ? 200 : 401;
     return c.html(await renderLoginPage(sessionId, session, error), status);
 }

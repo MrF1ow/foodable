@@ -2,7 +2,15 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { describeDb } from "./testing/pg.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
-import { del, get, put, sweepExpired, take } from "./login-sessions.js";
+import {
+    countSiteSessions,
+    del,
+    get,
+    put,
+    putSiteSessionWithCap,
+    sweepExpired,
+    take,
+} from "./login-sessions.js";
 
 const pgAvailable = await findPgBin();
 
@@ -57,6 +65,47 @@ describeDb(pgAvailable !== null, "login sessions db", (getCtx) => {
         `;
         expect(await get(id)).toBeNull();
         expect(await take(id)).toBeNull();
+    });
+
+    test("putSiteSessionWithCap trims live site rows to cap", async () => {
+        const { sql } = getCtx();
+        const cap = 4;
+        const payload = (n: number) => ({
+            purpose: "site" as const,
+            state: "site",
+            redirectUri: `/share?n=${n}`,
+            clientId: "site",
+        });
+        for (let i = 0; i < cap + 3; i++) {
+            const id = `site-${i}`;
+            await putSiteSessionWithCap(id, payload(i), TTL_MS, cap);
+            await sql`
+                update public.oauth_login_sessions
+                set expires_at = now() + (${i + 1}::int * interval '1 minute')
+                where id = ${id}
+            `;
+        }
+        expect(await countSiteSessions()).toBe(cap);
+        const newest = await get(`site-${cap + 2}`);
+        expect(newest).toEqual(payload(cap + 2));
+        expect(await get("site-0")).toBeNull();
+    });
+
+    test("concurrent putSiteSessionWithCap stays within cap", async () => {
+        const cap = 8;
+        const n = 40;
+        const payload = {
+            purpose: "site" as const,
+            state: "site",
+            redirectUri: "/",
+            clientId: "site",
+        };
+        await Promise.all(
+            Array.from({ length: n }, (_, i) =>
+                putSiteSessionWithCap(`race-${i}`, payload, TTL_MS, cap),
+            ),
+        );
+        expect(await countSiteSessions()).toBeLessThanOrEqual(cap);
     });
 
     test("sweepExpired deletes expired rows", async () => {

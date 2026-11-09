@@ -4,6 +4,10 @@ import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { createOAuthRouter } from "./oauth.js";
 import {
+    startLoginSessionCleanup,
+    useLiveLoginSessionStore,
+} from "./oauth-login-sessions.js";
+import {
     authenticateBearer,
     rateLimit,
     banRepeatAuthFailures,
@@ -486,10 +490,15 @@ if (import.meta.main) {
     // first tool call.
     await warmWidgets();
 
+    useLiveLoginSessionStore();
+
     // Background jobs act for no member. A timer keeps the async context it
     // was started in, so each job's ticks run as the system actor named here.
     // The flag pin sweep and the restock runner name their own actors.
     void runAsSystem("export sweep", async () => startExportCleanup());
+    void runAsSystem("login session sweep", async () =>
+        startLoginSessionCleanup(),
+    );
     startFlagPinSweep();
     void runAsSystem("unverified recipe sweep", async () =>
         startUnverifiedRecipeCleanup(

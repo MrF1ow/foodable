@@ -77,3 +77,71 @@ export async function sweepExpired(): Promise<number> {
         return deleted.length;
     });
 }
+
+export async function countSiteSessions(): Promise<number> {
+    return run(async (tx) => {
+        const row = await maybeOne<{ n: number }>(
+            tx,
+            tx`
+                select count(*)::int as n
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+            `,
+            "count site login sessions",
+        );
+        return row?.n ?? 0;
+    });
+}
+
+export async function evictOldestSiteSession(): Promise<void> {
+    await run(async (tx) => {
+        await tx`
+            delete from public.oauth_login_sessions
+            where id = (
+                select id
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+                order by expires_at asc
+                limit 1
+            )
+        `;
+    });
+}
+
+/** Insert a site login row and trim live site rows to at most `cap` in one transaction. */
+export async function putSiteSessionWithCap(
+    id: string,
+    payload: unknown,
+    ttlMs: number,
+    cap: number,
+): Promise<void> {
+    const json = JSON.stringify(payload);
+    const ttlSeconds = ttlMs / 1000;
+    await run(async (tx) => {
+        await tx`
+            insert into public.oauth_login_sessions (id, payload, expires_at)
+            values (
+                ${id},
+                ${json}::jsonb,
+                now() + (${ttlSeconds}::double precision * interval '1 second')
+            )
+            on conflict (id) do update
+            set
+                payload = excluded.payload,
+                expires_at = excluded.expires_at
+        `;
+        await tx`
+            delete from public.oauth_login_sessions
+            where id in (
+                select id
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+                order by expires_at desc
+                offset ${cap}
+            )
+        `;
+    });
+}
