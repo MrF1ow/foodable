@@ -67,6 +67,8 @@ import {
     buildFlagContext,
     createMemoryFlags,
     defaultFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
 } from "./flags.js";
 import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
 import { createToolContext } from "./mcp/shared.js";
@@ -116,8 +118,10 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     mergeFoods,
+    newFood,
     updateFood,
 } from "./domain/foods.js";
+import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
 import {
     FOOD_OUTPUT,
     GET_FOOD_OUTPUT,
@@ -3512,11 +3516,22 @@ describe("household config tools", () => {
             { name: "foodable-test", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
         );
+        const flags = evaluateViewerFlags(
+            buildFlagContext({
+                auth: { kind: "household", householdId: "hh-1" },
+                householdId: "hh-1",
+            }),
+            createMemoryFlags(allFlagsOn()),
+        );
         registerTools(
             server,
             { kind: "household", householdId: "hh-1" },
             true,
             null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
         );
         const [clientTransport, serverTransport] =
             InMemoryTransport.createLinkedPair();
@@ -3867,7 +3882,7 @@ describe("household config tools", () => {
 
         // The snapshot is the all-flags-on list. With a flag off, tools/list
         // is the snapshot minus exactly the gated tools left unregistered, in
-        // the same order. No real tool is gated yet, so today both are equal.
+        // the same order.
         async function listAgainstSnapshot(flags: ViewerFlags) {
             const { names, gated } = await toolNamesFor(flags);
             const hidden = new Set(
@@ -4135,6 +4150,379 @@ describe("household config tools", () => {
                 required: false,
             });
         }
+    });
+
+    async function withRateProductFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-rate-product": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [clientTransport, serverTransport] =
+            InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test-client", version: "0.0.0" });
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+        try {
+            await run(
+                (name, args = {}) =>
+                    client.callTool({
+                        name,
+                        arguments: callToolArguments(name, args),
+                    }) as Promise<ToolResult>,
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    async function seedMilkProduct(): Promise<string> {
+        const food = newFood({
+            householdId: "hh-1",
+            kind: "food",
+            name: "Milk Yogurt",
+            brand: "Test",
+            calories: 60,
+            sugarG: 8,
+            saturatedFatG: 2,
+            offQuality: {
+                nutriscoreGrade: "b",
+                novaGroup: 3,
+                ecoscoreGrade: "c",
+                additives: null,
+                allergensTags: ["en:milk"],
+                tracesTags: null,
+                ingredientsAnalysisTags: null,
+                labelsTags: null,
+                fetchedAt: "2026-11-09T12:00:00.000Z",
+            },
+        });
+        await db.foodsStore.insertFood(food);
+        return food.id;
+    }
+
+    describe("rate_product", () => {
+        test("flag off hides tool and rejects calls", async () => {
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const flagCtx = buildFlagContext({
+                auth: { kind: "user", userId: "u1" },
+            });
+            const flags = evaluateViewerFlags(
+                flagCtx,
+                createMemoryFlags({ "mcp-rate-product": false }),
+            );
+            registerTools(
+                server,
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                flags,
+            );
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([server.connect(st), client.connect(ct)]);
+            try {
+                const list = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(list).not.toContain("rate_product");
+                await expect(
+                    client.callTool({
+                        name: "rate_product",
+                        arguments: { barcode: "12345678" },
+                    }),
+                ).rejects.toThrow(/not found/i);
+            } finally {
+                await client.close();
+                await server.close();
+            }
+        });
+
+        test("food_id returns schema output with milk allergen block", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: foodId });
+                expect(r.isError).toBeFalsy();
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.checks).toHaveLength(1);
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("barcode resolves off cache without creating a food", async () => {
+            const barcode = "4006381333931";
+            db.barcodeFoods[barcode] = {
+                name: "Nutella",
+                brand: "Ferrero",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: { sugars: "high" },
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: "d",
+                    additives_tags: ["en:e322"],
+                    allergens_tags: ["en:nuts", "en:milk"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            db.goals = goals({ daily_sugar_g: 40 });
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.food_id).toBeNull();
+                expect(out.product.barcode).toBe(barcode);
+                expect(out.info_rows[0]!.per_100g).toBeNull();
+                expect(out.info_rows[0]!.level).toBe("high");
+                const sugarGoal = out.checks[0]!.notices.find(
+                    (n) =>
+                        n.code === "food.product_goal" &&
+                        n.message.includes("sugar"),
+                );
+                expect(sugarGoal).toBeDefined();
+                expect(sugarGoal!.message).toContain("8.4 g sugar");
+            });
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+
+        test("catalog milk allergen blocks when offQuality is missing", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Creamer",
+                allergens: ["milk"],
+                offQuality: null,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("gramsPerEach drives goal notice from per-100g macros", async () => {
+            db.goals = goals({ daily_sugar_g: 30 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Sweet Bar",
+                sugarG: 50,
+                gramsPerEach: 40,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const goal = out.checks[0]!.notices.find(
+                    (n) => n.code === "food.product_goal",
+                );
+                expect(goal?.message).toContain("20 g sugar");
+                expect(goal?.message).toContain("30 g left today");
+            });
+        });
+
+        test("missing food_id returns found false", async () => {
+            const missing = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: missing });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
+
+        test("archived household barcode falls through to off cache", async () => {
+            const barcode = "3017620422003";
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Archived Jar",
+            });
+            food.archivedAt = "2026-11-09T12:00:00.000Z";
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            db.barcodeFoods[barcode] = {
+                name: "Off Jar",
+                brand: "Test",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+            };
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.name).toBe("Off Jar");
+                expect(out.product.food_id).toBeNull();
+            });
+        });
+
+        test("user_id narrows checks to one member", async () => {
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "Alex",
+                },
+                {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    role: "member",
+                    displayName: "Bob",
+                },
+            ];
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: "u2",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.checks).toHaveLength(1);
+                expect(out.checks[0]!.user_id).toBe("u2");
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(false);
+            });
+        });
+
+        test("rejects user_id from another household", async () => {
+            const other = "22222222-2222-4222-8222-222222222222";
+            db.members.push({
+                householdId: "hh-2",
+                userId: other,
+                role: "owner",
+                displayName: "Elsewhere",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: other,
+                });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toContain("not a household member");
+            });
+        });
+
+        test("unknown barcode returns found false", async () => {
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    barcode: "9999888877776",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
     });
 });
 
@@ -6962,6 +7350,70 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
         .find((l) => l.startsWith("data:"));
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
+
+describe("rate_product over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Rated Bar",
+                offQuality: {
+                    nutriscoreGrade: "c",
+                    novaGroup: 3,
+                    ecoscoreGrade: "b",
+                    additives: null,
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("rate_product");
+                    const r = (await client.callTool({
+                        name: "rate_product",
+                        arguments: { food_id: food.id },
+                    })) as ToolResult;
+                    RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits rate_product from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": false }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("rate_product");
+                    await expect(
+                        client.callTool({
+                            name: "rate_product",
+                            arguments: { barcode: "12345678" },
+                        }),
+                    ).rejects.toThrow(/not found/i);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
 
 describe("household PAT over HTTP has no default userId", () => {
     async function withHouseholdHttp<T>(

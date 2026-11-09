@@ -4,6 +4,7 @@
     "start_meal_import",
     "bulk_import_meals",
     "lookup_barcode",
+    "rate_product",
     "get_meals",
     "search_meals",
     "get_nutrition_summary",

@@ -62,6 +62,15 @@ export const FLAGS = {
         why: "The background restock runner.",
         removeWhen: "never (kill switch)",
     },
+    "mcp-rate-product": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The rate_product MCP tool.",
+        removeWhen:
+            "rate_product has been on for everyone for a release with no rollback.",
+    },
 } as const satisfies Record<string, FlagDef>;
 
 export type FlagName = keyof typeof FLAGS;

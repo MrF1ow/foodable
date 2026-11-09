@@ -38,6 +38,7 @@ import {
     registerSearchFoodTool,
     registerCatalogFoodTools,
 } from "./tools/food.js";
+import { registerRateProductTools } from "./tools/product-score.js";
 import { registerGoalsTools } from "./tools/goals.js";
 import { registerWaterTools } from "./tools/water.js";
 import { registerWeightTools } from "./tools/weight.js";
@@ -72,7 +73,7 @@ Imported recipes start unverified until they pass the deterministic check. Unver
 
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
 
-Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools warn on allergen matches; treat a warning as blocking unless the user overrides it explicitly.
+Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools warn on allergen matches; treat a warning as blocking unless the user overrides it explicitly. Before recommending a packaged product for someone, call rate_product with the barcode or food_id to read the quality score and member-specific allergen notices.
 
 Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them. Use \`list_notices\` to see what needs attention; never dismiss a notice with \`dismiss_notice\` without asking the person first. After an unattended run (imports, bulk writes), call \`list_notices\` with \`code: "food.possible_duplicate"\` and mention any new possible duplicates to the household; never merge or dismiss a possible duplicate without asking the person first.
 
@@ -138,6 +139,7 @@ export function registerTools(
     // runs so tools/list stays byte-identical, including order.
     registerNutritionWriteTools(server, ctx);
     registerLookupBarcodeTool(server, ctx);
+    registerRateProductTools(server, ctx);
     registerNutritionReadTools(server, ctx);
     registerGoalsTools(server, ctx);
     registerNutritionEditTools(server, ctx);

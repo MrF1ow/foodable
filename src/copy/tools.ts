@@ -84,6 +84,16 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: true,
     },
     {
+        name: "rate_product",
+        category: "logging-food-meals",
+        badges: ["view"],
+        params: [
+            { name: "food_id", required: false },
+            { name: "barcode", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
         name: "start_meal_import",
         category: "logging-food-meals",
         badges: ["import", "widget"],
