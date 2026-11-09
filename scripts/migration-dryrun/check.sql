@@ -695,5 +695,44 @@ begin
         raise exception 'weight_log_user_logged_idx missing';
     end if;
 
+    if not exists (select 1 from pg_roles where rolname = 'foodable_app') then
+        raise exception 'foodable_app role missing';
+    end if;
+
+    if exists (
+        select 1
+        from pg_roles
+        where rolname = 'foodable_app'
+          and (rolsuper or rolbypassrls)
+    ) then
+        raise exception 'foodable_app must not be superuser or bypass RLS';
+    end if;
+
+    if exists (
+        select 1
+        from pg_auth_members m
+        join pg_roles member on member.oid = m.member
+        join pg_roles granted on granted.oid = m.roleid
+        where member.rolname = 'foodable_app'
+          and granted.rolbypassrls
+    ) then
+        raise exception 'foodable_app is a member of a bypassrls role';
+    end if;
+
+    if not has_table_privilege(
+        'foodable_app', 'public.profiles', 'SELECT, INSERT, UPDATE, DELETE'
+    ) then
+        raise exception 'foodable_app missing DML on profiles';
+    end if;
+
+    if exists (
+        select 1
+        from pg_namespace n
+        where n.nspname = 'foodable_migrations'
+          and has_schema_privilege('foodable_app', n.oid, 'USAGE')
+    ) then
+        raise exception 'foodable_app must not use foodable_migrations schema';
+    end if;
+
 end;
 $$;

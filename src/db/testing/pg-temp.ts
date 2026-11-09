@@ -5,6 +5,7 @@ export type TempPostgres = {
     url: string;
     dir: string;
     psql(args: string[]): Promise<{ ok: boolean; out: string }>;
+    psqlAs(role: string, args: string[]): Promise<{ ok: boolean; out: string }>;
     applyFile(path: string): Promise<{ ok: boolean; out: string }>;
     scalar(sql: string): Promise<string>;
     stop(opts?: { keep?: boolean }): Promise<void>;
@@ -33,24 +34,41 @@ export async function startTempPostgres(opts?: {
 
     await $`${bin}pg_ctl -D ${data} -l ${tmp}/log -w -o ${`-p ${port} -k ${tmp} -h 127.0.0.1`} start`.quiet();
 
-    const psqlBase = [
-        `${bin}psql`,
-        "-h",
-        tmp,
-        "-p",
-        String(port),
-        "-U",
-        "postgres",
-        "-d",
-        "postgres",
-        "-q",
-        "-X",
-        "-v",
-        "ON_ERROR_STOP=1",
-    ];
+    function psqlBaseFor(role: string): string[] {
+        return [
+            `${bin}psql`,
+            "-h",
+            tmp,
+            "-p",
+            String(port),
+            "-U",
+            role,
+            "-d",
+            "postgres",
+            "-q",
+            "-X",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ];
+    }
 
     async function psql(args: string[]): Promise<{ ok: boolean; out: string }> {
-        const res = await $`${[...psqlBase, ...args]}`.quiet().nothrow();
+        const res = await $`${[...psqlBaseFor("postgres"), ...args]}`
+            .quiet()
+            .nothrow();
+        return {
+            ok: res.exitCode === 0,
+            out: (res.stdout.toString() + res.stderr.toString()).trim(),
+        };
+    }
+
+    async function psqlAs(
+        role: string,
+        args: string[],
+    ): Promise<{ ok: boolean; out: string }> {
+        const res = await $`${[...psqlBaseFor(role), ...args]}`
+            .quiet()
+            .nothrow();
         return {
             ok: res.exitCode === 0,
             out: (res.stdout.toString() + res.stderr.toString()).trim(),
@@ -63,6 +81,7 @@ export async function startTempPostgres(opts?: {
         url: `postgres://postgres@127.0.0.1:${port}/postgres`,
         dir: tmp,
         psql,
+        psqlAs,
         applyFile(path: string) {
             return psql(["-1", "-f", path]);
         },
