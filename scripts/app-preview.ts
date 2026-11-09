@@ -414,6 +414,7 @@ function food(
         nutritionSource: null,
         allergens: [],
         offSourceId: null,
+        offQuality: null,
         genericFoodId: null,
         usualProductId: null,
         usualStoreId: null,
@@ -427,8 +428,7 @@ function food(
     };
 }
 
-// Views are cast with `as never`: this script is not typechecked (CI's
-// typecheck covers src/ only) and the fixtures only carry what renderers read.
+// Views are cast with `as never`: the fixtures only carry what renderers read.
 function previewFoodCatalog() {
     const catalog = [
         food("f-eggs", "Eggs", 143, {

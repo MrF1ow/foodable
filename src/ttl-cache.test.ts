@@ -11,6 +11,7 @@ describe("createTtlCache", () => {
         expect(fetcher).toHaveBeenCalledTimes(1);
 
         // Cross the (short) TTL with a real timer rather than mocking Date.now.
+        // oxlint-disable-next-line foodable/no-wall-clock-waits -- the TTL expiring is the behaviour under test
         await new Promise((r) => setTimeout(r, 20));
 
         fetcher.mockImplementation(() => Promise.resolve("v2"));
@@ -42,6 +43,7 @@ describe("createTtlCache", () => {
         const get = createTtlCache(10, fetcher);
         expect(await get()).toEqual({ data: "v1", stale: false });
 
+        // oxlint-disable-next-line foodable/no-wall-clock-waits -- the TTL expiring is the behaviour under test
         await new Promise((r) => setTimeout(r, 20));
         fetcher.mockImplementation(() => Promise.reject(new Error("boom")));
 

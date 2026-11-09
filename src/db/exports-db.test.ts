@@ -47,8 +47,7 @@ describeDb(pgAvailable !== null, "export archives db", (getCtx) => {
 
     test("expired row is not returned", async () => {
         const store = liveExportArchiveStore();
-        await store.put(userId, new Uint8Array([0x50, 0x4b]), 0);
-        await new Promise((r) => setTimeout(r, 5));
+        await store.put(userId, new Uint8Array([0x50, 0x4b]), -1);
         expect(await store.read(userId)).toBeNull();
     });
 
@@ -60,9 +59,8 @@ describeDb(pgAvailable !== null, "export archives db", (getCtx) => {
             values (${otherId}, ${"other@test.local"})
         `;
         const store = liveExportArchiveStore();
-        await store.put(userId, new Uint8Array([1]), 0);
+        await store.put(userId, new Uint8Array([1]), -1);
         await store.put(otherId, new Uint8Array([2]), 3600);
-        await new Promise((r) => setTimeout(r, 5));
         await store.sweepExpired();
         const [{ n: expired }] = await sql`
             select count(*)::int as n from export_archives where user_id = ${userId}

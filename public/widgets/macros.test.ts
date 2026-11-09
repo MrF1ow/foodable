@@ -613,8 +613,8 @@ const importWidget = await (async () => {
 
 // Render the map step over a one-row file. Returns its HTML.
 function mapStepFor(
-    headers: string[],
-    row: string[],
+    headers: readonly string[],
+    row: readonly string[],
     drinkUnit: string | null,
 ) {
     const w = importWidget;

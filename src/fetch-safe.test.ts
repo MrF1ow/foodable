@@ -326,6 +326,7 @@ describe("createSafeFetcher", () => {
             fetch: async (url) => {
                 hop += 1;
                 if (hop < 4) {
+                    // oxlint-disable-next-line foodable/no-wall-clock-waits -- simulates a slow upstream to exercise the fetcher's wall-clock deadline
                     await new Promise((r) => setTimeout(r, 40));
                     return okResponse("", {
                         status: 302,
@@ -352,6 +353,7 @@ describe("createSafeFetcher", () => {
             fetch: async (url) => {
                 const href = String(url);
                 if (href.startsWith("https://other.example/robots.txt")) {
+                    // oxlint-disable-next-line foodable/no-wall-clock-waits -- simulates a slow upstream to exercise the fetcher's wall-clock deadline
                     await new Promise((r) => setTimeout(r, 400));
                     return okResponse("User-agent: *\nAllow: /");
                 }

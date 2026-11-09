@@ -2,7 +2,7 @@
  * Headless browser check for Turbo-driven in-app navigation (P8).
  * Starts the fixture server, drives Chromium over CDP, exits non-zero on failure.
  */
-import { spawn } from "node:child_process";
+import { spawn } from "bun";
 import { join } from "node:path";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../src/tokens.js";
 
@@ -29,8 +29,7 @@ function record(name: string, pass: boolean, detail: unknown) {
 }
 
 const fixture = spawn(
-    "bun",
-    ["run", join(import.meta.dir, "nav-check-fixture.ts")],
+    ["bun", "run", join(import.meta.dir, "nav-check-fixture.ts")],
     {
         cwd: join(import.meta.dir, ".."),
         stdout: "inherit",
@@ -56,8 +55,8 @@ async function waitFixture() {
 }
 
 const chrome = spawn(
-    CHROME,
     [
+        CHROME,
         "--headless=new",
         "--no-sandbox",
         "--disable-gpu",

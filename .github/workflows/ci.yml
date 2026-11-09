@@ -3,8 +3,17 @@ name: CI
 # Runs on every pull request and on every push to main. Railway deploys main,
 # so this is the last gate before a change reaches the household's deploy.
 #
-# The format check keeps the tree prettier-clean, which is what makes
-# `bun run format` safe to run: it only ever touches files you actually edited.
+# The `check` job runs `scripts/check-changed.ts` on a pull request, the same
+# mapping as `bun run check:changed`: format, lint, typecheck and tests for what
+# the PR changed. A push to main does not go through that script: a PR can edit
+# it, and the push run is the last check before Railway deploys, so it lists
+# every command as its own step instead. The format check keeps the tree
+# prettier-clean, which is what makes `bun run format` safe to run: it only ever
+# touches files you actually edited.
+#
+# The repo's own rules (PR conventions, migration safety, skill drift, the
+# agent context budget) are judged by main's scripts, so a PR cannot loosen
+# the rule it is judged by: see policy.yml, and the `migrations` job below.
 
 on:
     pull_request:
@@ -28,6 +37,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
+                  # check-changed diffs against the base branch.
+                  fetch-depth: 0
 
             - name: Set up Bun
               uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -39,12 +50,6 @@ jobs:
 
             - name: Generate login templates
               run: bun run gen:all
-
-            - name: Check formatting
-              run: bun run format:check
-
-            - name: Typecheck src/
-              run: bun run typecheck
 
             - name: Install PostgreSQL for database tests
               run: |
@@ -60,8 +65,37 @@ jobs:
                   PG_BIN=$(dirname "${bins[0]}")
                   echo "PG_BIN=$PG_BIN" >> "$GITHUB_ENV"
 
-            - name: Run tests
+            - name: Run the checks for the changed files
+              if: github.event_name == 'pull_request'
+              env:
+                  BASE_REF: ${{ github.base_ref }}
+              run: |
+                  set -euo pipefail
+                  git fetch --no-tags origin "$BASE_REF"
+                  bun run scripts/check-changed.ts --base "origin/$BASE_REF"
+
+            # A push to main runs every check by listing the commands here, not
+            # through scripts/check-changed.ts, which the merged PR may have
+            # weakened. PG_BIN comes from the Postgres step above.
+            - name: Check formatting
+              if: github.event_name != 'pull_request'
+              run: bun run format:check
+
+            - name: Lint
+              if: github.event_name != 'pull_request'
+              run: bun run lint
+
+            - name: Typecheck
+              if: github.event_name != 'pull_request'
+              run: bun run typecheck
+
+            - name: Run the tests
+              if: github.event_name != 'pull_request'
               run: bun test
+
+            - name: Dry-run the migrations
+              if: github.event_name != 'pull_request'
+              run: bun run db:dryrun
 
     docker:
         runs-on: ubuntu-latest
@@ -110,7 +144,36 @@ jobs:
                     echo "no migration changes"
                     exit 0
                   fi
-                  bun run scripts/migration-safety.ts --base "$base"
+                  # A pull request is judged by the base branch's copy of the
+                  # safety rules, so it cannot loosen the rule it is judged by;
+                  # an edit to them takes effect once it merges. The script
+                  # imports its helpers relative to its own file, and git runs
+                  # in this checkout, so main's rules read the PR's migrations.
+                  # A push to main has nothing to be judged against: it runs
+                  # its own copy.
+                  #
+                  # This runs from the PR checkout, so bun would read the PR's
+                  # bunfig.toml first, and its `preload` could neutralise the
+                  # checker. --config points bun at the base's bunfig.toml
+                  # (an empty one when the base has none); --no-env-file keeps
+                  # the PR's .env out too. The required `policy` check runs the
+                  # same rules with no PR code at all; this run is a second
+                  # line, because a PR can edit this file.
+                  checker="scripts/migration-safety.ts"
+                  if [ "$EVENT_NAME" = "pull_request" ]; then
+                    git worktree add --detach "$RUNNER_TEMP/base" "$base"
+                    checker="$RUNNER_TEMP/base/scripts/migration-safety.ts"
+                    bunfig="$RUNNER_TEMP/base/bunfig.toml"
+                    if [ ! -f "$bunfig" ]; then
+                      bunfig="$RUNNER_TEMP/empty-bunfig.toml"
+                      : > "$bunfig"
+                    fi
+                    bun --config="$bunfig" --no-env-file "$checker" --base "$base"
+                  else
+                    bun run "$checker" --base "$base"
+                  fi
+                  # The dry run below needs the PR's migrations, so it runs
+                  # from the PR checkout.
                   echo "postgresql binaries:"
                   ls /usr/lib/postgresql || true
                   shopt -s nullglob
