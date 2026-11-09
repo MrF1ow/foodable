@@ -300,6 +300,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/widgets.ts": "platform",
     "bun.lock": "deps",
     "flags/rollout.yml": "platform",
+    "src/flags-rollout.ts": "platform",
 };
 
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
