@@ -142,6 +142,10 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^scripts\/conventions\/skills\.test\.ts$/,
         },
         {
+            when: /^flags\/rollout\.yml$/,
+            tests: /^src\/flags-rollout\.test\.ts$/,
+        },
+        {
             when: /^docs\/fetcher\.md$/,
             tests: /^src\/fetch-safe\.test\.ts$/,
         },
