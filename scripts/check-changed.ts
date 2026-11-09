@@ -4,7 +4,8 @@
 //
 //   --base <ref>  compare against <ref> (default origin/main)
 //   --list        print the checks and exit without running them
-//   --all         every check, ignoring what changed (what a push to main runs)
+//   --all         every check, ignoring what changed (CI's push to main lists
+//                 the same commands in ci.yml instead of running this script)
 //   --json        print the checks as a JSON array and exit (implies --list);
 //                 for CI, which feeds each `cmd` to a step
 //   --paths a,b   pretend exactly these paths changed (debugging the mapping)
@@ -23,7 +24,8 @@
 //
 // What this mirrors from .github/workflows/ci.yml: format, typecheck, tests and
 // the migrations job. It does not mirror the docker build, CodeQL, dependency
-// review, workflow lint, pr-lint or the gate: those run only in CI.
+// review, workflow lint, pr-lint or the policy checks (skill drift, agent
+// context budget, conventions): those run only in CI.
 
 export type Check = {
     /** Stable machine name: `format`, `typecheck`, `test`, … */
@@ -128,105 +130,155 @@ const FULL_SUITE_RATIO_MIN_TESTS = 20;
  * like conventions.test.ts): they run, but do not count as covering the file,
  * so a source file only they reach still falls back to the full suite.
  */
-const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] = [
-    // ---- docs and config that tests read from disk
-    {
-        when: /^CONTRIBUTING\.md$/,
-        tests: /^scripts\/conventions\/conventions\.test\.ts$/,
-    },
-    {
-        when: /^(ROADMAP\.md|planner\/)/,
-        tests: /^scripts\/conventions\/planner\.test\.ts$/,
-    },
-    {
-        when: /^(CLAUDE\.md|AGENTS\.md|\.claude\/skills\/|\.agents\/skills)/,
-        tests: /^scripts\/conventions\/skills\.test\.ts$/,
-    },
-    {
-        when: /^docs\/fetcher\.md$/,
-        tests: /^src\/fetch-safe\.test\.ts$/,
-    },
-    // ---- scanners that read every source file
-    {
-        when: /^(src|scripts)\/.+\.(ts|js)$/,
-        tests: /^src\/(flags|web\/route-map)\.test\.ts$/,
-        incidental: true,
-    },
-    {
-        when: /^src\/web\/.+\.ts$/,
-        tests: /^src\/copy\/notices-inline-guard\.test\.ts$/,
-        incidental: true,
-    },
-    {
-        when: /^src\/domain\/csv\.ts$/,
-        tests: /^src\/domain\/geometry\.test\.ts$/,
-    },
-    // ---- fixtures read from disk
-    {
-        when: /^src\/domain\/fixtures\//,
-        tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|social-readers)|db\/recipes|mcp)\.test\.ts$/,
-    },
-    {
-        when: /^src\/web\/fixtures\//,
-        tests: /^src\/web\/shell(-v2)?\.test\.ts$/,
-    },
-    // ---- assets
-    // Widget templates are assembled by src/widgets.ts and driven by the
-    // browser-side tests next to them.
-    {
-        when: /^public\/widgets\/src\/templates\//,
-        tests: /^(src\/(widgets|widget-frames)|public\/widgets\/[^/]+)\.test\.ts$/,
-    },
-    // The app stylesheet layer is asserted by the app-* tests and framed by the
-    // widget tests; the token tests read its generated sheets.
-    {
-        when: /^public\/app\//,
-        tests: /^src\/(app-[^/]+|widgets|widget-frames|tokens|tokens-v2)\.test\.ts$/,
-    },
-    {
-        when: /^src\/web\/client\//,
-        tests: /^src\/app-(js|assets)\.test\.ts$|^src\/web\/client\/.+\.test\.ts$/,
-    },
-    // Tokens generate the CSS the app and widgets ship.
-    {
-        when: /^(src\/tokens\.ts|scripts\/gen-tokens\.ts)$/,
-        tests: /^src\/(tokens|tokens-v2|app-brand|app-css|widgets|public-site)\.test\.ts$/,
-    },
-    // Brand geometry and the generated icons / static assets.
-    {
-        when: /^(src\/brand\.ts|scripts\/gen-icons\.ts|public\/(brand\/|fonts\/|favicon|apple-touch-icon|icon-))/,
-        tests: /^src\/(brand|app-assets)\.test\.ts$/,
-    },
-    // The generated login page and its inputs.
-    {
-        when: /^(public\/login\.html|public\/robots\.txt|scripts\/gen-login\.ts|scripts\/site-partials\.ts)$/,
-        tests: /^src\/(public-site|oauth)\.test\.ts$/,
-    },
-    // Tool copy and the agent surface are pinned by the MCP tests.
-    {
-        when: /^src\/copy\//,
-        tests: /^src\/(mcp|mcp\.format)\.test\.ts$|^src\/copy\/[^/]+\.test\.ts$/,
-    },
-    {
-        when: /^src\/mcp(\/|\.ts$)/,
-        tests: /^src\/(mcp|mcp\.format)\.test\.ts$|^src\/mcp\/[^/]+\.test\.ts$/,
-    },
-    // food-merge-job.test.ts spawns the script instead of importing it.
-    // The rule test runs oxlint over the fixtures (nothing imports them) and
-    // must also run when a rule file is deleted.
-    {
-        when: /^(scripts\/lint-rules\/|\.oxlintrc\.json$)/,
-        tests: /^scripts\/lint-rules\/rules\.test\.ts$/,
-    },
-    {
-        when: /^scripts\/merge-duplicate-foods\.ts$/,
-        tests: /^src\/domain\/food-merge-job\.test\.ts$/,
-    },
-    {
-        when: /^scripts\/migration-safety(\/|\.ts$)/,
-        tests: /^scripts\/migration-safety\/[^/]+\.test\.ts$/,
-    },
-];
+export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
+    [
+        // ---- docs and config that tests read from disk
+        {
+            when: /^CONTRIBUTING\.md$/,
+            tests: /^scripts\/conventions\/conventions\.test\.ts$/,
+        },
+        {
+            when: /^(ROADMAP\.md|planner\/)/,
+            tests: /^scripts\/conventions\/planner\.test\.ts$/,
+        },
+        {
+            when: /^(CLAUDE\.md|AGENTS\.md|\.claude\/skills\/|\.agents\/skills)/,
+            tests: /^scripts\/conventions\/skills\.test\.ts$/,
+        },
+        {
+            when: /^docs\/fetcher\.md$/,
+            tests: /^src\/fetch-safe\.test\.ts$/,
+        },
+        // ---- scanners that read every source file
+        {
+            when: /^(src|scripts)\/.+\.(ts|js)$/,
+            tests: /^src\/(flags|web\/route-map)\.test\.ts$/,
+            incidental: true,
+        },
+        {
+            when: /^src\/web\/.+\.ts$/,
+            tests: /^src\/copy\/notices-inline-guard\.test\.ts$/,
+            incidental: true,
+        },
+        // field.test.ts globs src/web/**/*.ts for hand-written labels;
+        // turbo-forms.test.ts reads pages/household.ts, components/ui.ts and shell.ts.
+        {
+            when: /^src\/web\/.+\.ts$/,
+            tests: /^src\/web\/(components\/field|turbo-forms)\.test\.ts$/,
+            incidental: true,
+        },
+        // notices.test.ts globs src/**/*.ts for hand-built allergen and expiry markup.
+        {
+            when: /^src\/.+\.ts$/,
+            tests: /^src\/web\/components\/notices\.test\.ts$/,
+            incidental: true,
+        },
+        // toast.test.ts reads every route module, toast-flash.ts and client/toast.js.
+        {
+            when: /^src\/web\/(routes\/.+\.ts|components\/toast-flash\.ts|client\/toast\.js)$/,
+            tests: /^src\/web\/components\/toast\.test\.ts$/,
+            incidental: true,
+        },
+        // ui.test.ts asserts every page module (and loaders.ts) goes through pageHeader.
+        {
+            when: /^src\/web\/(pages\/.+|loaders)\.ts$/,
+            tests: /^src\/web\/components\/ui\.test\.ts$/,
+            incidental: true,
+        },
+        // shared-import.test.ts reads these page and component sources as text.
+        {
+            when: /^src\/web\/(pages\/(fridge|grocery|recipes|nutrition)|components\/(ui|page-markup))\.ts$|^src\/web\/client\/food-picker\.js$/,
+            tests: /^src\/web\/components\/shared-import\.test\.ts$/,
+        },
+        // shell.test.ts evaluates client/shell.js, which sits outside its import graph.
+        {
+            when: /^src\/web\/client\/shell\.js$/,
+            tests: /^src\/web\/shell\.test\.ts$/,
+        },
+        {
+            when: /^src\/domain\/csv\.ts$/,
+            tests: /^src\/domain\/geometry\.test\.ts$/,
+        },
+        // ---- fixtures read from disk
+        {
+            when: /^src\/domain\/fixtures\//,
+            tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|social-readers)|db\/recipes|mcp)\.test\.ts$/,
+        },
+        {
+            when: /^src\/web\/fixtures\//,
+            tests: /^src\/web\/shell(-v2)?\.test\.ts$/,
+        },
+        // ---- assets
+        // Widget templates are assembled by src/widgets.ts and driven by the
+        // browser-side tests next to them.
+        {
+            when: /^public\/widgets\/src\/templates\//,
+            tests: /^(src\/(widgets|widget-frames)|public\/widgets\/[^/]+)\.test\.ts$/,
+        },
+        // The app stylesheet layer is asserted by the app-* tests and framed by the
+        // widget tests; the token tests read its generated sheets.
+        {
+            when: /^public\/app\//,
+            tests: /^src\/(app-[^/]+|widgets|widget-frames|tokens|tokens-v2)\.test\.ts$/,
+        },
+        // Tests that read the app stylesheets from disk: field.test.ts reads
+        // app.css, the v2 tests read public/app/v2/*.css, recipes.test.ts reads
+        // app.css for one rule.
+        {
+            when: /^public\/app\//,
+            tests: /^src\/web\/(components\/field|components\/v2\/[^/]+|pages\/recipes)\.test\.ts$/,
+        },
+        // turbo-forms.test.ts reads the generated login page.
+        {
+            when: /^public\/login\.html$/,
+            tests: /^src\/web\/turbo-forms\.test\.ts$/,
+            incidental: true,
+        },
+        {
+            when: /^src\/web\/client\//,
+            tests: /^src\/app-(js|assets)\.test\.ts$|^src\/web\/client\/.+\.test\.ts$/,
+        },
+        // Tokens generate the CSS the app and widgets ship.
+        {
+            when: /^(src\/tokens\.ts|scripts\/gen-tokens\.ts)$/,
+            tests: /^src\/(tokens|tokens-v2|app-brand|app-css|widgets|public-site)\.test\.ts$/,
+        },
+        // Brand geometry and the generated icons / static assets.
+        {
+            when: /^(src\/brand\.ts|scripts\/gen-icons\.ts|public\/(brand\/|fonts\/|favicon|apple-touch-icon|icon-))/,
+            tests: /^src\/(brand|app-assets|web\/manifest)\.test\.ts$/,
+        },
+        // The generated login page and its inputs.
+        {
+            when: /^(public\/login\.html|public\/robots\.txt|scripts\/gen-login\.ts|scripts\/site-partials\.ts)$/,
+            tests: /^src\/(public-site|oauth)\.test\.ts$/,
+        },
+        // Tool copy and the agent surface are pinned by the MCP tests.
+        {
+            when: /^src\/copy\//,
+            tests: /^src\/(mcp|mcp\.format)\.test\.ts$|^src\/copy\/[^/]+\.test\.ts$/,
+        },
+        {
+            when: /^src\/mcp(\/|\.ts$)/,
+            tests: /^src\/(mcp|mcp\.format)\.test\.ts$|^src\/mcp\/[^/]+\.test\.ts$/,
+        },
+        // The rule test runs oxlint over the fixtures (nothing imports them) and
+        // must also run when a rule file is deleted; check-suppressions.test.ts
+        // reads its own fixtures the same way.
+        {
+            when: /^(scripts\/lint-rules\/|\.oxlintrc\.json$)/,
+            tests: /^scripts\/lint-rules\/[^/]+\.test\.ts$/,
+        },
+        // food-merge-job.test.ts spawns the script instead of importing it.
+        {
+            when: /^scripts\/merge-duplicate-foods\.ts$/,
+            tests: /^src\/domain\/food-merge-job\.test\.ts$/,
+        },
+        {
+            when: /^scripts\/migration-safety(\/|\.ts$)/,
+            tests: /^scripts\/migration-safety\/[^/]+\.test\.ts$/,
+        },
+    ];
 
 const CONVENTIONS_TEST = "scripts/conventions/conventions.test.ts";
 // Fails when a path a skill watches disappears; deleted paths reach no other

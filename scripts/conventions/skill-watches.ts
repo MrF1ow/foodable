@@ -6,7 +6,10 @@
  *       - scripts/nav-check*.ts
  *
  * Meaning: a PR that changes any of these paths must update the skill in the
- * same PR. Entries are paths or globs (Bun.Glob syntax). Accepted forms: an
+ * same PR. Entries are paths or globs (Bun.Glob syntax), optionally followed by
+ * `#<key>` (`package.json#scripts`): the entry then matches only when that
+ * top-level key of the JSON file differs between the PR's base and head, so a
+ * version bump does not count as a change to `scripts`. Accepted forms: an
  * indented or zero-indent block list (blank and comment lines allowed inside)
  * and a one-line flow list (`watches: [a.ts, b.ts]`). Returns [] only when the
  * frontmatter or the `watches:` key is absent. A `watches:` key that yields no
@@ -47,7 +50,9 @@ export function parseWatches(text: string): string[] {
         if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
         const item = line.match(/^\s*-\s+(.+?)\s*$/);
         if (item?.[1]) {
-            out.push(unquote(item[1]));
+            // A YAML inline comment needs whitespace before `#`; a `#key`
+            // selector has none.
+            out.push(unquote(item[1].replace(/\s+#.*$/, "")));
             continue;
         }
         if (/^[A-Za-z_][\w-]*\s*:/.test(line)) break;

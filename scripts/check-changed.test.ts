@@ -3,6 +3,7 @@ import {
     changedChecks,
     parseArgs,
     resolveImport,
+    TEST_RULES,
     type Check,
 } from "./check-changed.ts";
 
@@ -717,5 +718,120 @@ describe("changedChecks: lint rules", () => {
         expect(byId(checks, "test").cmd).toContain(
             "scripts/lint-rules/rules.test.ts",
         );
+    });
+});
+
+describe("changedChecks: tests that scan or read the web layer", () => {
+    const WEB_TESTS = [
+        "src/web/components/field.test.ts",
+        "src/web/turbo-forms.test.ts",
+        "src/web/components/v2/components-css.test.ts",
+        "src/web/components/toast.test.ts",
+        "src/web/components/ui.test.ts",
+        "src/web/components/notices.test.ts",
+    ];
+    const files = [...FILES, ...WEB_TESTS, "src/web/pages/household.ts"];
+    const testCmd = (paths: string[]) =>
+        byId(
+            changedChecks(paths, {
+                files: [...files, "src/web/pages/household.test.ts"],
+                imports: IMPORTS,
+            }),
+            "test",
+        ).cmd;
+
+    test("a web page runs the label scan and the Turbo forms test", () => {
+        const cmd = testCmd(["src/web/pages/household.ts"]);
+        expect(cmd).toContain("src/web/components/field.test.ts");
+        expect(cmd).toContain("src/web/turbo-forms.test.ts");
+        expect(cmd).toContain("src/web/components/ui.test.ts");
+        expect(cmd).toContain("src/web/components/notices.test.ts");
+    });
+
+    test("a route runs the toast scan", () => {
+        expect(testCmd(["src/web/routes/fridge.ts"])).toContain(
+            "src/web/components/toast.test.ts",
+        );
+    });
+
+    test("an app stylesheet runs the tests that read it", () => {
+        const cmd = testCmd(["public/app/v2/components.css"]);
+        expect(cmd).toContain("src/web/components/field.test.ts");
+        expect(cmd).toContain("src/web/components/v2/components-css.test.ts");
+    });
+
+    test("the login page runs the Turbo forms test", () => {
+        expect(testCmd(["public/login.html"])).toContain(
+            "src/web/turbo-forms.test.ts",
+        );
+    });
+
+    test("a scanner alone does not cover a file nothing else tests", () => {
+        // src/web/pages/household.ts has no sibling, importer or covering rule:
+        // the incidental scanners ride along but the full suite still runs.
+        const checks = changedChecks(["src/web/pages/household.ts"], {
+            files,
+            imports: {},
+        });
+        expect(byId(checks, "test").cmd).toEqual(["bun", "test"]);
+    });
+});
+
+// Every test that reads files from the repo must be selected when what it
+// reads changes. The import graph cannot see a file read from disk, so each
+// such test is either named by a TEST_RULES row or listed here with the reason
+// the graph or FULL_SUITE already covers it. A new test that reads a repo path
+// fails this until one of the two is done.
+describe("changedChecks: tests that read files are mapped", () => {
+    const READS =
+        /readFileSync\(|Bun\.file\(|readFile\(|readdirSync\(|readdir\(|new Glob\(|Bun\.Glob/;
+
+    const EXEMPT: Record<string, string> = {
+        "scripts/check-changed.test.ts":
+            "reads the tracked tree only to build this guard; a change to check-changed.ts selects it as its sibling",
+        "src/db/migrate.test.ts":
+            "reads db/migrations/ and db/bootstrap.sql, and src/db/ changes; FULL_SUITE already runs everything for all three",
+    };
+
+    const tracked = (): string[] => {
+        const proc = Bun.spawnSync(["git", "ls-files", "*.test.ts"], {
+            cwd: `${import.meta.dir}/..`,
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        if (proc.exitCode !== 0) {
+            throw new Error(`git ls-files failed: ${proc.stderr.toString()}`);
+        }
+        return proc.stdout
+            .toString()
+            .split("\n")
+            .filter((p) => p !== "");
+    };
+
+    const named = (path: string) => TEST_RULES.some((r) => r.tests.test(path));
+
+    test("each is named by a TEST_RULES row or exempt with a reason", async () => {
+        const unmapped: string[] = [];
+        for (const path of tracked()) {
+            if (EXEMPT[path] !== undefined || named(path)) continue;
+            const text = await Bun.file(`${import.meta.dir}/../${path}`).text();
+            if (READS.test(text)) unmapped.push(path);
+        }
+        expect(unmapped).toEqual([]);
+    });
+
+    test("the exempt list holds only real, unnamed readers with a reason", async () => {
+        const all = new Set(tracked());
+        for (const [path, reason] of Object.entries(EXEMPT)) {
+            expect(all.has(path), `${path} is not a tracked test`).toBe(true);
+            expect(reason.length, `${path} needs a reason`).toBeGreaterThan(10);
+            expect(named(path), `${path} is named by a rule: drop it`).toBe(
+                false,
+            );
+            const text = await Bun.file(`${import.meta.dir}/../${path}`).text();
+            expect(READS.test(text), `${path} reads nothing: drop it`).toBe(
+                true,
+            );
+        }
     });
 });

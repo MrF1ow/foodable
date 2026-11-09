@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync } from "fs";
 import { lstat, readlink, readdir } from "fs/promises";
 import { join, resolve } from "path";
+import { splitWatch } from "./skill-drift.ts";
 import { parseWatches } from "./skill-watches.js";
 
 const root = join(import.meta.dir, "../..");
@@ -215,7 +216,8 @@ describe("skill watches", () => {
         for (const skillPath of await skillMarkdownPaths()) {
             const watches = parseWatches(await Bun.file(skillPath).text());
             for (const entry of watches) {
-                const glob = new Bun.Glob(entry);
+                // `path#key` selects one JSON key; the file part is what must exist.
+                const glob = new Bun.Glob(splitWatch(entry).glob);
                 const hit = files.some((f) => glob.match(f));
                 if (!hit) {
                     throw new Error(
@@ -224,6 +226,17 @@ describe("skill watches", () => {
                 }
             }
         }
+    });
+
+    test("a #key selector is kept on the entry for skill-drift to read", () => {
+        expect(
+            parseWatches("---\nname: x\nwatches:\n- package.json#scripts\n---"),
+        ).toEqual(["package.json#scripts"]);
+        expect(splitWatch("package.json#scripts")).toEqual({
+            glob: "package.json",
+            key: "scripts",
+        });
+        expect(splitWatch("src/**")).toEqual({ glob: "src/**" });
     });
 
     test("foodable-test declares a non-empty watches list", async () => {

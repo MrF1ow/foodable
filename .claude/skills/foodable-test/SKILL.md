@@ -2,7 +2,7 @@
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
 watches:
-    - package.json
+    - package.json#scripts
     - docker-compose.yml
     - Dockerfile
     - .env.example
@@ -84,8 +84,8 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 - `.env`, and any value in it (never print, copy or commit). `docker-compose.yml` loads `.env`, so do not use it for verification.
 - The design file `Foodable Design.figcraft` in the user's designs folder: read-only, read it with the FigCraft tools, never edit or save it.
 - The user's running dev server, `foodable*.service` units and `foodable-db.service`, and anything on :8080 or :54330. Never kill, restart or reuse them.
-- `main`, rulesets, the `gate:approved` label.
+- `main` and the rulesets.
 
 ## When this skill is out of date
 
-The `watches:` list in the frontmatter names the files this skill describes. If your change touches one of them, update this skill in the same PR.
+The `watches:` list in the frontmatter names the files this skill describes. If your change touches one of them, update this skill in the same PR: the **skill-drift** policy check fails the PR otherwise (`bun scripts/conventions/skill-drift.ts` runs it locally). Skills and CLAUDE.md are also held to a size budget (`.github/agent-context-budget.json`); growing past it needs the `agent-context-increase` label, and `bun scripts/conventions/context-budget.ts` checks it locally.

@@ -12,10 +12,8 @@ Use when opening or updating a pull request.
 Run, in order:
 
 1. `bun run gen:all`
-2. `bun run format:check`
-3. `bun run typecheck`
-4. `bun test`
-5. `bun run pr:check`
+2. `bun run check:changed` (format, lint, typecheck and the tests CI's `check` job runs for your changes; `--all` runs everything)
+3. `bun run pr:check body.md` (title, branch, body sections, blast floor)
 
 ## Title and body
 
@@ -23,7 +21,11 @@ Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title `<type>(<scope>)[!]: 
 
 ## Planner
 
-Every PR says `Closes <ID>`, `Part of <ID>`, or `None.` under `## Planner`. When it names an item, follow the foodable-planner skill ([.claude/skills/foodable-planner/SKILL.md](.claude/skills/foodable-planner/SKILL.md)): after the PR is open, run `bun run planner --close <ID> --pr <number>` (or `--start` for `Part of`) and push the result. `bun run pr:check body.md --pr <number>` runs the same check as CI.
+Every PR says `Closes <ID>`, `Part of <ID>`, or `None.` under `## Planner`. When it names an item, follow the foodable-planner skill ([.claude/skills/foodable-planner/SKILL.md](.claude/skills/foodable-planner/SKILL.md)): after the PR is open, run `bun run planner --close <ID> --pr <number>` (or `--start` for `Part of`) and push the result. No check compares the item files with the body since #228.
+
+## Merging
+
+The required checks are `check`, `docker`, `migrations`, `dependency-review` and `policy` (main's copy of the conventions, migration safety, skill drift and the agent context budget). When they are green and review threads are resolved, the PR merges with no review or label.
 
 Path floors, branch naming, and title parsing are defined in [scripts/conventions/](scripts/conventions/).
 

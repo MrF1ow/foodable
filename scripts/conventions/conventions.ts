@@ -47,6 +47,45 @@ export const GRANDFATHERED_BRANCHES = [
     "cursor/",
 ] as const;
 
+// Files the policy workflow (.github/workflows/policy.yml) runs from main,
+// never from the pull request: a prefix matches everything below it, a name
+// matches itself and anything that starts with it. A PR that edits one is still
+// judged by main's copy; the edit takes effect once it merges. The skills are
+// here because the skill-drift check reads their `watches:` from main.
+export const POLICY_PATHS = [
+    "scripts/conventions/",
+    "scripts/migration-safety",
+    "scripts/data-api-grants.ts",
+    ".github/agent-context-budget.json",
+    ".github/workflows/policy.yml",
+    ".claude/skills/",
+] as const;
+
+export function isPolicyPath(path: string): boolean {
+    return POLICY_PATHS.some((prefix) => path.startsWith(prefix));
+}
+
+// Files that define checks which run from the pull request itself (the `check`
+// job, the linter, the dependency pins), unlike POLICY_PATHS, which run from
+// main. A PR that edits one changes the checks that judge it, so the policy
+// check names them for the reviewer. policy.yml is not here: it is in
+// POLICY_PATHS and runs from main.
+const PR_CONTROLLED_CHECK_PREFIXES = [
+    ".github/workflows/",
+    "scripts/check-changed.ts",
+    "scripts/typecheck.ts",
+    "scripts/lint-rules/",
+    ".oxlintrc.json",
+    "package.json",
+] as const;
+
+export function isPrControlledCheckPath(path: string): boolean {
+    return (
+        !isPolicyPath(path) &&
+        PR_CONTROLLED_CHECK_PREFIXES.some((prefix) => path.startsWith(prefix))
+    );
+}
+
 export type Level = "low" | "medium" | "high";
 export type BlastLevel = Level;
 
@@ -59,8 +98,18 @@ export type Classified = {
 };
 type ClassifyResult = Classified;
 
+// The checks that judge a PR are themselves PR-controlled (check-changed,
+// typecheck, the linter and its rules, the agent settings and flow profile, the
+// context budget, bunfig), so editing one is as risky as editing the policy.
 const HIGH_EXACT = new Set([
     "package.json",
+    "bunfig.toml",
+    "scripts/check-changed.ts",
+    "scripts/typecheck.ts",
+    ".oxlintrc.json",
+    ".claude/settings.json",
+    ".flow/profile.yaml",
+    ".github/agent-context-budget.json",
     "Dockerfile",
     "docker-compose.yml",
     "railway.toml",
@@ -93,6 +142,7 @@ const HIGH_PREFIXES = [
     "scripts/migration-safety/",
     "scripts/migration-dryrun",
     "scripts/db-rehearse",
+    "scripts/lint-rules/",
     "public/widgets/src/shared/",
 ];
 
@@ -277,7 +327,6 @@ const LOW_REPO_PREFIXES = [
     ".flow/",
     "scripts/",
     ".cursor/",
-    ".oxlintrc.json",
     "public/fonts/",
     "design/",
 ];
@@ -412,10 +461,21 @@ function parseConventionalTitle(
     return { type, scope, breaking, subject };
 }
 
-export function parseTitle(title: string): ParsedTitle | { error: string } {
+const MAX_TITLE_LENGTH = 72;
+
+/**
+ * `maxLength` is the title length limit. Dependabot titles are generated from
+ * the dependency names and cannot be shortened, so `lintPr` lifts the limit
+ * for that author only.
+ */
+export function parseTitle(
+    title: string,
+    opts: { maxLength?: number } = {},
+): ParsedTitle | { error: string } {
+    const maxLength = opts.maxLength ?? MAX_TITLE_LENGTH;
     const revertMatch = /^Revert "(.+)"$/.exec(title);
     if (revertMatch) {
-        if (title.length > 72) {
+        if (title.length > maxLength) {
             return { error: `Invalid title: ${title}` };
         }
         const inner = parseConventionalTitle(revertMatch[1] ?? "");
@@ -425,7 +485,7 @@ export function parseTitle(title: string): ParsedTitle | { error: string } {
         return inner;
     }
 
-    if (title.length > 72) {
+    if (title.length > maxLength) {
         return { error: `Invalid title: ${title}` };
     }
     return parseConventionalTitle(title);
@@ -577,8 +637,11 @@ export function lintPr(input: {
 } {
     const findings: Finding[] = [];
     const { level: floor, areas, highPaths } = blastFloor(input.files);
-    const parsed = parseTitle(input.title);
     const isDependabot = input.author === "dependabot[bot]";
+    const parsed = parseTitle(
+        input.title,
+        isDependabot ? { maxLength: Infinity } : {},
+    );
 
     if ("error" in parsed) {
         findings.push({ rule: "title", message: parsed.error });

@@ -351,9 +351,7 @@ async function main(argv: string[]): Promise<void> {
         body,
     ]);
     console.log(url);
-    console.log(
-        "Add gate:approved and merge; the Release workflow does the rest.",
-    );
+    console.log("Merge it; the Release workflow does the rest.");
 }
 
 if (import.meta.main) {
