@@ -56,6 +56,11 @@ import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
 import { runAsSystem } from "./db/actor.js";
+import {
+    createPostgresRateLimitStore,
+    setRateLimitStore,
+    startRateLimitSweep,
+} from "./rate-limit.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
 import { initFlags } from "./flags.js";
@@ -491,6 +496,7 @@ if (import.meta.main) {
     await warmWidgets();
 
     useLiveLoginSessionStore();
+    setRateLimitStore(createPostgresRateLimitStore());
 
     // Background jobs act for no member. A timer keeps the async context it
     // was started in, so each job's ticks run as the system actor named here.
@@ -499,6 +505,7 @@ if (import.meta.main) {
     void runAsSystem("login session sweep", async () =>
         startLoginSessionCleanup(),
     );
+    void runAsSystem("rate limit sweep", async () => startRateLimitSweep());
     startFlagPinSweep();
     void runAsSystem("unverified recipe sweep", async () =>
         startUnverifiedRecipeCleanup(

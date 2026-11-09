@@ -15,6 +15,8 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     "src/household-token.ts",
     // Export sweep, login session sweep, unverified recipe sweep, fetch memory sweep.
     "src/index.ts",
+    // Shared rate-limit buckets and auth bans before an actor exists.
+    "src/rate-limit.ts",
     // OAuth sign-in, authorization codes, token exchange, client registration.
     "src/oauth.ts",
     // Postgres-backed OAuth login session rows before a member is known.

@@ -160,6 +160,66 @@ describeDb(pgAvailable !== null, "hot query indexes", (ctx) => {
         );
         expect(plan).toContain("stock_movements_fridge_item_idx");
     });
+
+    // Mirrors takeSlot in src/db/rate-limits.ts, the one statement every
+    // request runs: the window sum and the upsert both use the primary key.
+    test("rate limit window check reads and writes through the bucket primary key", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `with slot as (
+                 select
+                     t,
+                     date_trunc('second', t) as cur,
+                     t - make_interval(secs => 60::float8) as cutoff
+                 from (select now() as t) clock
+             ),
+             others as (
+                 select
+                     coalesce(sum(b.count), 0)::int as n,
+                     min(b.window_start) as oldest
+                 from public.rate_limit_buckets b, slot
+                 where b.key = 'plan-key'
+                     and b.window_start > slot.cutoff
+                     and b.window_start < slot.cur
+             ),
+             taken as (
+                 insert into public.rate_limit_buckets as b (
+                     key, window_start, count
+                 )
+                 select 'plan-key', slot.cur, 1
+                 from slot, others
+                 where others.n < 60
+                 on conflict (key, window_start) do update
+                 set count = b.count + 1
+                 where b.count + (select n from others) < 60
+                 returning b.count
+             )
+             select (select count from taken) as taken, others.n
+             from slot, others`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "rate_limit_buckets_pkey",
+            "rate_limit_buckets",
+        );
+        expect(plan).toContain(
+            "Conflict Arbiter Indexes: rate_limit_buckets_pkey",
+        );
+    });
+
+    test("ban reads use the auth_bans primary key", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select a.strikes
+             from (select now() as t) clock
+             left join public.auth_bans a on a.ip_key = 'plan-ip'`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(plan, "auth_bans_pkey", "auth_bans");
+    });
 });
 
 describeDb(pgAvailable !== null, "household page reads", (ctx) => {

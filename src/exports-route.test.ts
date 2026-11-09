@@ -62,11 +62,11 @@ function restoreSessionSecret(): void {
 }
 
 describe("GET /exports/:token", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         prevSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = SECRET;
         resetSessionSecretWarningForTest();
-        _resetBuckets();
+        await _resetBuckets();
     });
 
     afterEach(() => {

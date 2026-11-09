@@ -52,7 +52,29 @@ const testClientIpConfig = {
 
 const { authenticateBearer, banRepeatAuthFailures, rateLimit } =
     await import("./middleware.js");
-const { _resetBuckets } = await import("./rate-limit.js");
+const { _resetBuckets, createMemoryRateLimitStore, setRateLimitStore } =
+    await import("./rate-limit.js");
+type RateLimitStore = import("./rate-limit.js").RateLimitStore;
+
+// A memory store whose ban reads or writes can be switched to fail, standing
+// in for a database outage on the ban table.
+function flakyBanStore(fail: { read: boolean; write: boolean }) {
+    const inner = createMemoryRateLimitStore();
+    const store: RateLimitStore = {
+        checkBucket: (key, limit, windowMs) =>
+            inner.checkBucket(key, limit, windowMs),
+        readBan: async (ip) => {
+            if (fail.read) throw new Error("connection refused");
+            return inner.readBan(ip);
+        },
+        updateBan: async (ip, fn, opts) => {
+            if (fail.write) throw new Error("connection refused");
+            return inner.updateBan(ip, fn, opts);
+        },
+        reset: () => inner.reset(),
+    };
+    return store;
+}
 
 // Mirrors the /mcp wiring in index.ts: the ban guard runs ahead of the bearer
 // check, and the outermost access log honours the suppression flag. Replicated
@@ -93,15 +115,15 @@ const fromXff = (xff: string, token?: string) =>
 beforeAll(() => setClientIpConfigForTests(testClientIpConfig));
 afterAll(() => setClientIpConfigForTests(null));
 
-beforeEach(() => {
-    _resetBuckets();
+beforeEach(async () => {
+    await _resetBuckets();
     tokenLookups = 0;
     tokenStoreAvailable = true;
     setClientIpConfigForTests(testClientIpConfig);
     spyOn(householdDb, "getHouseholdMembership").mockResolvedValue(null);
 });
-afterEach(() => {
-    _resetBuckets();
+afterEach(async () => {
+    await _resetBuckets();
     spyOn(householdDb, "getHouseholdMembership").mockRestore();
 });
 
@@ -194,6 +216,53 @@ test("a token lookup outage never bans anyone", async () => {
 
     tokenStoreAvailable = true;
     expect((await app.fetch(from("3.3.3.3", "valid-token"))).status).toBe(200);
+});
+
+test("an unreadable ban store answers 503 with Retry-After, before any token lookup", async () => {
+    const fail = { read: true, write: false };
+    setRateLimitStore(flakyBanStore(fail));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+        const { app } = buildApp();
+        for (const token of [undefined, "valid-token", "nope"]) {
+            const res = await app.fetch(from("4.4.4.4", token));
+            expect(res.status).toBe(503);
+            expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+        }
+        expect(tokenLookups).toBe(0);
+
+        fail.read = false;
+        expect((await app.fetch(from("4.4.4.4", "valid-token"))).status).toBe(
+            200,
+        );
+    } finally {
+        errors.mockRestore();
+        setRateLimitStore(createMemoryRateLimitStore());
+    }
+});
+
+test("a failed strike write answers 503, not 401", async () => {
+    const fail = { read: false, write: true };
+    setRateLimitStore(flakyBanStore(fail));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+        const { app } = buildApp();
+        const bad = await app.fetch(from("4.4.4.5", "nope"));
+        expect(bad.status).toBe(503);
+        expect(Number(bad.headers.get("Retry-After"))).toBeGreaterThan(0);
+        expect((await app.fetch(from("4.4.4.5"))).status).toBe(503);
+
+        // A valid token still gets through: clearing strikes is best effort.
+        expect((await app.fetch(from("4.4.4.5", "valid-token"))).status).toBe(
+            200,
+        );
+
+        fail.write = false;
+        expect((await app.fetch(from("4.4.4.5", "nope"))).status).toBe(401);
+    } finally {
+        errors.mockRestore();
+        setRateLimitStore(createMemoryRateLimitStore());
+    }
 });
 
 test("bans are per-IP and do not affect other clients", async () => {

@@ -340,7 +340,7 @@ function fire(app: Hono, method: string, path: string, ip: string) {
 // limit. A structural assertion on OAUTH_PATHS would not have caught this;
 // only actually driving /mcp past the auth limit does.
 test("the OAuth rate limiter does not leak onto /mcp", async () => {
-    _resetBuckets();
+    await _resetBuckets();
     const { app, mcpHits } = buildTestApp();
 
     // Read the per-IP auth limit off a real OAuth response instead of hardcoding
@@ -348,7 +348,7 @@ test("the OAuth rate limiter does not leak onto /mcp", async () => {
     const probe = await fire(app, "GET", "/authorize", "203.0.113.9");
     const authLimit = Number(probe.headers.get("X-RateLimit-Limit"));
     expect(authLimit).toBeGreaterThan(0);
-    _resetBuckets();
+    await _resetBuckets();
 
     const total = authLimit * 3;
     for (let i = 0; i < total; i++) {
@@ -366,7 +366,7 @@ test("the OAuth rate limiter does not leak onto /mcp", async () => {
 // regression, and it is the main risk of scoping the middleware by path.
 test("every OAuth endpoint is still rate-limited", async () => {
     for (const [i, path] of OAUTH_PATHS.entries()) {
-        _resetBuckets();
+        await _resetBuckets();
         const { app } = buildTestApp();
         const method = OAUTH_METHODS[path]!;
         // Distinct IP per path so the buckets can't bleed into each other.
