@@ -119,12 +119,33 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            /*@include shared/date.js@*/
+
+            const T = {
+                weightTrends: {
+                    title: "Weight",
+                    empty: "No weight logged in this range yet.",
+                    rangeEmpty:
+                        "No weigh-ins in the last {range} days. Try a wider range.",
+                    windowAriaLabel: "Trend window",
+                    rangeAriaLabel: "Last {n} days",
+                    chartAriaLabel:
+                        "Weight from {from} to {to}, latest {latest}",
+                    latest: "Latest",
+                    needTwo: "need 2+ weigh-ins",
+                    sinceDate: "{change} since {date}",
+                    weighIns: { one: "{n} weigh-in", other: "{n} weigh-ins" },
+                    atTarget: "at target",
+                    toLose: "{amount} to lose",
+                    toGain: "{amount} to gain",
+                    target: "Target {value}",
+                    noTarget: "No target set",
+                },
+            };
 
             const RANGES = [7, 14, 30];
 
@@ -137,13 +158,13 @@
             // "2026-07-11" → "11 Jul". Parsed by parts, not by Date: the string
             // is already a local calendar day and re-reading it through a
             // timezone is how it slips by one. Reuses
-            // T.nutritionSummary.months (identical Jan..Dec shape) rather than
+            // MONTHS (identical Jan..Dec shape) rather than
             // its own MONTHS array.
             function shortDay(iso) {
                 const p = String(iso).split("-");
                 const m = Number(p[1]);
                 if (!m || m < 1 || m > 12) return String(iso);
-                return `${Number(p[2])} ${T.nutritionSummary.months[m - 1]}`;
+                return `${Number(p[2])} ${MONTHS[m - 1]}`;
             }
 
             // ---- Sample data so the file renders on its own (browser preview) ----
@@ -347,7 +368,6 @@
             function render(data) {
                 STATE.data = data;
                 const root = document.getElementById("root");
-                setLocaleFrom(data, __widgetApi);
                 if (
                     !data ||
                     !Array.isArray(data.days) ||

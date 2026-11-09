@@ -47,14 +47,20 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/date.js@*/
 
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            const T = {
+                mealLogged: {
+                    titleLogged: "Meal logged",
+                    titleUpdated: "Meal updated",
+                    titleNotLogged: "Not logged yet",
+                    addedKcal: "+{kcal} kcal",
+                },
+            };
 
             // ---- Sample data so the file renders on its own (browser preview) ----
             const SAMPLE = {
@@ -194,7 +200,6 @@
                     root.innerHTML = "";
                     return;
                 }
-                setLocaleFrom(data, __widgetApi);
 
                 const totals = data.totals || {};
                 // update_meal (and log_meal, via a backdated logged_at) can
@@ -203,8 +208,10 @@
                 // otherwise it names the day, which is also why that day is
                 // now on the header line below.
                 const calLabel = isToday(data.date)
-                    ? T.macros.caloriesToday
-                    : tpl(T.macros.caloriesOn, { date: shortDate(data.date) });
+                    ? MACRO_COPY.caloriesToday
+                    : tpl(MACRO_COPY.caloriesOn, {
+                          date: shortDate(data.date),
+                      });
                 const panel = macroPanel(
                     totals,
                     data.goals,

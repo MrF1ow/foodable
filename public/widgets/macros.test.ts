@@ -3,11 +3,10 @@
 //
 // Widget code is inline template JS, so it has no import surface: `macros.js` is
 // evaluated here the way the assembler splices it into a page — with util.js
-// (fmt/esc/tpl) and i18n.js, in the same order every template includes them —
+// (fmt/esc/tpl/plural) and macros.js, in the same order every template includes them —
 // and the caption strings are asserted against real values. Without this the
 // wording is pinned by nothing at all.
 import { test, expect } from "bun:test";
-import { WIDGET_STRINGS_EN } from "../../src/copy/widgets";
 
 const SRC = "./public/widgets/src";
 
@@ -15,21 +14,12 @@ type Bits = { goalLine: string; over: boolean; pct: number | null };
 type Macro = { key: string; direction?: string };
 type Vals = Record<string, number | null>;
 const macrosApi = await (async () => {
-    // shared/util.js then shared/i18n.js then shared/macros.js — util.js
-    // supplies fmt/esc/tpl, i18n.js supplies T/plural. Only the "en"
-    // dictionary is wired in (WIDGET_STRINGS = { en: ... }): these tests
-    // assert English wording, and macroLabel()/T.macros.* fall back to
-    // English by construction whenever a locale is missing.
     const utilSrc = await Bun.file(`${SRC}/shared/util.js`).text();
-    const i18nSrc = await Bun.file(`${SRC}/shared/i18n.js`).text();
     const macrosSrc = await Bun.file(`${SRC}/shared/macros.js`).text();
-    // `document`/`window` are left undefined so the partial's delegated event
-    // wiring (guarded by `typeof document`) stays out of the way.
     const factory = new Function(
-        "WIDGET_STRINGS",
-        `${utilSrc}\n${i18nSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
+        `${utilSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
     );
-    return factory({ en: WIDGET_STRINGS_EN }) as {
+    return factory() as {
         fmt: (n: number, decimals?: number) => string;
         macroBits: (
             m: Macro,

@@ -1,3 +1,16 @@
+const CHART_COPY = {
+    nutritionSummary: {
+        caloriesPerDay: "Calories / day",
+        avg: "avg",
+        goal: "goal",
+        chartAriaLabel: "Calories per day over the selected range",
+    },
+    trends: {
+        loggedOfTotal: "{logged}/{total} days logged",
+        caloriesOverRange: "Calories per day over the last {range} days",
+    },
+};
+
 // Shared calories-per-day trend chart (plan D5 / U9).
 //
 // The trends.html version is the superset: padding 8/8/6/4, dot radius 2.2,
@@ -69,10 +82,10 @@ function trendChart(days, goal, range, logged) {
         return `
           <div class="chart">
             <div class="chead">
-              <span class="ctitle">${esc(T.nutritionSummary.caloriesPerDay)}</span>
-              <span class="cmeta">${tpl(T.trends.loggedOfTotal, { logged, total: n })}</span>
+              <span class="ctitle">${esc(CHART_COPY.nutritionSummary.caloriesPerDay)}</span>
+              <span class="cmeta">${tpl(CHART_COPY.trends.loggedOfTotal, { logged, total: n })}</span>
             </div>
-            <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tpl(T.trends.caloriesOverRange, { range }))}">
+            <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tpl(CHART_COPY.trends.caloriesOverRange, { range }))}">
               <line class="axis" x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}"/>
               ${goalLine}
               <path d="${area}" fill="var(--calories)" opacity="0.16"/>
@@ -89,10 +102,10 @@ function trendChart(days, goal, range, logged) {
     return `
           <div class="chart">
             <div class="chead">
-              <span class="ctitle">${esc(T.nutritionSummary.caloriesPerDay)}</span>
-              <span class="cmeta">${esc(T.nutritionSummary.avg)} ${fmt(avg, 0)}${goal && goal > 0 ? ` · ${esc(T.nutritionSummary.goal)} ${fmt(goal, 0)}` : ""}</span>
+              <span class="ctitle">${esc(CHART_COPY.nutritionSummary.caloriesPerDay)}</span>
+              <span class="cmeta">${esc(CHART_COPY.nutritionSummary.avg)} ${fmt(avg, 0)}${goal && goal > 0 ? ` · ${esc(CHART_COPY.nutritionSummary.goal)} ${fmt(goal, 0)}` : ""}</span>
             </div>
-            <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(T.nutritionSummary.chartAriaLabel)}">
+            <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(CHART_COPY.nutritionSummary.chartAriaLabel)}">
               <line class="axis" x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}"/>
               ${goalLine}
               <path d="${area}" fill="var(--calories)" opacity="0.16"/>

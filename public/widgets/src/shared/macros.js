@@ -7,7 +7,40 @@
 // matter only that widget has (a chart, a range toggle, a weight line). Pairs
 // with shared/macros.css (layout) and shared/ring.css (the gauge).
 //
-// Requires fmt(n, decimals) and esc(s) from shared/util.js to already be in scope.
+// Requires fmt(), esc(), tpl(), and plural() from shared/util.js to already be
+// in scope.
+
+const MACRO_COPY = {
+    labels: {
+        calories: "Calories",
+        protein_g: "Protein",
+        carbs_g: "Carbs",
+        fat_g: "Fat",
+        sugar_g: "Sugar",
+        alcohol_g: "Alcohol",
+        caffeine_mg: "Caffeine",
+        fiber_g: "Fiber",
+        water_ml: "Water",
+    },
+    noGoalSet: "no goal set",
+    atLimit: "at limit",
+    floorUnder: "left",
+    ceilingUnder: "under",
+    over: "over",
+    limitPrefix: "limit",
+    ofPrefix: "of",
+    drinkLabels: { us: "US drinks", uk: "UK units" },
+    noneLogged: "none logged",
+    caloriesToday: "Calories today",
+    caloriesOn: "Calories · {date}",
+    tapHint: "Tap a metric for the meals behind it",
+    showMealsContributed: "Show the meals that contributed.",
+    byMealTitle: "{label} by meal",
+    closeBreakdown: "Close breakdown",
+    noMealsContributed: "No logged meals contributed {label}.",
+    untitledMeal: "Untitled meal",
+    moreMeals: { one: "+ {n} smaller meal", other: "+ {n} smaller meals" },
+};
 //
 // Data contract: `vals` and `goal` are plain objects keyed by macro
 // (`calories`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g`, `sugar_g`,
@@ -150,13 +183,8 @@ function dayHasData(day) {
     return TOP_LEVEL_MACRO_KEYS.some((k) => (day?.[k] || 0) > 0);
 }
 
-// The translated label for a metric, falling back to the English literal
-// above if the current locale's dictionary (T, from shared/i18n.js) is
-// somehow missing it. Not baked into the MACROS entries themselves: T is
-// only resolved once the widget's locale is known (setLocale(), called from
-// render()), which is after this module-level array is built.
 function macroLabel(m) {
-    return (T.macros.labels && T.macros.labels[m.key]) || m.label;
+    return (MACRO_COPY.labels && MACRO_COPY.labels[m.key]) || m.label;
 }
 
 // Grams of pure ethanol per standard drink. Mirrors src/alcohol.ts (NIAAA:
@@ -164,7 +192,7 @@ function macroLabel(m) {
 // Hand-copied rather than pulled in with @inlinets because src/widgets.test.ts
 // requires every @include'd partial to appear VERBATIM in the assembled
 // HTML, and a marker expanded inside this partial would break it. The unit
-// NAMES ("US drinks" / "UK units") come from T.macros.drinkLabels instead of
+// NAMES ("US drinks" / "UK units") come from MACRO_COPY.drinkLabels instead of
 // a sibling constant here, since — unlike the gram figures — they are
 // user-visible text.
 const DRINK_GRAMS = { us: 14, uk: 7.893 };
@@ -182,9 +210,9 @@ function macroBits(m, vals, goal, wording) {
     // "Days over limit" phrasing in computeTrends — and `wording` tunes the
     // floor case only (trends passes { under: "under" } for its averages).
     const underWord = ceiling
-        ? T.macros.ceilingUnder
-        : (wording && wording.under) || T.macros.floorUnder;
-    const overWord = (wording && wording.over) || T.macros.over;
+        ? MACRO_COPY.ceilingUnder
+        : (wording && wording.under) || MACRO_COPY.floorUnder;
+    const overWord = (wording && wording.over) || MACRO_COPY.over;
     const val = vals?.[m.key] ?? 0;
     const target = goal?.[m.key] ?? null;
 
@@ -211,7 +239,7 @@ function macroBits(m, vals, goal, wording) {
     // localized value — see its use in macroLimit.
     let atLimit = false;
     if (pct == null) {
-        targetStr = T.macros.noGoalSet;
+        targetStr = MACRO_COPY.noGoalSet;
         deltaStr = "";
         goalLine = targetStr;
         center2 = `<div class="ru">${m.unit}</div>`;
@@ -222,12 +250,12 @@ function macroBits(m, vals, goal, wording) {
         } else if (delta === 0 && ceiling) {
             // "0 g under" would be read as room left; exactly at a limit is
             // its own state.
-            deltaStr = T.macros.atLimit;
+            deltaStr = MACRO_COPY.atLimit;
             atLimit = true;
         } else {
             deltaStr = `${fmt(delta, m.decimals)} ${m.unit} ${underWord}`;
         }
-        targetStr = `${ceiling ? T.macros.limitPrefix : T.macros.ofPrefix} ${fmt(target, m.decimals)} ${m.unit}`;
+        targetStr = `${ceiling ? MACRO_COPY.limitPrefix : MACRO_COPY.ofPrefix} ${fmt(target, m.decimals)} ${m.unit}`;
         goalLine = `${targetStr} · ${deltaStr}`;
         center2 = `<div class="rp" style="color:${pctColor}">${Math.round(pct)}%</div>`;
     }
@@ -307,7 +335,7 @@ function tileLabel(m, b) {
     // "·" separates value from goal visually; screen readers either skip it or
     // announce "middle dot", so the spoken name uses a comma.
     const state = b.goalLine.replace(" · ", ", ");
-    return `${macroLabel(m)} ${fmt(b.val, m.decimals)} ${m.unit}, ${state}. ${T.macros.showMealsContributed}`;
+    return `${macroLabel(m)} ${fmt(b.val, m.decimals)} ${m.unit}, ${state}. ${MACRO_COPY.showMealsContributed}`;
 }
 
 // When a tile has something to disclose it is also a button that toggles its
@@ -414,11 +442,11 @@ function macroLimit(m, ctx, interactive) {
     const num =
         b.val > 0
             ? `${fmt(b.val, m.decimals)}${unit}`
-            : `<span class="mnone">${esc(T.macros.noneLogged)}</span>`;
+            : `<span class="mnone">${esc(MACRO_COPY.noneLogged)}</span>`;
     let cap = b.targetStr;
     if (b.val > 0 && m.gloss === "drinks") {
         const drinks = (b.val / DRINK_GRAMS[ctx.drinkUnit]).toFixed(1);
-        cap = `${drinks} ${T.macros.drinkLabels[ctx.drinkUnit]} · ${cap}`;
+        cap = `${drinks} ${MACRO_COPY.drinkLabels[ctx.drinkUnit]} · ${cap}`;
     }
     // The limit itself is the caption; BY HOW MUCH joins it only when that is
     // the thing to act on. Under a limit "13.1 g under" is noise in a cell
@@ -472,13 +500,13 @@ function macroCtxOf(vals, goal, wording, meals, opts) {
         // alcohol-tracking user with no saved preference.
         drinkUnit: DRINK_GRAMS[unit] ? unit : "us",
         // The shared default calorie-ring label, translated via
-        // T.macros.caloriesToday. goal-progress.html and meal-logged.html
+        // MACRO_COPY.caloriesToday. goal-progress.html and meal-logged.html
         // pass this same default explicitly when data.date is the viewer's
-        // today, and T.macros.caloriesOn (day-scoped) otherwise, so the ring
+        // today, and MACRO_COPY.caloriesOn (day-scoped) otherwise, so the ring
         // never claims "today" for a date it knows is not (#114);
         // nutrition-summary.html and trends.html always pass their own more
         // specific calLabel (day count / range-averaged wording).
-        calLabel: (opts && opts.calLabel) || T.macros.caloriesToday,
+        calLabel: (opts && opts.calLabel) || MACRO_COPY.caloriesToday,
         // Set by a widget that puts something of its own — a chart, a range
         // toggle's chart — between the header line and the strip, so the strip
         // opens with the same hairline that separates its own sections.
@@ -542,7 +570,7 @@ function macroPanel(vals, goal, wording, meals, opts) {
     // hides it once a breakdown is open: by then the answer is on screen and
     // the instruction is just a row of noise above it.
     const hint = interactive
-        ? `<div class="mhint" data-macro-hint>${esc(T.macros.tapHint)}</div>`
+        ? `<div class="mhint" data-macro-hint>${esc(MACRO_COPY.tapHint)}</div>`
         : "";
     // The breakdown renders into this region on tap; hidden until then.
     const detail = interactive
@@ -587,7 +615,7 @@ function mealList(m, meals) {
         .sort((a, b) => b.v - a.v);
 
     if (!rows.length) {
-        return `<div class="md-empty">${esc(tpl(T.macros.noMealsContributed, { label: macroLabel(m) }))}</div>`;
+        return `<div class="md-empty">${esc(tpl(MACRO_COPY.noMealsContributed, { label: macroLabel(m) }))}</div>`;
     }
 
     const CAP = 8;
@@ -604,14 +632,14 @@ function mealList(m, meals) {
             return `
         <li class="md-row">
           <span class="md-val" style="color:${m.color}">${fmt(v, decimals)}<span class="md-unit">${esc(m.unit)}</span></span>
-          <span class="md-name">${esc(meal.description || T.macros.untitledMeal)}</span>
+          <span class="md-name">${esc(meal.description || MACRO_COPY.untitledMeal)}</span>
           ${sub ? `<span class="md-sub">${sub}</span>` : ""}
         </li>`;
         })
         .join("");
     const more =
         extra > 0
-            ? `<li class="md-more">${esc(plural(T.macros.moreMeals, extra))}</li>`
+            ? `<li class="md-more">${esc(plural(MACRO_COPY.moreMeals, extra))}</li>`
             : "";
     return `<ul class="md-list">${items}${more}</ul>`;
 }
@@ -621,8 +649,8 @@ function mealList(m, meals) {
 function macroDetailBody(m, ctx) {
     return `
       <div class="md-head">
-        <span class="md-title"><span class="dot" style="background:${m.color}"></span>${esc(tpl(T.macros.byMealTitle, { label: macroLabel(m) }))}</span>
-        <button class="md-close" data-macro-close aria-label="${esc(T.macros.closeBreakdown)}">✕</button>
+        <span class="md-title"><span class="dot" style="background:${m.color}"></span>${esc(tpl(MACRO_COPY.byMealTitle, { label: macroLabel(m) }))}</span>
+        <button class="md-close" data-macro-close aria-label="${esc(MACRO_COPY.closeBreakdown)}">✕</button>
       </div>${mealList(m, ctx.meals)}`;
 }
 

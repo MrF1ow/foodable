@@ -82,12 +82,20 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            const T = {
+                groceryList: {
+                    title: "Grocery",
+                    loading: "Loading the grocery list…",
+                    empty: "Grocery list is empty.",
+                    alreadyHave: "already have",
+                    checkAria: "Mark {name} checked",
+                    uncheckAria: "Mark {name} unchecked",
+                },
+            };
 
             const SAMPLE = {
                 locale: "en",
@@ -164,7 +172,6 @@
                     return;
                 }
                 __data = data;
-                setLocaleFrom(data, __widgetApi);
                 const canCheck = !!(__widgetApi && __widgetApi.canCallTools);
                 const n = lineCount(data.stores);
                 if (n === 0) {

@@ -108,12 +108,135 @@
     <body>
         <div id="root"></div>
         <script>
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            const T = {
+                importMeals: {
+                    stepFile: "File",
+                    stepMap: "Map columns",
+                    stepPreview: "Preview",
+                    stepImport: "Import",
+                    fieldLabels: {
+                        logged_at: "Date / time",
+                        description: "Food name",
+                        meal_type: "Meal",
+                        calories: "Calories",
+                        protein_g: "Protein (g)",
+                        carbs_g: "Carbs (g)",
+                        fat_g: "Fat (g)",
+                        fiber_g: "Fiber (g)",
+                        sugar_g: "Sugar, total (g)",
+                        alcohol_g: "Alcohol (g)",
+                        caffeine_mg: "Caffeine (mg)",
+                        notes: "Notes",
+                        time: "Time (separate column)",
+                        deleted: "Deleted flag",
+                        source_id: "Meal id (from our export)",
+                        timezone: "Timezone (from our export)",
+                    },
+                    chooseExportHeading: "Choose your export",
+                    noToolsWarning:
+                        "This host does not let this view write to your log. Ask Claude to import the file instead — it can do it directly.",
+                    emailFallback:
+                        "If asking Claude does not work either, email {email}.",
+                    tzWarning:
+                        "Your timezone is not set, so times will be read as UTC and may land on the wrong day. Ask Claude to set your timezone first.",
+                    dropChoose: "Choose a CSV file",
+                    dropOr: "or drag it here",
+                    recognizedHint:
+                        "Exports from MyFitnessPal, Cronometer, Lose It! and MacroFactor are recognised automatically. Nothing is saved until you confirm.",
+                    dateMapHint:
+                        "Map a date column above to see how a value from your file converts.",
+                    dateNoneHint: "That column has no dates in it.",
+                    dateUnreadable:
+                        "{raw} → cannot be read as {format}, so rows like it will be skipped",
+                    dateConverted: "{raw} → {result}",
+                    energyMapHint:
+                        "Map a calories column above to see how a value from your file converts.",
+                    energyNoneHint: "That column has no numbers in it.",
+                    energyConverted: "{v} kJ → {kcal} kcal",
+                    energyNoConversion: "{v} kcal → {v} kcal (no conversion)",
+                    dateAmbiguousWarning:
+                        "The date format could not be determined from this file — its dates read equally well as day-first or month-first. Please confirm which one your app exports: the wrong choice files meals on the wrong day with no error.",
+                    dateFormatLabel: "Date format in this file",
+                    dateFormatYmd: "Year-Month-Day",
+                    dateFormatDmy: "Day/Month/Year",
+                    dateFormatMdy: "Month/Day/Year",
+                    energyUnitLabel: "Energy unit of the calories column",
+                    energyUnitKcal: "Calories",
+                    energyUnitKj: "Kilojoules",
+                    mapColumnsHeading: "Map columns",
+                    rowsCount: { one: "{n} row", other: "{n} rows" },
+                    columnsCount: { one: "{n} column", other: "{n} columns" },
+                    delimiterLabel: "delimiter",
+                    tabLabel: "tab",
+                    notInFile: "(not in this file)",
+                    columnFallback: "column {n}",
+                    addedSugarNotice:
+                        "This file has an added-sugar column ({column}) but no total-sugar column, so Sugar was left unmapped. Sugar is stored as TOTAL sugars, including what occurs naturally in fruit and milk, so mapping added sugar into it would under-report every row.",
+                    caffeineGramsNotice:
+                        "This file's caffeine column ({column}) is in grams, but caffeine is stored in milligrams, so Caffeine was left unmapped. Mapping it would record 0.18 where the label says 180 mg. Re-importing the same file later will not fill it in — those rows will already be logged and will be skipped as duplicates. If the header is mislabelled and the values really are milligrams, pick it above; if they really are grams, multiply them by 1000 in the file before importing, not after.",
+                    alcoholNotice:
+                        "This file has an alcohol column ({column}), but alcohol tracking is off for this account, so it will not be imported. Re-importing the same file later will not fill it in — those rows will already be logged and will be skipped as duplicates. To keep this data, ask Claude to turn on alcohol tracking (set_alcohol_tracking) before importing.",
+                    sampleValue: "e.g. {sample}",
+                    sourceAppLabel: "Source app (optional)",
+                    sourceAppHint:
+                        "Used to label rows that have no food name of their own.",
+                    previewButton: "Preview import",
+                    chooseAnotherButton: "Choose another file",
+                    previewHeading: "Preview",
+                    mealsToImport: {
+                        one: "{n} meal to import",
+                        other: "{n} meals to import",
+                    },
+                    kcalTotal: "{kcal} kcal total",
+                    rowsSkipped: "{n} rows skipped",
+                    batchCount: { one: "{n} batch", other: "{n} batches" },
+                    datesReadAs: "Dates read as {format}; energy {conversion}.",
+                    energyConvertedNote: "converted from kJ to kcal",
+                    energyReadAsKcal: "read as kcal",
+                    badDatesWarning:
+                        "{n} row(s) were skipped because their date could not be read as {format}{sample}. Go back and set the date format that matches your file.",
+                    badDateSample: " (e.g. line {line}: {value})",
+                    noTimeWarning:
+                        "{n} row(s) have a date but no time — they will be logged at midday.",
+                    splitDatesCount: {
+                        one: "{n} date has",
+                        other: "{n} dates have",
+                    },
+                    splitDatesWarning:
+                        " more than {max} meals (e.g. {date}) and had to be split across separate import batches. If that date contains two entries with the exact same food, meal type and macros, one of them may be skipped as a duplicate instead of imported.",
+                    tableLine: "Line",
+                    tableWhen: "When",
+                    tableMeal: "Meal",
+                    tableFood: "Food",
+                    tableProblem: "Problem",
+                    noNameFallback: "(no name — will be labelled by meal)",
+                    showingRows: "Showing {shown} of {total} rows",
+                    checkingRows: "Checking {n} rows…",
+                    importingRows: "Importing {n} rows…",
+                    batchProgress: "{label} (batch {done} of {total})",
+                    rowsRange: "Rows {a}–{b}: {msg}",
+                    preflightFailed: "Preflight check failed.",
+                    rowsWouldFail:
+                        "{n} row(s) would fail, e.g. line {line}: {message}",
+                    importingEllipsis: "Importing…",
+                    importButton: "Import {n} meals",
+                    backToMapping: "Back to mapping",
+                    importCompleteHeading: "Import complete",
+                    resultMealsImported: "{n} meals imported",
+                    resultAlreadyLogged: ", {n} already logged",
+                    resultFailed: ", {n} failed",
+                    resultSkipped: ", {n} skipped",
+                    restartButton: "Import another file",
+                    couldNotReadFile: "Could not read that file: {msg}",
+                    noDataRows: "No data rows found in that file.",
+                    emailNotice:
+                        "Not working as expected? Email {email} and include the lines below — that is everything needed to diagnose it.",
+                },
+            };
 
             // The real, unit-tested CSV parser (src/domain/csv.ts + src/domain/csv.test.ts).
             /*@inlinets src/domain/csv.ts@*/
@@ -242,9 +365,6 @@
             }
 
             // ---- state -------------------------------------------------------
-            // Plain data — labels are looked up from T.importMeals.fieldLabels
-            // by key at the one call site that renders them (mapStep()), so a
-            // locale switch relabels these without rebuilding the array.
             const FIELDS = [
                 { key: "logged_at", required: true },
                 { key: "description" },
@@ -576,7 +696,7 @@
             // store every row 4.184x too high while reporting success. So each
             // control is shown next to a worked example from the user's own first
             // row — a wrong setting is then visible before anything is written.
-            // Functions, not static arrays, so a locale switch (setLocale runs
+            // Functions, not static arrays, so relabel helpers can run
             // before every render()) relabels these without rebuilding them.
             function dateFormatOptions() {
                 return [
@@ -1682,14 +1802,6 @@
                     if (data && data.import_tool_name) {
                         CFG = Object.assign({}, CFG, data);
                     }
-                    setLocale(
-                        pickLocale(
-                            CFG.locale,
-                            API && API.hostContext
-                                ? API.hostContext.locale
-                                : null,
-                        ),
-                    );
                     render();
                 },
                 sample: {
