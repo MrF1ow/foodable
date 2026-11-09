@@ -167,6 +167,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/web\/(components\/field|turbo-forms)\.test\.ts$/,
             incidental: true,
         },
+        // actor-allowlist.test.ts scans src/**/*.ts for runAsSystem callers.
+        {
+            when: /^src\/.+\.ts$/,
+            tests: /^src\/db\/actor-allowlist\.test\.ts$/,
+            incidental: true,
+        },
         // notices.test.ts globs src/**/*.ts for hand-built allergen and expiry markup.
         {
             when: /^src\/.+\.ts$/,

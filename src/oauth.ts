@@ -9,6 +9,7 @@ import {
     registerClient,
 } from "./db/tokens.js";
 import { signUpUser, signInUser, authUserCount } from "./db/users.js";
+import { runAsSystem } from "./db/actor.js";
 import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
 import { rateLimitAuth } from "./middleware.js";
@@ -127,11 +128,13 @@ async function finishAuthorization(
     }
 
     const authCode = crypto.randomUUID();
-    await storeAuthCode(
-        authCode,
-        session.redirectUri,
-        userId,
-        session.codeChallenge,
+    await runAsSystem("oauth authorization code", () =>
+        storeAuthCode(
+            authCode,
+            session.redirectUri,
+            userId,
+            session.codeChallenge,
+        ),
     );
 
     const redirectUrl = new URL(session.redirectUri);
@@ -285,7 +288,9 @@ export function createOAuthRouter() {
         }
 
         // Fire-and-forget: track who registers
-        registerClient(body.client_name ?? null, redirectUris);
+        void runAsSystem("oauth client registration", async () =>
+            registerClient(body.client_name ?? null, redirectUris),
+        );
 
         return c.json({
             client_id: clientId,
@@ -392,14 +397,17 @@ export function createOAuthRouter() {
 
         let userId: string;
         try {
-            userId = await resolveApproveUser({
-                email,
-                password,
-                authUserCount,
-                signInUser,
-                signUpUser,
-                messages: LOGIN_ERRORS,
-            });
+            // Nobody is signed in yet: the credential check is the system's.
+            userId = await runAsSystem("sign in", () =>
+                resolveApproveUser({
+                    email,
+                    password,
+                    authUserCount,
+                    signInUser,
+                    signUpUser,
+                    messages: LOGIN_ERRORS,
+                }),
+            );
         } catch (err: unknown) {
             const message =
                 err instanceof Error ? err.message : "Authentication failed";
@@ -429,15 +437,21 @@ export function createOAuthRouter() {
             }
 
             // Look up the existing user from the refresh token
-            const userId = await consumeRefreshToken(refreshToken);
+            const newAccessToken = crypto.randomUUID();
+            const newRefreshToken = crypto.randomUUID();
+            const userId = await runAsSystem(
+                "oauth refresh token exchange",
+                async () => {
+                    const owner = await consumeRefreshToken(refreshToken);
+                    if (!owner) return null;
+                    await storeToken(newAccessToken, owner);
+                    await storeRefreshToken(newRefreshToken, owner);
+                    return owner;
+                },
+            );
             if (!userId) {
                 return c.json({ error: "invalid_grant" }, 400);
             }
-
-            const newAccessToken = crypto.randomUUID();
-            const newRefreshToken = crypto.randomUUID();
-            await storeToken(newAccessToken, userId);
-            await storeRefreshToken(newRefreshToken, userId);
 
             return c.json({
                 access_token: newAccessToken,
@@ -464,7 +478,10 @@ export function createOAuthRouter() {
         }
 
         // Atomically consume the auth code
-        const authCodeData = await consumeAuthCode(code);
+        const authCodeData = await runAsSystem(
+            "oauth authorization code exchange",
+            () => consumeAuthCode(code),
+        );
         if (!authCodeData) {
             return c.json({ error: "invalid_grant" }, 400);
         }
@@ -500,8 +517,10 @@ export function createOAuthRouter() {
         // Issue tokens linked to the authenticated user
         const accessToken = crypto.randomUUID();
         const refreshToken = crypto.randomUUID();
-        await storeToken(accessToken, authCodeData.user_id);
-        await storeRefreshToken(refreshToken, authCodeData.user_id);
+        await runAsSystem("oauth token exchange", async () => {
+            await storeToken(accessToken, authCodeData.user_id);
+            await storeRefreshToken(refreshToken, authCodeData.user_id);
+        });
 
         return c.json({
             access_token: accessToken,

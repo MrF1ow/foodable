@@ -417,6 +417,11 @@ export type RestockCheckDeps = {
     dismissals: NoticeDismissalsStore;
     restock: RestockStore;
     logger?: { log: (msg: string) => void };
+    /** Runs one household's check; the live runner acts as that household. */
+    forHousehold?: <T>(
+        householdId: string,
+        work: () => Promise<T>,
+    ) => Promise<T>;
 };
 
 export async function runRestockCheck(
@@ -424,72 +429,77 @@ export async function runRestockCheck(
     now = new Date(),
 ): Promise<void> {
     const log = deps.logger?.log ?? ((msg: string) => console.log(msg));
+    const forHousehold =
+        deps.forHousehold ??
+        (<T>(_id: string, work: () => Promise<T>) => work());
     const households = await deps.listEnabled();
     for (const household of households) {
         const id8 = household.id.slice(0, 8);
         try {
-            const owner = await deps.getOwnerProfile(household.id);
-            const tz = householdTimezone(household.preferences, owner);
-            const clock = localClock(now, tz);
-            const restock = household.preferences.restock;
-            if (!restockDue(restock, clock)) continue;
+            await forHousehold(household.id, async () => {
+                const owner = await deps.getOwnerProfile(household.id);
+                const tz = householdTimezone(household.preferences, owner);
+                const clock = localClock(now, tz);
+                const restock = household.preferences.restock;
+                if (!restockDue(restock, clock)) return;
 
-            const householdId = household.id;
-            const [items, lines, dismissals, stores] = await Promise.all([
-                deps.fridge.listItems(householdId),
-                deps.grocery.listLines(householdId),
-                deps.dismissals.listForHousehold(householdId),
-                deps.settings.listStores(householdId),
-            ]);
-            const sectionLists = await Promise.all(
-                stores.map((store) => deps.settings.listSections(store.id)),
-            );
-            const sections = sectionLists.flat();
-            const foodIds = new Set<string>();
-            for (const item of items) {
-                if (item.foodId) foodIds.add(item.foodId);
-            }
-            for (const line of lines) {
-                if (line.foodId) foodIds.add(line.foodId);
-            }
-            const listed = await deps.foods.listFoods(householdId);
-            const families = new Set<string>();
-            for (const id of foodIds) {
-                const row = listed.find((f) => f.id === id);
-                if (row) families.add(familyOf(row));
-            }
-            for (const fam of families) {
-                foodIds.add(fam);
-            }
-            const foodsById = await effectiveFoodsByIds(
-                deps.foods,
-                householdId,
-                [...foodIds],
-            );
-            const plan = restockPlan({
-                items,
-                foodsById,
-                lines,
-                dismissed: dismissedKeySet(dismissals),
-                today: clock.date,
-                stores,
-                sections,
-                householdId,
-            });
-            const committed = await deps.restock.commitRestockRun(
-                householdId,
-                clock.date,
-                plan.lines,
-            );
-            if (!committed) {
-                log(
-                    `[restock] household=${id8} date=${clock.date} already ran`,
+                const householdId = household.id;
+                const [items, lines, dismissals, stores] = await Promise.all([
+                    deps.fridge.listItems(householdId),
+                    deps.grocery.listLines(householdId),
+                    deps.dismissals.listForHousehold(householdId),
+                    deps.settings.listStores(householdId),
+                ]);
+                const sectionLists = await Promise.all(
+                    stores.map((store) => deps.settings.listSections(store.id)),
                 );
-                continue;
-            }
-            log(
-                `[restock] household=${id8} date=${clock.date} added=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}`,
-            );
+                const sections = sectionLists.flat();
+                const foodIds = new Set<string>();
+                for (const item of items) {
+                    if (item.foodId) foodIds.add(item.foodId);
+                }
+                for (const line of lines) {
+                    if (line.foodId) foodIds.add(line.foodId);
+                }
+                const listed = await deps.foods.listFoods(householdId);
+                const families = new Set<string>();
+                for (const id of foodIds) {
+                    const row = listed.find((f) => f.id === id);
+                    if (row) families.add(familyOf(row));
+                }
+                for (const fam of families) {
+                    foodIds.add(fam);
+                }
+                const foodsById = await effectiveFoodsByIds(
+                    deps.foods,
+                    householdId,
+                    [...foodIds],
+                );
+                const plan = restockPlan({
+                    items,
+                    foodsById,
+                    lines,
+                    dismissed: dismissedKeySet(dismissals),
+                    today: clock.date,
+                    stores,
+                    sections,
+                    householdId,
+                });
+                const committed = await deps.restock.commitRestockRun(
+                    householdId,
+                    clock.date,
+                    plan.lines,
+                );
+                if (!committed) {
+                    log(
+                        `[restock] household=${id8} date=${clock.date} already ran`,
+                    );
+                    return;
+                }
+                log(
+                    `[restock] household=${id8} date=${clock.date} added=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}`,
+                );
+            });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             log(`[restock] household=${id8} failed: ${message}`);

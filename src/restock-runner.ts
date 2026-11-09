@@ -4,6 +4,7 @@ import {
     type FlagContext,
     type FlagName,
 } from "./flags.js";
+import { runAsSystem, withActor } from "./db/actor.js";
 import { liveFoodsStore } from "./db/foods.js";
 import { liveFridgeStore } from "./db/fridge.js";
 import { liveGroceryStore } from "./db/grocery.js";
@@ -77,8 +78,12 @@ export function liveRestockCheckDeps() {
     const settings = liveSettingsStore();
     const dismissals = liveNoticeDismissalsStore();
     return {
+        // Finding which households are due spans every household, so it is
+        // the system's; each household's own check then acts as that household.
         listEnabled: async () => {
-            const rows = await listRestockEnabledHouseholds();
+            const rows = await runAsSystem("restock household list", () =>
+                listRestockEnabledHouseholds(),
+            );
             const log = (msg: string) => console.log(msg);
             const households = restockHouseholdsFromRows(rows, log);
             return filterRestockRunnerHouseholds(households, log);
@@ -91,6 +96,8 @@ export function liveRestockCheckDeps() {
         settings,
         dismissals,
         restock,
+        forHousehold: <T>(householdId: string, work: () => Promise<T>) =>
+            withActor({ kind: "household", householdId }, work),
     };
 }
 

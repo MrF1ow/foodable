@@ -8,6 +8,7 @@
 // Railway reader (the one that can read the epoch). Every other reader is
 // answered straight from its own evaluations with no query, so self-hosters
 // and tests stay query-free.
+import { runAsSystem } from "./db/actor.js";
 import { liveFlagPinStore } from "./db/flag-pins.js";
 import {
     decideKillSwitch,
@@ -369,8 +370,37 @@ type LoadedPins = { entry: SubjectEntry; pins: Map<string, Pin> };
 
 let runtime: FlagPinRuntime | null = null;
 
+/**
+ * Runs every store call as the system. The pin and snapshot caches are shared
+ * by the whole process (a global snapshot loaded during one member's request
+ * serves every later request), and the sweep runs on a timer, so these rows
+ * are the flag runtime's bookkeeping rather than the acting member's data.
+ */
+export function systemFlagPinStore(store: FlagPinStore): FlagPinStore {
+    return {
+        loadPins: (subject) =>
+            runAsSystem("flag pin load", () => store.loadPins(subject)),
+        upsertPin: (subject, pin) =>
+            runAsSystem("flag pin save", () => store.upsertPin(subject, pin)),
+        clearPins: (subject) =>
+            runAsSystem("flag pin clear", () => store.clearPins(subject)),
+        sweepExpired: (now) =>
+            runAsSystem("flag pin sweep", () => store.sweepExpired(now)),
+        loadSnapshot: (subject) =>
+            runAsSystem("flag snapshot load", () =>
+                store.loadSnapshot(subject),
+            ),
+        saveSnapshot: (flag, value, subject) =>
+            runAsSystem("flag snapshot save", () =>
+                store.saveSnapshot(flag, value, subject),
+            ),
+    };
+}
+
 export function getFlagPins(): FlagPinRuntime {
-    runtime ??= createFlagPinRuntime({ store: liveFlagPinStore() });
+    runtime ??= createFlagPinRuntime({
+        store: systemFlagPinStore(liveFlagPinStore()),
+    });
     return runtime;
 }
 

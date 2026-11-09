@@ -18,7 +18,8 @@ import {
     type FlagContext,
     type RailwayFlagsSdk,
 } from "./flags.js";
-import { createFlagPinRuntime } from "./flag-pins.js";
+import { currentActor, type Actor } from "./db/actor.js";
+import { createFlagPinRuntime, systemFlagPinStore } from "./flag-pins.js";
 import { loadViewerFlags } from "./viewer-flags.js";
 import { VERSION } from "./version.js";
 
@@ -811,5 +812,49 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "NO_MATCH" }),
         );
         expect(notReady.epoch(ctxFor()).reliable).toBe(false);
+    });
+});
+
+describe("systemFlagPinStore", () => {
+    test("every store call runs as the system", async () => {
+        const seen: Record<string, Actor | undefined> = {};
+        const note = (name: string) => {
+            seen[name] = currentActor();
+        };
+        const wrapped = systemFlagPinStore({
+            loadPins: async () => (note("loadPins"), []),
+            upsertPin: async () => note("upsertPin"),
+            clearPins: async () => note("clearPins"),
+            sweepExpired: async () => (note("sweepExpired"), 0),
+            loadSnapshot: async () => (note("loadSnapshot"), new Map()),
+            saveSnapshot: async () => note("saveSnapshot"),
+        });
+        const subject = { kind: "user", id: "u1" } as const;
+        await wrapped.loadPins(subject);
+        await wrapped.upsertPin(subject, {
+            flag: "f",
+            value: true,
+            reason: "rollout",
+            epoch: 1,
+            assignedAt: 0,
+            expiresAt: 1,
+        });
+        await wrapped.clearPins(subject);
+        await wrapped.sweepExpired(0);
+        await wrapped.loadSnapshot();
+        await wrapped.saveSnapshot("f", true);
+
+        expect(Object.keys(seen).sort()).toEqual([
+            "clearPins",
+            "loadPins",
+            "loadSnapshot",
+            "saveSnapshot",
+            "sweepExpired",
+            "upsertPin",
+        ]);
+        for (const actor of Object.values(seen)) {
+            expect(actor?.kind).toBe("system");
+        }
+        expect(currentActor()).toBeUndefined();
     });
 });

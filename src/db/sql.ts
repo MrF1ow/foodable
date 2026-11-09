@@ -6,11 +6,7 @@
  */
 import { SQL, type TransactionSQL } from "bun";
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-    currentActor,
-    jwtSubAndHouseholdForActor,
-    warnMissingActorIfNeeded,
-} from "./actor.js";
+import { actorForRun, jwtSubAndHouseholdForActor } from "./actor.js";
 
 export type Tx = TransactionSQL;
 
@@ -65,9 +61,7 @@ export async function run<T>(
     if (outer?.open) return fn(outer.tx);
 
     const sql = getSql();
-    const actor = currentActor();
-    if (!actor) warnMissingActorIfNeeded();
-    const { jwtSub, householdId } = jwtSubAndHouseholdForActor(actor);
+    const { jwtSub, householdId } = jwtSubAndHouseholdForActor(actorForRun());
     return sql.begin(async (tx) => {
         const store = { tx, open: true };
         return activeTx.run(store, async () => {

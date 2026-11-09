@@ -71,6 +71,20 @@ export function jwtSubAndHouseholdForActor(actor: Actor | undefined): {
 
 const warnedMissingActorSites = new Set<string>();
 
+// Set only by the database test harness (src/db/testing/pg.ts): the actor a
+// run() falls back to when no withActor / runAsSystem is active. Production
+// code never sets it, so a missing actor there still warns.
+let testFallbackActor: Actor | undefined;
+
+/** Test harness only: the actor run() uses when none is active (null clears it). */
+export function setFallbackActorForTests(actor: Actor | null): void {
+    testFallbackActor = actor ?? undefined;
+}
+
+export const MISSING_ACTOR_MESSAGE =
+    "run() called without an actor: wrap the caller in withActor(actor, fn), " +
+    'or runAsSystem("<reason>", fn) for background work';
+
 function isTestRuntime(): boolean {
     if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
         return true;
@@ -78,9 +92,20 @@ function isTestRuntime(): boolean {
     return process.argv.includes("test");
 }
 
-/** Logged when run() starts without an actor; quiet under the test runner. */
-export function warnMissingActorIfNeeded(): void {
-    if (isTestRuntime()) return;
+/**
+ * The actor run() should apply. Without one it throws under the test runner,
+ * so a missing actor fails the suite, and in production it logs a warning
+ * once per call site and carries on with the settings cleared.
+ */
+export function actorForRun(): Actor | undefined {
+    const actor = currentActor() ?? testFallbackActor;
+    if (actor) return actor;
+    if (isTestRuntime()) throw new Error(MISSING_ACTOR_MESSAGE);
+    warnMissingActor();
+    return undefined;
+}
+
+function warnMissingActor(): void {
     const err = new Error();
     const stack = err.stack ?? "";
     const line =
@@ -94,7 +119,5 @@ export function warnMissingActorIfNeeded(): void {
             ) ?? "unknown";
     if (warnedMissingActorSites.has(line)) return;
     warnedMissingActorSites.add(line);
-    console.warn(
-        `[db] run() without actor context (settings cleared); ${line.trim()}`,
-    );
+    console.warn(`[db] ${MISSING_ACTOR_MESSAGE}; ${line.trim()}`);
 }

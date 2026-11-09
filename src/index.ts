@@ -51,6 +51,7 @@ import { settingsRoutes } from "./web/routes/settings.js";
 import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
+import { runAsSystem } from "./db/actor.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
 import { initFlags } from "./flags.js";
@@ -485,14 +486,20 @@ if (import.meta.main) {
     // first tool call.
     await warmWidgets();
 
-    // Periodically delete expired meal-export files from the storage bucket.
-    startExportCleanup();
+    // Background jobs act for no member. A timer keeps the async context it
+    // was started in, so each job's ticks run as the system actor named here.
+    // The flag pin sweep and the restock runner name their own actors.
+    void runAsSystem("export sweep", async () => startExportCleanup());
     startFlagPinSweep();
-    startUnverifiedRecipeCleanup(
-        () => listHouseholdsForRecipeSweep(),
-        liveRecipesStore(),
+    void runAsSystem("unverified recipe sweep", async () =>
+        startUnverifiedRecipeCleanup(
+            () => listHouseholdsForRecipeSweep(),
+            liveRecipesStore(),
+        ),
     );
-    startFetchMemorySweep(recipeFetchMemory());
+    void runAsSystem("fetch memory sweep", async () =>
+        startFetchMemorySweep(recipeFetchMemory()),
+    );
     bootRestockRuns();
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
