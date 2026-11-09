@@ -7,6 +7,7 @@ import {
     formatFoodResult,
     type FoodResult,
 } from "../../foods.js";
+import { formatAlcohol } from "../../alcohol.js";
 import { searchFoodsByName } from "../../food-search.js";
 import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
@@ -52,8 +53,41 @@ import {
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
     type WireNotice,
+    type AlcoholDisplay,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+
+function catalogMacro(value: number | null, unit: string): string {
+    return value == null ? "unknown" : `${value} ${unit}`;
+}
+
+function formatHouseholdBarcodeHit(
+    eff: EffectiveFood,
+    barcode: string,
+    alcohol: AlcoholDisplay,
+): string {
+    const title = eff.brand ? `${eff.name} (${eff.brand})` : eff.name;
+    const lines = [
+        title,
+        "Serving: 100 g",
+        `Calories: ${catalogMacro(eff.calories, "kcal")} · Protein: ${catalogMacro(
+            eff.proteinG,
+            "g",
+        )} · Carbs: ${catalogMacro(eff.carbsG, "g")} · Fat: ${catalogMacro(
+            eff.fatG,
+            "g",
+        )}`,
+        `Fiber: ${catalogMacro(eff.fiberG, "g")} · Sugar (total): ${catalogMacro(
+            eff.sugarG,
+            "g",
+        )}`,
+    ];
+    if (alcohol && eff.alcoholG != null) {
+        lines.push(`Alcohol: ${formatAlcohol(eff.alcoholG, alcohol)}`);
+    }
+    lines.push(`Source: household catalog (barcode ${barcode})`);
+    return lines.join("\n");
+}
 
 export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
     const { alcohol, personSchema, actorUserId, callerHouseholdId, analytics } =
@@ -63,7 +97,7 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
         {
             title: "Look Up Barcode",
             description:
-                "Look up a packaged product's label nutrition by barcode via Open Food Facts. The figures come from the product's own label as transcribed by the Open Food Facts community, so they beat estimating — but they are not verified by this server and can be wrong, stale, or missing entirely. Pass the barcode digits (EAN/UPC, 8–14 digits). The user can type them, or you can read them from a photo of the package — transcribe the human-readable digits printed beneath the barcode. Returns the product name, serving, and macros, which you can then pass to log_meal scaled to the amount eaten. When Open Food Facts has computed them, it also returns the Nutri-Score (A–E, a nutritional-quality grade) and NOVA group (1–4, how processed the product is) — pass these along if the user is asking about the product's quality, not just its macros; they're omitted, not \"n/a\", when OFF hasn't computed one for that product. If no product is found, fall back to web search or estimation. When the product is not in the household catalog yet, add it with upsert_food passing barcode (and generic_food_id to file it under a plain food), with nutrition per 100 g. Two gaps to close yourself before logging: a fiber or sugar figure shown as n/a is missing data rather than a zero, so estimate it and pass it anyway; and Open Food Facts carries no caffeine at all, so for a coffee, tea, cola, energy drink or other caffeinated product get caffeine_mg from the label or a web search.",
+                "Look up a packaged product's label nutrition by barcode via Open Food Facts. The figures come from the product's own label as transcribed by the Open Food Facts community, so they beat estimating — but they are not verified by this server and can be wrong, stale, or missing entirely. Pass the barcode digits (EAN/UPC, 8–14 digits). The user can type them, or you can read them from a photo of the package — transcribe the human-readable digits printed beneath the barcode. Returns the product name, serving, and macros, which you can then pass to log_meal scaled to the amount eaten. When Open Food Facts has computed them, it also returns the Nutri-Score (A–E, a nutritional-quality grade) and NOVA group (1–4, how processed the product is) — pass these along if the user is asking about the product's quality, not just its macros; they're omitted, not \"n/a\", when OFF hasn't computed one for that product. If no product is found, fall back to web search or estimation. When online lookups are paused, saved household foods for that barcode are returned instead. When the product is not in the household catalog yet, add it with upsert_food passing barcode (and generic_food_id to file it under a plain food), with nutrition per 100 g. Two gaps to close yourself before logging: a fiber or sugar figure shown as n/a is missing data rather than a zero, so estimate it and pass it anyway; and Open Food Facts carries no caffeine at all, so for a coffee, tea, cola, energy drink or other caffeinated product get caffeine_mg from the label or a web search.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -105,9 +139,14 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         };
                     }
 
-                    let food;
+                    const householdId = await callerHouseholdId();
+                    const notice = { message: null as string | null };
+                    let food: FoodResult | null;
                     try {
-                        food = await lookupBarcode(normalized);
+                        food = await lookupBarcode(normalized, {
+                            householdId,
+                            notice,
+                        });
                     } catch (err) {
                         const msg =
                             err instanceof Error ? err.message : String(err);
@@ -131,12 +170,57 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         };
                     }
 
+                    const pausedNote = notice.message;
+
+                    if (!food && pausedNote) {
+                        try {
+                            const store = liveFoodsStore();
+                            const foodId = await store.getBarcodeFoodId(
+                                householdId,
+                                normalized,
+                            );
+                            if (foodId) {
+                                const listed =
+                                    await store.listFoods(householdId);
+                                const catalog = new Map(
+                                    listed.map((row) => [row.id, row]),
+                                );
+                                const row = await findFoodById(
+                                    store,
+                                    householdId,
+                                    foodId,
+                                );
+                                const eff = effectiveFood(row, catalog);
+                                const body = formatHouseholdBarcodeHit(
+                                    eff,
+                                    normalized,
+                                    alcohol,
+                                );
+                                return {
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: `${pausedNote}\n\n${body}`,
+                                        },
+                                    ],
+                                };
+                            }
+                        } catch {
+                            // Household lookup failure must not block a soft response.
+                        }
+                    }
+
                     if (!food) {
+                        const miss = pausedNote
+                            ? `No saved food found for barcode ${normalized} in your household catalog. Ask the user what the product is, or estimate the macros, then log the meal.`
+                            : `No product found in Open Food Facts for barcode ${normalized}. Ask the user what the product is, or estimate the macros, then log the meal.`;
                         return {
                             content: [
                                 {
                                     type: "text",
-                                    text: `No product found in Open Food Facts for barcode ${normalized}. Ask the user what the product is, or estimate the macros, then log the meal.`,
+                                    text: pausedNote
+                                        ? `${pausedNote}\n\n${miss}`
+                                        : miss,
                                 },
                             ],
                         };
@@ -146,7 +230,6 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                     // an existing household row when the barcode already matches;
                     // never creates foods or changes user-entered catalog fields.
                     try {
-                        const householdId = await callerHouseholdId();
                         await refreshFoodQualityByBarcode(
                             liveFoodsStore(),
                             householdId,
@@ -157,11 +240,14 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         // No household member or store error must not change lookup output.
                     }
 
+                    const body = formatFoodResult(food, alcohol);
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: formatFoodResult(food, alcohol),
+                                text: pausedNote
+                                    ? `${pausedNote}\n\n${body}`
+                                    : body,
                             },
                         ],
                     };
@@ -458,7 +544,7 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
         {
             title: "Search Food",
             description:
-                "Search the household food catalog first, then Open Food Facts. Household hits include food_id; household products are marked with the plain food they belong to. Prefer passing food_id to fridge, grocery, and recipe add tools. Do not use this to search logged meals — that is search_meals.",
+                "Search the household food catalog first, then Open Food Facts. Household hits include food_id; household products are marked with the plain food they belong to. When online lookups are paused, only household foods are returned. Prefer passing food_id to fridge, grocery, and recipe add tools. Do not use this to search logged meals — that is search_meals.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -481,10 +567,14 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
                     // Open Food Facts is an outside service and goes down
                     // (503s). The household catalog must still answer, as it
                     // does in the web app's food search.
+                    const notice = { message: null as string | null };
                     let offHits: FoodResult[] = [];
                     let offError: string | null = null;
                     try {
-                        offHits = await searchFoodsByName(args.query, names);
+                        offHits = await searchFoodsByName(args.query, names, {
+                            householdId,
+                            notice,
+                        });
                     } catch (err) {
                         offError =
                             err instanceof Error ? err.message : String(err);
@@ -507,6 +597,9 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
                                         : foods
                                               .map(formatSearchHit)
                                               .join("\n")) +
+                                    (notice.message
+                                        ? `\n${notice.message}`
+                                        : "") +
                                     (offError
                                         ? `\nOpen Food Facts is unavailable (${offError}); these are household foods only.`
                                         : ""),

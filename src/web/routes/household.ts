@@ -276,7 +276,8 @@ householdRoutes.post(
                         store,
                         member.householdId,
                         formText(body, "barcode"),
-                        fridgeBarcodeLookup,
+                        (barcode) =>
+                            fridgeBarcodeLookup(barcode, member.householdId),
                     )
                   : null;
             if (!picked) {

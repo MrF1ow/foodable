@@ -761,7 +761,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         amount: args.amount,
                                         unit: args.unit,
                                     },
-                                    { lookup: lookupBarcode },
+                                    {
+                                        lookup: (barcode) =>
+                                            lookupBarcode(barcode, {
+                                                householdId,
+                                            }),
+                                    },
                                 )
                               : await addRecipeManualIngredient(store, foods, {
                                     householdId,
@@ -1495,7 +1500,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 onSimilar,
                             },
                             {
-                                lookup: lookupBarcode,
+                                lookup: (barcode) =>
+                                    lookupBarcode(barcode, {
+                                        householdId: actor.householdId,
+                                    }),
                                 transaction: (fn) => run(async () => fn()),
                             },
                         );

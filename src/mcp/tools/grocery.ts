@@ -418,7 +418,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                               unit: args.unit,
                                               onPicked,
                                           },
-                                          { lookup: lookupBarcode },
+                                          {
+                                              lookup: (barcode) =>
+                                                  lookupBarcode(barcode, {
+                                                      householdId,
+                                                  }),
+                                          },
                                       )
                                     : await addGroceryManualFood(
                                           grocery,

@@ -57,8 +57,11 @@ import {
 
 export const fridgeRoutes = new Hono();
 
-export async function fridgeBarcodeLookup(barcode: string) {
-    return lookupBarcode(barcode);
+export async function fridgeBarcodeLookup(
+    barcode: string,
+    householdId: string,
+) {
+    return lookupBarcode(barcode, { householdId });
 }
 
 async function fridgeFormError(
@@ -178,7 +181,11 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                                   foods,
                                   member.householdId,
                                   formText(body, "barcode"),
-                                  fridgeBarcodeLookup,
+                                  (barcode) =>
+                                      fridgeBarcodeLookup(
+                                          barcode,
+                                          member.householdId,
+                                      ),
                               );
                           const prepared = await prepareAddFoodById(
                               store,

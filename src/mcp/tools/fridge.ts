@@ -390,7 +390,12 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                               amount: args.amount,
                                               unit: args.unit,
                                           },
-                                          { lookup: lookupBarcode },
+                                          {
+                                              lookup: (barcode) =>
+                                                  lookupBarcode(barcode, {
+                                                      householdId,
+                                                  }),
+                                          },
                                       )
                                     : await prepareAddManualFood(store, foods, {
                                           householdId,

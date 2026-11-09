@@ -1,6 +1,14 @@
 import { test, expect, mock, beforeEach, afterEach, describe } from "bun:test";
 import { searchFoodsByName } from "./food-search.js";
-import type { FoodResult } from "./foods.js";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "./flags.js";
+import {
+    ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE,
+    type FoodResult,
+} from "./foods.js";
 
 const realFetch = globalThis.fetch;
 
@@ -171,6 +179,52 @@ describe("searchFoodsByName", () => {
         expect(
             searchFoodsByName("cottage", [], { searchCache: async () => [] }),
         ).rejects.toThrow(/OFF_USER_AGENT/);
+    });
+
+    test("skips Open Food Facts when isEnabled returns false", async () => {
+        let offCalled = false;
+        mockFetch(() => {
+            throw new Error("fetch must not run");
+        });
+        const notice = { message: null as string | null };
+        const cached = food({
+            name: "Saved Cottage Cheese",
+            barcode: "111111111111",
+        });
+        const results = await searchFoodsByName("cottage", [], {
+            householdId: "hh-test",
+            isEnabled: () => false,
+            notice,
+            searchCache: async () => [cached],
+            searchOff: async () => {
+                offCalled = true;
+                return [];
+            },
+        });
+        expect(offCalled).toBe(false);
+        expect(results).toEqual([cached]);
+        expect(notice.message).toBe(ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE);
+    });
+
+    test("default isEnabled respects off-lookups flag via householdId", async () => {
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+        try {
+            let offCalled = false;
+            mockFetch(() => {
+                throw new Error("fetch must not run");
+            });
+            await searchFoodsByName("cottage", [], {
+                householdId: "hh-web-search",
+                searchCache: async () => [],
+                searchOff: async () => {
+                    offCalled = true;
+                    return [];
+                },
+            });
+            expect(offCalled).toBe(false);
+        } finally {
+            resetFlagsForTests();
+        }
     });
 
     test("returns an empty list for a blank query without fetching", async () => {

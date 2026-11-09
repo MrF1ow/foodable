@@ -353,6 +353,10 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    lookupBarcodeCalls: [] as {
+        barcode: string;
+        options?: actualFoods.FoodLookupHooks;
+    }[],
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
@@ -743,7 +747,16 @@ mock.module("./db/social-readers.js", () => ({
 
 mock.module("./foods.js", () => ({
     ...actualFoods,
-    lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
+    lookupBarcode: async (
+        barcode: string,
+        options?: actualFoods.FoodLookupHooks,
+    ) => {
+        db.lookupBarcodeCalls.push({ barcode, options });
+        if (Object.hasOwn(db.barcodeFoods, barcode)) {
+            return db.barcodeFoods[barcode];
+        }
+        return realFoods.lookupBarcode(barcode, options);
+    },
 }));
 
 mock.module("./food-search.js", () => ({
@@ -856,6 +869,7 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.lookupBarcodeCalls = [];
     db.foodSearchHits = [];
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
@@ -8294,6 +8308,48 @@ describe("household PAT over HTTP has no default userId", () => {
                     expect(
                         body && "text" in body && body.text.length,
                     ).toBeGreaterThan(0);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
+describe("off-lookups kill switch over HTTP", () => {
+    test.each(ERAS)(
+        "lookup_barcode surfaces the paused message (%p)",
+        async (mode) => {
+            setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+            try {
+                await withHttpClient("u1", mode, async (client) => {
+                    const made = await client.callTool({
+                        name: "upsert_food",
+                        arguments: {
+                            name: "Paused lookup food",
+                            barcode: "737628064502",
+                            calories: 120,
+                        },
+                    });
+                    expect(made.isError).toBeFalsy();
+                    const r = await client.callTool({
+                        name: "lookup_barcode",
+                        arguments: { barcode: "737628064502" },
+                    });
+                    expect(r.isError).toBeFalsy();
+                    const text = (
+                        r.content as { type: string; text?: string }[]
+                    )
+                        .map((c) => c.text ?? "")
+                        .join("\n");
+                    expect(text).toContain("Online food lookups are paused");
+                    expect(text).toContain("Paused lookup food");
+                    expect(text).toContain("Source: household catalog");
+                    expect(text).not.toContain("Open Food Facts has no fiber");
+                    const lookupCall = db.lookupBarcodeCalls.find(
+                        (c) => c.barcode === "737628064502",
+                    );
+                    expect(lookupCall?.options?.householdId).toBe("hh-1");
                 });
             } finally {
                 resetFlagsForTests();

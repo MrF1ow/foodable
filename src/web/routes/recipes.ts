@@ -840,7 +840,7 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                 foods,
                 member.householdId,
                 formText(body, "barcode"),
-                fridgeBarcodeLookup,
+                (barcode) => fridgeBarcodeLookup(barcode, member.householdId),
             );
             await addRecipeIngredientById(liveRecipesStore(), foods, {
                 householdId: member.householdId,
