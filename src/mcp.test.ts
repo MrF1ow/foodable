@@ -124,6 +124,7 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
 import {
     FOOD_OUTPUT,
     GET_FOOD_OUTPUT,
@@ -333,6 +334,7 @@ const db = {
     wipedUsers: [] as string[],
     ownershipTransfers: [] as { from: string; to: string }[],
     profileReads: [] as string[],
+    profilesByUserId: {} as Record<string, actualProfiles.Profile>,
     membershipReads: [] as string[],
     members: [] as actualHousehold.HouseholdMembership[],
     addedLogins: [] as string[],
@@ -553,6 +555,9 @@ mock.module("./db/profiles.js", () => ({
     ...actualProfiles,
     getProfile: async (userId: string) => {
         db.profileReads.push(userId);
+        if (db.profilesByUserId[userId]) {
+            return db.profilesByUserId[userId];
+        }
         return db.profile;
     },
     getUserTimezone: async () => db.profile?.timezone ?? "UTC",
@@ -821,6 +826,7 @@ beforeEach(() => {
     db.wipedUsers = [];
     db.ownershipTransfers = [];
     db.profileReads = [];
+    db.profilesByUserId = {};
     db.membershipReads = [];
     db.addedLogins = [];
     db.tokenRotations = [];
@@ -7740,6 +7746,246 @@ describe("rate_product over HTTP", () => {
     );
 });
 
+describe("get_household_digest", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+
+    async function withHouseholdDigestFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const call: CallTool = async (name, args) =>
+                (await client.callTool({
+                    name,
+                    arguments: args ?? {},
+                })) as ToolResult;
+            await run(call);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    test("flag off hides tool and rejects calls", async () => {
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": false }),
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const list = (await client.listTools()).tools.map((t) => t.name);
+            expect(list).not.toContain("get_household_digest");
+            const resources = await client.listResources();
+            expect(
+                resources.resources.some(
+                    (r) => r.uri === "household://weekly-digest",
+                ),
+            ).toBe(false);
+            await expect(
+                client.callTool({
+                    name: "get_household_digest",
+                    arguments: {},
+                }),
+            ).rejects.toThrow(/not found/i);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    });
+
+    test("flag on returns schema output and respects week_of", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "2026-08-07",
+            });
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(out.window).toEqual({
+                from: "2026-08-01",
+                to: "2026-08-07",
+            });
+            expect(out.text.length).toBeGreaterThan(0);
+        });
+    });
+
+    test("invalid week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "not-a-date",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("week_of");
+        });
+    });
+
+    test("impossible calendar week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            for (const bad of ["2026-02-31", "2026-13-01"]) {
+                const r = await call("get_household_digest", { week_of: bad });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toMatch(/week_of|calendar/i);
+            }
+        });
+    });
+
+    test("every household member a caller can read appears", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {});
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            const ids = out.members.map((m) => m.member_id);
+            expect(ids).toContain("u1");
+            expect(ids).toContain(bob);
+        });
+    });
+});
+
+describe("get_household_digest over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("get_household_digest");
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits get_household_digest from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": false }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("get_household_digest");
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (r) => r.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(false);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
 describe("household PAT over HTTP has no default userId", () => {
     async function withHouseholdHttp<T>(
         mode: EraMode,
@@ -7815,6 +8061,49 @@ describe("household PAT over HTTP has no default userId", () => {
             expect(db.inserted).toHaveLength(0);
         });
     });
+
+    test.each(ERAS)(
+        "get_household_digest succeeds for household PAT (%p)",
+        async (mode) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHouseholdHttp(mode, async (client) => {
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    expect(r.isError).toBeFalsy();
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (res) => res.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(true);
+                    const payload = await client.readResource({
+                        uri: "household://weekly-digest",
+                    });
+                    const body = payload.contents[0];
+                    expect(
+                        body && "text" in body && body.text.length,
+                    ).toBeGreaterThan(0);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
 });
 
 describe("/mcp serves the 2026-07-28 revision", () => {

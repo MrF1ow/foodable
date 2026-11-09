@@ -51,6 +51,7 @@ import { registerGroceryTools } from "./tools/grocery.js";
 import { registerRecipesTools } from "./tools/recipes.js";
 import { registerRulesTools } from "./tools/rules.js";
 import { registerHouseholdTools } from "./tools/household.js";
+import { registerHouseholdDigestTools } from "./tools/household-digest.js";
 import { registerNoticeTools } from "./tools/notices.js";
 
 // Sent to clients in the initialize response (SDK ServerOptions.instructions).
@@ -72,6 +73,8 @@ The loop: grocery list → put_away_grocery_lines into the fridge → cook_recip
 Imported recipes start unverified until they pass the deterministic check. Unverified recipes cannot go on the grocery list, be cooked, or be logged as portions. Fix them from import data in get_recipe (pasted text, unresolved lines, problems) without opening the original post or inventing amounts, then call verify_recipe. To import a recipe from a link, call import_recipe_from_url with optional text (the pasted caption) and credit. If it returns paste_needed, ask the user to paste the caption; never open the post yourself.
 
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
+
+At the start of a weekly household check-in, call get_household_digest or read the household://weekly-digest resource for expiring fridge stock, what ran out, nutrition by member, and grocery suggestions.
 
 Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools surface allergen matches in \`notices\`; treat a \`block\` notice as blocking unless the user overrides it explicitly. Before recommending a packaged product for someone, call rate_product with the barcode or food_id to read the quality score and member-specific allergen notices.
 
@@ -156,6 +159,7 @@ export function registerTools(
     registerCatalogFoodTools(server, ctx);
     registerNoticeTools(server, ctx);
     registerHouseholdTools(server, ctx);
+    registerHouseholdDigestTools(server, ctx);
     return ctx;
 }
 

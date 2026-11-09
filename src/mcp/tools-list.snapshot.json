@@ -72,5 +72,6 @@
     "list_members",
     "get_household_config",
     "update_household_config",
-    "delete_account"
+    "delete_account",
+    "get_household_digest"
 ]

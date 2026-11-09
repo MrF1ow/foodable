@@ -71,6 +71,15 @@ export const FLAGS = {
         removeWhen:
             "rate_product has been on for everyone for a release with no rollback.",
     },
+    "mcp-household-digest": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The get_household_digest MCP tool and household://weekly-digest resource.",
+        removeWhen:
+            "get_household_digest has been on for everyone for a release with no rollback.",
+    },
 } as const satisfies Record<string, FlagDef>;
 
 export type FlagName = keyof typeof FLAGS;

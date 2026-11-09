@@ -395,6 +395,13 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "get_household_digest",
+        category: "settings-account",
+        badges: ["view"],
+        params: [{ name: "week_of", required: false }],
+        hasPhotoHint: false,
+    },
+    {
         name: "update_household_config",
         category: "settings-account",
         badges: ["setting"],
@@ -856,6 +863,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "list_notices",
     "list_members",
     "get_household_config",
+    "get_household_digest",
     "update_household_config",
     "get_fridge",
     "add_fridge_location",

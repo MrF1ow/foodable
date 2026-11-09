@@ -492,6 +492,26 @@ export type DashboardAccess =
       }
     | { ok: false; error: "not_a_member" | "not_a_peer" };
 
+/**
+ * Members whose nutrition may appear in a household-wide digest for this
+ * caller: the same rule the nutrition tools apply to a `user_id` read, so a
+ * member can see exactly the people they could already ask about.
+ */
+export function membersForHouseholdNutritionDigest(
+    auth: AuthContext,
+    viewerUserId: string | null,
+    householdId: string,
+    members: HouseholdMember[],
+): HouseholdMember[] {
+    return members.filter(
+        (member) =>
+            member.householdId === householdId &&
+            (member.userId === viewerUserId ||
+                auth.kind === "household" ||
+                resolveActorUserId(auth, member.userId, "read").ok),
+    );
+}
+
 export function dashboardAccess(
     viewer: HouseholdMember | null,
     subject: HouseholdMember | null,
