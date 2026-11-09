@@ -70,11 +70,18 @@ afterEach(() => {
 });
 
 describe("gated route harness on composed app", () => {
-    test("gated invite routes redirect when ui-v2 is off", async () => {
+    test("gated routes are off while ui-v2 is off", async () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
+        expect(routes.find((r) => r.path === "/dev/gallery-v2")).toEqual({
+            method: "GET",
+            path: "/dev/gallery-v2",
+            flag: "ui-v2",
+            notFound: true,
+        });
         expect(routes.map((r) => r.path).sort()).toEqual([
+            "/dev/gallery-v2",
             "/settings/household/invites",
             "/settings/household/invites",
             "/settings/household/invites/revoke",

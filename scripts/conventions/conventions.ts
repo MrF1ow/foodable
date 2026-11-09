@@ -277,6 +277,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/attention.ts": "web",
     "src/web/pages/needs-attention.ts": "web",
     "src/web/routes/needs-attention.ts": "web",
+    "src/web/routes/dev-gallery.ts": "web",
+    "src/web/pages/dev-gallery.ts": "web",
     "src/exports-route.ts": "platform",
     "src/food-search.ts": "platform",
     "src/html.ts": "platform",

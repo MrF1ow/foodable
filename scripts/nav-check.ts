@@ -1909,6 +1909,24 @@ try {
     );
 
     await send("Emulation.setDeviceMetricsOverride", {
+        width: 1024,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/");
+    await setMarker();
+    const v2Breakpoint = await v2Snap();
+    record(
+        "v2 shell at 1024px: sidebar and top bar, phone tab bar hidden",
+        v2Breakpoint.tabs === "none" &&
+            v2Breakpoint.sidebar === "flex" &&
+            v2Breakpoint.topbar === "flex" &&
+            !v2Breakpoint.bottomNav,
+        { v2Breakpoint, ex: drain() },
+    );
+
+    await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
         height: 960,
         deviceScaleFactor: 1,

@@ -61,6 +61,7 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
+import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import {
     didYouMeanView,
@@ -935,6 +936,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
+        ...(V2 ? { "dev-gallery-v2": renderDevGalleryV2Page(chrome) } : {}),
     };
 }
 
@@ -1131,10 +1133,14 @@ if (process.argv.includes("--shots")) {
         console.log(`${OUT}/${name}-wide.png`);
         if (V2) {
             // The new shell's two layouts: the phone nav at 390 wide, the
-            // sidebar and top bar at the design's 1440.
-            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
+            // sidebar and top bar at the design's 1440. The dev gallery is
+            // one long page — use a tall window so --shots capture every block.
+            const galleryFullPage = name.startsWith("dev-gallery-v2");
+            const v2Phone = galleryFullPage ? "390,5400" : "390,844";
+            const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
             console.log(`${OUT}/${name}-v2-390.png`);
-            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1440,960 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Desktop} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
             console.log(`${OUT}/${name}-v2-1440.png`);
         }
     }

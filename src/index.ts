@@ -53,6 +53,7 @@ import { manifestJson } from "./web/manifest.js";
 import { householdRoutes } from "./web/routes/household.js";
 import { settingsRoutes } from "./web/routes/settings.js";
 import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
+import { devGalleryRoutes } from "./web/routes/dev-gallery.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
 import { runAsSystem } from "./db/actor.js";
@@ -308,6 +309,7 @@ app.route("/", shareRoutes);
 app.route("/", householdRoutes);
 app.route("/", settingsRoutes);
 app.route("/", needsAttentionRoutes);
+app.route("/", devGalleryRoutes);
 
 app.get("/logout", (c) => {
     const secure =
