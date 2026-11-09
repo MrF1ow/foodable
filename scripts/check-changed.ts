@@ -24,7 +24,7 @@
 //
 // What this mirrors from .github/workflows/ci.yml: format, typecheck, tests and
 // the migrations job. It does not mirror the docker build, CodeQL, dependency
-// review, workflow lint, pr-lint or the policy checks (skill drift, agent
+// review, workflow lint or the policy checks (skill drift, agent
 // context budget, conventions): those run only in CI.
 
 export type Check = {

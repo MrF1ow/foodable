@@ -47,7 +47,7 @@ bun run check:changed   # what CI's check job runs for your changes
 
 Three CI jobs enforce the repo's own rules, and one required check, **policy**, sums them up. They run from `main`, never from your branch, and read your PR through the GitHub API:
 
-- **PR conventions and migration safety** (`scripts/conventions/policy.ts`): the title, branch name, body sections and blast level, and the rules for `db/migrations/` files.
+- **PR conventions and migration safety** (`scripts/conventions/policy.ts`): the title, branch name, body sections and blast level, and the rules for `db/migrations/` files. Check the conventions locally with `bun run pr:check body.md [--title "<title>"]`; without `--title` it uses the open PR's title, else the latest commit's subject, and prints which.
 - **skill-drift:** a skill lists the files it describes in its frontmatter `watches:`. A PR that changes a watched file without touching that skill's folder fails; update the skill (or its `watches:`) in the same PR. An entry can name one top-level JSON key (`package.json#scripts`): it then counts only when that key differs between your branch point and your head, so a version bump or a dependency update does not trigger it. `bun run scripts/conventions/skill-drift.ts` checks your working tree.
 - **agent-context-budget:** `CLAUDE.md` and each `.claude/skills/<name>` folder have a size baseline in `.github/agent-context-budget.json`. A PR that grows one past it, or adds a skill folder, fails unless it carries the `agent-context-increase` label, and with the label it must also commit a regenerated baseline (`bun run scripts/conventions/context-budget.ts --write`, which counts tracked files only), or the next PR would start from the old sizes.
 

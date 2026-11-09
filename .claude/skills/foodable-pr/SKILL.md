@@ -13,7 +13,7 @@ Run, in order:
 
 1. `bun run gen:all`
 2. `bun run check:changed` (format, lint, typecheck and the tests CI's `check` job runs for your changes; `--all` runs everything)
-3. `bun run pr:check body.md` (title, branch, body sections, blast floor)
+3. `bun run pr:check body.md [--title "<title>"]` (title: the open PR's, else the last commit's; branch, sections, blast floor)
 
 ## Title and body
 
@@ -25,4 +25,4 @@ The required checks are `check`, `docker`, `migrations`, `dependency-review` and
 
 Path floors, branch naming, and title parsing are defined in [scripts/conventions/](scripts/conventions/).
 
-Create or update the pull request with `gh pr create` or `gh pr edit` once checks pass and the body is complete.
+Then `gh pr create` or `gh pr edit`.
