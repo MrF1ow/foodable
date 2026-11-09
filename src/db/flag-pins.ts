@@ -9,7 +9,27 @@ import { rows, run } from "./sql.js";
 
 const PIN_COLS = "flag_name, value, reason, epoch, assigned_at, expires_at";
 
-export function liveFlagPinStore(): FlagPinStore {
+export type SnapshotSubject =
+    | { kind: "global"; id: string }
+    | { kind: "household"; id: string }
+    | { kind: "user"; id: string };
+
+const GLOBAL_SNAPSHOT: SnapshotSubject = { kind: "global", id: "" };
+
+function snapshotSubject(subject?: SnapshotSubject): SnapshotSubject {
+    return subject ?? GLOBAL_SNAPSHOT;
+}
+
+export type DbFlagPinStore = FlagPinStore & {
+    loadSnapshot(subject?: SnapshotSubject): Promise<Map<string, boolean>>;
+    saveSnapshot(
+        flag: string,
+        value: boolean,
+        subject?: SnapshotSubject,
+    ): Promise<void>;
+};
+
+export function liveFlagPinStore(): DbFlagPinStore {
     return {
         async loadPins(subject: FlagSubject): Promise<Pin[]> {
             const data = await run((tx) =>
@@ -84,23 +104,32 @@ export function liveFlagPinStore(): FlagPinStore {
             return deleted.length;
         },
 
-        async loadSnapshot() {
+        async loadSnapshot(subject?: SnapshotSubject) {
+            const { kind, id } = snapshotSubject(subject);
             const data = await run((tx) =>
                 rows<Record<string, unknown>>(
                     tx,
-                    tx`select flag_name, value from flag_snapshot`,
+                    tx`
+                        select flag_name, value
+                        from flag_snapshot
+                        where subject_kind = ${kind}
+                          and subject_id = ${id}
+                    `,
                 ),
             );
             return snapshotFromRows(data);
         },
 
-        async saveSnapshot(flag, value) {
+        async saveSnapshot(flag, value, subject?: SnapshotSubject) {
+            const { kind, id } = snapshotSubject(subject);
             const json = JSON.stringify(value);
             await run(async (tx) => {
                 await tx`
-                    insert into flag_snapshot (flag_name, value, saved_at)
-                    values (${flag}, ${json}::jsonb, now())
-                    on conflict (flag_name) do update
+                    insert into flag_snapshot (
+                        flag_name, value, saved_at, subject_kind, subject_id
+                    )
+                    values (${flag}, ${json}::jsonb, now(), ${kind}, ${id})
+                    on conflict (flag_name, subject_kind, subject_id) do update
                     set value = excluded.value, saved_at = now()
                 `;
             });

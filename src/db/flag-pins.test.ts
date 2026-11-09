@@ -237,4 +237,41 @@ describeDb(pgAvailable !== null, "flag pins db", (getCtx) => {
         `) as { n: number }[];
         expect(counted?.n).toBe(2);
     });
+
+    test("snapshot upserts stay separate per subject", async () => {
+        const { sql } = getCtx();
+        const householdA = crypto.randomUUID();
+        const householdB = crypto.randomUUID();
+        const store = liveFlagPinStore();
+        await store.saveSnapshot("off-lookups", true);
+        await store.saveSnapshot("off-lookups", false, {
+            kind: "household",
+            id: householdA,
+        });
+        await store.saveSnapshot("off-lookups", true, {
+            kind: "household",
+            id: householdB,
+        });
+        expect((await store.loadSnapshot()).get("off-lookups")).toBe(true);
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: householdA,
+                })
+            ).get("off-lookups"),
+        ).toBe(false);
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: householdB,
+                })
+            ).get("off-lookups"),
+        ).toBe(true);
+        const [counted] = (await sql`
+            select count(*)::int as n from public.flag_snapshot
+        `) as { n: number }[];
+        expect(counted?.n).toBe(3);
+    });
 });
