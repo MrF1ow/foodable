@@ -6,6 +6,11 @@
  */
 import { SQL, type TransactionSQL } from "bun";
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+    currentActor,
+    jwtSubAndHouseholdForActor,
+    warnMissingActorIfNeeded,
+} from "./actor.js";
 
 export type Tx = TransactionSQL;
 
@@ -60,13 +65,18 @@ export async function run<T>(
     if (outer?.open) return fn(outer.tx);
 
     const sql = getSql();
+    const actor = currentActor();
+    if (!actor) warnMissingActorIfNeeded();
+    const { jwtSub, householdId } = jwtSubAndHouseholdForActor(actor);
     return sql.begin(async (tx) => {
         const store = { tx, open: true };
         return activeTx.run(store, async () => {
             try {
                 await tx`
                 select set_config('statement_timeout', ${String(opts?.timeoutMs ?? 15_000)}, true),
-                       set_config('TimeZone', 'UTC', true)
+                       set_config('TimeZone', 'UTC', true),
+                       set_config('request.jwt.claim.sub', ${jwtSub}, true),
+                       set_config('app.household_id', ${householdId}, true)
             `;
                 // TimeZone UTC: timestamptz inside json_agg must match PostgREST (+00:00).
                 return await fn(tx);
