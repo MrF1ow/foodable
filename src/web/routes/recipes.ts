@@ -79,8 +79,11 @@ import {
     validateRecipeLink,
 } from "../../domain/recipe-link.js";
 import {
+    RECIPE_LINK_READER_PAUSED_WEB_MESSAGE,
     recipeFetchMemory,
     recipeImportFetcher,
+    linkImportPaused,
+    recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
@@ -98,7 +101,7 @@ async function recipeImportDeps(householdId: string) {
     return {
         recipes: liveRecipesStore(),
         foods: liveFoodsStore(),
-        fetcher: recipeImportFetcher(),
+        fetcher: recipeImportFetcher({ householdId }),
         memory: recipeFetchMemory(),
         transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
         readers: config.preferences.socialReaders,
@@ -289,6 +292,34 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             ...importOriginPrefill(textOrigin),
             importSourceKind: "text",
             importSourceLabel: "Recipe text",
+        });
+        return c.html(page.html, 422);
+    }
+
+    if (
+        importUrl.trim() !== "" &&
+        linkImportPaused({
+            text,
+            readerEnabled: recipeLinkReaderEnabled(member.householdId),
+        })
+    ) {
+        const importLinkValidated = validateRecipeLink(importUrl);
+        const pausedUrl = importLinkValidated.ok
+            ? cleanRecipeLink(importLinkValidated.url)
+            : pinOrPageUrl;
+        const linkInfo = importLinkValidated.ok
+            ? recipeSource(importLinkValidated.url)
+            : null;
+        const page = await renderRecipesListPage(userId, {
+            openModalId: IMPORT_RECIPE_MODAL_ID,
+            importUrl: pausedUrl,
+            importError: RECIPE_LINK_READER_PAUSED_WEB_MESSAGE,
+            importPasteStep: true,
+            importPasteText: text.trim() !== "" ? text : undefined,
+            importCredit: credit,
+            importSourceKind: linkInfo?.kind,
+            importSourceLabel: linkInfo?.label,
+            ...importOriginPrefill(textOrigin),
         });
         return c.html(page.html, 422);
     }

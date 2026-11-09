@@ -1,3 +1,9 @@
+import {
+    buildBackgroundFlagContext,
+    isEnabled as defaultIsEnabled,
+    type FlagContext,
+    type FlagName,
+} from "./flags.js";
 import { liveFoodsStore } from "./db/foods.js";
 import { liveFridgeStore } from "./db/fridge.js";
 import { liveGroceryStore } from "./db/grocery.js";
@@ -14,6 +20,32 @@ import {
     type HouseholdPreferences,
 } from "./household.js";
 import { runRestockCheck, startRestockRuns } from "./domain/restock.js";
+
+export type RestockRunnerIsEnabled = (
+    flag: FlagName,
+    ctx: FlagContext,
+) => boolean;
+
+export function filterRestockRunnerHouseholds<
+    T extends { id: string; preferences: HouseholdPreferences },
+>(
+    households: T[],
+    log: (msg: string) => void,
+    isEnabled: RestockRunnerIsEnabled = defaultIsEnabled,
+): T[] {
+    const out: T[] = [];
+    for (const household of households) {
+        const ctx = buildBackgroundFlagContext(household.id);
+        if (!isEnabled("restock-runner", ctx)) {
+            log(
+                `[restock] household=${household.id.slice(0, 8)} skipped: restock runner disabled`,
+            );
+            continue;
+        }
+        out.push(household);
+    }
+    return out;
+}
 
 export function restockHouseholdsFromRows(
     rows: RestockEnabledHouseholdRow[],
@@ -47,7 +79,9 @@ export function liveRestockCheckDeps() {
     return {
         listEnabled: async () => {
             const rows = await listRestockEnabledHouseholds();
-            return restockHouseholdsFromRows(rows, (msg) => console.log(msg));
+            const log = (msg: string) => console.log(msg);
+            const households = restockHouseholdsFromRows(rows, log);
+            return filterRestockRunnerHouseholds(households, log);
         },
         getOwnerProfile: (householdId: string) =>
             getHouseholdOwnerProfile(householdId),
