@@ -6,6 +6,9 @@ import {
     minifyWidgetHtml,
     WIDGET_BUDGETS,
     WIDGET_TEMPLATES,
+    WIDGET_TEMPLATES_V2,
+    widgetAssemblies,
+    widgetTemplateName,
 } from "./widgets.js";
 
 const KEYS = Object.keys(WIDGET_TEMPLATES);
@@ -134,19 +137,45 @@ test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
 test("minified widgets fit size budgets", async () => {
     const rows: string[] = [];
     rows.push("widget".padEnd(22) + "raw".padStart(10) + "gzip".padStart(10));
-    for (const key of KEYS) {
+    for (const { key, v2 } of widgetAssemblies()) {
         const budget = WIDGET_BUDGETS[key];
         expect(budget).toBeDefined();
-        const html = await getWidgetHtml(key);
+        const html = await getWidgetHtml(key, { v2 });
         const raw = new TextEncoder().encode(html).byteLength;
         const gzip = gzipByteLength(html);
+        const label = v2 ? `${key}:v2` : key;
         rows.push(
-            key.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
+            label.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
         );
         expect(raw).toBeLessThanOrEqual(budget!.raw);
         expect(gzip).toBeLessThanOrEqual(budget!.gzip);
     }
     console.log(rows.join("\n"));
+});
+
+test("v2 assembly falls back to the v1 template when no v2 file exists", async () => {
+    const v1 = await getWidgetHtml("trends");
+    const v2 = await getWidgetHtml("trends", { v2: true });
+    expect(v2).toBe(v1);
+});
+
+test("v2-only keys resolve only through the v2 variant", () => {
+    const v2Only = "__v2_only_fixture__";
+    (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only] =
+        "fixture-only.html";
+    try {
+        expect(widgetTemplateName(v2Only)).toBe("");
+        expect(widgetTemplateName(v2Only, { v2: true })).toBe(
+            "fixture-only.html",
+        );
+        // A v2-only key is assembled only as v2: warming and the budget
+        // test must never ask for its v1 twin.
+        expect(widgetAssemblies().filter((a) => a.key === v2Only)).toEqual([
+            { key: v2Only, v2: true },
+        ]);
+    } finally {
+        delete (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only];
+    }
 });
 
 test("unknown widget key throws", async () => {

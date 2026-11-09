@@ -76,10 +76,19 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
     "component-gallery": "component-gallery.html",
 };
 
+// Widget keys with a v2 template but no v1 twin (later phases). v1 getWidgetHtml
+// does not resolve these keys; MCP v2 URIs may once templates land.
+export const WIDGET_TEMPLATES_V2: Record<string, string> = {};
+
 /** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */
 export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
     Object.fromEntries(
-        Object.keys(WIDGET_TEMPLATES).map((key) => [
+        [
+            ...new Set([
+                ...Object.keys(WIDGET_TEMPLATES),
+                ...Object.keys(WIDGET_TEMPLATES_V2),
+            ]),
+        ].map((key) => [
             key,
             key === "import-meals"
                 ? { raw: 80 * 1024, gzip: 24 * 1024 }
@@ -87,8 +96,57 @@ export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
         ]),
     );
 
-// Per instance by design: assembled widget HTML keyed by template; identical bytes on every instance for the same build.
+export type WidgetHtmlOptions = { v2?: boolean };
+
+/** Every assembly the server can serve: v1 for each v1 template, v2 for every key. */
+export function widgetAssemblies(): { key: string; v2: boolean }[] {
+    return [
+        ...Object.keys(WIDGET_TEMPLATES).map((key) => ({ key, v2: false })),
+        ...[
+            ...new Set([
+                ...Object.keys(WIDGET_TEMPLATES),
+                ...Object.keys(WIDGET_TEMPLATES_V2),
+            ]),
+        ].map((key) => ({ key, v2: true })),
+    ];
+}
+
+function cacheKey(key: string, v2: boolean): string {
+    return v2 ? `${key}:v2` : key;
+}
+
+// Per instance by design: assembled widget HTML keyed by widget key and variant; identical bytes on every instance for the same build.
 const cache = new Map<string, string>();
+
+async function resolveTemplateRelPath(
+    key: string,
+    v2: boolean,
+): Promise<string> {
+    if (v2) {
+        const v2Only = WIDGET_TEMPLATES_V2[key];
+        if (v2Only) return `templates/v2/${v2Only}`;
+        const v1File = WIDGET_TEMPLATES[key];
+        if (!v1File) throw new Error(`unknown widget: ${key}`);
+        const v2Rel = `templates/v2/${v1File}`;
+        if (await Bun.file(`${SRC_DIR}/${v2Rel}`).exists()) return v2Rel;
+        return `templates/${v1File}`;
+    }
+    const v1File = WIDGET_TEMPLATES[key];
+    if (!v1File) throw new Error(`unknown widget: ${key}`);
+    return `templates/${v1File}`;
+}
+
+/** Template filename (no v2/ prefix) for a widget key — used for ui:// URIs. */
+export function widgetTemplateName(
+    key: string,
+    opts?: WidgetHtmlOptions,
+): string {
+    const v2 = opts?.v2 === true;
+    if (v2) {
+        return WIDGET_TEMPLATES_V2[key] ?? WIDGET_TEMPLATES[key] ?? "";
+    }
+    return WIDGET_TEMPLATES[key] ?? "";
+}
 
 async function readSrc(
     relPath: string,
@@ -130,10 +188,10 @@ async function resolveIncludes(
     return text.replace(INCLUDE_RE, (_full, rel) => resolved.get(rel) ?? "");
 }
 
-async function assemble(templateFile: string): Promise<string> {
-    const template = await readSrc(`templates/${templateFile}`);
-    const withPartials = await resolveIncludes(template, templateFile, [
-        `templates/${templateFile}`,
+async function assembleTemplateRelPath(templateRel: string): Promise<string> {
+    const template = await readSrc(templateRel);
+    const withPartials = await resolveIncludes(template, templateRel, [
+        templateRel,
     ]);
 
     // @inlinets runs after @include so a shared partial can pull it in too.
@@ -156,10 +214,13 @@ async function assemble(templateFile: string): Promise<string> {
 }
 
 /** Unminified widget document (partials expanded). */
-export async function assembleSource(key: string): Promise<string> {
-    const templateFile = WIDGET_TEMPLATES[key];
-    if (!templateFile) throw new Error(`unknown widget: ${key}`);
-    return assemble(templateFile);
+export async function assembleSource(
+    key: string,
+    opts?: WidgetHtmlOptions,
+): Promise<string> {
+    return assembleTemplateRelPath(
+        await resolveTemplateRelPath(key, opts?.v2 === true),
+    );
 }
 
 function stripCssBlockComments(css: string): string {
@@ -324,12 +385,17 @@ export function minifyWidgetHtml(html: string): string {
 }
 
 // Return the fully-inlined HTML for a widget, assembling+caching on first use.
-export async function getWidgetHtml(key: string): Promise<string> {
-    const cached = cache.get(key);
+export async function getWidgetHtml(
+    key: string,
+    opts?: WidgetHtmlOptions,
+): Promise<string> {
+    const v2 = opts?.v2 === true;
+    const ck = cacheKey(key, v2);
+    const cached = cache.get(ck);
     if (cached !== undefined) return cached;
-    const raw = await assembleSource(key);
+    const raw = await assembleSource(key, opts);
     const html = minifyWidgetHtml(raw);
-    cache.set(key, html);
+    cache.set(ck, html);
     return html;
 }
 
@@ -636,7 +702,7 @@ export function withWidgetData(
 // rather than on a client's first request.
 export async function warmWidgets(): Promise<void> {
     await Promise.all([
-        ...Object.keys(WIDGET_TEMPLATES).map((key) => getWidgetHtml(key)),
+        ...widgetAssemblies().map(({ key, v2 }) => getWidgetHtml(key, { v2 })),
         getAppCss(),
         getEmbedCss(),
         getAppJs(),

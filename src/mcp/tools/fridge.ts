@@ -40,11 +40,9 @@ import {
 } from "../../domain/meals.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
-    APP_UI_MIME_TYPE,
-    FRIDGE_WIDGET_URI,
+    registerWidgetResource,
     NOTICE_SCHEMA,
     NEW_FOOD_INPUT,
     ON_SIMILAR_INPUT,
@@ -121,7 +119,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     }),
                 ),
             }),
-            ...uiMeta(FRIDGE_WIDGET_URI),
+            ...uiMeta("fridge"),
         },
         async () =>
             withAnalytics(
@@ -206,28 +204,13 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    server.registerResource(
-        "fridge-widget",
-        FRIDGE_WIDGET_URI,
-        {
-            title: "Fridge",
-            description:
-                "Interactive UI for get_fridge: locations with their items, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("fridge"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "fridge",
+        resourceName: "fridge-widget",
+        title: "Fridge",
+        description:
+            "Interactive UI for get_fridge: locations with their items, with automatic light/dark theming.",
+    });
 
     server.registerTool(
         "add_fridge_location",

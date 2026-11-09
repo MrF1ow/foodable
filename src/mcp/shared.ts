@@ -74,7 +74,13 @@ import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
 import { noticeActionFor, noticeSentence } from "../copy/notices.js";
 import type { FlagName } from "../flags.js";
-import { defaultViewerFlags, type ViewerFlags } from "../viewer-flags.js";
+import { type McpServer } from "@modelcontextprotocol/server";
+import { getWidgetHtml, widgetTemplateName } from "../widgets.js";
+import {
+    defaultViewerFlags,
+    isViewerFlagOn,
+    type ViewerFlags,
+} from "../viewer-flags.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -84,15 +90,77 @@ import { defaultViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 // The widget HTML is assembled from shared source partials at startup (see
 // widgets.ts / public/widgets/src). getWidgetHtml(key) returns the fully-inlined,
 // self-contained document for each ui:// resource below.
-export const SUMMARY_WIDGET_URI = "ui://widget/nutrition-summary.html";
 export const APP_UI_MIME_TYPE = "text/html;profile=mcp-app";
-export const GOAL_PROGRESS_WIDGET_URI = "ui://widget/goal-progress.html";
-export const MEAL_LOGGED_WIDGET_URI = "ui://widget/meal-logged.html";
-export const TRENDS_WIDGET_URI = "ui://widget/trends.html";
-export const WEIGHT_TRENDS_WIDGET_URI = "ui://widget/weight-trends.html";
-export const IMPORT_MEALS_WIDGET_URI = "ui://widget/import-meals.html";
-export const GROCERY_LIST_WIDGET_URI = "ui://widget/grocery-list.html";
-export const FRIDGE_WIDGET_URI = "ui://widget/fridge.html";
+
+export function widgetUri(templateName: string, v2 = false): string {
+    return v2
+        ? `ui://widget/v2/${templateName}`
+        : `ui://widget/${templateName}`;
+}
+
+export function widgetUriForKey(widgetKey: string, v2 = false): string {
+    const name = widgetTemplateName(widgetKey, { v2 });
+    if (!name) throw new Error(`unknown widget key: ${widgetKey}`);
+    return widgetUri(name, v2);
+}
+
+export const SUMMARY_WIDGET_URI = widgetUri("nutrition-summary.html");
+export const GOAL_PROGRESS_WIDGET_URI = widgetUri("goal-progress.html");
+export const MEAL_LOGGED_WIDGET_URI = widgetUri("meal-logged.html");
+export const TRENDS_WIDGET_URI = widgetUri("trends.html");
+export const WEIGHT_TRENDS_WIDGET_URI = widgetUri("weight-trends.html");
+export const IMPORT_MEALS_WIDGET_URI = widgetUri("import-meals.html");
+export const GROCERY_LIST_WIDGET_URI = widgetUri("grocery-list.html");
+export const FRIDGE_WIDGET_URI = widgetUri("fridge.html");
+
+export type WidgetResourceDef = {
+    key: string;
+    resourceName: string;
+    title: string;
+    description: string;
+};
+
+/** Register the v1 ui:// resource and, when mcp-widgets-v2 is on, its v2 twin. */
+export function registerWidgetResource(
+    server: McpServer,
+    ctx: ToolContext,
+    def: WidgetResourceDef,
+): void {
+    const { key, resourceName, title, description } = def;
+    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
+    server.registerResource(
+        resourceName,
+        widgetUriForKey(key, false),
+        listing,
+        async (uri) => ({
+            contents: [
+                {
+                    uri: uri.href,
+                    mimeType: APP_UI_MIME_TYPE,
+                    text: await getWidgetHtml(key),
+                    _meta: { ui: { prefersBorder: true } },
+                },
+            ],
+        }),
+    );
+    if (isViewerFlagOn(ctx.flags, "mcp-widgets-v2")) {
+        server.registerResource(
+            `${resourceName}-v2`,
+            widgetUriForKey(key, true),
+            listing,
+            async (uri) => ({
+                contents: [
+                    {
+                        uri: uri.href,
+                        mimeType: APP_UI_MIME_TYPE,
+                        text: await getWidgetHtml(key, { v2: true }),
+                        _meta: { ui: { prefersBorder: true } },
+                    },
+                ],
+            }),
+        );
+    }
+}
 
 const NOTICE_CODE_ENUM = NOTICE_CODES as unknown as [
     NoticeCode,
@@ -1390,7 +1458,7 @@ export type ToolContext = {
         householdId: string;
     }>;
     analytics: { userId: string };
-    uiMeta: (resourceUri: string) => Record<string, unknown>;
+    uiMeta: (widgetKey: string) => Record<string, unknown>;
 };
 
 export function createToolContext(
@@ -1569,15 +1637,19 @@ export function createToolContext(
     // Apps SDK alias on some surfaces, and hosts that know neither key ignore
     // both. The two values must stay identical — ChatGPT drops the widget
     // silently if the alias points at an unregistered URI.
-    const uiMeta = (resourceUri: string) =>
-        widgetsEnabled
-            ? {
-                  _meta: {
-                      ui: { resourceUri },
-                      "openai/outputTemplate": resourceUri,
-                  },
-              }
-            : {};
+    const uiMeta = (widgetKey: string) => {
+        if (!widgetsEnabled) return {};
+        const uri = widgetUriForKey(
+            widgetKey,
+            isViewerFlagOn(flags, "mcp-widgets-v2"),
+        );
+        return {
+            _meta: {
+                ui: { resourceUri: uri },
+                "openai/outputTemplate": uri,
+            },
+        };
+    };
     return {
         auth,
         baseUrl,

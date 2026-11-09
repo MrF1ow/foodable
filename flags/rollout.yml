@@ -28,6 +28,9 @@ flags:
     mcp-household-digest:
         default: false
         rules: []
+    mcp-widgets-v2:
+        default: false
+        rules: []
     flags-epoch:
         default: 0
         rules: []

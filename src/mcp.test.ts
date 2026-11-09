@@ -6,6 +6,7 @@ import {
     beforeAll,
     beforeEach,
     afterAll,
+    afterEach,
 } from "bun:test";
 import {
     formatProgress,
@@ -73,7 +74,11 @@ import {
     setFlagsForTests,
 } from "./flags.js";
 import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
-import { createToolContext } from "./mcp/shared.js";
+import {
+    createToolContext,
+    MEAL_LOGGED_WIDGET_URI,
+    widgetUri,
+} from "./mcp/shared.js";
 import { gatedTool } from "./mcp/gated.js";
 import { toolNamesFor } from "./test-support/flag-harness.js";
 
@@ -8669,6 +8674,108 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
             });
         },
     );
+
+    const MCP_WIDGET_FILES = [
+        "nutrition-summary.html",
+        "goal-progress.html",
+        "meal-logged.html",
+        "trends.html",
+        "weight-trends.html",
+        "import-meals.html",
+        "grocery-list.html",
+        "fridge.html",
+    ] as const;
+
+    const V1_WIDGET_URIS = MCP_WIDGET_FILES.map((f) => widgetUri(f)).sort();
+
+    describe("mcp-widgets-v2 flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        test.each(ERAS)(
+            "flag off keeps v1 tool _meta URIs and resources/list unchanged (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-widgets-v2": false }),
+                );
+                db.goals = goals({ user_id: "u1" });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const logMeal = tools.find((t) => t.name === "log_meal");
+                    expect(logMeal?._meta?.ui).toEqual({
+                        resourceUri: MEAL_LOGGED_WIDGET_URI,
+                    });
+                    expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
+                        MEAL_LOGGED_WIDGET_URI,
+                    );
+                    const summary = tools.find(
+                        (t) => t.name === "get_nutrition_summary",
+                    );
+                    expect(
+                        (summary?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(widgetUri("nutrition-summary.html"));
+
+                    const { resources } = await client.listResources();
+                    const widgetUris = resources
+                        .map((r) => r.uri)
+                        .filter((u) => u.startsWith("ui://widget/"))
+                        .sort();
+                    expect(widgetUris).toEqual(V1_WIDGET_URIS);
+                    expect(widgetUris.some((u) => u.includes("/v2/"))).toBe(
+                        false,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links v2 URIs, lists v1 and v2 resources, v2 read matches assembly (%p)",
+            async (mode) => {
+                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
+                db.goals = goals({ user_id: "u1" });
+                const assembledV2 = await getWidgetHtml("meal-logged", {
+                    v2: true,
+                });
+                const v2Uri = widgetUri("meal-logged.html", true);
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const logMeal = tools.find((t) => t.name === "log_meal");
+                    expect(
+                        (logMeal?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(v2Uri);
+                    expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
+                        v2Uri,
+                    );
+
+                    const { resources } = await client.listResources();
+                    const widgetUris = resources
+                        .map((r) => r.uri)
+                        .filter((u) => u.startsWith("ui://widget/"))
+                        .sort();
+                    const expected = [
+                        ...V1_WIDGET_URIS,
+                        ...MCP_WIDGET_FILES.map((f) => widgetUri(f, true)),
+                    ].sort();
+                    expect(widgetUris).toEqual(expected);
+
+                    const res = await client.readResource({ uri: v2Uri });
+                    const c = res.contents[0] as {
+                        mimeType?: string;
+                        text?: string;
+                        _meta?: { ui?: { prefersBorder?: boolean } };
+                    };
+                    expect(c.mimeType).toBe("text/html;profile=mcp-app");
+                    expect(c._meta?.ui?.prefersBorder).toBe(true);
+                    expect(c.text).toBe(assembledV2);
+                    expect(
+                        c.text?.trimStart().startsWith("<!doctype html>"),
+                    ).toBe(true);
+                    expect(c.text).toContain("function initWidget(config)");
+                });
+            },
+        );
+    });
 
     test.each(ERAS)(
         "input validation errors are in-band, not transport failures (%p)",
