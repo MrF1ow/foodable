@@ -1,7 +1,11 @@
 import type { Context, Next } from "hono";
 import type { AuthContext } from "./auth-context.js";
 import { rateLimitKey } from "./auth-context.js";
-import { lookupBearer } from "./db/tokens.js";
+import { withActor } from "./db/actor.js";
+import {
+    actorForValidBearer,
+    lookupBearerAsSystem,
+} from "./household-token.js";
 import { maskIp } from "./net.js";
 import { resourceMetadataUrl } from "./discovery.js";
 import { getBaseUrl } from "./url.js";
@@ -105,7 +109,7 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     }
 
     const token = authHeader.substring(7);
-    const lookup = await lookupBearer(token);
+    const lookup = await lookupBearerAsSystem(token);
 
     if (lookup.status === "unavailable") {
         // We could not verify the token, so this is not the client's fault:
@@ -138,13 +142,13 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     clearAuthFailures(rateLimitIp(c));
 
     c.set("accessToken", token);
-    c.set(
-        "authContext",
+    const authContext: AuthContext =
         lookup.kind === "user"
             ? { kind: "user", userId: lookup.userId }
-            : { kind: "household", householdId: lookup.householdId },
-    );
-    await next();
+            : { kind: "household", householdId: lookup.householdId };
+    c.set("authContext", authContext);
+    const actor = await actorForValidBearer(lookup);
+    return withActor(actor, () => next());
 };
 
 // Sheds clients that have failed authentication many times in a row — in

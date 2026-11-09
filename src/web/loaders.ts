@@ -1,3 +1,4 @@
+import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
     dashboardAccess,
@@ -160,7 +161,13 @@ type MemberGate =
     | { status: 200; html: string; create: true };
 
 async function memberGate(viewerUserId: string): Promise<MemberGate> {
-    const viewer = await getHouseholdMembership(viewerUserId);
+    const stashed = peekSiteMembership();
+    // Reuse the middleware's lookup only for the same user and only when it
+    // found a membership: a request can create a household after the lookup.
+    const viewer =
+        stashed && stashed.userId === viewerUserId
+            ? stashed
+            : await getHouseholdMembership(viewerUserId);
     if (viewer == null) {
         if (!(await householdExists())) {
             return {

@@ -11,6 +11,7 @@ import {
 import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
+import * as householdDb from "./db/household.js";
 
 // Snapshot before mocking — restoring from the live namespace is a no-op
 // because Bun patches it in place (see mcp.test.ts).
@@ -97,8 +98,12 @@ beforeEach(() => {
     tokenLookups = 0;
     tokenStoreAvailable = true;
     setClientIpConfigForTests(testClientIpConfig);
+    spyOn(householdDb, "getHouseholdMembership").mockResolvedValue(null);
 });
-afterEach(() => _resetBuckets());
+afterEach(() => {
+    _resetBuckets();
+    spyOn(householdDb, "getHouseholdMembership").mockRestore();
+});
 
 test("unauthenticated /mcp is shed with 429 after the strike threshold", async () => {
     const { app } = buildApp();

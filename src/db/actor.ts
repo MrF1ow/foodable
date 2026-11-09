@@ -1,4 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { AuthContext } from "../auth-context.js";
+import type { HouseholdMember } from "../household.js";
 
 export type Actor =
     | { kind: "user"; userId: string; householdId: string | null }
@@ -6,6 +8,20 @@ export type Actor =
     | { kind: "system"; reason: string };
 
 const activeActor = new AsyncLocalStorage<Actor>();
+
+const siteMembershipPeek = new AsyncLocalStorage<HouseholdMember | null>();
+
+/** Stash resolved site membership for loaders in the same request (undefined = not stashed). */
+export function withSiteMembershipPeek<T>(
+    member: HouseholdMember | null,
+    fn: () => Promise<T>,
+): Promise<T> {
+    return siteMembershipPeek.run(member, fn);
+}
+
+export function peekSiteMembership(): HouseholdMember | null | undefined {
+    return siteMembershipPeek.getStore();
+}
 
 export function withActor<T>(actor: Actor, fn: () => Promise<T>): Promise<T> {
     return activeActor.run(actor, fn);
@@ -20,6 +36,17 @@ export function runAsSystem<T>(
     fn: () => Promise<T>,
 ): Promise<T> {
     return withActor({ kind: "system", reason }, fn);
+}
+
+/** Maps an authenticated request identity to the actor stored for database access. */
+export function actorFromAuthContext(
+    auth: AuthContext,
+    householdId: string | null,
+): Actor {
+    if (auth.kind === "household") {
+        return { kind: "household", householdId: auth.householdId };
+    }
+    return { kind: "user", userId: auth.userId, householdId };
 }
 
 export function jwtSubAndHouseholdForActor(actor: Actor | undefined): {
