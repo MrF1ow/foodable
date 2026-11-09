@@ -2188,6 +2188,18 @@ export function linkProductPromptPath(
     return `${returnPath}${sep}link_product=${encodeURIComponent(product.id)}`;
 }
 
+/** Build effective foods from an already-listed household catalog (no per-id loads). */
+export function effectiveFoodsFromListed(
+    listed: readonly Food[],
+): Map<string, EffectiveFood> {
+    const catalog = new Map(listed.map((food) => [food.id, food]));
+    const out = new Map<string, EffectiveFood>();
+    for (const food of listed) {
+        out.set(food.id, effectiveFood(food, catalog));
+    }
+    return out;
+}
+
 export async function effectiveFoodsByIds(
     store: FoodsStore,
     householdId: string,
