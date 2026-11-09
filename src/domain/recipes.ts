@@ -141,8 +141,6 @@ export type RecipeMacros = {
     sugar_g: number | null;
     alcohol_g: number | null;
     incomplete: boolean;
-    incompleteReasons: string[];
-    gaps: RecipeGap[];
 };
 
 export type RecipesStore = {
@@ -686,10 +684,7 @@ function scaleNutrient(value: number | null, factor: number): number | null {
     return roundAmount(value * factor);
 }
 
-type MacroNutrient = Exclude<
-    keyof RecipeMacros,
-    "incomplete" | "incompleteReasons" | "gaps"
->;
+type MacroNutrient = Exclude<keyof RecipeMacros, "incomplete">;
 
 export function macrosForPerson(
     ingredients: RecipeIngredient[],
@@ -697,7 +692,7 @@ export function macrosForPerson(
     portionCount: number,
     foodsById: ReadonlyMap<string, Food> = new Map(),
 ): RecipeMacros {
-    const gaps: RecipeGap[] = [];
+    let hasGaps = false;
     const sum: RecipeMacros = {
         calories: null,
         protein_g: null,
@@ -707,8 +702,6 @@ export function macrosForPerson(
         sugar_g: null,
         alcohol_g: null,
         incomplete: false,
-        incompleteReasons: [],
-        gaps: [],
     };
     for (const ingredient of ingredients) {
         const catalog = ingredient.foodId
@@ -719,8 +712,10 @@ export function macrosForPerson(
             ingredient,
             catalog,
         );
-        gaps.push(...notices.map(gapFromNotice));
-        if (notices.length > 0) continue;
+        if (notices.length > 0) {
+            hasGaps = true;
+            continue;
+        }
         if (ingredient.quantity == null) continue;
         const nutrition = nutritionFromCatalogFood(catalog!)!;
         const eaten = amountForPortion(
@@ -747,16 +742,7 @@ export function macrosForPerson(
         add("sugar_g");
         add("alcohol_g");
     }
-    sum.gaps = gaps;
-    const seen = new Set<string>();
-    sum.incompleteReasons = gaps
-        .map((gap) => gap.message)
-        .filter((message) => {
-            if (seen.has(message)) return false;
-            seen.add(message);
-            return true;
-        });
-    sum.incomplete = gaps.length > 0;
+    sum.incomplete = hasGaps;
     return sum;
 }
 

@@ -328,9 +328,13 @@ test("each without grams_per_each marks macros incomplete with a named reason", 
     );
     expect(macros.incomplete).toBe(true);
     expect(macros.calories).toBeNull();
-    expect(macros.incompleteReasons).toEqual(["Eggs: set grams per each"]);
-    expect(macros.gaps.map((g) => g.reason)).toEqual([
-        "missing_grams_per_each",
+    const gapNotices = recipeNotices(
+        recipe.id,
+        view.ingredients,
+        new Map((await foods.listFoods(HH)).map((row) => [row.id, row])),
+    );
+    expect(gapNotices.map((n) => n.code)).toEqual([
+        "recipe.missing_grams_per_each",
     ]);
     await updateFood(foods, HH, ingredient.foodId!, { gramsPerEach: 50 });
     const complete = macrosForPerson(
@@ -563,8 +567,6 @@ test("recipes list page is not a stub and detail reuses shared picker", () => {
             sugar_g: 3,
             alcohol_g: null,
             incomplete: false,
-            incompleteReasons: [],
-            gaps: [],
         },
         allergenNotices: [BOB_PEA_RECIPE_ALLERGEN_NOTICE],
         dislikeNote: "Bob dislikes cilantro.",
@@ -669,8 +671,6 @@ test("recipe pages use modals for create and detail actions", async () => {
             sugar_g: 2,
             alcohol_g: 0,
             incomplete: false,
-            incompleteReasons: [],
-            gaps: [],
         },
         isOwner: true,
     } as never);
@@ -771,8 +771,6 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             sugar_g: null,
             alcohol_g: null,
             incomplete: true,
-            incompleteReasons: [],
-            gaps: [],
         },
         isOwner: true,
         error: "Only the creator or household owner can delete this recipe.",
@@ -843,8 +841,6 @@ test("a server error reopens the recipe modal that submitted the form", () => {
             sugar_g: 2,
             alcohol_g: 0,
             incomplete: false,
-            incompleteReasons: [],
-            gaps: [],
         },
         isOwner: true,
         error: "Amount must be positive.",
@@ -900,8 +896,6 @@ test("recipe detail shows a page banner when openModalId does not match a dialog
             sugar_g: null,
             alcohol_g: null,
             incomplete: true,
-            incompleteReasons: [],
-            gaps: [],
         },
         isOwner: true,
         error: "Unknown ingredient.",
@@ -1296,7 +1290,7 @@ test("recipeNotices and gapFromNotice align with recipeIngredientGaps", async ()
     );
 });
 
-test("macrosForPerson gaps mirror recipeNotices mapped through gapFromNotice", async () => {
+test("macrosForPerson incomplete mirrors recipe gap notices", async () => {
     const foods = createMemoryFoodsStore();
     const plain = await findOrCreateManualFood(
         foods,
@@ -1346,9 +1340,8 @@ test("macrosForPerson gaps mirror recipeNotices mapped through gapFromNotice", a
             .filter((id): id is string => id != null);
         const cat = await effectiveFoodsByIds(foods, HH, ids);
         const macros = macrosForPerson(list, 1, 1, cat);
-        const fromNotices = recipeNotices("r1", list, cat).map(gapFromNotice);
-        expect(macros.incomplete).toBe(macros.gaps.length > 0);
-        expect(macros.gaps).toEqual(fromNotices);
+        const gapNotices = recipeNotices("r1", list, cat);
+        expect(macros.incomplete).toBe(gapNotices.length > 0);
     }
 });
 
@@ -1493,10 +1486,9 @@ test("macrosForPerson names Half and half nutrition gap and completes with usual
     let catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
     const incomplete = macrosForPerson([ingredient], 1, 1, catalog);
     expect(incomplete.incomplete).toBe(true);
-    expect(incomplete.gaps[0]?.reason).toBe("no_nutrition");
-    expect(incomplete.gaps[0]?.message).toBe(
-        "Half and half: no nutrition — add it, or pick a usual product",
-    );
+    expect(
+        recipeIngredientGaps(ingredient, catalog.get(plain.id)!)[0]?.reason,
+    ).toBe("no_nutrition");
 
     const product = await createProduct(foods, HH, plain.id, {
         name: "Member's Mark Half and Half",
@@ -1512,11 +1504,10 @@ test("macrosForPerson names Half and half nutrition gap and completes with usual
     catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
     const complete = macrosForPerson([ingredient], 1, 1, catalog);
     expect(complete.incomplete).toBe(false);
-    expect(complete.gaps).toEqual([]);
     expect(complete.calories).toBe(78);
 });
 
-test("macrosForPerson never sets incomplete without gaps", async () => {
+test("macrosForPerson sets incomplete when nutrition gaps exist", async () => {
     const foods = createMemoryFoodsStore();
     const recipes = createMemoryRecipesStore();
     const cases: Array<() => Promise<void>> = [
@@ -1549,7 +1540,7 @@ test("macrosForPerson never sets incomplete without gaps", async () => {
             });
             const catalog = await effectiveFoodsByIds(foods, HH, [oats.id]);
             const macros = macrosForPerson([ing], 1, 1, catalog);
-            expect(macros.incomplete).toBe(macros.gaps.length > 0);
+            expect(macros.incomplete).toBe(false);
         },
         async () => {
             const plain = await findOrCreateManualFood(
@@ -1573,7 +1564,7 @@ test("macrosForPerson never sets incomplete without gaps", async () => {
             });
             const catalog = await effectiveFoodsByIds(foods, HH, [plain.id]);
             const macros = macrosForPerson([ing], 1, 1, catalog);
-            expect(macros.incomplete).toBe(macros.gaps.length > 0);
+            expect(macros.incomplete).toBe(true);
         },
     ];
     for (const run of cases) await run();
@@ -1680,8 +1671,9 @@ test("macrosForPerson counts only measured ingredients when one is unmeasured", 
     });
     const macros = macrosForPerson([measured, unmeasured], 1, 1, catalog);
     expect(macros.incomplete).toBe(true);
-    const amountGap = macros.gaps.find((g) => g.reason === "no_amount");
-    expect(amountGap?.message).toContain("Salt has no amount");
+    expect(
+        recipeIngredientGaps(unmeasured, catalog.get(salt.id)!)?.[0]?.message,
+    ).toContain("Salt has no amount");
     expect(macros.calories).toBe(364);
     expect(macros.protein_g).toBe(10);
     expect(macros.carbs_g).toBe(76);

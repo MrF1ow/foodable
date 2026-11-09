@@ -1287,11 +1287,16 @@ export async function householdFoodNames(
 export async function groceryLineExtras(
     householdId: string,
     line: {
+        id: string;
         displayName: string;
         quantity: { amount: number; unit: string };
         foodId?: string | null;
     },
-): Promise<{ alreadyHave: string | null; warning: string | null }> {
+): Promise<{
+    alreadyHave: string | null;
+    allergenText: string | null;
+    notices: Notice[];
+}> {
     const [fridge, allergenMembers] = await Promise.all([
         listFridge(liveFridgeStore(), householdId),
         householdAllergenMembers(householdId),
@@ -1312,7 +1317,9 @@ export async function groceryLineExtras(
         catalog,
     );
     const food = line.foodId ? catalog.get(line.foodId) : undefined;
-    const warning = groceryAllergenWarning(
+    // The same allergen notices list_grocery_lines gives this line.
+    const notices = allergenNotices(
+        { kind: "grocery_line", id: line.id },
         line.displayName,
         allergenMembers,
         food ? food.allergens : null,
@@ -1324,7 +1331,15 @@ export async function groceryLineExtras(
                 : tag.cover === "full"
                   ? "already have"
                   : `already have: have ${tag.have.amount} ${tag.have.unit}, need ${tag.need.amount} ${tag.need.unit}`,
-        warning: warning?.text ?? null,
+        // The text also covers "allergens unknown" for an uncatalogued
+        // food, which has no notice.
+        allergenText:
+            groceryAllergenWarning(
+                line.displayName,
+                allergenMembers,
+                food ? food.allergens : null,
+            )?.text ?? null,
+        notices,
     };
 }
 

@@ -129,7 +129,7 @@ function formatAllergenList(allergens: string[]): string {
     return `${allergens.slice(0, -1).join(", ")} and ${allergens[allergens.length - 1]}`;
 }
 
-/** Today's `groceryAllergenWarning` text: every matched allergen, then every affected member. */
+/** Grocery allergen block notice: every matched allergen, then every affected member. */
 function allergenSentence(notice: Notice): string {
     const allergens = (notice.params.allergens ?? []) as string[];
     const label = formatAllergenList(allergens);

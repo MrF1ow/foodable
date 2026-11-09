@@ -256,8 +256,6 @@ const MACROS = {
     sugar_g: 9,
     alcohol_g: 0,
     incomplete: false,
-    incompleteReasons: [],
-    gaps: [],
 };
 
 function food(id: string, name: string, calories: number | null) {

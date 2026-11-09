@@ -1,6 +1,6 @@
 import type { RecipeMacros } from "../domain/recipes.js";
 
-/** RecipeMacros for page tests, without the legacy gap fields. */
+/** RecipeMacros for page tests. */
 export function recipeMacrosFixture(
     overrides: Partial<RecipeMacros> & Pick<RecipeMacros, "incomplete">,
 ): RecipeMacros {
@@ -12,8 +12,6 @@ export function recipeMacrosFixture(
         fiber_g: null,
         sugar_g: null,
         alcohol_g: null,
-        incompleteReasons: [],
-        gaps: [],
         ...overrides,
     };
 }

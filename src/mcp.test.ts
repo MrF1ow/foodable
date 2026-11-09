@@ -5281,10 +5281,17 @@ describe("phone-app domain MCP tools", () => {
             });
             const got = await call("get_recipe", { id: recipeId });
             expect(got.isError).toBeFalsy();
-            const macros = MACROS_ITEM_OUTPUT_SCHEMA.parse(
+            MACROS_ITEM_OUTPUT_SCHEMA.parse(
                 got.structuredContent?.macros_per_portion,
             );
-            expect(macros.gaps[0]?.reason).toBe("no_nutrition");
+            const sc = got.structuredContent as {
+                notices: Array<{ code: string }>;
+                macros_per_portion: { incomplete: boolean };
+            };
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(
+                sc.notices.some((n) => n.code === "recipe.no_nutrition"),
+            ).toBe(true);
             expect(textOf(got)).toContain(
                 "Half and half: no nutrition — add it, or pick a usual product",
             );
@@ -6820,12 +6827,16 @@ describe("phone-app domain MCP tools", () => {
                 amount: 100,
             });
             expect(line.isError).toBeFalsy();
-            expect(line.structuredContent?.warning).toContain("peanut");
             expect(textOf(line).toLowerCase()).toContain("peanut");
+            const sc = ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(
+                line.structuredContent,
+            );
+            expect(sc.notices.map((n) => n.code)).toEqual(["grocery.allergen"]);
+            expect(sc.notices[0]!.severity).toBe("block");
         });
     });
 
-    test("get_recipe wires recipe.no_nutrition notices beside gaps", async () => {
+    test("get_recipe wires recipe.no_nutrition notices", async () => {
         await withUser(alice, async (call) => {
             const plain = await call("upsert_food", { name: "Half and half" });
             const plainId = plain.structuredContent?.id as string;
@@ -6857,7 +6868,7 @@ describe("phone-app domain MCP tools", () => {
                     message: string;
                     action: { label: string } | null;
                 }>;
-                macros_per_portion: { gaps: Array<{ message: string }> };
+                macros_per_portion: { incomplete: boolean };
             };
             for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
             const nn = sc.notices.find((n) => n.code === "recipe.no_nutrition");
@@ -6865,7 +6876,8 @@ describe("phone-app domain MCP tools", () => {
             expect(nn?.subject.kind).toBe("recipe_ingredient");
             expect(nn?.subject.recipe_id).toBe(recipeId);
             expect(nn?.action).toEqual({ label: "Pick usual product" });
-            expect(nn?.message).toBe(sc.macros_per_portion.gaps[0]?.message);
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(nn?.message).toContain("no nutrition");
         });
     });
 
@@ -6995,9 +7007,8 @@ describe("phone-app domain MCP tools", () => {
                 name: "Peanut Butter",
                 amount: 1,
             });
-            expect(added.structuredContent?.warning).toBe(
-                "Contains peanut — Bob.",
-            );
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(added.structuredContent);
+            expect(textOf(added)).toContain("Contains peanut — Bob.");
             await call("add_grocery_line", {
                 store_id: store.id,
                 kind: "food",
@@ -7037,9 +7048,7 @@ describe("phone-app domain MCP tools", () => {
                     (r) => r.kind === "member" && r.name === "Bob",
                 ),
             ).toBe(true);
-            expect(pean!.notices[0]?.message).toBe(
-                added.structuredContent?.warning as string,
-            );
+            expect(pean!.notices[0]?.message).toBe("Contains peanut — Bob.");
             expect(textOf(listed)).toContain(" — Contains peanut — Bob.");
             const oats = lines.find((l) =>
                 l.display_name.toLowerCase().includes("oats"),
