@@ -185,6 +185,36 @@ test("mergedFoodFields: takes drop nutrition block when keep has none", () => {
     });
 });
 
+test("mergedFoodFields: fills null keep saturated fat from drop", () => {
+    const keep = sampleRow({
+        calories: 200,
+        saturatedFatG: null,
+        nutritionSource: "manual",
+    });
+    const drop = sampleRow({
+        calories: 999,
+        saturatedFatG: 3.2,
+        nutritionSource: "openfoodfacts",
+    });
+    expect(mergedFoodFields(keep, drop).saturatedFatG).toBe(3.2);
+});
+
+test("mergedFoodFields: keep sole saturated fat with drop nutrition block", () => {
+    const keep = sampleRow({
+        saturatedFatG: 2,
+        nutritionSource: null,
+    });
+    const drop = sampleRow({
+        calories: 400,
+        proteinG: 12,
+        nutritionSource: "openfoodfacts",
+    });
+    const merged = mergedFoodFields(keep, drop);
+    expect(merged.calories).toBe(400);
+    expect(merged.proteinG).toBe(12);
+    expect(merged.saturatedFatG).toBe(2);
+});
+
 test("mergedFoodFields: keeps partial keep block when drop has full nutrition", () => {
     const keep = sampleRow({
         calories: 50,
@@ -420,9 +450,11 @@ function sampleRow(over: Partial<Food>): Food {
         fatG: null,
         fiberG: null,
         sugarG: null,
+        saturatedFatG: null,
         alcoholG: null,
         caffeineMg: null,
         nutritionSource: null,
+        offNutrientLevels: null,
         allergens: [],
         offSourceId: null,
         genericFoodId: null,

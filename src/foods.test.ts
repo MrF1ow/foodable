@@ -682,6 +682,7 @@ describe("isBarcodeCacheServable", () => {
         expect(
             isBarcodeCacheServable({
                 ...row,
+                nutrient_levels: null,
                 quality: {
                     nutriscore_grade: "e",
                     nova_group: 4,
@@ -695,5 +696,24 @@ describe("isBarcodeCacheServable", () => {
                 },
             }),
         ).toBe(true);
+    });
+
+    test("legacy cache without nutrient_levels key is not servable", () => {
+        expect(
+            isBarcodeCacheServable({
+                ...row,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            }),
+        ).toBe(false);
     });
 });

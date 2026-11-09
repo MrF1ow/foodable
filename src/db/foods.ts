@@ -6,6 +6,7 @@ import {
     offQualityToRowFields,
     type MergeFoodPairInput,
     type Food,
+    type FoodOffNutritionPatch,
     type FoodQuality,
     type FoodsStore,
 } from "../domain/foods.js";
@@ -25,7 +26,7 @@ const FOODS = "foods";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",
@@ -52,12 +53,14 @@ function foodRowForWrite(
     tx: Tx,
     row: ReturnType<typeof foodToRow>,
 ): Record<string, unknown> {
+    const levels = row.off_nutrient_levels;
     return {
         ...row,
         allergens: tx.array(
             Array.isArray(row.allergens) ? row.allergens : [],
             "text",
         ),
+        off_nutrient_levels: levels == null ? null : JSON.stringify(levels),
         additives_tags: bindTextArray(tx, row.additives_tags),
         allergens_tags: bindTextArray(tx, row.allergens_tags),
         traces_tags: bindTextArray(tx, row.traces_tags),
@@ -268,6 +271,46 @@ export function liveFoodsStore(): FoodsStore {
                     return data ? foodFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("set food quality", err);
+                }
+            });
+        },
+        async setFoodOffNutrition(
+            householdId,
+            foodId,
+            patch: FoodOffNutritionPatch,
+        ) {
+            const sat =
+                patch.saturatedFatG != null && patch.saturatedFatG >= 0
+                    ? patch.saturatedFatG
+                    : null;
+            const hasLevels = patch.offNutrientLevels != null;
+            if (sat == null && !hasLevels) return null;
+            const levelsJson = hasLevels
+                ? JSON.stringify(patch.offNutrientLevels)
+                : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FOODS)}
+                            set saturated_fat_g = coalesce(saturated_fat_g, ${sat}::numeric),
+                                off_nutrient_levels = coalesce(${levelsJson}::jsonb, off_nutrient_levels),
+                                updated_at = now()
+                            where household_id = ${householdId}
+                              and id = ${foodId}
+                              and archived_at is null
+                              and (
+                                  (${sat}::numeric is not null and saturated_fat_g is null)
+                                  or ${levelsJson}::jsonb is not null
+                              )
+                            returning ${tx.unsafe(FOOD_COLS)}
+                        `,
+                        "set food off nutrition",
+                    );
+                    return data ? foodFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("set food off nutrition", err);
                 }
             });
         },

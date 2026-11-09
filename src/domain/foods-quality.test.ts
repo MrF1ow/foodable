@@ -93,7 +93,7 @@ test("existing barcode with null offQuality refetches once", async () => {
     expect(food.offQuality?.nutriscoreGrade).toBe("e");
 });
 
-test("existing with offQuality does not call lookup", async () => {
+test("existing with offQuality and OFF nutrition filled does not call lookup", async () => {
     const store = createMemoryFoodsStore();
     const q: FoodQuality = {
         nutriscoreGrade: "c",
@@ -112,6 +112,8 @@ test("existing with offQuality does not call lookup", async () => {
             kind: "food",
             name: "Nutella",
             offQuality: q,
+            saturatedFatG: 1.0,
+            offNutrientLevels: { sugars: "low" },
         }),
     );
     await store.setBarcode(HH, BARCODE, base.id);
@@ -121,6 +123,53 @@ test("existing with offQuality does not call lookup", async () => {
         return hitWithQuality();
     });
     expect(lookups).toBe(0);
+});
+
+test("existing with quality but null OFF nutrition refetches once", async () => {
+    const store = createMemoryFoodsStore();
+    const q: FoodQuality = {
+        nutriscoreGrade: "c",
+        novaGroup: 3,
+        ecoscoreGrade: null,
+        additives: null,
+        allergensTags: null,
+        tracesTags: null,
+        ingredientsAnalysisTags: null,
+        labelsTags: null,
+        fetchedAt: FETCHED,
+    };
+    const base = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Nutella",
+            offQuality: q,
+            saturatedFatG: null,
+            offNutrientLevels: null,
+        }),
+    );
+    await store.setBarcode(HH, BARCODE, base.id);
+    let lookups = 0;
+    const { food, created } = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => {
+            lookups++;
+            return {
+                ...hitWithQuality(),
+                saturated_fat_g: 2.5,
+                nutrient_levels: {
+                    sugars: "low",
+                    "saturated-fat": "moderate",
+                },
+            };
+        },
+    );
+    expect(created).toBe(false);
+    expect(lookups).toBe(1);
+    expect(food.saturatedFatG).toBe(2.5);
+    expect(food.offNutrientLevels?.sugars).toBe("low");
 });
 
 test("confirmed miss stamps all-null quality and skips later lookups", async () => {

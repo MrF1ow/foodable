@@ -129,6 +129,37 @@ describeDb(pgAvailable !== null, "food-cache db", (getCtx) => {
             expect(hit?.name).toBe("Cached Nutella");
         });
 
+        test("legacy quality cache without nutrient_levels stamps on 404 and refetches once", async () => {
+            const qualityLegacy = {
+                ...legacy,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            };
+            await upsertFoodCacheRow({
+                source: "openfoodfacts",
+                source_id: barcode,
+                payload: qualityLegacy,
+                fetched_at: new Date().toISOString(),
+            });
+            let fetches = 0;
+            globalThis.fetch = (async () => {
+                fetches++;
+                return new Response("{}", { status: 404 });
+            }) as unknown as typeof fetch;
+            await lookupBarcode(barcode);
+            await lookupBarcode(barcode);
+            expect(fetches).toBe(1);
+        });
+
         test("replaces the cached row when the refetch has quality", async () => {
             globalThis.fetch = (async () =>
                 Response.json({

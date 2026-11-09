@@ -40,6 +40,7 @@ async function insertProduct(
             fatG: over.fatG,
             fiberG: over.fiberG,
             sugarG: over.sugarG,
+            saturatedFatG: over.saturatedFatG,
             alcoholG: over.alcoholG,
             caffeineMg: over.caffeineMg,
             nutritionSource: over.nutritionSource,
@@ -88,6 +89,33 @@ test("effectiveFood takes whole nutrition block from usual when any nutrient set
     expect(eff.proteinG).toBeNull();
     expect(eff.nutritionSource).toBe("openfoodfacts");
     expect(eff.product?.id).toBe(usual.id);
+});
+
+test("effectiveFood pulls saturated fat from usual when usual only has that macro", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Milk",
+            calories: 100,
+            nutritionSource: "manual",
+        }),
+    );
+    const usual = await insertProduct(store, plain, {
+        name: "Brand milk",
+        normalizedName: "brand milk",
+        saturatedFatG: 3.2,
+        nutritionSource: "openfoodfacts",
+    });
+    await store.updateFoodRow({ ...plain, usualProductId: usual.id });
+    const catalog = new Map([
+        [plain.id, { ...plain, usualProductId: usual.id }],
+        [usual.id, usual],
+    ]);
+    const eff = effectiveFood({ ...plain, usualProductId: usual.id }, catalog);
+    expect(eff.calories).toBe(100);
+    expect(eff.saturatedFatG).toBe(3.2);
 });
 
 test("effectiveFood keeps plain nutrition when usual has none but sets product", async () => {

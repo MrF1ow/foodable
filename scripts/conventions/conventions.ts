@@ -205,6 +205,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/off-quality.ts": "foods",
     "src/domain/product-checks.ts": "foods",
     "src/domain/product-checks.test.ts": "foods",
+    "src/domain/off-nutrient-levels.ts": "foods",
+    "src/domain/product-score.ts": "foods",
     "src/domain/additive-risk.ts": "foods",
     "src/domain/linking.ts": "foods",
     "src/mcp/tools/food.ts": "foods",

@@ -19,6 +19,7 @@ import {
     qualityFromOff,
     type OffProductQuality,
 } from "./domain/off-quality.js";
+import { filterOffNutrientLevels } from "./domain/off-nutrient-levels.js";
 
 const OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
 // v2 /api/v2/search is filter-only (no full-text). Name search still needs the
@@ -58,6 +59,8 @@ export interface FoodResult {
     fat_g: number | null;
     fiber_g: number | null;
     sugar_g: number | null; // TOTAL sugars, incl. naturally occurring
+    saturated_fat_g?: number | null;
+    nutrient_levels?: Record<string, string> | null;
     alcohol_g: number | null; // pure ethanol; often null — see resolveAlcoholGrams
     // Open Food Facts' own quality scores. Both are null when OFF hasn't
     // computed one — a real gap (missing category or nutrition data on OFF's
@@ -107,6 +110,7 @@ interface OFFProduct {
     traces_tags?: unknown;
     ingredients_analysis_tags?: unknown;
     labels_tags?: unknown;
+    nutrient_levels?: unknown;
 }
 
 // The only alcohol unit Open Food Facts actually emits (see below).
@@ -214,6 +218,8 @@ function normalizeOFFProduct(
         // `added-sugars_*`; we deliberately do not read it — the canonical
         // stored field is total sugar.
         sugar_g: pick("sugars_serving", "sugars_100g"),
+        saturated_fat_g: pick("saturated-fat_serving", "saturated-fat_100g"),
+        nutrient_levels: filterOffNutrientLevels(product.nutrient_levels),
         alcohol_g: resolveAlcoholGrams(product, n, hasServing),
         nutriscore_grade: normalizeNutriscoreGrade(product.nutriscore_grade),
         nova_group: normalizeNovaGroup(product.nova_group),
@@ -407,11 +413,27 @@ export async function searchCachedFoodsByName(
     }
 }
 
+function stampLegacyCacheNutrientLevels(
+    barcode: string,
+    cached: FoodResult,
+): FoodResult {
+    if (Object.prototype.hasOwnProperty.call(cached, "nutrient_levels")) {
+        return cached;
+    }
+    const stamped: FoodResult = { ...cached, nutrient_levels: null };
+    void putCachedFood(SOURCE_OFF, barcode, stamped);
+    return stamped;
+}
+
 /** Barcode cache hits need a `quality` block; search hits may omit it. */
 export function isBarcodeCacheServable(
     cached: FoodResult | null,
 ): cached is FoodResult {
-    return cached != null && cached.quality !== undefined;
+    return (
+        cached != null &&
+        cached.quality !== undefined &&
+        Object.prototype.hasOwnProperty.call(cached, "nutrient_levels")
+    );
 }
 
 // Cache-first barcode lookup. `barcode` must already be normalized
@@ -430,10 +452,13 @@ export async function lookupBarcode(
     try {
         food = await fetchProductFromOFF(barcode);
     } catch (err) {
-        if (cached) return cached;
+        if (cached) return stampLegacyCacheNutrientLevels(barcode, cached);
         throw err;
     }
     if (food) await putCachedFood(SOURCE_OFF, barcode, food);
+    if (!food && cached) {
+        return stampLegacyCacheNutrientLevels(barcode, cached);
+    }
     return food ?? cached;
 }
 
