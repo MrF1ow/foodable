@@ -734,5 +734,48 @@ begin
         raise exception 'foodable_app must not use foodable_migrations schema';
     end if;
 
+    -- Every table with a household_id gives foodable_app a policy, except the
+    -- ones named here on purpose: system-only tables and a person's own rows,
+    -- which carry their own policies. A listed table that gains a policy must
+    -- leave the list.
+    declare
+        missing text;
+        stale text;
+        exempt text[] := array[
+            'flag_assignments',
+            'household_mcp_tokens',
+            'meal_items',
+            'nutrition_goal_days'
+        ];
+    begin
+        select string_agg(c.relname, ', ' order by c.relname) into missing
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_attribute a
+          on a.attrelid = c.oid and a.attname = 'household_id' and not a.attisdropped
+        where n.nspname = 'public'
+          and c.relkind in ('r', 'p')
+          and c.relname <> all (exempt)
+          and not exists (
+              select 1 from pg_policies p
+              where p.schemaname = 'public'
+                and p.tablename = c.relname
+                and 'foodable_app' = any (p.roles)
+          );
+        if missing is not null then
+            raise exception 'tables with household_id but no foodable_app policy: %', missing;
+        end if;
+
+        select string_agg(p.tablename, ', ' order by p.tablename) into stale
+        from (
+            select distinct tablename from pg_policies
+            where schemaname = 'public' and 'foodable_app' = any (roles)
+        ) p
+        where p.tablename = any (exempt);
+        if stale is not null then
+            raise exception 'exempt from the household policy check but has a foodable_app policy: %', stale;
+        end if;
+    end;
+
 end;
 $$;
