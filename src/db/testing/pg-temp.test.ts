@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, expect, test } from "bun:test";
 import {
     existsSync,
     mkdirSync,
@@ -9,7 +9,23 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pgTestRoot, sweepPgTestRoot } from "./pg-temp.js";
+import { findPgBin } from "./pg-shared.js";
+import {
+    createTestDatabase,
+    ensureTemplate,
+    pgTestRoot,
+    sweepPgTestRoot,
+} from "./pg-temp.js";
+import { DB_SETUP_TIMEOUT_MS } from "./pg.js";
+
+const pgAvailable = !!(await findPgBin());
+
+// Starts the shared server outside the per-test timeout.
+if (pgAvailable) {
+    beforeAll(async () => {
+        await (await createTestDatabase()).stop();
+    }, DB_SETUP_TIMEOUT_MS);
+}
 
 let root: string | undefined;
 
@@ -41,6 +57,36 @@ test("pgTestRoot honours the override, then XDG_CACHE_HOME, then ~/.cache", () =
     expect(pgTestRoot({ XDG_CACHE_HOME: "/c" })).toBe("/c/foodable/pg-test");
     expect(pgTestRoot({})).toMatch(/\/\.cache\/foodable\/pg-test$/);
 });
+
+test("pgTestRoot makes a relative path absolute", () => {
+    expect(pgTestRoot({ FOODABLE_PG_TEST_DIR: "rel/pg" })).toBe(
+        join(process.cwd(), "rel/pg"),
+    );
+    expect(pgTestRoot({ XDG_CACHE_HOME: "c" })).toBe(
+        join(process.cwd(), "c/foodable/pg-test"),
+    );
+});
+
+test.skipIf(!pgAvailable)(
+    "a failed template build is retried and reports its own error",
+    async () => {
+        const name = `tpl_${crypto.randomUUID().replace(/-/g, "")}`;
+        const fail = () => Promise.reject(new Error("real build failure"));
+        await expect(ensureTemplate(name, fail)).rejects.toThrow(
+            "real build failure",
+        );
+        await expect(ensureTemplate(name, fail)).rejects.toThrow(
+            "real build failure",
+        );
+        await ensureTemplate(name, async () => {});
+        const db = await createTestDatabase({ template: name });
+        try {
+            expect(await db.scalar("select 1")).toBe("1");
+        } finally {
+            await db.stop();
+        }
+    },
+);
 
 test("sweep removes only abandoned run folders", () => {
     root = mkdtempSync(join(tmpdir(), "foodable-sweep-"));

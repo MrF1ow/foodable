@@ -27,7 +27,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { binPrefix, findPgBin, PG_BIN_HINT, pickPort } from "./pg-shared.js";
 
 export type TempPostgres = {
@@ -58,9 +58,11 @@ const SERVER_OPTIONS = [
 export function pgTestRoot(
     env: Record<string, string | undefined> = process.env,
 ): string {
-    if (env.FOODABLE_PG_TEST_DIR) return env.FOODABLE_PG_TEST_DIR;
+    // Absolute, because postgres resolves its socket and lock paths after
+    // changing into the data directory.
+    if (env.FOODABLE_PG_TEST_DIR) return resolve(env.FOODABLE_PG_TEST_DIR);
     const cache = env.XDG_CACHE_HOME || join(homedir(), ".cache");
-    return join(cache, "foodable", "pg-test");
+    return resolve(cache, "foodable", "pg-test");
 }
 
 type Cluster = {
@@ -357,10 +359,20 @@ export function ensureTemplate(
             const admin = client(cluster, "postgres");
             const ident = quoteIdent(name);
             await admin.scalar(`create database ${ident}`);
-            await build(client(cluster, name).url);
-            await admin.scalar(
-                `alter database ${ident} with is_template true allow_connections false`,
-            );
+            try {
+                await build(client(cluster, name).url);
+                await admin.scalar(
+                    `alter database ${ident} with is_template true allow_connections false`,
+                );
+            } catch (err) {
+                // Drop the half-built database, so the next caller rebuilds
+                // it and reports the real error instead of "already exists".
+                await admin.psql([
+                    "-c",
+                    `drop database if exists ${ident} with (force)`,
+                ]);
+                throw err;
+            }
         })().catch((err) => {
             templates.delete(name);
             throw err;
