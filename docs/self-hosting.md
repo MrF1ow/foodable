@@ -152,6 +152,34 @@ bun run foods:merge-duplicates --apply  # merge exactly what the dry run listed
 
 On Railway, prefix both with `railway run`. `--json` prints the report as JSON. Each merge is its own transaction; a failed merge is reported and the rest continue, and a second `--apply` finds nothing to do. Reverting the code does not undo merges already applied.
 
+### Finding slow queries
+
+Production Postgres keeps two records of query time: the `pg_stat_statements` extension (totals per query shape) and the server log, which records every statement slower than 200 ms. Start performance work from these, not from guesses.
+
+Enable them once per database. `pg_stat_statements` must be in `shared_preload_libraries` (Railway's Postgres image already lists it; elsewhere add it and restart Postgres). The slow log needs only a reload:
+
+```sql
+create extension if not exists pg_stat_statements;
+alter system set log_min_duration_statement = '200ms';
+select pg_reload_conf();
+```
+
+On Railway the database is internal-only, so run psql inside the Postgres service container (`<project-id>` is your Railway project):
+
+```bash
+# the ten query shapes with the most total time
+railway ssh -p <project-id> -s Postgres -e production -- \
+  'psql "$DATABASE_URL" -c "select calls, round(total_exec_time) as total_ms, round(mean_exec_time::numeric, 1) as mean_ms, left(query, 120) as query from pg_stat_statements order by total_exec_time desc limit 10"'
+
+# confirm the slow log is on
+railway ssh -p <project-id> -s Postgres -e production -- \
+  'psql "$DATABASE_URL" -c "show log_min_duration_statement"'
+```
+
+Slow statements appear in the Postgres service's logs as `duration: … ms  statement: …` (Railway dashboard, or `railway logs -s Postgres`). `select pg_stat_statements_reset()` starts the totals over, for example after a fix ships.
+
+The reads the household pages depend on (fridge, grocery, recipes, food catalog) have plan tests in `src/db/indexes.test.ts`: a change that makes one of them stop using its index fails CI.
+
 ## Environment variables
 
 | Variable                | Required     | Purpose                                                                                                                     |
