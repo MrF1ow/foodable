@@ -65,20 +65,11 @@ The pull request that does the work also updates the item, so the planner is alw
 2. Once the PR has a number, run one command and push the result:
     - `bun run planner --close CAL-2 --pr <number>` sets `status: done` and adds the number to `prs`. When that was the project's last open item, it also deletes the project folder, appends the key to `retired.yml` with this PR's number, and moves the project's `ROADMAP.md` row to Shipped.
     - `bun run planner --start CAL-2 --pr <number>` sets `status: doing` and adds the number to `prs`.
-3. `bun run pr:check` (the **PR lint** check) compares `planner/` on the base branch with this PR, and fails when:
-    - an item named under `Closes` is not `done`, or `prs` lacks this PR;
-    - an item named under `Part of` is not `doing`, or `prs` lacks this PR;
-    - an item turns `done`, or records this PR, without the PR naming it;
-    - a project has nothing left open but its folder is still there;
-    - a project folder disappears without being retired, or is retired while an item was still open;
-    - an item file is deleted outside a retirement (set `status: dropped` instead), a recorded PR number is removed, or `retired.yml` loses or changes an entry;
-    - any file breaks the rules in the table above, or a new project reuses a retired key.
-
-Check locally with `bun run pr:check body.md --pr <number>`.
+3. Keep the item files in step with the PR yourself.
 
 Planning edits (new items, priorities, sizes, order) need no declaration: say `None.` and change the files. Dropping the last open item of a project also finishes it, so retire the project in the same PR. Bugs stay GitHub issues.
 
-The rules live in `scripts/conventions/planner.ts`, a gate file, so changing them needs the code owner's `gate:approved` label.
+The rules live in `scripts/conventions/planner.ts` and are covered by `planner.test.ts`. No PR check runs them since #228 removed the planner check from `pr:check`, so keep `planner/` in step yourself.
 
 ## The inbox
 

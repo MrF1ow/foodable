@@ -1,5 +1,5 @@
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
-import { test, expect } from "bun:test";
+import { test, expect, setSystemTime } from "bun:test";
 import {
     addFoodByBarcode,
     addFoodById,
@@ -2192,14 +2192,18 @@ test("ingredient edits bump updatedAt on memory store", async () => {
         yieldPortions: 1,
     });
     const before = recipe.updatedAt;
-    await Bun.sleep(5);
-    await addRecipeManualIngredient(store, foods, {
-        householdId: HH,
-        recipeId: recipe.id,
-        name: "Flour",
-        amount: 10,
-        unit: "g",
-    });
+    setSystemTime(new Date(Date.parse(before) + 5));
+    try {
+        await addRecipeManualIngredient(store, foods, {
+            householdId: HH,
+            recipeId: recipe.id,
+            name: "Flour",
+            amount: 10,
+            unit: "g",
+        });
+    } finally {
+        setSystemTime();
+    }
     const saved = await store.getRecipe(HH, recipe.id);
     expect(saved!.updatedAt >= before).toBe(true);
     expect(saved!.updatedAt !== before).toBe(true);

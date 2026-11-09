@@ -1,0 +1,117 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "plugins": [],
+    "categories": {
+        "correctness": "off"
+    },
+    "jsPlugins": ["./scripts/lint-rules/plugin.js"],
+    "ignorePatterns": [
+        "node_modules/**",
+        "scripts/lint-rules/fixtures/**",
+        "src/domain/additive-risk.ts"
+    ],
+    "rules": {},
+    "overrides": [
+        {
+            "files": ["**/*.test.ts"],
+            "rules": {
+                "foodable/no-db-mock-outside-windows": [
+                    "error",
+                    {
+                        "allow": {
+                            "src/mcp.test.ts": [
+                                "src/db/analytics",
+                                "src/db/exports",
+                                "src/db/fetch-memory",
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/nutrition",
+                                "src/db/profiles",
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/social-readers",
+                                "src/db/sql",
+                                "src/db/stock",
+                                "src/db/users"
+                            ],
+                            "src/middleware.test.ts": ["src/db/tokens"],
+                            "src/oauth.test.ts": ["src/db/tokens"],
+                            "src/web/gated-routes.test.ts": [
+                                "src/db/household"
+                            ],
+                            "src/web/routes/did-you-mean.test.ts": [
+                                "src/db/fetch-memory",
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/social-readers",
+                                "src/db/stock"
+                            ],
+                            "src/web/routes/household.test.ts": [
+                                "src/db/fetch-memory",
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/social-readers",
+                                "src/db/stock"
+                            ],
+                            "src/web/routes/needs-attention.test.ts": [
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/stock"
+                            ],
+                            "src/web/routes/possible-duplicates.test.ts": [
+                                "src/db/fetch-memory",
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/social-readers",
+                                "src/db/stock"
+                            ]
+                        }
+                    }
+                ],
+                "foodable/no-restore-from-live-import": "error",
+                "foodable/no-wall-clock-waits": "error",
+                "foodable/no-per-test-timeout": "error",
+                "foodable/skip-needs-reason": "error"
+            }
+        },
+        {
+            "files": ["src/mcp/**/*.ts"],
+            "rules": {
+                "foodable/mcp-schema-object": "error",
+                "foodable/gated-tool": "error"
+            }
+        }
+    ]
+}

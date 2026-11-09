@@ -34,6 +34,7 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
             invoked_at: "2026-03-01T12:00:00.000Z",
         } as unknown as AnalyticsRecord;
         insertToolAnalytics(record);
+        // oxlint-disable-next-line foodable/no-wall-clock-waits -- insertToolAnalytics is fire-and-forget and returns no promise to await
         await new Promise((r) => setTimeout(r, 50));
         const { sql } = getCtx();
         setSqlForTests(sql);
@@ -68,8 +69,13 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
         await closeSql();
         const calls: unknown[][] = [];
         const prev = console.warn;
+        let warnedOnce!: () => void;
+        const warned = new Promise<void>((resolve) => {
+            warnedOnce = resolve;
+        });
         console.warn = (...args: unknown[]) => {
             calls.push(args);
+            warnedOnce();
         };
         try {
             insertToolAnalytics({
@@ -79,7 +85,7 @@ describeDb(pgAvailable !== null, "analytics db", (getCtx) => {
                 duration_ms: 1,
                 invoked_at: new Date().toISOString(),
             });
-            await new Promise((r) => setTimeout(r, 20));
+            await warned;
             expect(calls).toEqual([
                 ["Failed to persist analytics for x:", "Missing DATABASE_URL"],
             ]);

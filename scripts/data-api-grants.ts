@@ -1,6 +1,6 @@
-// The migrations job calls this through scripts/migration-safety.ts.
-// It stays outside scripts/migration-safety/ so the rule can land without
-// editing a gate file. Gate files need a code owner's gate:approved label.
+// The migrations job calls this through scripts/migration-safety.ts, and the
+// policy workflow through scripts/conventions/policy.ts. Both run main's copy,
+// so an edit here takes effect once it merges.
 import { stripSql } from "./migration-safety/check.js";
 
 export type GrantFinding = {

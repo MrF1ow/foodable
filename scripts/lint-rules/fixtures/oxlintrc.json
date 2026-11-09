@@ -1,0 +1,24 @@
+{
+    "$schema": "../../../node_modules/oxlint/configuration_schema.json",
+    "plugins": [],
+    "categories": { "correctness": "off" },
+    "jsPlugins": ["../plugin.js"],
+    "rules": {
+        "foodable/no-db-mock-outside-windows": [
+            "error",
+            {
+                "allow": {
+                    "scripts/lint-rules/fixtures/no-db-mock-outside-windows/allowed.ts": [
+                        "src/db/tokens"
+                    ]
+                }
+            }
+        ],
+        "foodable/no-restore-from-live-import": "error",
+        "foodable/no-wall-clock-waits": "error",
+        "foodable/no-per-test-timeout": "error",
+        "foodable/skip-needs-reason": "error",
+        "foodable/mcp-schema-object": "error",
+        "foodable/gated-tool": "error"
+    }
+}

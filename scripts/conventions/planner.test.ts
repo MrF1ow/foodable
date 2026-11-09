@@ -625,7 +625,7 @@ describe("the committed planner", () => {
             .filter((p): p is string => p !== null);
         for (const plan of plans) {
             expect(
-                await Bun.file(join(root, plan.split("#")[0])).exists(),
+                await Bun.file(join(root, plan.split("#")[0] ?? "")).exists(),
             ).toBe(true);
         }
     });
