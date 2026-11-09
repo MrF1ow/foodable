@@ -55,7 +55,9 @@ The login page is the OAuth screen at `/authorize` (and `/` when you are signed 
 ```bash
 bun run dev             # regenerates login HTML, then watches src/
 bun test                # test suite
-bun run typecheck       # typecheck src/
+bun run check:changed   # the CI checks for what you changed (--all for everything)
+bun run typecheck       # typecheck the whole project, tests and scripts included
+bun run lint            # oxlint with the repo's own rules
 bun run format          # Prettier, 4-space indent
 ```
 
