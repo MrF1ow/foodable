@@ -244,7 +244,7 @@ type V2Api = {
         g: object | null,
         attrs?: object,
     ): { html: string; status: string };
-    goalListV2(v: object, g: object | null): string;
+    goalListV2(v: object, g: object | null, o?: object): string;
     ringsV2(days: object[], g: object | null, active?: number): string;
     averagesV2(v: object, g: object | null): string;
     pcfV2(v: object): string;
@@ -377,7 +377,7 @@ test("v2 strip lays limits out in the design's order and keeps v1's gates", asyn
     );
     expect(over).toContain('<span class="v is-over">61.3</span>');
     expect(over).toContain('<span class="v is-over">4.0</span>');
-    expect(over).toContain("/ 3.5 drinks");
+    expect(over).toContain("/ 3.5 UK units");
     expect(over).toContain('<span class="v">250</span>');
 });
 
@@ -703,4 +703,419 @@ test("v2 interactive strips each keep their own breakdown", async () => {
 test("v2 macro copy carries no unused strings", async () => {
     const src = await Bun.file(`${SRC}/shared/v2/macros.js`).text();
     expect(src).not.toContain("legend:");
+});
+
+// ---- v2 macro-strip widgets --------------------------------------------------
+
+// Run an assembled widget's script against a stub document, the way the
+// household app seeds a frame: window.__WIDGET_DATA__ is painted straight
+// through render(), with no host and no chat footer. Returns the card markup.
+function renderWidget(html: string, data: unknown): string {
+    // appendChild: the no-host sample path adds the chat footer.
+    const root = { innerHTML: "", appendChild: () => {} };
+    const noop = () => {};
+    const document = {
+        getElementById: (id: string) => (id === "root" ? root : null),
+        documentElement: { setAttribute: noop, style: {} as object },
+        body: {},
+        addEventListener: noop,
+        createElement: () => ({ style: {} }),
+    };
+    const window: Record<string, unknown> = {
+        __WIDGET_DATA__: data,
+        addEventListener: noop,
+        innerWidth: 400,
+    };
+    window.parent = window;
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    return root.innerHTML;
+}
+
+// A local calendar date, written the way the payloads carry it.
+function isoDay(offset = 0): string {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const p = (x: number) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+test("v2 goal list opens the breakdown per list, like a strip", async () => {
+    const v2 = await loadV2();
+    const first = [{ description: "Oats", calories: 432, protein_g: 27 }];
+    const second = [{ description: "Bowl", calories: 852, protein_g: 69 }];
+    const a = v2.goalListV2(V2_DAY, V2_GOAL, { meals: first });
+    const b = v2.goalListV2(V2_DAY, V2_GOAL, { meals: second });
+    // Every row a meal contributed to is a tile button; the others are not.
+    expect(a).toContain("data-macro-panel");
+    expect(a).toContain('<div class="gl" role="button"');
+    expect(a).toContain('data-macro="calories"');
+    expect(a).toContain('data-macro="protein_g"');
+    expect(a).not.toContain('data-macro="fat_g"');
+    expect(a.match(/class="gl"/g)?.length).toBe(4);
+    expect(a.match(/class="gl" role="button"/g)?.length).toBe(2);
+    expect(a).toContain('class="macro-detail" hidden');
+    expect(a).toContain("data-macro-hint");
+
+    const idOf = (html: string) =>
+        html.match(/data-macro-strip="([^"]+)"/)?.[1];
+    expect(idOf(a)).toBeDefined();
+    expect(idOf(a)).not.toBe(idOf(b));
+    const tapOn = (html: string) => ({
+        closest: (sel: string) =>
+            sel === "[data-macro-strip]"
+                ? { getAttribute: () => idOf(html) }
+                : null,
+    });
+    v2.v2ClaimStrip(tapOn(a));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(first);
+    v2.v2ClaimStrip(tapOn(b));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+
+    // No meals behind it: plain rows, and the shared slot is left alone.
+    const still = v2.goalListV2(V2_DAY, V2_GOAL, { withLimits: true });
+    expect(still).not.toContain("data-macro");
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+});
+
+test("v2 goal list carries the strip's limits row and water line on request", async () => {
+    const v2 = await loadV2();
+    const plain = v2.goalListV2(V2_DAY, V2_GOAL);
+    expect(plain).toMatch(/^<div class="goals">/);
+    expect(plain).not.toContain('class="limits"');
+    expect(plain).not.toContain('class="water"');
+
+    const full = v2.goalListV2(V2_DAY, V2_GOAL, {
+        withLimits: true,
+        withWater: true,
+    });
+    expect(full).toMatch(/^<div class="strip"><div class="goals">/);
+    // The strip's own limits and water: the design's order, v1's gates
+    // (alcohol at 0 never recorded is hidden).
+    const strip = v2.macroStripV2(V2_DAY, V2_GOAL);
+    const limits = strip.match(
+        /<div class="limits"[\s\S]*?(?=<div class="water">)/,
+    )?.[0];
+    expect(limits).toBeDefined();
+    expect(full).toContain(limits as string);
+    expect(full).toContain("1.6 / 3 L");
+    expect(full.indexOf('class="limits"')).toBeLessThan(
+        full.indexOf('class="water"'),
+    );
+    expect(v2.goalListV2(V2_DAY, V2_GOAL, { withLimits: true })).not.toContain(
+        'class="water"',
+    );
+    expect(v2.goalListV2(V2_DAY, V2_GOAL, { withWater: true })).not.toContain(
+        'class="limits"',
+    );
+
+    // Alcohol in the caller's drink unit, and a limit tile some meal fed is
+    // a button too.
+    const uk = v2.goalListV2({ ...V2_DAY, alcohol_g: 16 }, V2_GOAL, {
+        withLimits: true,
+        drinkUnit: "uk",
+        meals: [{ description: "Coffee", caffeine_mg: 95 }],
+    });
+    expect(uk).toContain(">2.0<");
+    expect(uk).toContain('data-macro="caffeine_mg"');
+});
+
+test("v2 meal block leaves out unrecorded macros instead of printing 0", async () => {
+    const v2 = await loadV2();
+    const apple = v2.mealBlockV2("Apple", {
+        calories: 95,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: null,
+    });
+    expect(apple).not.toContain('class="pcf"');
+    expect(apple).toContain(">+95<");
+    const part = v2.mealBlockV2("Toast", {
+        calories: 120,
+        protein_g: 0,
+        carbs_g: 22,
+        fat_g: null,
+    });
+    // A recorded 0 still shows; a null part is left out.
+    expect(part).toContain('<span class="p">P 0</span>');
+    expect(part).toContain('<span class="c">C 22</span>');
+    expect(part).not.toContain('class="f"');
+});
+
+test("v2 meal block shows +kcal only for a recorded figure", async () => {
+    const v2 = await loadV2();
+    expect(v2.mealBlockV2("Bowl", { calories: 852 })).toContain(
+        '<span class="meal-k">+852</span><span class="fig-u">kcal</span>',
+    );
+    // A real zero is a measurement (v1 prints it too).
+    expect(v2.mealBlockV2("Water", { calories: 0 })).toContain(">+0<");
+    for (const calories of [null, undefined]) {
+        const html = v2.mealBlockV2("Mystery", { calories, protein_g: 4 });
+        expect(html).not.toContain('class="meal-k"');
+        expect(html).not.toContain("kcal");
+        expect(html).toContain("P 4<");
+    }
+});
+
+const V2_TOTALS = { ...V2_DAY, alcohol_g: null };
+const V2_GOALS_PAYLOAD = { ...V2_GOAL, alcohol_g: null };
+const V2_ZERO = {
+    calories: 0,
+    protein_g: 0,
+    carbs_g: 0,
+    fat_g: 0,
+    fiber_g: 0,
+    sugar_g: 0,
+    alcohol_g: null,
+    caffeine_mg: null,
+    water_ml: 0,
+};
+const V2_OVER = { ...V2_TOTALS, calories: 2690, protein_g: 230 };
+const V2_MEALS = [
+    {
+        description: "Chicken rice bowl",
+        meal_type: "lunch",
+        date: null,
+        calories: 852,
+        protein_g: 69,
+        carbs_g: 76,
+        fat_g: 25,
+        fiber_g: 8.6,
+        sugar_g: 12.8,
+        alcohol_g: null,
+        caffeine_mg: 85,
+    },
+];
+
+function summaryPayload(day: object, goals: object | null, date = isoDay()) {
+    return {
+        start_date: date,
+        end_date: date,
+        logged_days: 1,
+        days_in_range: 1,
+        drink_unit: null,
+        locale: "en",
+        goals,
+        averages: day,
+        days: [{ date, meal_count: 1, ...day }],
+        meals: V2_MEALS,
+    };
+}
+
+function progressPayload(totals: object, goals: object | null, extra = {}) {
+    return {
+        date: isoDay(),
+        meal_count: 1,
+        water_entries: 2,
+        drink_unit: null,
+        locale: "en",
+        goals,
+        totals,
+        weight: {
+            current: 82.7,
+            target: 79.4,
+            unit: "kg",
+            logged_on: isoDay(-1),
+        },
+        meals: V2_MEALS,
+        ...extra,
+    };
+}
+
+function mealPayload(totals: object, goals: object | null, extra = {}) {
+    return {
+        action: "logged",
+        status: "ok",
+        similar_foods: [],
+        date: isoDay(),
+        drink_unit: null,
+        locale: "en",
+        logged_meal: { ...V2_MEALS[0] },
+        has_goals: goals != null,
+        goals,
+        totals,
+        meals: V2_MEALS,
+        ...extra,
+    };
+}
+
+async function v2Widget(key: string) {
+    const html = await getWidgetHtml(key, { v2: true });
+    // The v2 template, not the v1 fallback: only v2 tokens name this.
+    expect(html).toContain("--surface-panel");
+    return html;
+}
+
+test("v2 nutrition-summary: the design's day, its sample, and the edge days", async () => {
+    const html = await v2Widget("nutrition-summary");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Today<");
+    expect(sample).toContain(`>${n(1137)}<`);
+    expect(sample).toContain("kcal left");
+
+    const day = renderWidget(html, summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD));
+    expect(day).toContain(">Today<");
+    expect(day).toContain(`>${n(1137)}<`);
+    expect(day).toContain("1.6 / 3 L");
+    // Tiles a meal contributed to open the breakdown, as in v1.
+    expect(day).toContain("data-macro-panel");
+    expect(day).toContain('data-macro="protein_g"');
+
+    const noGoal = renderWidget(html, summaryPayload(V2_TOTALS, null));
+    expect(noGoal).toContain(`>${n(1284)}<`);
+    expect(noGoal).toContain("kcal eaten");
+
+    const over = renderWidget(html, summaryPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain(`>${n(269)}<`);
+    expect(over).toContain("kcal over");
+
+    const zero = renderWidget(html, summaryPayload(V2_ZERO, V2_GOALS_PAYLOAD));
+    expect(zero).toContain(`>${n(2421)}<`);
+
+    const empty = renderWidget(html, {
+        ...summaryPayload(V2_ZERO, null),
+        days: [],
+    });
+    expect(empty).toContain("No meals or water logged in this range.");
+
+    // A past day is named, not called "Today".
+    const past = renderWidget(
+        html,
+        summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD, "2026-11-07"),
+    );
+    expect(past).not.toContain(">Today<");
+    expect(past).toContain("Sat 7 Nov");
+});
+
+test("v2 nutrition-summary keeps v1's range chart and logged-days count", async () => {
+    const html = await v2Widget("nutrition-summary");
+    const range = renderWidget(html, {
+        ...summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD, "2026-07-07"),
+        start_date: "2026-07-01",
+        logged_days: 2,
+        days_in_range: 7,
+        days: [
+            { date: "2026-07-07", meal_count: 2, ...V2_TOTALS },
+            { date: "2026-07-05", meal_count: 3, ...V2_OVER },
+        ],
+    });
+    expect(range).toContain("1–7 Jul");
+    expect(range).toContain("2 of 7 days logged");
+    expect(range).toContain("Calories / day");
+    expect(range).toContain("<svg");
+    expect(range).toContain("Daily average · logged days");
+});
+
+test("v2 goal-progress tip counts only goals above 0", async () => {
+    const html = await v2Widget("goal-progress");
+    const eaten = { ...V2_TOTALS, calories: 1000, protein_g: 40 };
+    const tip = (goals: object) =>
+        renderWidget(html, progressPayload(eaten, goals)).match(
+            /class="tip">.*?<span>([^<]*)</,
+        )?.[1];
+    // No protein goal (null or 0): the tip never calls it met.
+    for (const protein_g of [null, 0]) {
+        const text = tip({ ...V2_GOALS_PAYLOAD, protein_g });
+        expect(text).toBe(`${n(1421)} kcal to go.`);
+    }
+    // A calorie goal of 0 is no goal: no calorie sentence at all.
+    const noCal = tip({ ...V2_GOALS_PAYLOAD, calories: 0 });
+    expect(noCal).toBe(`${n(170)} g of protein to go.`);
+    expect(tip({ ...V2_GOALS_PAYLOAD, calories: 0, protein_g: 0 })).toBe(
+        undefined,
+    );
+});
+
+test("v2 goal-progress: goal list, tip, limits, weight and the edge days", async () => {
+    const html = await v2Widget("goal-progress");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Goal progress");
+    expect(sample).toContain(`${n(1284)} / ${n(2421)} kcal`);
+    expect(sample).toContain(">53%<");
+
+    const day = renderWidget(
+        html,
+        progressPayload(V2_TOTALS, V2_GOALS_PAYLOAD),
+    );
+    expect(day).toContain(">46%<");
+    expect(day).toContain('class="tip"');
+    expect(day).toContain(`${n(114)} g of protein`);
+    // v1's limits, water and weight stay.
+    expect(day).toContain(">Sugar<");
+    expect(day).toContain("1.6 / 3 L");
+    expect(day).toContain("3.3 kg to lose");
+    // The goal list rows open the breakdown like v1's strip tiles.
+    expect(day).toContain("data-macro-panel");
+    expect(day).toContain('data-macro="calories"');
+
+    const noGoal = renderWidget(html, progressPayload(V2_TOTALS, null));
+    expect(noGoal).toContain("no goal");
+    expect(noGoal).not.toContain('class="tip"');
+
+    const over = renderWidget(html, progressPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain(`${n(269)} kcal over`);
+
+    const empty = renderWidget(
+        html,
+        progressPayload(V2_ZERO, V2_GOALS_PAYLOAD, {
+            meal_count: 0,
+            water_entries: 0,
+            weight: null,
+            meals: [],
+        }),
+    );
+    expect(empty).toContain("Nothing logged yet for today.");
+});
+
+test("v2 meal-logged: meal block over the strip, and the edge days", async () => {
+    const html = await v2Widget("meal-logged");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Logged to lunch");
+    expect(sample).toContain("Chicken rice bowl");
+    expect(sample).toContain(`>${n(1137)}<`);
+
+    const day = renderWidget(html, mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD));
+    expect(day).toContain("Logged to lunch");
+    expect(day).toContain(">+852<");
+    expect(day).toContain('<span class="p">P 69</span>');
+    expect(day).toContain("data-macro-panel");
+
+    const updated = renderWidget(
+        html,
+        mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD, { action: "updated" }),
+    );
+    expect(updated).toContain("Meal updated");
+    // An updated meal keeps its slot on the header line, beside the day.
+    expect(updated).toContain('<span class="hd-meta">lunch · today</span>');
+
+    // No goals: nothing to show progress against, so nothing at all (v1).
+    expect(renderWidget(html, mealPayload(V2_TOTALS, null))).toBe("");
+
+    const over = renderWidget(html, mealPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain("kcal over");
+
+    const zero = renderWidget(
+        html,
+        mealPayload(V2_ZERO, V2_GOALS_PAYLOAD, {
+            logged_meal: { ...V2_MEALS[0], calories: null, meal_type: null },
+            meals: [],
+        }),
+    );
+    expect(zero).toContain("Meal logged");
+    // No calorie figure on the meal: no "+0 kcal" claiming a measured zero.
+    expect(zero).not.toContain('class="meal-k"');
+    expect(zero).toContain(`>${n(2421)}<`);
+
+    const similar = renderWidget(
+        html,
+        mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD, {
+            status: "similar_foods",
+            logged_meal: null,
+        }),
+    );
+    expect(similar).toContain("Not logged yet");
 });

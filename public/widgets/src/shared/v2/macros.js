@@ -100,23 +100,19 @@ function gaugeV2(vals, goal, attrs) {
             return `<path d="${s.d}" stroke-width="${sw}" style="stroke:${m ? m.color : "currentColor"}"/>`;
         })
         .join("");
-    let value;
-    let caption;
-    let tone = "";
-    if (g.status === "no-goal") {
-        value = fmt(v.calories, 0);
-        caption = V2_MACRO_COPY.kcalEaten;
-    } else if (g.status === "over") {
-        value = fmt(-g.remaining, 0);
-        caption = V2_MACRO_COPY.kcalOver;
-        tone = " is-over";
-    } else if (g.status === "at") {
-        value = "0";
-        caption = V2_MACRO_COPY.atGoal;
-    } else {
-        value = fmt(g.remaining, 0);
-        caption = V2_MACRO_COPY.kcalLeft;
-    }
+    const st = g.status;
+    const value =
+        st === "no-goal"
+            ? fmt(v.calories, 0)
+            : st === "at"
+              ? "0"
+              : fmt(Math.abs(g.remaining), 0);
+    const caption =
+        V2_MACRO_COPY[
+            { "no-goal": "kcalEaten", over: "kcalOver", at: "atGoal" }[st] ||
+                "kcalLeft"
+        ];
+    const tone = st === "over" ? " is-over" : "";
     const label = `${MACRO_COPY.labels.calories}: ${value} ${caption}`;
     const a = v2Attrs(attrs) || v2Attrs({ role: "img", "aria-label": label });
     const html = `<div class="gauge"${a}><svg width="${g.box.width}" height="${g.box.height}" viewBox="0 0 ${g.box.width} ${g.box.height}" aria-hidden="true"><path class="g-track" d="${g.track.d}" stroke-width="${sw}"/>${segs}</svg><div class="gauge-c"><span class="gauge-v${tone}">${value}</span><span class="gauge-k">${esc(caption)}</span></div></div>`;
@@ -125,35 +121,38 @@ function gaugeV2(vals, goal, attrs) {
 
 // ---- Strip cells ----------------------------------------------------------
 
+// "/ 210 g" against a goal, or the bare unit without one; `show` formats
+// the target.
+function v2Sub(b, unit, show) {
+    return b.pct != null ? `/ ${show(b.target)} ${unit}` : unit;
+}
+
 // One protein / carbs / fat bar: dot, name, "96 / 210 g", a 4px bar.
 function macroBarV2(m, ctx, interactive) {
     const b = macroBits(m, ctx.vals, ctx.goal, ctx.wording);
-    const sub =
-        b.pct != null ? `/ ${fmt(b.target, m.decimals)} ${m.unit}` : m.unit;
+    const sub = v2Sub(b, m.unit, (x) => fmt(x, m.decimals));
     const a = interactive ? v2Attrs(v2TileAttrs(m, b)) : "";
     return `<div class="mb"${a}><div class="mb-row">${v2Dot(m.color)}<span class="mb-l">${esc(macroLabel(m))}</span><span class="v">${fmt(b.val, m.decimals)}</span><span class="vs">${esc(sub)}</span></div>${v2Bar(b.frac, m.color)}</div>`;
 }
 
-// One limit cell: name, "31 / 50 g", a 3px bar. Alcohol reads in drinks
-// (DRINK_GRAMS, the user's unit). A ceiling past its limit flags the figure
+// One limit cell: name, "31 / 50 g", a 3px bar. Alcohol reads in drinks or
+// UK units (DRINK_GRAMS, the user's unit). A ceiling past its limit flags the figure
 // in --status-over; the bar keeps the metric colour. The limitShown gate is
 // v1's: never-recorded alcohol and caffeine render nothing.
 function macroLimitV2(m, ctx, interactive) {
     if (!limitShown(m, ctx)) return "";
     const b = macroBits(m, ctx.vals, ctx.goal, ctx.wording);
-    let value;
-    let sub;
-    if (m.gloss === "drinks") {
-        value = v2Drinks(b.val, ctx.drinkUnit);
-        sub =
-            b.pct != null
-                ? `/ ${v2Drinks(b.target, ctx.drinkUnit)} ${V2_MACRO_COPY.drinks}`
-                : V2_MACRO_COPY.drinks;
-    } else {
-        value = fmt(b.val, m.decimals);
-        sub =
-            b.pct != null ? `/ ${fmt(b.target, m.decimals)} ${m.unit}` : m.unit;
-    }
+    const drinks = m.gloss === "drinks";
+    const show = (x) =>
+        drinks ? v2Drinks(x, ctx.drinkUnit) : fmt(x, m.decimals);
+    const value = show(b.val);
+    // US drinks read "drinks" as the design draws them; UK units keep v1's
+    // name, since 2.0 of them is not 2.0 drinks.
+    const unit =
+        ctx.drinkUnit === "uk"
+            ? MACRO_COPY.drinkLabels.uk
+            : V2_MACRO_COPY.drinks;
+    const sub = v2Sub(b, drinks ? unit : m.unit, show);
     const flag = b.over && m.direction === "ceiling" ? " is-over" : "";
     const a = interactive ? v2Attrs(v2TileAttrs(m, b)) : "";
     return `<div class="lim"${a}><span class="lim-l">${esc(macroLabel(m))}</span><span class="lim-r"><span class="v${flag}">${value}</span><span class="vs">${esc(sub)}</span></span>${v2Bar(b.frac, m.color, { size: "thin" })}</div>`;
@@ -162,10 +161,7 @@ function macroLimitV2(m, ctx, interactive) {
 // Water: dot, name, a bar to the goal, "1.6 / 3 L".
 function macroWaterV2(m, ctx) {
     const b = macroBits(m, ctx.vals, ctx.goal, ctx.wording);
-    const num =
-        b.pct != null
-            ? `${v2Litres(b.val)} / ${v2Litres(b.target)} L`
-            : `${v2Litres(b.val)} L`;
+    const num = `${v2Litres(b.val)} ${v2Sub(b, "L", v2Litres)}`;
     return `<div class="water">${v2Dot(m.color)}<span class="mb-l">${esc(macroLabel(m))}</span>${v2Bar(b.frac, m.color)}<span class="v">${esc(num)}</span></div>`;
 }
 
@@ -212,6 +208,43 @@ if (typeof document !== "undefined" && !window.__v2StripsWired) {
     document.addEventListener("keydown", claim, true);
 }
 
+// The strip's context (v1's macroCtxOf) from a panel's arguments and opts.
+function v2Ctx(vals, goal, opts) {
+    return macroCtxOf(v2NonNeg(vals), goal, opts?.wording, opts?.meals, opts);
+}
+
+// A breakdown panel (the strip, a goal list with opts): `body(tap)` draws the
+// panel's own tiles, then come the limits row for `limits` (from v2Limits)
+// and, when `water` is set, the water line if water was logged. `tap(m)` says
+// whether metric m opens a breakdown. A panel with a tappable tile among
+// `tiles` and `limits` registers its context under a fresh strip id and
+// points the slot at it, as v1's macroPanel does, so it works before any tap
+// has been routed, and carries the hint and the detail region; a static
+// panel never touches the slot.
+function v2Panel(ctx, tiles, limits, water, body) {
+    const tap = (m) => macroHasDetail(m, ctx);
+    let attrs = "";
+    let tail = "";
+    if ([...tiles, ...limits].some(tap)) {
+        const id = `s${++v2StripSeq}`;
+        V2_STRIPS.set(id, ctx);
+        __macroCtx = ctx;
+        attrs = ` data-macro-panel${v2Attrs({ "data-macro-strip": id })}`;
+        tail = `<div class="mhint" data-macro-hint>${esc(MACRO_COPY.tapHint)}</div><div class="macro-detail" hidden aria-live="polite"></div>`;
+    }
+    const limitRow = limits.length
+        ? `<div class="limits" style="--n:${limits.length}">${limits
+              .map((m) => macroLimitV2(m, ctx, tap(m)))
+              .join("")}</div>`
+        : "";
+    const waters = water
+        ? MACROS.filter((m) => m.role === "bar" && (ctx.vals[m.key] ?? 0) > 0)
+              .map((m) => macroWaterV2(m, ctx))
+              .join("")
+        : "";
+    return `<div class="strip"${attrs}>${body(tap)}${limitRow}${waters}${tail}</div>`;
+}
+
 // The macro strip, laid out by role like v1's macroPanel: the gauge beside
 // the three macro bars, the limits row (one to four cells), and the water
 // line when water was logged.
@@ -223,70 +256,57 @@ if (typeof document !== "undefined" && !window.__v2StripsWired) {
 //   wording    v1's floor wording ({ under, over })
 // Returns the HTML string.
 function macroStripV2(vals, goal, opts) {
-    const o = opts || {};
-    const ctx = macroCtxOf(v2NonNeg(vals), goal, o.wording, o.meals, o);
-
+    const ctx = v2Ctx(vals, goal, opts);
     const cal = MACROS.find((m) => m.role === "cal");
     const trio = MACROS.filter((m) => m.role === "macro");
-    const limits = v2Limits(ctx);
-    const waters = MACROS.filter(
-        (m) => m.role === "bar" && (ctx.vals[m.key] ?? 0) > 0,
-    );
-    const tap = (m) => macroHasDetail(m, ctx);
-    const interactive = [cal, ...trio, ...limits].some(tap);
-    // Register the context for v2ClaimStrip. The slot itself is also set
-    // here, as v1's macroPanel does, so a strip works even before any tap
-    // has been routed; a static strip never touches it.
-    let stripId = "";
-    if (interactive) {
-        stripId = `s${++v2StripSeq}`;
-        V2_STRIPS.set(stripId, ctx);
-        __macroCtx = ctx;
-    }
-
-    const calAttrs = tap(cal)
-        ? v2TileAttrs(cal, macroBits(cal, ctx.vals, ctx.goal, ctx.wording))
-        : null;
-    const gauge = gaugeV2(ctx.vals, ctx.goal, calAttrs).html;
-    const bars = trio.map((m) => macroBarV2(m, ctx, tap(m))).join("");
-    const limitRow = limits.length
-        ? `<div class="limits" style="--n:${limits.length}">${limits
-              .map((m) => macroLimitV2(m, ctx, tap(m)))
-              .join("")}</div>`
-        : "";
-    const hint = interactive
-        ? `<div class="mhint" data-macro-hint>${esc(MACRO_COPY.tapHint)}</div>`
-        : "";
-    const detail = interactive
-        ? `<div class="macro-detail" hidden aria-live="polite"></div>`
-        : "";
-    const panelAttrs = interactive
-        ? ` data-macro-panel${v2Attrs({ "data-macro-strip": stripId })}`
-        : "";
-    return `<div class="strip"${panelAttrs}><div class="srow">${gauge}<div class="mbars">${bars}</div></div>${limitRow}${waters
-        .map((m) => macroWaterV2(m, ctx))
-        .join("")}${hint}${detail}</div>`;
+    return v2Panel(ctx, [cal, ...trio], v2Limits(ctx), true, (tap) => {
+        const calAttrs = tap(cal)
+            ? v2TileAttrs(cal, macroBits(cal, ctx.vals, ctx.goal, ctx.wording))
+            : null;
+        const gauge = gaugeV2(ctx.vals, ctx.goal, calAttrs).html;
+        const bars = trio.map((m) => macroBarV2(m, ctx, tap(m))).join("");
+        return `<div class="srow">${gauge}<div class="mbars">${bars}</div></div>`;
+    });
 }
 
 // ---- Goal list (goal-progress) --------------------------------------------
 
 // Calories then the three macros, each "Name   1,284 / 2,421 kcal   53%" over
 // a 6px bar. With no goal a row shows the amount alone.
-function goalListV2(vals, goal) {
-    const ctx = macroCtxOf(v2NonNeg(vals), goal);
-    const rows = MACROS.filter((m) => m.role === "cal" || m.role === "macro")
-        .map((m) => {
-            const b = macroBits(m, ctx.vals, ctx.goal);
-            const fig =
-                b.pct != null
-                    ? `${fmt(b.val, m.decimals)} / ${fmt(b.target, m.decimals)} ${m.unit}`
-                    : `${fmt(b.val, m.decimals)} ${m.unit}`;
-            const pct =
-                b.pct != null ? `${Math.round(b.pct)}%` : V2_MACRO_COPY.noGoal;
-            return `<div class="gl"><div class="gl-row"><span class="gl-l">${esc(macroLabel(m))}</span><span class="gl-v">${fig}</span><span class="gl-p${b.pct == null ? " t-3" : ""}">${esc(pct)}</span></div>${v2Bar(b.frac, m.color, { size: "thick" })}</div>`;
-        })
-        .join("");
-    return `<div class="goals">${rows}</div>`;
+//
+// opts (all optional) make it a breakdown panel like the strip:
+//   meals       per-meal breakdown rows (v1's shape); rows and limit cells a
+//               meal contributed to become buttons that open the "<metric>
+//               by meal" list, under the list's own strip id
+//   drinkUnit   "us" | "uk", for alcohol in the limits row
+//   wording     v1's floor wording ({ under, over })
+//   withLimits  append the strip's limits row
+//   withWater   append the strip's water line (when water was logged)
+// Without opts it returns the bare `.goals` list; with opts the list and its
+// extras sit in one `.strip` panel.
+function goalListV2(vals, goal, opts) {
+    const ctx = v2Ctx(vals, goal, opts);
+    const listed = MACROS.filter((m) => m.role === "cal" || m.role === "macro");
+    const list = (tap) =>
+        `<div class="goals">${listed
+            .map((m) => {
+                const b = macroBits(m, ctx.vals, ctx.goal, ctx.wording);
+                const pct =
+                    b.pct != null
+                        ? `${Math.round(b.pct)}%`
+                        : V2_MACRO_COPY.noGoal;
+                const a = tap(m) ? v2Attrs(v2TileAttrs(m, b)) : "";
+                return `<div class="gl"${a}><div class="gl-row"><span class="gl-l">${esc(macroLabel(m))}</span><span class="gl-v">${fmt(b.val, m.decimals)} ${v2Sub(b, m.unit, (x) => fmt(x, m.decimals))}</span><span class="gl-p${b.pct == null ? " t-3" : ""}">${esc(pct)}</span></div>${v2Bar(b.frac, m.color, { size: "thick" })}</div>`;
+            })
+            .join("")}</div>`;
+    if (!opts) return list(() => false);
+    return v2Panel(
+        ctx,
+        listed,
+        opts.withLimits ? v2Limits(ctx) : [],
+        opts.withWater,
+        list,
+    );
 }
 
 // ---- Rings (trends) -------------------------------------------------------
@@ -380,14 +400,29 @@ function averagesV2(vals, goal) {
 
 // ---- P / C / F line and the meal block ------------------------------------
 
-// "P 69  C 76  F 25" in macro colours (a meal, a recipe).
+// "P 69  C 76  F 25" in macro colours (a meal, a recipe). An unrecorded part
+// (null or missing) is left out rather than read as 0, and with none of the
+// three recorded there is no line at all. A recorded 0 still shows.
 function pcfV2(vals) {
     const v = v2NonNeg(vals);
-    return `<span class="pcf"><span class="p">P ${fmt(v.protein_g, 0)}</span><span class="c">C ${fmt(v.carbs_g, 0)}</span><span class="f">F ${fmt(v.fat_g, 0)}</span></span>`;
+    const parts = [
+        ["p", "P", v.protein_g],
+        ["c", "C", v.carbs_g],
+        ["f", "F", v.fat_g],
+    ]
+        .filter((p) => p[2] != null)
+        .map(([c, l, x]) => `<span class="${c}">${l} ${fmt(x, 0)}</span>`);
+    return parts.length ? `<span class="pcf">${parts.join("")}</span>` : "";
 }
 
 // The meal-logged top block: name over its P/C/F line, "+852 kcal" right.
+// A meal with no calorie figure (null or missing) shows none, as v1 does:
+// "+0 kcal" would claim a measured zero. A recorded 0 still reads "+0".
 function mealBlockV2(name, vals) {
     const v = v2NonNeg(vals);
-    return `<div class="meal"><div class="meal-t"><span class="meal-n">${esc(name)}</span>${pcfV2(v)}</div><span class="meal-k">+${fmt(v.calories, 0)}</span><span class="fig-u">kcal</span></div>`;
+    const kcal =
+        v.calories == null
+            ? ""
+            : `<span class="meal-k">+${fmt(v.calories, 0)}</span><span class="fig-u">kcal</span>`;
+    return `<div class="meal"><div class="meal-t"><span class="meal-n">${esc(name)}</span>${pcfV2(v)}</div>${kcal}</div>`;
 }
