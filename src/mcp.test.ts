@@ -53,10 +53,12 @@ import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
 import * as actualDbUsers from "./db/users.js";
 import {
+    GOAL_DAY_FIELDS,
     goalsForDate,
     goalsResolver,
     type GoalDayOverride,
 } from "./domain/insights.js";
+import { SET_NUTRITION_GOALS_OUTPUT_SCHEMA } from "./mcp/tools/goals.js";
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
@@ -472,6 +474,65 @@ mock.module("./db/nutrition.js", () => ({
     ) => {
         db.goals = { ...goals(), user_id: userId, ...patch } as NutritionGoals;
         return db.goals;
+    },
+    upsertGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+        input: Record<string, number | null | undefined>,
+    ) => {
+        const provided = GOAL_DAY_FIELDS.filter((f) => input[f] !== undefined);
+        if (provided.length === 0 || dates.length === 0) return [];
+        const saved: GoalDayOverride[] = [];
+        for (const date of [...new Set(dates)]) {
+            let row = db.goalDays.find(
+                (o) => o.user_id === userId && o.date === date,
+            );
+            if (!row) {
+                row = {
+                    user_id: userId,
+                    date,
+                    updated_at: new Date().toISOString(),
+                    daily_calories: null,
+                    daily_protein_g: null,
+                    daily_carbs_g: null,
+                    daily_fat_g: null,
+                    daily_fiber_g: null,
+                    daily_sugar_g: null,
+                    daily_alcohol_g: null,
+                    daily_caffeine_mg: null,
+                    daily_water_ml: null,
+                };
+                db.goalDays.push(row);
+            }
+            for (const field of provided) {
+                row[field] = input[field] ?? null;
+            }
+            row.updated_at = new Date().toISOString();
+            if (GOAL_DAY_FIELDS.every((f) => row![f] == null)) {
+                db.goalDays = db.goalDays.filter(
+                    (o) => !(o.user_id === userId && o.date === date),
+                );
+            } else {
+                saved.push({ ...row });
+            }
+        }
+        return saved;
+    },
+    clearGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+    ) => {
+        let removed = 0;
+        for (const date of dates) {
+            const before = db.goalDays.length;
+            db.goalDays = db.goalDays.filter(
+                (o) => !(o.user_id === userId && o.date === date),
+            );
+            if (db.goalDays.length < before) removed += 1;
+        }
+        return removed;
     },
     getLatestWeight: async () => null,
     getWeightInRange: async () => [],
@@ -1508,6 +1569,176 @@ describe("per-day nutrition goal overrides (read path)", () => {
                 }),
             );
             expect(text).toContain("varies by day");
+        });
+    });
+});
+
+describe("set_nutrition_goals per-day overrides", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+    const otherDay = "2026-07-05";
+
+    test("override on one day; another day keeps the default", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const set = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(set.isError).toBeFalsy();
+            SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(set.structuredContent);
+            expect(set.structuredContent?.scope).toBe("days");
+            const onDay = await call("get_goal_progress", {
+                date: "2026-07-04",
+            });
+            expect(textOf(onDay)).toContain("2800");
+            const other = await call("get_goal_progress", { date: otherDay });
+            expect(textOf(other)).toContain("2000");
+        });
+    });
+
+    test("a three-day range writes each day", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-08-01",
+                to: "2026-08-03",
+                daily_protein_g: 180,
+            });
+            expect(r.isError).toBeFalsy();
+            const sc = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(sc.days).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+            expect(
+                db.goalDays
+                    .filter((o) => o.user_id === "u1")
+                    .map((o) => o.date),
+            ).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+        });
+    });
+
+    test("clear removes an override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                clear: true,
+            });
+            expect(db.goalDays).toHaveLength(0);
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2000");
+            expect(textOf(r)).not.toContain("2800");
+        });
+    });
+
+    test("null on one field clears only that override field", async () => {
+        db.goals = goals({ daily_calories: 2000, daily_protein_g: 150 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+                daily_protein_g: 200,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_protein_g: null,
+            });
+            const row = db.goalDays.find(
+                (o) => o.date === "2026-07-04" && o.user_id === "u1",
+            );
+            expect(row?.daily_calories).toBe(2800);
+            expect(row?.daily_protein_g).toBeNull();
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2800");
+            expect(textOf(r)).toContain("150");
+        });
+    });
+
+    test("an empty date is refused instead of writing the defaults", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "",
+                daily_calories: 2100,
+            });
+            expect(r.isError).toBe(true);
+            expect(db.goals?.daily_calories).toBe(2000);
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("standing defaults do not need a household membership", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 2200,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals?.daily_calories).toBe(2200);
+        });
+    });
+
+    test("a 93-day range is refused without writing", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-01-01",
+                to: "2026-04-03",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("92");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("date and from together is refused", async () => {
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                from: "2026-07-01",
+                to: "2026-07-02",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("not both");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("target_member writes the other member's override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                target_member: bob,
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(
+                db.goalDays.some(
+                    (o) => o.user_id === bob && o.daily_calories === 2800,
+                ),
+            ).toBe(true);
         });
     });
 });
@@ -7350,6 +7581,35 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
         .find((l) => l.startsWith("data:"));
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
+
+describe("set_nutrition_goals over HTTP", () => {
+    test.each(ERAS)(
+        "per-day override and get_goal_progress agree (%p)",
+        async (era) => {
+            db.goals = goals({ daily_calories: 2000 });
+            await withHttpClient("u1", era, async (client) => {
+                const set = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: {
+                        date: "2026-07-04",
+                        daily_calories: 2800,
+                    },
+                })) as ToolResult;
+                expect(set.isError).toBeFalsy();
+                const out = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                    set.structuredContent,
+                );
+                expect(out.scope).toBe("days");
+                expect(out.days).toEqual(["2026-07-04"]);
+                const prog = (await client.callTool({
+                    name: "get_goal_progress",
+                    arguments: { date: "2026-07-04" },
+                })) as ToolResult;
+                expect(textOf(prog)).toContain("2800");
+            });
+        },
+    );
+});
 
 describe("rate_product over HTTP", () => {
     test.each(ERAS)(
