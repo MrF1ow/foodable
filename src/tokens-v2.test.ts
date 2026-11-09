@@ -6,6 +6,7 @@ import {
     V2_SPACE,
     V2_THEME,
     renderV2TokensCss,
+    renderWidgetV2TokensCss,
     type V2ColorName,
 } from "./tokens.js";
 
@@ -46,6 +47,13 @@ test("the committed v2 tokens.css matches src/tokens.ts", async () => {
         await Bun.file("public/app/v2/tokens.css").text(),
         "public/app/v2/tokens.css: run bun run gen:tokens",
     ).toBe(renderV2TokensCss());
+});
+
+test("the committed widget v2 tokens.css matches src/tokens.ts", async () => {
+    expect(
+        await Bun.file("public/widgets/src/shared/v2/tokens.css").text(),
+        "public/widgets/src/shared/v2/tokens.css: run bun run gen:tokens",
+    ).toBe(renderWidgetV2TokensCss());
 });
 
 test("V2_THEME matches design/figcraft-variables.json Theme collection", () => {
@@ -160,5 +168,34 @@ test("v2 tokens.css: dark by default, light by media query, data-theme wins both
     );
     // The explicit overrides come after the media query, so equal
     // specificity would still resolve in their favour.
+    expect(css.indexOf(':root[data-theme="dark"]')).toBeGreaterThan(media);
+});
+
+test("widget v2 tokens.css: light by default, dark by media query, data-theme wins both ways", () => {
+    const css = renderWidgetV2TokensCss();
+    const media = css.indexOf("@media (prefers-color-scheme: dark) {");
+    expect(media).toBeGreaterThan(0);
+    const statics: Record<string, string> = {
+        "--nutrient-alcohol": "var(--text-tertiary)",
+    };
+    for (const [k, v] of Object.entries(V2_RADIUS)) {
+        statics[`--radius-${k}`] = `${v}px`;
+    }
+    for (const [k, v] of Object.entries(V2_SPACE)) {
+        statics[`--space-${k}`] = `${v}px`;
+    }
+    const root = declsOf(block(css, ":root"));
+    expect(root).toMatchObject({ ...themeDecls("light"), ...statics });
+    expect(root["--font-body"]).not.toContain("Geist");
+    expect(root["--font-display"]).toBe("var(--font-body)");
+    expect(declsOf(block(css.slice(media), ":root"))).toEqual(
+        themeDecls("dark"),
+    );
+    expect(declsOf(block(css, ':root[data-theme="dark"]'))).toEqual(
+        themeDecls("dark"),
+    );
+    expect(declsOf(block(css, ':root[data-theme="light"]'))).toEqual(
+        themeDecls("light"),
+    );
     expect(css.indexOf(':root[data-theme="dark"]')).toBeGreaterThan(media);
 });

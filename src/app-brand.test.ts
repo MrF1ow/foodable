@@ -7,17 +7,42 @@ import {
     withWidgetData,
 } from "./widgets.js";
 
-// The app carries the marketing site's look through an app-only brand layer;
-// the in-chat widgets keep their neutral look. These pin that split.
+// v1 chat widgets keep the NEUTRAL palette; v2 widgets use the Theme palette
+// with a system font. The household app carries Geist and Bricolage in brand.css
+// only — never in a widget partial or assembly.
 
-const BRAND_MARKERS = ["Geist", "Bricolage", "--accent-soft", "/fonts/"];
+const WEB_FONT_MARKERS = ["Geist", "Bricolage", "/fonts/"];
+const WIDGET_V2_TOKENS = "public/widgets/src/shared/v2/tokens.css";
+const WIDGET_V2_MARKER = "MCP chat widgets v2";
 
-test("chat widgets carry none of the app's brand layer", async () => {
+test("v1 chat widgets carry no web fonts or app font URLs", async () => {
     for (const key of Object.keys(WIDGET_TEMPLATES)) {
         const html = await getWidgetHtml(key);
-        for (const marker of BRAND_MARKERS) {
+        for (const marker of WEB_FONT_MARKERS) {
             expect(html, `${key} contains ${marker}`).not.toContain(marker);
         }
+        expect(html, `${key} contains --accent-soft`).not.toContain(
+            "--accent-soft",
+        );
+    }
+});
+
+test("the v2 widget token partial carries no web fonts", async () => {
+    const css = await Bun.file(WIDGET_V2_TOKENS).text();
+    for (const marker of WEB_FONT_MARKERS) {
+        expect(css, marker).not.toContain(marker);
+    }
+    expect(css).not.toContain("@font-face");
+});
+
+test("the household app never loads widget v2 partials", async () => {
+    for (const [label, css] of [
+        ["getAppCss", await getAppCss()],
+        ["getEmbedCss", await getEmbedCss()],
+        ["brand.css", await Bun.file("./public/app/brand.css").text()],
+    ] as const) {
+        expect(css, label).not.toContain("shared/v2/");
+        expect(css, label).not.toContain(WIDGET_V2_MARKER);
     }
 });
 

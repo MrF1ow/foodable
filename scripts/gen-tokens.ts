@@ -8,12 +8,14 @@ import {
     renderBrandCss,
     renderTokensCss,
     renderV2TokensCss,
+    renderWidgetV2TokensCss,
 } from "../src/tokens.js";
 
 const OUTPUTS: [string, () => string][] = [
     ["public/widgets/src/shared/tokens.css", renderTokensCss],
     ["public/app/brand.css", renderBrandCss],
     ["public/app/v2/tokens.css", renderV2TokensCss],
+    ["public/widgets/src/shared/v2/tokens.css", renderWidgetV2TokensCss],
 ];
 
 for (const [path, render] of OUTPUTS) {
