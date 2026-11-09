@@ -3,6 +3,7 @@ import { newFood } from "../domain/foods.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
 import { findLegacyLinks } from "./route-map.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
+import { recipeMacrosFixture } from "../test-support/recipe-macros.js";
 import { renderFridgePage } from "./pages/fridge.js";
 import { renderGroceryPage } from "./pages/grocery.js";
 import {
@@ -58,7 +59,7 @@ function recipeDetail(): RecipeDetailView {
         ingredients: [],
         notices: [],
         noticeContext: { from: "/recipes/r1", foods: new Map() },
-        macros: {
+        macros: recipeMacrosFixture({
             calories: 0,
             protein_g: 0,
             carbs_g: 0,
@@ -67,10 +68,8 @@ function recipeDetail(): RecipeDetailView {
             sugar_g: 0,
             alcohol_g: 0,
             incomplete: false,
-            incompleteReasons: [],
-            gaps: [],
-        },
-        macrosPerPortion: {
+        }),
+        macrosPerPortion: recipeMacrosFixture({
             calories: 0,
             protein_g: 0,
             carbs_g: 0,
@@ -79,9 +78,7 @@ function recipeDetail(): RecipeDetailView {
             sugar_g: 0,
             alcohol_g: 0,
             incomplete: false,
-            incompleteReasons: [],
-            gaps: [],
-        },
+        }),
         members: [{ userId: ME.userId, displayName: ME.displayName }],
         stores: [],
         viewerId: ME.userId,

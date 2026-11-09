@@ -71,8 +71,8 @@ import type { Notice } from "../domain/notices.js";
 import { listFridge } from "../domain/fridge.js";
 import {
     allergenNotices,
-    groceryAllergenWarning,
     listGrocery,
+    matchGroceryAllergens,
 } from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import {
@@ -441,12 +441,13 @@ export async function renderGroceryListPage(
     });
     const unknownAllergen = snapshot.lines.some((line) => {
         const food = line.foodId ? catalog.get(line.foodId) : null;
-        const warning = groceryAllergenWarning(
-            line.displayName,
-            memberAllergens,
-            food ? food.allergens : null,
+        return (
+            matchGroceryAllergens(
+                line.displayName,
+                memberAllergens,
+                food ? food.allergens : null,
+            ) === "unknown"
         );
-        return warning != null && !warning.blocking;
     });
     const linkProductPrompt = opts.linkProductId
         ? linkProductPromptFromFoods(
