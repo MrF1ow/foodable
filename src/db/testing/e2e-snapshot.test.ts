@@ -1,9 +1,12 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
-import { migrate } from "../migrate.js";
 import { SQL } from "bun";
 import { findPgBin } from "./pg-shared.js";
-import { startTempPostgres } from "./pg-temp.js";
+import {
+    createMigratedDatabase,
+    DB_SETUP_TIMEOUT_MS,
+    prepareMigratedTemplate,
+} from "./pg.js";
 import {
     e2eRehearseRestore,
     e2eRestore,
@@ -14,15 +17,14 @@ import { seedSource } from "./import-postgres-data.test.js";
 
 const pgAvailable = !!(await findPgBin());
 
+if (pgAvailable) beforeAll(prepareMigratedTemplate, DB_SETUP_TIMEOUT_MS);
+
 test.skipIf(!pgAvailable)(
     "e2e snapshot and restore preserve public data",
     async () => {
-        const pg = await startTempPostgres();
+        const pg = await createMigratedDatabase();
         const snap = join(pg.dir, "e2e-snap.sql");
         try {
-            const sql = new SQL(pg.url, { prepare: false, max: 1 });
-            await migrate(sql);
-            await sql.close();
             await seedSource(pg.url);
 
             const before = await publicRowFingerprint(pg.url);

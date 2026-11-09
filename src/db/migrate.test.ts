@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import {
     findTransactionControlStatement,
@@ -9,8 +9,12 @@ import {
     migrate,
     splitSqlStatements,
 } from "./migrate.js";
-import { describeDb } from "./testing/pg.js";
-import { findPgBin, startTempPostgres } from "./testing/pg-temp.js";
+import { DB_SETUP_TIMEOUT_MS, describeDb } from "./testing/pg.js";
+import {
+    createTestDatabase,
+    findPgBin,
+    startTempPostgres,
+} from "./testing/pg-temp.js";
 import { rows, run, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
@@ -22,6 +26,16 @@ if (!pgAvailable) {
     }
     console.warn("database tests skipped: no initdb (set PG_BIN)");
 }
+
+const tempDirs: string[] = [];
+function migrationDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+}
+afterAll(() => {
+    for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 describe("splitSqlStatements", () => {
     test("splits on top-level semicolons only", () => {
@@ -105,7 +119,7 @@ describe("findTransactionControlStatement", () => {
 
 describe("listMigrationFiles", () => {
     test("parses version and name", () => {
-        const dir = mkdtempSync(join(tmpdir(), "foodable-mig-"));
+        const dir = migrationDir("foodable-mig-");
         writeFileSync(join(dir, "20260101120000_first_step.sql"), "select 1;");
         const files = listMigrationFiles(dir);
         expect(files).toEqual([
@@ -158,6 +172,48 @@ describeDb(pgAvailable !== null, "migrate", (ctx) => {
         expect(second.applied).toEqual([]);
     });
 
+    // Every other test here runs on the shared test server, whose roles
+    // already exist because the migrated template ran bootstrap. Roles are
+    // cluster-wide, so only a cluster of its own shows bootstrap creating
+    // them, the way a first deploy does.
+    describe("on a fresh cluster", () => {
+        const roles = `
+            select coalesce(string_agg(rolname, ',' order by rolname), '')
+            from pg_roles
+            where rolname in ('anon', 'authenticated', 'service_role')
+        `;
+        let fresh:
+            | {
+                  rolesBefore: string;
+                  rolesAfter: string;
+                  applied: string[];
+              }
+            | undefined;
+
+        beforeAll(async () => {
+            const pg = await startTempPostgres();
+            const sql = new SQL(pg.url, { prepare: false, max: 1 });
+            try {
+                const rolesBefore = await pg.scalar(roles);
+                const { applied } = await migrate(sql);
+                fresh = {
+                    rolesBefore,
+                    applied,
+                    rolesAfter: await pg.scalar(roles),
+                };
+            } finally {
+                await sql.close();
+                await pg.stop();
+            }
+        }, DB_SETUP_TIMEOUT_MS);
+
+        test("bootstrap creates the Supabase roles it has none of", () => {
+            expect(fresh?.rolesBefore).toBe("");
+            expect(fresh?.applied.length).toBe(listMigrationFiles().length);
+            expect(fresh?.rolesAfter).toBe("anon,authenticated,service_role");
+        });
+    });
+
     test("bootstrap is idempotent after migrations", async () => {
         const { sql, pg } = ctx();
         const root = new URL("../..", import.meta.url).pathname;
@@ -188,10 +244,10 @@ describeDb(pgAvailable !== null, "migrate", (ctx) => {
     });
 
     test("failing migration leaves earlier files recorded and rolls back", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-fail-"));
+            const dir = migrationDir("foodable-mig-fail-");
             writeFileSync(join(dir, "20260101120000_ok.sql"), "select 1;");
             writeFileSync(
                 join(dir, "20260101130000_bad.sql"),
@@ -219,7 +275,7 @@ select * from table_does_not_exist;`,
     });
 
     test("recorded version with no file throws", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
             await migrate(sql);
@@ -245,7 +301,7 @@ select * from table_does_not_exist;`,
     });
 
     test("dryRun makes no changes on an empty database", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
             const result = await migrate(sql, { dryRun: true });
@@ -271,10 +327,10 @@ select * from table_does_not_exist;`,
     });
 
     test("a legacy supabase_migrations history is renamed, not replayed", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-legacy-"));
+            const dir = migrationDir("foodable-mig-legacy-");
             writeFileSync(
                 join(dir, "20260101120000_first.sql"),
                 "create table public.legacy_first(id int);",
@@ -340,14 +396,14 @@ select * from table_does_not_exist;`,
     });
 
     test("refuses to migrate when both history schemas exist", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
             await sql`
                 create schema supabase_migrations;
                 create schema foodable_migrations;
             `.simple();
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-both-"));
+            const dir = migrationDir("foodable-mig-both-");
             writeFileSync(join(dir, "20260101120000_ok.sql"), "select 1;");
             await expect(migrate(sql, { dir, log: () => {} })).rejects.toThrow(
                 "Both supabase_migrations and foodable_migrations exist",
@@ -366,10 +422,10 @@ create table public.work_row(id int);`),
     });
 
     test("a nested transaction is rejected before anything runs", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-tx-"));
+            const dir = migrationDir("foodable-mig-tx-");
             writeFileSync(
                 join(dir, "20260101120000_nested.sql"),
                 `begin work;
@@ -395,10 +451,10 @@ select * from missing_relation;`,
     });
 
     test("allows begin/end inside dollar-quoted function bodies", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-fn-"));
+            const dir = migrationDir("foodable-mig-fn-");
             writeFileSync(
                 join(dir, "20260101120000_fn.sql"),
                 `create or replace function public.tx_guard_probe()
@@ -428,7 +484,7 @@ $$;`,
         }
     });
     test("migrate does not leak session state to the caller connection", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
             await migrate(sql);
@@ -465,10 +521,10 @@ $$;`,
     });
 
     test("a failing migration still leaves the caller connection clean", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-leak-"));
+            const dir = migrationDir("foodable-mig-leak-");
             // Session-level settings, like the pg_dump preamble: they survive
             // the file's commit, so only discard-on-failure clears them.
             writeFileSync(
@@ -504,10 +560,10 @@ select * from table_does_not_exist;`,
     });
 
     test("rejects a bad pending file before applying any earlier one", async () => {
-        const pg = await startTempPostgres();
+        const pg = await createTestDatabase();
         const sql = new SQL(pg.url, { prepare: false, max: 1 });
         try {
-            const dir = mkdtempSync(join(tmpdir(), "foodable-mig-upfront-"));
+            const dir = migrationDir("foodable-mig-upfront-");
             writeFileSync(
                 join(dir, "20260101120000_good.sql"),
                 "create table public.good_first(id int);",

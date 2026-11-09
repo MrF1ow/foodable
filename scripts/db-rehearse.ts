@@ -10,8 +10,9 @@
 // foodable_migrations.schema_migrations, then a data-only dump of the public
 // schema. The dump is the household's real data. It is streamed into a fresh
 // private directory outside the repo (0700, file 0600), and so is the
-// throwaway cluster `db:dryrun` builds from it (TMPDIR points there). The
-// directory is removed when the run ends: on success, failure, Ctrl-C or kill.
+// throwaway cluster `db:dryrun` builds from it (FOODABLE_PG_TEST_DIR points
+// there). The directory is removed when the run ends: on success, failure,
+// Ctrl-C or kill.
 
 import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -233,8 +234,9 @@ async function main(): Promise<number> {
     const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
-        // The dry run's own cluster lives in here too (TMPDIR): stop it
-        // before removing its files, in case the run was killed mid-way.
+        // The dry run's own cluster lives in here too (FOODABLE_PG_TEST_DIR):
+        // stop it before removing its files, in case the run was killed
+        // mid-way.
         for (const entry of new Bun.Glob("*/data/postmaster.pid").scanSync({
             cwd: dir,
             onlyFiles: true,
@@ -299,7 +301,11 @@ async function main(): Promise<number> {
             ],
             {
                 stdio: ["ignore", "inherit", "inherit"],
-                env: { ...process.env, TMPDIR: dir },
+                env: {
+                    ...process.env,
+                    TMPDIR: dir,
+                    FOODABLE_PG_TEST_DIR: dir,
+                },
             },
         );
         const code = await child.exited;

@@ -3,7 +3,11 @@ import { describe, afterAll, beforeAll, beforeEach } from "bun:test";
 import { setFallbackActorForTests, type Actor } from "../actor.js";
 import { migrate } from "../migrate.js";
 import { pairAppSqlForTests } from "../sql.js";
-import { startTempPostgres, type TempPostgres } from "./pg-temp.js";
+import {
+    createTestDatabase,
+    ensureTemplate,
+    type TempPostgres,
+} from "./pg-temp.js";
 
 type DbCtx = {
     /** The owner (superuser) connection: seeding, assertions, system work. */
@@ -16,19 +20,43 @@ type DbCtx = {
     truncateAll(): Promise<void>;
 };
 
+// Long enough for the first caller in a process, which starts the shared
+// server and migrates the template, on a busy machine.
+export const DB_SETUP_TIMEOUT_MS = 120_000;
+
+const MIGRATED_TEMPLATE = "foodable_migrated";
+
 let shared: DbCtx | undefined;
 
+/** Build the migrated template on the shared server (once per process). */
+export function prepareMigratedTemplate(): Promise<void> {
+    return ensureTemplate(MIGRATED_TEMPLATE, async (url) => {
+        const sql = new SQL(url, { prepare: false, max: 1 });
+        try {
+            await migrate(sql);
+        } finally {
+            await sql.close();
+        }
+    });
+}
+
+/** A fully migrated database of its own, copied from the template. */
+export async function createMigratedDatabase(): Promise<TempPostgres> {
+    await prepareMigratedTemplate();
+    return createTestDatabase({ template: MIGRATED_TEMPLATE });
+}
+
 export async function setupTestDatabase(): Promise<DbCtx> {
-    const pg = await startTempPostgres();
+    const pg = await createMigratedDatabase();
     const sql = new SQL(pg.url, { prepare: false, max: 1 });
-    // The temp cluster trusts local connections, so foodable_app (created by
-    // the migrations) needs no password here.
+    // The test server trusts local connections, so foodable_app (created by
+    // the migrations in the template; roles are cluster-wide) needs no
+    // password here.
     const appUrl = new URL(pg.url);
     appUrl.username = "foodable_app";
     const appSql = new SQL(appUrl.toString(), { prepare: false, max: 1 });
     const actorSql = new SQL(pg.url, { prepare: false, max: 1 });
     try {
-        await migrate(sql);
         // setSqlForTests(sql) now points the app pool at foodable_app.
         pairAppSqlForTests(sql, appSql);
 
@@ -121,7 +149,7 @@ export function describeDb(
         beforeAll(async () => {
             shared = await setupTestDatabase();
             setFallbackActorForTests(fallback);
-        });
+        }, DB_SETUP_TIMEOUT_MS);
 
         beforeEach(() => {
             setFallbackActorForTests(fallback);
