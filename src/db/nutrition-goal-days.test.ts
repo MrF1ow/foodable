@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
     clearGoalDays,
+    countGoalDays,
+    getAllGoalDays,
     getGoalsForDate,
     getGoalsForRange,
     pgGoalDayStore,
@@ -509,5 +511,29 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
             "2026-05-01",
             "2026-05-02",
         ]);
+    });
+
+    test("getAllGoalDays is user-scoped and reconciles count", async () => {
+        const { sql } = getCtx();
+        const other = crypto.randomUUID();
+        await sql`
+            insert into public.users (id, email)
+            values (${other}, ${`x-${other}@t.test`})
+        `;
+        await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            ["2026-06-01", "2026-06-03"],
+            {
+                daily_calories: 2000,
+            },
+        );
+        await upsertGoalDays(other, storeHouseholdId, ["2026-06-02"], {
+            daily_calories: 1900,
+        });
+        expect(await countGoalDays(storeUserId)).toBe(2);
+        const rows = await getAllGoalDays(storeUserId);
+        expect(rows.map((r) => r.date)).toEqual(["2026-06-01", "2026-06-03"]);
+        expect(rows.every((r) => r.user_id === storeUserId)).toBe(true);
     });
 });

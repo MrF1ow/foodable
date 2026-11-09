@@ -1236,6 +1236,62 @@ export async function clearGoalDays(
     });
 }
 
+/**
+ * How many per-day goal overrides this user has. Independent exact count, used
+ * by `getAllGoalDays` to prove the paged fetch came back whole.
+ */
+export async function countGoalDays(userId: string): Promise<number> {
+    return run(async (tx) =>
+        countForUser(tx, NUTRITION_GOAL_DAYS, userId, "count goal days"),
+    );
+}
+
+/**
+ * All of a user's per-day goal overrides, sorted by calendar date — used by
+ * export_all_data. Pages through `fetchAllPages` for consistency with the other
+ * export readers. `id` is a secondary sort key so rows sharing a date still get
+ * a stable order across page boundaries. Reconciles the fetched total against
+ * `countGoalDays` so a truncated result throws instead of silently exporting
+ * less than the user has.
+ */
+export async function getAllGoalDays(
+    userId: string,
+): Promise<GoalDayOverride[]> {
+    const expected = await countGoalDays(userId);
+    if (expected === 0) return [];
+
+    const raw = await fetchAllPages<Record<string, unknown>>(
+        async (from, to) => {
+            const limit = to - from + 1;
+            return run(async (tx) => {
+                try {
+                    return await rows<Record<string, unknown>>(
+                        tx,
+                        tx`
+                        select *
+                        from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                        where user_id = ${userId}
+                        order by date asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                    );
+                } catch (err) {
+                    throw nutritionFailed("get goal days", err);
+                }
+            });
+        },
+    );
+
+    const goalDays = raw.map(goalDayFromRow);
+    if (goalDays.length < expected) {
+        throw new Error(
+            `getAllGoalDays: fetched ${goalDays.length} rows but countGoalDays reported ${expected} — export would be truncated`,
+        );
+    }
+    return goalDays;
+}
+
 export const pgGoalDayStore: GoalDayStore = {
     overrideForDate(userId, date) {
         if (!isCalendarDate(date)) return Promise.resolve(null);

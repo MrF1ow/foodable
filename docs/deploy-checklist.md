@@ -65,7 +65,7 @@ Run this on the live site with two members.
 - [ ] **Put away.** On `/kitchen/groceries`, check that line and submit **Put away**. Expect `/kitchen/fridge` to show the new stock. **Clear checked** does not stock the fridge.
 - [ ] **Cook.** On the recipe, submit **Cooked it** with **Log meals** checked, for both members. Expect the fridge count to drop and two meals to appear, one per member. If stock is short, the shortfall is reported and the fridge does not go negative. With two lots of the same food, the earlier expiry is used first.
 - [ ] **Eat and toss.** On `/kitchen/fridge`, submit **Ate it** on one item and **Toss** on another. Expect **Ate it** to also log a meal.
-- [ ] **Export.** Run `export_all_data`. Expect the ZIP to hold `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `profile.csv`, and `README.txt`. `meal_items.csv` is keyed by `meal_id`, has a `timezone` column, and keeps its header with zero rows.
+- [ ] **Export.** Run `export_all_data`. Expect the ZIP to hold `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `goal_days.csv`, `profile.csv`, and `README.txt`. `meal_items.csv` is keyed by `meal_id`, has a `timezone` column, and keeps its header with zero rows.
 - [ ] **Agent surface.** `tools/list` returns 71 tools. `get_meals`, `get_water`, `get_weight`, `get_fridge`, `get_household_rules`, and `set_household_rules` exist. `list_grocery_lines` and `get_fridge` render their cards in a widget-capable client.
 - [ ] **Barcode.** `lookup_barcode` on a real product returns data, which proves `OFF_USER_AGENT` is set.
 

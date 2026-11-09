@@ -540,6 +540,7 @@ mock.module("./db/nutrition.js", () => ({
     getAllMealItems: async () => [],
     getAllWater: async () => db.water,
     getAllWeight: async () => [],
+    getAllGoalDays: async () => db.goalDays,
 }));
 
 mock.module("./db/exports.js", () => ({
@@ -3200,6 +3201,7 @@ describe("export_all_data is on the tool surface", () => {
             "water.csv",
             "weight.csv",
             "goals.csv",
+            "goal_days.csv",
             "profile.csv",
             "README.txt",
         ]) {

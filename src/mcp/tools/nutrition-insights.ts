@@ -841,7 +841,7 @@ export function registerNutritionInsightTools(
         {
             title: "Export All Data",
             description:
-                "Export EVERY table this server tracks for the user — meals, meal items, water, weight, nutrition goals and profile settings — as a single ZIP archive (meals.csv, meal_items.csv, water.csv, weight.csv, goals.csv, profile.csv, plus a README.txt describing the columns and the units they are in) and return a private, time-limited download link (valid 60 minutes). Timestamps use the user's timezone if set, otherwise UTC. Only meals.csv can be read back in; water, weight, goals, profile and meal_items are export-only. This is the server's only export path — use it for a full backup, an account takeout, or a request for the meal history alone, in which case tell the user their meals are meals.csv inside the archive. Share the link with the user so they can download their data.",
+                "Export EVERY table this server tracks for the user — meals, meal items, water, weight, nutrition goals and profile settings — as a single ZIP archive (meals.csv, meal_items.csv, water.csv, weight.csv, goals.csv, goal_days.csv, profile.csv, plus a README.txt describing the columns and the units they are in) and return a private, time-limited download link (valid 60 minutes). Timestamps use the user's timezone if set, otherwise UTC. Only meals.csv can be read back in; water, weight, goals, goal_days, profile and meal_items are export-only. This is the server's only export path — use it for a full backup, an account takeout, or a request for the meal history alone, in which case tell the user their meals are meals.csv inside the archive. Share the link with the user so they can download their data.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -873,7 +873,7 @@ export function registerNutritionInsightTools(
                         };
                     }
                     // Name every file's row count, zeros included: the archive
-                    // always ships all six files, so "0 weight entries" is what
+                    // always ships every file, so "0 weight entries" is what
                     // tells the user weight.csv is headers-only because they
                     // never logged weight — not because the export lost it.
                     const contents = [
@@ -881,6 +881,7 @@ export function registerNutritionInsightTools(
                         `${counts.water} water ${counts.water === 1 ? "entry" : "entries"}`,
                         `${counts.weight} weight ${counts.weight === 1 ? "entry" : "entries"}`,
                         goals ? "nutrition goals" : "no nutrition goals set",
+                        `${counts.goal_days} per-day goal override${counts.goal_days === 1 ? "" : "s"}`,
                         profile ? "profile settings" : "no profile settings",
                     ].join(", ");
                     return {
