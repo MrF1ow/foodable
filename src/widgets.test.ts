@@ -4,6 +4,32 @@ import { getWidgetHtml, WIDGET_TEMPLATES } from "./widgets.js";
 const KEYS = Object.keys(WIDGET_TEMPLATES);
 const SRC = "./public/widgets/src";
 const INCLUDE_RE = /\/\*@include\s+([^\s@]+)\s*@\*\//g;
+const INLINE_TS_RE = /\/\*@inlinets\s+([^\s@]+)\s*@\*\//g;
+
+async function transpileForWidget(tsPath: string): Promise<string> {
+    const ts = await Bun.file(`./${tsPath}`).text();
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(ts);
+    return js
+        .replace(/^export\s+default\s+/gm, "")
+        .replace(/^export\s+/gm, "")
+        .replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, "");
+}
+
+/** Partial source as it appears after assembly (@inlinets markers expanded). */
+async function partialAsInlined(rel: string): Promise<string> {
+    let partial = (await Bun.file(`${SRC}/${rel}`).text()).trim();
+    const compiled = new Map<string, string>();
+    for (const m of partial.matchAll(INLINE_TS_RE)) {
+        const path = m[1]!;
+        if (!compiled.has(path)) {
+            compiled.set(path, await transpileForWidget(path));
+        }
+    }
+    return partial.replace(
+        INLINE_TS_RE,
+        (_full, path) => compiled.get(path) ?? "",
+    );
+}
 
 // Every widget must assemble from its source partials into a self-contained
 // document — no unresolved @include markers, valid inline JS, single style/script.
@@ -54,7 +80,7 @@ test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
 
     const html = await getWidgetHtml(key);
     for (const rel of includes) {
-        const partial = (await Bun.file(`${SRC}/${rel}`).text()).trim();
+        const partial = await partialAsInlined(rel);
         expect(html).toContain(partial);
     }
 });

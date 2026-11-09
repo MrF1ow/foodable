@@ -189,13 +189,12 @@ function macroLabel(m) {
 
 // Grams of pure ethanol per standard drink. Mirrors src/alcohol.ts (NIAAA:
 // 14 g per US drink; NHS: one unit is 10 mL of ethanol = 7.893 g).
-// Hand-copied rather than pulled in with @inlinets because src/widgets.test.ts
-// requires every @include'd partial to appear VERBATIM in the assembled
-// HTML, and a marker expanded inside this partial would break it. The unit
-// NAMES ("US drinks" / "UK units") come from MACRO_COPY.drinkLabels instead of
-// a sibling constant here, since — unlike the gram figures — they are
-// user-visible text.
+// The unit NAMES ("US drinks" / "UK units") come from MACRO_COPY.drinkLabels
+// instead of a sibling constant here, since — unlike the gram figures — they
+// are user-visible text.
 const DRINK_GRAMS = { us: 14, uk: 7.893 };
+
+/*@inlinets src/domain/geometry.ts@*/
 
 // value vs goal → filled fraction, the target caption, the remaining-amount
 // caption, and the ring's centre. Bars and rings keep their metric colour even
@@ -218,19 +217,23 @@ function macroBits(m, vals, goal, wording) {
 
     let pct = null;
     let over = false;
+    let frac = 0;
     if (target != null && target > 0) {
         pct = (val / target) * 100;
-        over = pct > 100;
+        const fill = barFill(val, target);
+        over = fill.over;
+        frac = fill.fraction;
     } else if (ceiling && target === 0) {
         // A ceiling of 0 is a real limit — "none today" is the most likely
         // alcohol limit there is — so it is honoured, while a floor of 0 stays
         // "no goal set" (a 0 g protein target is meaningless). Percent of zero
         // has no value to report, so it is pinned rather than left to divide
-        // into Infinity/NaN.
+        // into Infinity/NaN. barFill treats a 0 goal as absent (fraction 0), so
+        // the ring still needs this branch for pixels identical to before.
         over = val > 0;
         pct = over ? 100 : 0;
+        frac = pct / 100;
     }
-    const frac = pct == null ? 0 : Math.max(0, Math.min(pct, 100)) / 100;
     const pctColor = over ? "var(--over)" : m.color;
 
     let goalLine, targetStr, deltaStr, center2;
