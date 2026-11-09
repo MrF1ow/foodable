@@ -139,7 +139,7 @@ describe("flag on: the new shell", () => {
         expect(html).not.toContain("<aside");
         expect(html).toContain('<div class="fd-sidebar">');
         expect(html).toContain(
-            '<main class="app-main native fd-main"><a class="fd-chip"',
+            '<main class="app-main native fd-main"><a class="fd-account-chip"',
         );
     });
 
@@ -177,7 +177,7 @@ describe("flag on: the new shell", () => {
             "fd-sidelink-settings",
             "fd-side-dot",
             "fd-account",
-            "fd-chip",
+            "fd-account-chip",
             "fd-topbar",
             "fd-search",
             "fd-scan",
@@ -289,7 +289,7 @@ describe("flag on: the new shell", () => {
 
     test("account chip links to Settings, with the viewer's initials", () => {
         const html = v2Html();
-        const chip = between(html, /<a class="fd-chip"/, "</a>");
+        const chip = between(html, /<a class="fd-account-chip"/, "</a>");
         expect(chip).toContain('href="/settings"');
         expect(chip).toContain('data-turbo="false"');
         expect(chip).toContain(
@@ -466,7 +466,7 @@ describe("flag on: the new shell", () => {
             expect(bareH1).toContain("</nav><section>x</section></main>");
             const none = v2Html({ active: "fridge", body: "<p>x</p>" });
             expect(none).toContain(
-                '"><a class="fd-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
+                '"><a class="fd-account-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
             );
         });
 

@@ -1863,7 +1863,7 @@ try {
                 navGap: Math.round(innerHeight - r.bottom),
                 navCentre: Math.round(r.left + r.width / 2 - document.documentElement.clientWidth / 2),
                 chrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
-                chip: q(".fd-chip")?.getAttribute("href") ?? null,
+                chip: q(".fd-account-chip")?.getAttribute("href") ?? null,
                 tracked: document.querySelectorAll("link[rel='stylesheet'][data-turbo-track='reload'], script[data-turbo-track='reload']").length,
                 open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
                 hash: location.hash,
@@ -1970,7 +1970,7 @@ try {
 
     await goto("/");
     await setMarker();
-    await clickSel(".fd-chip");
+    await clickSel(".fd-account-chip");
     await sleep(400);
     const chipNav = await ev<{ marker: string | null; path: string }>(`({
         marker: window.__marker ?? null,

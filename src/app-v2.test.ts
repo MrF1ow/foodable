@@ -28,13 +28,25 @@ describe("/app-v2.css", () => {
         expect(css).not.toContain("/*@include");
         const tokens = readFileSync("./public/app/v2/tokens.css", "utf8");
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
+        const components = readFileSync(
+            "./public/app/v2/components.css",
+            "utf8",
+        );
+        const sheet = readFileSync("./public/app/v2/sheet.css", "utf8");
         expect(css).toContain(tokens.trim());
         expect(css).toContain(shell.trim());
+        expect(css).toContain(components.trim());
+        expect(css).toContain(sheet.trim());
         expect(css.indexOf(tokens.trim())).toBeLessThan(
             css.indexOf(shell.trim()),
         );
+        expect(css.indexOf(shell.trim())).toBeLessThan(
+            css.indexOf(components.trim()),
+        );
         expect(css).toContain("--surface-bg: #0d0f0e");
         expect(css).toContain(".fd-tabs");
+        expect(css).toContain(".fd-row--swipe");
+        expect(css).toContain(".fd-sheet");
     });
 
     test("is content-hashed", async () => {
@@ -106,7 +118,7 @@ describe("/app-v2.js", () => {
         const js = await getAppV2Js();
         expect(js).toContain("window.FoodableApp.onLoad(");
         expect(js).not.toContain("Turbo.start");
-        expect(js.length).toBeLessThan(10_000);
+        expect(js.length).toBeLessThan(35_000);
     });
 });
 

@@ -255,7 +255,7 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
 function accountChip(chrome: AppChrome): string {
     const name = chrome.identity?.viewerName ?? "";
     const label = name ? `Settings, signed in as ${name}` : "Settings";
-    return `<a class="fd-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
+    return `<a class="fd-account-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 
 /** The page's own header is what `pageHeader` (components/ui.ts) writes first:

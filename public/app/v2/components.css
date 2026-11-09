@@ -1,10 +1,10 @@
-/* v2 shared components (UI-5): hairline rows, chips, stepper, stat tiles, score
- * badge. Server markup lives in src/web/components/v2/; every class here starts
- * with `fd-`. Colours, radii and the spacing that has a token come only from
+/* v2 shared components: hairline rows, chips, stepper, stat tiles, score badge.
+ * Server markup lives in src/web/components/v2/; every class here starts with
+ * `fd-`. Colours, radii and the spacing that has a token come only from
  * tokens.css (light and dark follow it). Only the values the FigCraft variables
  * do not have are local, defined once just below, each with its FigCraft node.
  * src/web/components/v2/components-css.test.ts fails on a colour literal or a
- * class that is not `fd-`. Nothing loads this file yet; UI-3 adds it to /app-v2.css. */
+ * class that is not `fd-`. Included from /app-v2.css via @include. */
 
 :root {
     /* Spacing steps the design uses that tokens.css has no variable for. */
@@ -364,6 +364,7 @@
     background: var(--surface-raised);
 }
 .fd-row--swipe .fd-row__body {
+    touch-action: pan-y;
     background: var(--surface-bg);
     transform: translateX(var(--fd-swipe-x, 0));
     transition: transform 0.2s ease;

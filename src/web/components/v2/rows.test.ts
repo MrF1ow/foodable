@@ -217,6 +217,24 @@ test("swipe slots are real buttons in the DOM, lead before the body and trail af
     expect(html).not.toContain("data-swipe-open");
 });
 
+test("swipe rows stamp data-swipe-right/left and link the sheet", () => {
+    const html = foodRow({
+        title: "Eggs",
+        swipe: {
+            lead: {
+                label: "Again",
+                form: { action: "/meals/1/again" },
+            },
+            trail: { label: "Delete", form: { action: "/meals/1" } },
+            sheetId: "meal-sheet-1",
+        },
+    });
+    expect(html).toMatch(/data-swipe-right="\/meals\/1\/again\tAgain"/);
+    expect(html).toMatch(/data-swipe-left="\/meals\/1\tDelete"/);
+    expect(html).toContain(`data-sheet-id="meal-sheet-1"`);
+    expect(html).toContain(`aria-controls="meal-sheet-1"`);
+});
+
 test("swipe.open stamps data-swipe-open; a row without actions ignores it", () => {
     const open = foodRow({
         title: "x",
