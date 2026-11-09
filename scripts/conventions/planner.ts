@@ -128,7 +128,7 @@ export function splitFrontmatter(
     const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(normalized);
     if (!match) return { error: "missing frontmatter (--- … ---)" };
     try {
-        const data = Bun.YAML.parse(match[1]);
+        const data = Bun.YAML.parse(match[1] ?? "");
         return { data, body: normalized.slice(match[0].length) };
     } catch (err) {
         return { error: `invalid YAML: ${(err as Error).message}` };
@@ -243,7 +243,7 @@ export function parsePlanner(files: Record<string, string>): {
         const parts = path.split("/");
         if (parts.length === 2) {
             if (parts[1] === RETIRED_FILE) {
-                retired = parseRetired(path, files[path], fail);
+                retired = parseRetired(path, files[path] ?? "", fail);
             } else if (parts[1] !== "README.md") {
                 fail(
                     path,
@@ -259,12 +259,13 @@ export function parsePlanner(files: Record<string, string>): {
             );
             continue;
         }
-        const [, dir, file] = parts;
+        // parts.length is 3 here, so both are present.
+        const [, dir = "", file = ""] = parts;
         if (!file.endsWith(".md")) {
             fail(path, "only Markdown files belong in a project folder");
             continue;
         }
-        const parsed = splitFrontmatter(files[path]);
+        const parsed = splitFrontmatter(files[path] ?? "");
         if ("error" in parsed) {
             fail(path, parsed.error);
             continue;
@@ -463,7 +464,7 @@ export function parsePlanner(files: Record<string, string>): {
                 fail(item.path, "an item cannot come after itself");
             else if (ids.has(dep)) continue;
             // An item in a retired project is finished by definition.
-            else if (retiredKeys.has(dep.split("-")[0])) continue;
+            else if (retiredKeys.has(dep.split("-")[0] ?? "")) continue;
             else fail(item.path, `after names ${dep}, which does not exist`);
         }
     }
@@ -620,7 +621,9 @@ export function parsePlannerSection(
                 error: `## Planner: cannot read "${line}" (use Closes <ID>, Part of <ID>, or None.)`,
             };
         }
-        const ids = m[2].split(/\s*,\s*|\s+and\s+/i).map((s) => s.trim());
+        const ids = (m[2] ?? "")
+            .split(/\s*,\s*|\s+and\s+/i)
+            .map((s) => s.trim());
         for (const id of ids) {
             if (!ID_PATTERN.test(id)) {
                 return {
@@ -628,9 +631,10 @@ export function parsePlannerSection(
                 };
             }
         }
-        (m[1].toLowerCase() === "closes" ? out.closes : out.partOf).push(
-            ...ids,
-        );
+        ((m[1] ?? "").toLowerCase() === "closes"
+            ? out.closes
+            : out.partOf
+        ).push(...ids);
     }
     if (out.none && (out.closes.length > 0 || out.partOf.length > 0)) {
         return { error: "## Planner says None. and also names items" };
@@ -730,7 +734,7 @@ export function checkPlannerPr(input: {
     }
 
     const inRetiringProject = (id: string) =>
-        retiring.has(id.split("-")[0]) && baseById.has(id);
+        retiring.has(id.split("-")[0] ?? "") && baseById.has(id);
 
     // History is append-only: an item never disappears except with its
     // retired project, and a recorded PR number stays.

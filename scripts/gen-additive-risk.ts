@@ -80,7 +80,7 @@ async function loadTaxonomy(fromPath: string | null): Promise<Taxonomy> {
 }
 
 const fromIdx = process.argv.indexOf("--from");
-const fromPath = fromIdx >= 0 ? process.argv[fromIdx + 1] : null;
+const fromPath = fromIdx >= 0 ? (process.argv[fromIdx + 1] ?? null) : null;
 if (fromIdx >= 0 && !fromPath) {
     throw new Error("--from requires a path");
 }

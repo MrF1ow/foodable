@@ -18,7 +18,7 @@ describe("fetchMigrationContents", () => {
         const sql = "-- foodable:contract reason\nSELECT 1;\n";
         const b64 = Buffer.from(sql, "utf8").toString("base64");
 
-        globalThis.fetch = (async (input: RequestInfo | URL) => {
+        globalThis.fetch = (async (input: string | URL | Request) => {
             const url = String(input);
             if (url.includes(missing)) {
                 return new Response("not found", { status: 404 });

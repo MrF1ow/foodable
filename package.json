@@ -41,6 +41,7 @@
         "format": "bunx prettier --write .",
         "format:check": "bunx prettier --check .",
         "typecheck": "bun run scripts/typecheck.ts",
+        "check:changed": "bun run scripts/check-changed.ts",
         "db:dryrun": "bun run scripts/migration-dryrun.ts",
         "db:rehearse": "bun run scripts/db-rehearse.ts",
         "db:migrate": "bun run scripts/migrate.ts",

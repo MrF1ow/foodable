@@ -956,8 +956,10 @@ const SCENARIOS: Scenario[] = [
                     // Recipe yields 4; 2 portions use half: 250 g chicken,
                     // 150 g broccoli. Cooking takes what the fridge holds and
                     // never goes below zero; anything missing is a shortfall.
-                    const used = (have: number | null, need: number) =>
-                        Math.min(have ?? 0, need);
+                    const used = (
+                        have: number | null | undefined,
+                        need: number,
+                    ) => Math.min(have ?? 0, need);
                     c.near(
                         (await stockOf(chicken)).g ?? 0,
                         (chickenBefore.g ?? 0) - used(chickenBefore.g, 250),

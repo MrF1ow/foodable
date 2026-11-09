@@ -386,10 +386,9 @@ function parseConventionalTitle(
     if (!match) {
         return { error: `Invalid title: ${title}` };
     }
-    const type = match[1];
-    const scope = match[2];
-    const breaking = match[3] === "!";
-    const subject = match[4];
+    // Every group is non-optional, so a match always fills all four.
+    const [, type = "", scope = "", bang = "", subject = ""] = match;
+    const breaking = bang === "!";
 
     if (!(TYPES as readonly string[]).includes(type)) {
         return { error: `Invalid title: ${title}` };
@@ -418,7 +417,7 @@ export function parseTitle(title: string): ParsedTitle | { error: string } {
         if (title.length > 72) {
             return { error: `Invalid title: ${title}` };
         }
-        const inner = parseConventionalTitle(revertMatch[1]);
+        const inner = parseConventionalTitle(revertMatch[1] ?? "");
         if ("error" in inner) {
             return inner;
         }
@@ -515,7 +514,7 @@ export function parseBody(markdown: string): {
         const headingMatch = /^## (.+)$/.exec(line);
         if (headingMatch) {
             flush();
-            currentHeading = headingMatch[1];
+            currentHeading = headingMatch[1] ?? null;
             currentLines = [];
         } else if (currentHeading !== null) {
             currentLines.push(line);
@@ -554,7 +553,7 @@ function sectionIsNone(text: string | undefined): boolean {
 function hasMigrationContract(content: string): boolean {
     for (const line of content.split("\n")) {
         const m = /^--\s*foodable:contract\s+(.+)$/.exec(line.trim());
-        if (m && m[1].trim().length > 0) {
+        if (m && (m[1] ?? "").trim().length > 0) {
             return true;
         }
     }
