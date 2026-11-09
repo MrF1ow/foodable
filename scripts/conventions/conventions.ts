@@ -321,6 +321,7 @@ const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
     { prefix: "src/web/client/", area: "web" },
     { prefix: "src/copy/", area: "web" },
     { prefix: "public/brand/", area: "brand" },
+    { prefix: "public/widgets/src/templates/v2/", area: "widgets" },
 ];
 
 const LOW_REPO_EXACT = new Set([

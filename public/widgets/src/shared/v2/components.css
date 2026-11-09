@@ -1,0 +1,748 @@
+/* v2 components, as the FigCraft "Chat widgets" page draws them at chat
+ * width (a 400px card, 366px of content). Markup comes from shared/v2/ui.js
+ * and shared/v2/macros.js; colours only through tokens, so host light and
+ * dark follow without script. Metric colours arrive as `--c` on the element. */
+
+/* ---- Dots ---------------------------------------------------------------- */
+.dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c, var(--text-tertiary));
+}
+.dot.lg {
+    width: 7px;
+    height: 7px;
+}
+
+/* ---- Bars: track + fill, optional goal marker ---------------------------- */
+.bar {
+    position: relative;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+}
+.bar.thin {
+    height: 3px;
+}
+.bar.thick {
+    height: 6px;
+}
+.bar > i {
+    display: block;
+    height: 100%;
+    max-width: 100%;
+    border-radius: var(--radius-pill);
+    background: var(--c);
+}
+.bar > b {
+    position: absolute;
+    top: -3px;
+    width: 1.5px;
+    height: 10px;
+    margin-left: -0.75px;
+    background: var(--text-secondary);
+}
+
+/* ---- Calorie gauge: semicircle, macro segments, figure in the bowl ------- */
+.gauge {
+    position: relative;
+    flex: none;
+    width: 132px;
+    height: 71px;
+}
+.gauge svg {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+}
+.gauge path {
+    fill: none;
+}
+.gauge .g-track {
+    stroke: var(--surface-track);
+    stroke-linecap: round;
+}
+.gauge-c {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+.gauge-v {
+    font-size: 30px;
+    line-height: 36px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+.gauge-k {
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-secondary);
+}
+
+/* ---- Macro strip: gauge beside three bars, limits row, water line -------- */
+.strip {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.srow {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+.mbars {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.mb {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.mb-row,
+.water {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    line-height: 15px;
+}
+.mb-l {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.v {
+    font-weight: 600;
+    white-space: nowrap;
+}
+.vs {
+    font-size: 11px;
+    line-height: 13px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.limits {
+    display: grid;
+    grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr));
+    gap: 8px;
+}
+.lim {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.lim-l {
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+.lim-r {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+    font-size: 12px;
+    line-height: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.lim .bar {
+    width: calc(100% - 5.5px);
+}
+
+.water {
+    gap: 8px;
+}
+.water .mb-l {
+    flex: none;
+}
+.water .bar {
+    flex: 1;
+    margin: 0 27px 0 0;
+}
+.water .v {
+    margin-left: auto;
+}
+
+/* Interactive strip: tiles some meal contributed to open a breakdown (the
+ * delegated handler in shared/macros.js). */
+.strip [data-macro] {
+    cursor: pointer;
+    border-radius: 6px;
+}
+.strip [data-macro]:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 3px;
+}
+.strip [data-macro].open .mb-l,
+.strip [data-macro].open .lim-l {
+    color: var(--text-primary);
+}
+.mhint {
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+.macro-detail {
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+}
+.md-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.md-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.md-close {
+    margin-left: auto;
+    border: 0;
+    background: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--text-tertiary);
+}
+.md-close:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 1px;
+    border-radius: 4px;
+}
+.md-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.md-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+}
+.md-row:last-child {
+    border-bottom: 0;
+}
+.md-val {
+    flex: none;
+    min-width: 52px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.md-unit {
+    margin-left: 2px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+}
+.md-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.md-sub,
+.md-more,
+.md-empty {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+.md-more {
+    padding-top: 7px;
+}
+
+/* ---- Goal list (goal-progress): label, figure, percent, thick bar -------- */
+.goals {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.gl {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.gl-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.gl-l {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 16px;
+}
+.gl-v {
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.gl-p {
+    min-width: 34px;
+    text-align: right;
+    font-size: 12px;
+    line-height: 15px;
+    font-weight: 600;
+}
+
+/* ---- Tip line: a dot and one sentence ------------------------------------ */
+.tip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+}
+.tip .dot {
+    --c: var(--accent-fill);
+}
+
+/* ---- Meal block (meal-logged) -------------------------------------------- */
+.meal {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.meal-t {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.meal-n {
+    font-size: 15px;
+    line-height: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pcf {
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 15px;
+}
+.pcf .p {
+    color: var(--macro-protein);
+}
+.pcf .c {
+    color: var(--macro-carbs);
+}
+.pcf .f {
+    color: var(--macro-fat);
+}
+.meal-k {
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ---- Big figure with unit (weight, streaks) ------------------------------ */
+.fig {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.fig-v {
+    font-size: 20px;
+    line-height: 24px;
+    font-weight: 600;
+}
+.fig-v.xl {
+    font-size: 34px;
+    line-height: 41px;
+    letter-spacing: -0.01em;
+}
+.fig-u {
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+}
+.fig-end {
+    margin-left: auto;
+    font-size: 12px;
+}
+
+/* ---- Range toggle -------------------------------------------------------- */
+.seg {
+    display: inline-flex;
+    flex: none;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-bg);
+}
+.seg button {
+    border: 0;
+    background: none;
+    border-radius: var(--radius-pill);
+    padding: 3px 9px;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.seg button:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 1px;
+}
+
+/* ---- Rings: one per day, three concentric macro arcs --------------------- */
+/* --cols comes from ringsV2: the day count up to fourteen, then half of it
+ * (two rows). The ring keeps its drawn size and shrinks only when its cell
+ * is narrower, so seven days look exactly as designed. */
+.rings {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    gap: 2px;
+}
+.rday {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 0;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+.rday.on {
+    background: var(--surface-bg);
+    color: var(--text-primary);
+}
+.rday svg {
+    display: block;
+    overflow: visible;
+    /* 4px of air between scaled rings; never binds at seven days. */
+    max-width: calc(100% - 4px);
+    height: auto;
+}
+.rday path {
+    fill: none;
+    stroke-linecap: round;
+}
+.rday .r-track {
+    stroke: var(--surface-track);
+}
+.legend {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+}
+.legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-secondary);
+}
+
+/* ---- Hairline rows ------------------------------------------------------- */
+.grp {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.rows {
+    display: flex;
+    flex-direction: column;
+}
+.row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    min-width: 0;
+    border-bottom: 1px solid var(--line);
+}
+.row:last-child {
+    border-bottom: 0;
+}
+.row-t {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 16px;
+}
+.row-s {
+    flex: none;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.row-end {
+    margin-left: auto;
+    flex: none;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+/* :where keeps this at the specificity of .row-end, so a tone class
+ * (.is-over, .is-warn, below) still colours an overdue date. */
+.row-end:where(.date) {
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+.row.done .row-t {
+    color: var(--text-tertiary);
+    text-decoration: line-through;
+}
+/* Average rows (trends): fixed label column, bar, figure. */
+.row.avg .row-t {
+    flex: none;
+    width: 64px;
+}
+.row.avg .bar {
+    flex: 1;
+    max-width: 190px;
+}
+/* Tones: a dot takes its colour from --c, text from .is-over / .is-warn /
+   .is-dim / .is-ok (the end of this file). */
+.s-over {
+    --c: var(--status-over);
+}
+.s-warn {
+    --c: var(--status-warn);
+}
+.s-dim {
+    --c: var(--text-tertiary);
+}
+
+/* A row's one action: link-weight accent text, a real button. */
+.act {
+    margin-left: auto;
+    flex: none;
+    border: 0;
+    background: none;
+    padding: 0;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--accent-text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.row-end + .act {
+    margin-left: 0;
+}
+.act:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Grocery tick. */
+.check {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-tertiary);
+    background: none;
+    cursor: pointer;
+}
+.check svg {
+    display: none;
+}
+.check:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+.check.on {
+    border: 0;
+    background: var(--accent-fill);
+}
+.check.on svg {
+    display: block;
+}
+.check path {
+    fill: none;
+    stroke: var(--accent-on);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* ---- Chips and tags ------------------------------------------------------ */
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-bg);
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.chip:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+.chip-n {
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+.chip[aria-pressed="true"] {
+    border-color: var(--text-primary);
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.chip[aria-pressed="true"] .chip-n {
+    color: inherit;
+}
+.tag {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    height: 15px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-secondary);
+}
+
+/* ---- Tiles (use soon) and the inset panel -------------------------------- */
+.tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+.tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-bg);
+    min-width: 0;
+}
+.tile-w {
+    font-size: 11px;
+    line-height: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.tile-n {
+    font-size: 13px;
+    line-height: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.inset {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface-bg);
+}
+.inset-t {
+    font-size: 15px;
+    line-height: 18px;
+    font-weight: 600;
+}
+
+/* ---- Buttons ------------------------------------------------------------- */
+.btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+.btn {
+    flex: 1;
+    height: 38px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn.primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+.btn:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* Text tones last, so they win over each component's own text colour. */
+.is-over {
+    color: var(--status-over);
+}
+.is-warn {
+    color: var(--status-warn);
+}
+.is-ok {
+    color: var(--accent-text);
+}
+.is-dim {
+    color: var(--text-tertiary);
+}
+
+/* Narrow chats: four limit cells become a 2×2 and the gauge row stacks
+ * no earlier than it has to. */
+@media (max-width: 340px) {
+    .limits {
+        --n: 2 !important;
+        row-gap: 12px;
+    }
+}

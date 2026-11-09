@@ -1,0 +1,405 @@
+<!doctype html>
+<!--
+  v2 component gallery — DEV ONLY.
+
+  Every shared v2 component on one page, as the FigCraft "Chat widgets" page
+  draws it, in the states the widget templates will hit: under, at and over
+  goal, no goal, a zero day, empty lists. Assembled as the v2 variant of the
+  component-gallery key (no ui:// resource, no tool), so no client reaches it.
+
+  View it with:  bun run harness  ->  /host?widget=component-gallery&v2=1
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Component Gallery v2</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .gal {
+                display: grid;
+                grid-template-columns: minmax(0, 400px);
+                gap: 10px;
+                padding: 12px 8px 24px;
+            }
+            .gal-h {
+                margin: 14px 4px 0;
+                font-size: 11px;
+                line-height: 13px;
+                color: var(--text-tertiary);
+            }
+            .gal-h:first-child {
+                margin-top: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script>
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            /*@include shared/v2/macros.js@*/
+
+            // The design's day: Recomp goal, lunch logged, no alcohol yet and
+            // no alcohol limit set.
+            const GOAL = {
+                calories: 2421,
+                protein_g: 210,
+                carbs_g: 213,
+                fat_g: 81,
+                fiber_g: 38,
+                sugar_g: 50,
+                caffeine_mg: 400,
+                water_ml: 3000,
+            };
+            const GOAL_LIMITS = { ...GOAL, alcohol_g: 28 };
+            const DAY = {
+                calories: 1284,
+                protein_g: 96,
+                carbs_g: 118,
+                fat_g: 42,
+                fiber_g: 18,
+                sugar_g: 31,
+                alcohol_g: 0,
+                caffeine_mg: 180,
+                water_ml: 1600,
+            };
+            const OVER = {
+                calories: 2690,
+                protein_g: 188,
+                carbs_g: 262,
+                fat_g: 96,
+                fiber_g: 24.6,
+                sugar_g: 61.3,
+                alcohol_g: 31.6,
+                caffeine_mg: 470,
+                water_ml: 2400,
+            };
+            const AT = { ...DAY, calories: 2421 };
+            const ZERO = {
+                calories: 0,
+                protein_g: 0,
+                carbs_g: 0,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 0,
+                alcohol_g: null,
+                caffeine_mg: null,
+                water_ml: 0,
+            };
+            const MEALS = [
+                {
+                    description: "Overnight oats with berries",
+                    meal_type: "breakfast",
+                    calories: 432,
+                    protein_g: 27,
+                    carbs_g: 42,
+                    fat_g: 17,
+                    fiber_g: 9.4,
+                    sugar_g: 18.2,
+                    alcohol_g: 0,
+                    caffeine_mg: 95,
+                },
+                {
+                    description: "Chicken rice bowl",
+                    meal_type: "lunch",
+                    calories: 852,
+                    protein_g: 69,
+                    carbs_g: 76,
+                    fat_g: 25,
+                    fiber_g: 8.6,
+                    sugar_g: 12.8,
+                    alcohol_g: 0,
+                    caffeine_mg: 85,
+                },
+            ];
+            const LUNCH = MEALS[1];
+            const WEEK = [
+                { label: "S", protein_g: 205, carbs_g: 210, fat_g: 80 },
+                { label: "M" },
+                { label: "T", protein_g: 200, carbs_g: 207, fat_g: 84 },
+                { label: "W", protein_g: 206, carbs_g: 205, fat_g: 79 },
+                { label: "T", protein_g: 205, carbs_g: 211, fat_g: 81 },
+                { label: "F", protein_g: 212, carbs_g: 212, fat_g: 83 },
+                { label: "S", protein_g: 96, carbs_g: 118, fat_g: 42 },
+            ];
+            const AVG = {
+                protein_g: 189,
+                carbs_g: 190,
+                fat_g: 98,
+                calories: 2365,
+            };
+            const RANGES = [
+                { value: 7, label: "7d" },
+                { value: 14, label: "14d" },
+                { value: 30, label: "30d" },
+            ];
+
+            // A longer range for the 14- and 30-day rings: WEEK repeated,
+            // with a gap day and a null day (no row at all) mixed in.
+            const range = (n) =>
+                Array.from({ length: n }, (_, i) =>
+                    i === 9
+                        ? null
+                        : { ...WEEK[i % 7], label: "SMTWTFS"[i % 7] },
+                );
+
+            const card = (html) => `<section class="card">${html}</section>`;
+            const head = (t) => `<p class="gal-h">${esc(t)}</p>`;
+
+            function render() {
+                document.getElementById("root").innerHTML = `
+          <div class="gal">
+            ${head("Macro strip · under goal (nutrition summary)")}
+            ${card(v2Header("Today", "Sat 7 Nov · Recomp") + macroStripV2(DAY, GOAL))}
+
+            ${head("Goal list and tip (goal progress)")}
+            ${card(
+                v2Header("Goal progress", "Recomp · today") +
+                    goalListV2(DAY, GOAL) +
+                    '<hr class="rule" />' +
+                    v2Tip(
+                        "On pace. A dinner with 40 g of protein keeps you on track.",
+                    ),
+            )}
+
+            ${head("Meal block over the strip, interactive (meal logged)")}
+            ${card(
+                v2Header("Logged to lunch", "12:40") +
+                    mealBlockV2(LUNCH.description, LUNCH) +
+                    '<hr class="rule" />' +
+                    macroStripV2(DAY, GOAL, { meals: MEALS }),
+            )}
+
+            ${head("Range toggle, rings, legend, averages, streak (trends)")}
+            ${card(
+                v2Header("Trends", null, v2Seg(RANGES, 7, "Range")) +
+                    ringsV2(WEEK, GOAL, 6) +
+                    macroLegendV2() +
+                    averagesV2(AVG, GOAL) +
+                    v2Figures([
+                        { value: "4", unit: "day streak ·" },
+                        { value: "86%", unit: "days logged" },
+                    ]),
+            )}
+
+            ${head("Big figure (weight trends)")}
+            ${card(
+                v2Header(
+                    "Weight",
+                    null,
+                    v2Seg(
+                        [
+                            { value: 30, label: "30d" },
+                            { value: 90, label: "90d" },
+                            { value: 365, label: "1y" },
+                        ],
+                        30,
+                        "Range",
+                    ),
+                ) +
+                    v2Figures(
+                        [{ value: "182.4", unit: "lb", xl: true }],
+                        '<span class="is-ok">↓ 1.2 lb this month</span>',
+                    ) +
+                    '<p class="note">Goal 175 lb · about 9 weeks at this pace</p>',
+            )}
+
+            ${head("Strip · at goal")}
+            ${card(macroStripV2(AT, GOAL_LIMITS))}
+
+            ${head("Strip · over goal and over every limit (UK units)")}
+            ${card(macroStripV2(OVER, GOAL_LIMITS, { drinkUnit: "uk" }))}
+
+            ${head("Strip · no goal set")}
+            ${card(macroStripV2(DAY, null))}
+
+            ${head("Strip · nothing logged yet (alcohol and caffeine never recorded)")}
+            ${card(macroStripV2(ZERO, GOAL) + goalListV2(ZERO, null))}
+
+            ${head("Chips, labels, ticks, tags (grocery list)")}
+            ${card(
+                v2Header("Groceries", "8 to get") +
+                    v2Chips([
+                        { label: "Costco", count: 5, on: true },
+                        { label: "Trader Joe's", count: 3 },
+                    ]) +
+                    v2Group("Dairy & eggs", [
+                        {
+                            check: false,
+                            title: "Kirkland 2% milk",
+                            tag: "usual",
+                            end: "1 gal",
+                        },
+                        {
+                            check: false,
+                            title: "Vital Farms large eggs",
+                            tag: "usual",
+                            end: "24",
+                        },
+                    ]) +
+                    v2Group("Pantry", [
+                        { check: false, title: "Jasmine rice", end: "5 lb" },
+                        {
+                            check: true,
+                            done: true,
+                            title: "California Olive Ranch",
+                            tag: "usual",
+                            end: "1 bottle",
+                        },
+                    ]) +
+                    '<p class="note">Tick items off here or in the app.</p>',
+            )}
+
+            ${head("Tiles and dated rows (fridge)")}
+            ${card(
+                v2Header("Fridge", "24 items") +
+                    v2Label("Use soon") +
+                    v2Tiles([
+                        { when: "Tomorrow", tone: "over", name: "Salmon" },
+                        { when: "2 days", tone: "warn", name: "Spinach" },
+                        { when: "3 days", tone: "warn", name: "Cooked rice" },
+                    ]) +
+                    v2Group(
+                        "Fridge",
+                        [
+                            {
+                                title: "Eggs",
+                                sub: "9",
+                                end: "Nov 19",
+                                endKind: "date",
+                            },
+                            {
+                                title: "Chicken thighs",
+                                sub: "0.5 lb",
+                                end: "Nov 10",
+                                endKind: "date",
+                            },
+                            {
+                                title: "Milk 2%",
+                                sub: "½ gal",
+                                end: "Nov 12",
+                                endKind: "date",
+                            },
+                        ],
+                        9,
+                    ) +
+                    '<p class="note">+ 6 more in the fridge, 6 in the freezer, 6 in the pantry</p>',
+            )}
+
+            ${head("Status rows with actions (needs attention)")}
+            ${card(
+                v2Header("Needs attention", "5") +
+                    v2Group("Expiring", [
+                        {
+                            dot: { tone: "over" },
+                            title: "Salmon",
+                            sub: "tomorrow",
+                            subTone: "over",
+                            action: "Cook it",
+                        },
+                        {
+                            dot: { tone: "warn" },
+                            title: "Baby spinach",
+                            sub: "2 days",
+                            subTone: "warn",
+                            action: "Use in a recipe",
+                        },
+                    ]) +
+                    v2Group("Running low", [
+                        {
+                            dot: { tone: "warn" },
+                            title: "Eggs",
+                            sub: "9 left",
+                            action: "Add to list",
+                        },
+                    ]) +
+                    v2Group("Missing for planned meals", [
+                        {
+                            dot: { tone: "warn" },
+                            title: "Lemon",
+                            sub: "Sat · salmon",
+                            action: "Add",
+                        },
+                        {
+                            dot: { tone: "warn" },
+                            title: "Kidney beans",
+                            sub: "Sun · chili",
+                            action: "Add",
+                        },
+                    ]),
+            )}
+
+            ${head("Inset panel and buttons (use soon)")}
+            ${card(
+                v2Header("Use soon", "4 items") +
+                    v2Group(null, [
+                        {
+                            dot: { tone: "over" },
+                            title: "Salmon",
+                            sub: "1 lb",
+                            end: "Tomorrow",
+                            endTone: "over",
+                        },
+                        {
+                            dot: { tone: "warn" },
+                            title: "Baby spinach",
+                            sub: "½ bag",
+                            end: "2 days",
+                            endTone: "warn",
+                        },
+                        {
+                            dot: { tone: "dim" },
+                            title: "Greek yogurt",
+                            sub: "12 oz",
+                            end: "5 days",
+                        },
+                    ]) +
+                    `<div class="inset">${v2Label("Uses 3 of them")}<span class="inset-t">Salmon, rice &amp; spinach</span><span class="tip">25 min · 640 kcal · ${pcfV2({ protein_g: 48, carbs_g: 62, fat_g: 22 })}</span>${v2Buttons(
+                        [
+                            { label: "Cook it", primary: true },
+                            { label: "Add to plan" },
+                        ],
+                    )}</div>`,
+            )}
+
+            ${head("Empty list")}
+            ${card(v2Header("Groceries", "0 to get") + '<p class="note">Nothing to get. Add items here or in the app.</p>')}
+
+            ${head("Rings · 14 days (one row) and 30 days (two rows)")}
+            ${card(
+                v2Header("Trends", null, v2Seg(RANGES, 14, "Range")) +
+                    ringsV2(range(14), GOAL, 13) +
+                    macroLegendV2(),
+            )}
+            ${card(
+                v2Header("Trends", null, v2Seg(RANGES, 30, "Range")) +
+                    ringsV2(range(30), GOAL, 29) +
+                    macroLegendV2(),
+            )}
+          </div>`;
+            }
+
+            initWidget({
+                name: "component-gallery",
+                loading: '<div class="empty">Loading gallery…</div>',
+                coerce: () => ({ gallery: true }),
+                render,
+                sample: { gallery: true },
+            });
+
+            render();
+        </script>
+    </body>
+</html>

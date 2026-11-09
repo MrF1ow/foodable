@@ -65,7 +65,8 @@ function indexPage(): string {
   <h1>MCP Apps widget harness</h1>
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
-     <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>.</p>
+     <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
+     <code>?v2=1</code> (the v2 assembly).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -76,6 +77,8 @@ function hostPage(widget: string, params: URLSearchParams): string {
     const delay = Number(params.get("delay") ?? 0);
     const maxHeight = params.get("maxHeight");
     const failCalls = params.get("fail") === "1";
+    // ?v2=1 frames the widget's v2 assembly (getWidgetHtml(key, { v2: true })).
+    const v2 = params.get("v2") === "1";
     // The alcohol opt-in, as every tool that touches alcohol sends it:
     // "us"/"uk" when the user tracks alcohol, null when they do not. Default
     // null, because that is the default account state and the state the
@@ -394,7 +397,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
 <body>
   <strong>${widget}</strong>
   <span class="cfg">serverTools=${serverTools} answerTools=${answerTools} delay=${delay}ms${maxHeight ? " maxHeight=" + maxHeight : ""}${failCalls ? " fail=1" : ""} drinkUnit=${drinkUnit ?? "null (tracking off)"}</span>
-  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}"></iframe></div>
+  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}${v2 ? "?v2=1" : ""}"></iframe></div>
   <div style="margin-top:8px">
     <button onclick="hostRequest(1)">host req id=1</button>
     <button onclick="hostRequest(2)">host req id=2</button>
@@ -602,7 +605,8 @@ Bun.serve({
             }
             // Same CSP the MCP Apps sandbox applies, so a widget that reaches
             // for the network here fails here too.
-            return new Response(await getWidgetHtml(key), {
+            const v2 = url.searchParams.get("v2") === "1";
+            return new Response(await getWidgetHtml(key, { v2 }), {
                 headers: {
                     "content-type": "text/html; charset=utf-8",
                     "content-security-policy":
