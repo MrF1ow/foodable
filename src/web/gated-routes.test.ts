@@ -80,7 +80,14 @@ describe("gated route harness on composed app", () => {
             flag: "ui-v2",
             notFound: true,
         });
+        expect(routes.find((r) => r.path === "/api/log/search")).toEqual({
+            method: "GET",
+            path: "/api/log/search",
+            flag: "ui-v2",
+            notFound: true,
+        });
         expect(routes.map((r) => r.path).sort()).toEqual([
+            "/api/log/search",
             "/dev/gallery-v2",
             "/settings/household/invites",
             "/settings/household/invites",

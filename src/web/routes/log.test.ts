@@ -1,0 +1,493 @@
+import {
+    afterAll,
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    mock,
+    test,
+} from "bun:test";
+import type { HouseholdMember } from "../../household.js";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "../../flags.js";
+import * as actualHousehold from "../../db/household.js";
+import * as actualProfiles from "../../db/profiles.js";
+import * as actualFoodsDb from "../../db/foods.js";
+import * as actualFridgeDb from "../../db/fridge.js";
+import * as actualRecipesDb from "../../db/recipes.js";
+import * as actualNutritionDb from "../../db/nutrition.js";
+import * as actualFoodSearch from "../../food-search.js";
+import type { FoodResult } from "../../foods.js";
+import {
+    catalogNutritionFromOff,
+    createMemoryFoodsStore,
+    matchFoodsByWords,
+    newFood,
+    updateFood,
+} from "../../domain/foods.js";
+import { createMemoryFridgeStore } from "../../domain/fridge.js";
+import {
+    createMemoryRecipesStore,
+    createRecipe,
+} from "../../domain/recipes.js";
+import {
+    checkRateLimit,
+    checkWebSearchRateLimit,
+    _resetBuckets,
+} from "../../rate-limit.js";
+
+const realHousehold = { ...actualHousehold };
+const realProfiles = { ...actualProfiles };
+const realFoodsDb = { ...actualFoodsDb };
+const realFridgeDb = { ...actualFridgeDb };
+const realRecipesDb = { ...actualRecipesDb };
+const realNutritionDb = { ...actualNutritionDb };
+const realFoodSearch = { ...actualFoodSearch };
+
+const ALICE = "11111111-1111-4111-8111-111111111111";
+const HH = "hh-1";
+const BARCODE = "1111111111111";
+
+const member: HouseholdMember = {
+    userId: ALICE,
+    householdId: HH,
+    role: "owner",
+    displayName: "Alice",
+};
+
+const db = {
+    foodsStore: createMemoryFoodsStore(),
+    fridgeStore: createMemoryFridgeStore(),
+    recipesStore: createMemoryRecipesStore(),
+};
+
+let offThrows = false;
+let offServing = "30 g";
+let offCalls = 0;
+const rangeCalls: Array<{
+    userId: string;
+    start: string;
+    end: string;
+    tz: string;
+}> = [];
+let listFoodsCalls = 0;
+let listRecipesCalls = 0;
+let listFridgeItemsCalls = 0;
+
+function offHit(query: string): FoodResult {
+    return {
+        name: `OFF ${query}`,
+        brand: "OE",
+        serving: offServing,
+        serving_quantity: offServing === "30 g" ? 30 : 100,
+        serving_quantity_unit: "g",
+        calories: 150,
+        protein_g: 3,
+        carbs_g: 20,
+        fat_g: 6,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        nutriscore_grade: null,
+        nova_group: null,
+        source: `off:${BARCODE}`,
+        source_name: "openfoodfacts" as const,
+        barcode: BARCODE,
+    };
+}
+
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/household.js", () => ({
+    ...realHousehold,
+    getHouseholdMembership: async (userId: string) =>
+        userId === ALICE ? member : null,
+    householdExists: async () => true,
+}));
+
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/profiles.js", () => ({
+    ...realProfiles,
+    getProfile: async (userId: string) =>
+        userId === ALICE
+            ? {
+                  user_id: ALICE,
+                  theme: "light",
+                  timezone: "America/Los_Angeles",
+                  preferred_weight_unit: null,
+                  widgets_enabled: true,
+                  alcohol_tracking_enabled: false,
+                  preferred_drink_unit: null,
+                  nutrition_layout: null,
+                  created_at: "2026-01-01T00:00:00.000Z",
+                  updated_at: "2026-01-01T00:00:00.000Z",
+              }
+            : null,
+}));
+
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/foods.js", () => ({
+    ...realFoodsDb,
+    liveFoodsStore: () => db.foodsStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/fridge.js", () => ({
+    ...realFridgeDb,
+    liveFridgeStore: () => db.fridgeStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/recipes.js", () => ({
+    ...realRecipesDb,
+    liveRecipesStore: () => db.recipesStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/nutrition.js", () => ({
+    ...realNutritionDb,
+    searchMeals: async () => [],
+    getMealsInRange: async (
+        userId: string,
+        start: string,
+        end: string,
+        tz: string,
+    ) => {
+        rangeCalls.push({ userId, start, end, tz });
+        return [
+            {
+                id: "meal-recipe",
+                user_id: ALICE,
+                logged_at: "2026-11-01T19:00:00.000Z",
+                meal_type: "dinner",
+                description: "Chili night",
+                calories: 400,
+                protein_g: 20,
+                carbs_g: 30,
+                fat_g: 10,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                caffeine_mg: null,
+                notes: null,
+                idempotency_key: null,
+                items: [
+                    {
+                        id: "item-1",
+                        meal_id: "meal-recipe",
+                        user_id: ALICE,
+                        household_id: HH,
+                        food_id: null,
+                        recipe_id: "recipe-chili",
+                        label: "Chili",
+                        amount: 1,
+                        unit: "portion",
+                        grams: null,
+                        portions: 1,
+                        calories: 400,
+                        protein_g: 20,
+                        carbs_g: 30,
+                        fat_g: 10,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sort_order: 0,
+                        created_at: "2026-11-01T19:00:00.000Z",
+                    },
+                ],
+            },
+        ];
+    },
+}));
+mock.module("../../food-search.js", () => ({
+    ...realFoodSearch,
+    searchFoodsByName: async (query: string) => {
+        offCalls += 1;
+        if (offThrows) throw new Error("off down");
+        return [offHit(query)];
+    },
+}));
+
+afterAll(() => {
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/household.js", () => realHousehold);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/profiles.js", () => realProfiles);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/foods.js", () => realFoodsDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/fridge.js", () => realFridgeDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/recipes.js", () => realRecipesDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/nutrition.js", () => realNutritionDb);
+    mock.module("../../food-search.js", () => realFoodSearch);
+});
+
+process.env.OAUTH_CLIENT_ID ||= "test-client-id";
+process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
+process.env.OFF_USER_AGENT ||= "Foodable (test@example.com)";
+
+const { app } = await import("../../index.js");
+const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
+
+function sessionCookie(userId: string): string {
+    return `${SITE_COOKIE}=${mintSiteSession(userId)}`;
+}
+
+const searchUrl = "http://x/api/log/search";
+
+type Body = {
+    groups: Array<{
+        kind: string;
+        items: Array<Record<string, unknown>>;
+    }>;
+};
+
+async function search(q: string, extra = ""): Promise<Body> {
+    const res = await app.request(
+        `${searchUrl}?q=${encodeURIComponent(q)}${extra}`,
+        { headers: { cookie: sessionCookie(ALICE) } },
+    );
+    expect(res.status).toBe(200);
+    return (await res.json()) as Body;
+}
+
+function names(body: Body): string[] {
+    return body.groups.flatMap((g) => g.items.map((i) => String(i.name)));
+}
+
+afterEach(async () => {
+    resetFlagsForTests();
+    await _resetBuckets();
+});
+
+beforeEach(async () => {
+    offThrows = false;
+    offServing = "30 g";
+    offCalls = 0;
+    rangeCalls.length = 0;
+    listFoodsCalls = 0;
+    listRecipesCalls = 0;
+    listFridgeItemsCalls = 0;
+    db.foodsStore = createMemoryFoodsStore();
+    db.fridgeStore = createMemoryFridgeStore();
+    db.recipesStore = createMemoryRecipesStore();
+    const foodsList = db.foodsStore.listFoods.bind(db.foodsStore);
+    db.foodsStore.listFoods = async (householdId: string) => {
+        listFoodsCalls += 1;
+        return foodsList(householdId);
+    };
+    const recipesList = db.recipesStore.listRecipes.bind(db.recipesStore);
+    db.recipesStore.listRecipes = async (householdId: string) => {
+        listRecipesCalls += 1;
+        return recipesList(householdId);
+    };
+    const fridgeItems = db.fridgeStore.listItems.bind(db.fridgeStore);
+    db.fridgeStore.listItems = async (householdId: string) => {
+        listFridgeItemsCalls += 1;
+        return fridgeItems(householdId);
+    };
+    await db.foodsStore.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Egg", calories: 155 }),
+    );
+    await db.foodsStore.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggplant",
+            calories: 25,
+        }),
+    );
+    const rice = await db.foodsStore.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Fried rice",
+            calories: 160,
+        }),
+    );
+    await db.foodsStore.setAlias(HH, "aubergine", rice.id);
+    const plant = (await db.foodsStore.listFoods(HH)).find(
+        (row) => row.name === "Eggplant",
+    )!;
+    await db.foodsStore.setAlias(HH, "aubergine", plant.id);
+    await createRecipe(db.recipesStore, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Omelette",
+        yieldPortions: 2,
+    });
+    listFoodsCalls = 0;
+    listRecipesCalls = 0;
+    listFridgeItemsCalls = 0;
+    setFlagsForTests(createMemoryFlags({ "ui-v2": true, "off-lookups": true }));
+});
+
+describe("GET /api/log/search", () => {
+    test("returns 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const res = await app.request(`${searchUrl}?q=egg`, {
+            headers: { cookie: sessionCookie(ALICE) },
+        });
+        expect(res.status).toBe(404);
+    });
+
+    test("signed out serves the login page like other member JSON routes", async () => {
+        const res = await app.request(`${searchUrl}?q=egg`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toContain("text/html");
+    });
+
+    test("q=egg returns the household food first", async () => {
+        const body = await search("egg");
+        const food = body.groups.find((g) => g.kind === "food");
+        expect(food?.items.map((i) => i.name)).toEqual(["Egg", "Eggplant"]);
+    });
+
+    test("plural, alias, and word-order household hits are kept", async () => {
+        const listed = await db.foodsStore.listFoods(HH);
+        const aliases = await db.foodsStore.listAllAliases(HH);
+        expect(
+            matchFoodsByWords("eggs", listed, aliases).map((f) => f.name),
+        ).toEqual(["Egg", "Eggplant"]);
+        const eggs = await search("eggs");
+        const alias = await search("aubergine");
+        const swapped = await search("rice fried");
+        expect(names(eggs)).toContain("Egg");
+        expect(names(alias)).toContain("Eggplant");
+        expect(names(swapped)).toContain("Fried rice");
+    });
+
+    test("OFF per-serving calories are not labeled kcal_per_100g", async () => {
+        const hit = offHit("cookie");
+        expect(catalogNutritionFromOff(hit).calories).toBeNull();
+        const body = await search("cookie");
+        const off = body.groups.find((g) => g.kind === "off");
+        expect(off?.items[0]?.kcal_per_100g).toBeUndefined();
+        expect(off?.items[0]?.barcode).toBe(BARCODE);
+        expect(listFoodsCalls).toBe(1);
+        expect(listRecipesCalls).toBe(1);
+        expect(listFridgeItemsCalls).toBe(1);
+    });
+
+    test("already-saved barcode is omitted from OFF results", async () => {
+        offServing = "100 g";
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        await db.foodsStore.setBarcode(HH, BARCODE, egg.id);
+        const body = await search("egg");
+        expect(body.groups.some((g) => g.kind === "off")).toBe(false);
+    });
+
+    test("an OFF hit is kept when no household name contains the query", async () => {
+        const body = await search("coke");
+        const off = body.groups.find((g) => g.kind === "off");
+        expect(off?.items.map((i) => i.name)).toEqual(["OFF coke"]);
+    });
+
+    test("a saved barcode on a food the query did not match lists that food instead", async () => {
+        const oreos = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Oreos" }),
+        );
+        await db.foodsStore.setBarcode(HH, BARCODE, oreos.id);
+        const body = await search("cookie");
+        expect(body.groups.some((g) => g.kind === "off")).toBe(false);
+        const food = body.groups.find((g) => g.kind === "food");
+        expect(food?.items.map((i) => i.food_id)).toContain(oreos.id);
+    });
+
+    test("a barcode on an archived food does not hide the OFF product", async () => {
+        const oreos = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Oreos" }),
+        );
+        await db.foodsStore.setBarcode(HH, BARCODE, oreos.id);
+        await updateFood(db.foodsStore, HH, oreos.id, { archived: true });
+        const body = await search("cookie");
+        const off = body.groups.find((g) => g.kind === "off");
+        expect(off?.items.map((i) => i.barcode)).toEqual([BARCODE]);
+        expect(names(body)).not.toContain("Oreos");
+    });
+
+    test("OFF failure still returns household foods", async () => {
+        offThrows = true;
+        const body = await search("egg");
+        expect(names(body)).toEqual(["Egg", "Eggplant"]);
+        expect(body.groups.some((g) => g.kind === "off")).toBe(false);
+    });
+
+    test("with off-lookups off there is no off group", async () => {
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "off-lookups": false }),
+        );
+        const body = await search("egg");
+        expect(body.groups.some((g) => g.kind === "off")).toBe(false);
+        expect(offCalls).toBe(0);
+    });
+
+    test("empty q returns history without OFF and recipe meals carry re-log fields", async () => {
+        const empty = await search("");
+        expect(offCalls).toBe(0);
+        expect(empty.groups.map((g) => g.kind)).toEqual(["history"]);
+        expect(rangeCalls[0]).toMatchObject({
+            userId: ALICE,
+            tz: "America/Los_Angeles",
+        });
+        const item = empty.groups[0]!.items[0]!;
+        expect(item.id).toBe("meal-recipe");
+        expect(item.recipe_id).toBe("recipe-chili");
+        expect(item.kcal).toBe(400);
+        expect(item.amount).toBe(1);
+        expect(item.unit).toBe("portion");
+        expect(item.unit_hints).toEqual(["portion"]);
+    });
+
+    test("recipe results use portion-only unit hints", async () => {
+        const body = await search("omelette");
+        const recipe = body.groups.find((g) => g.kind === "recipe");
+        expect(recipe?.items[0]).toMatchObject({
+            name: "Omelette",
+            unit_hints: ["portion"],
+            source: "recipe",
+        });
+        expect(recipe?.items[0]?.kcal_per_100g).toBeUndefined();
+    });
+
+    test("five household hits skip OFF unless online=1", async () => {
+        for (const name of [
+            "Bean one",
+            "Bean two",
+            "Bean three",
+            "Bean four",
+            "Bean five",
+        ]) {
+            await db.foodsStore.insertFood(
+                newFood({ householdId: HH, kind: "food", name, calories: 40 }),
+            );
+        }
+        const plain = await search("bean");
+        expect(plain.groups.some((g) => g.kind === "off")).toBe(false);
+        expect(offCalls).toBe(0);
+        const online = await search("bean", "&online=1");
+        expect(online.groups.some((g) => g.kind === "off")).toBe(true);
+        expect(offCalls).toBe(1);
+    });
+
+    test("web search rate limit is independent of the MCP bucket", async () => {
+        for (let i = 0; i < 70; i++) await checkRateLimit(ALICE);
+        expect((await checkRateLimit(ALICE)).allowed).toBe(false);
+        const res = await app.request(`${searchUrl}?q=egg`, {
+            headers: { cookie: sessionCookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        for (let i = 0; i < 120; i++) await checkWebSearchRateLimit(ALICE);
+        const blocked = await app.request(`${searchUrl}?q=egg`, {
+            headers: { cookie: sessionCookie(ALICE) },
+        });
+        expect(blocked.status).toBe(429);
+        expect((await checkRateLimit(ALICE)).allowed).toBe(false);
+        expect((await checkWebSearchRateLimit(ALICE)).allowed).toBe(false);
+        expect((await checkWebSearchRateLimit(ALICE)).limit).toBe(120);
+    });
+});

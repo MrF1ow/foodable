@@ -148,6 +148,8 @@ const HIGH_PREFIXES = [
 ];
 
 const MEDIUM_EXACT: Readonly<Record<string, string>> = {
+    "src/domain/log-search.ts": "nutrition",
+    "src/domain/log-search.test.ts": "nutrition",
     "src/domain/meals.ts": "nutrition",
     "src/domain/insights.ts": "nutrition",
     "src/domain/layout.ts": "nutrition",
@@ -278,6 +280,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/needs-attention.ts": "web",
     "src/web/routes/needs-attention.ts": "web",
     "src/web/routes/dev-gallery.ts": "web",
+    "src/web/routes/log.ts": "nutrition",
+    "src/web/routes/log.test.ts": "nutrition",
     "src/web/pages/dev-gallery.ts": "web",
     "src/exports-route.ts": "platform",
     "src/food-search.ts": "platform",

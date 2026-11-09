@@ -16,6 +16,7 @@ import {
     BanStoreUnavailableError,
     checkAuthRateLimit,
     checkRateLimit,
+    checkWebSearchRateLimit,
     clearAuthFailures,
     createMemoryRateLimitStore,
     createPostgresRateLimitStore,
@@ -309,6 +310,21 @@ function registerSharedRateLimitTests(bindClock: () => Clock) {
         }
         clock.at(T0 + 60_000);
         expect((await checkRateLimit(user)).remaining).toBe(59);
+    });
+
+    test("checkWebSearchRateLimit is independent of checkRateLimit", async () => {
+        const user = "user-web";
+        for (let i = 0; i < 60; i++) {
+            expect((await checkRateLimit(user)).allowed).toBe(true);
+        }
+        expect((await checkRateLimit(user)).allowed).toBe(false);
+        for (let i = 0; i < 120; i++) {
+            const result = await checkWebSearchRateLimit(user);
+            expect(result.allowed).toBe(true);
+            if (i === 0) expect(result.limit).toBe(120);
+        }
+        expect((await checkWebSearchRateLimit(user)).allowed).toBe(false);
+        expect((await checkRateLimit(user)).allowed).toBe(false);
     });
 
     test("_resetBuckets clears rate-limit windows and ban state together", async () => {

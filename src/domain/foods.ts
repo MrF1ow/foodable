@@ -1755,8 +1755,11 @@ export function foodNameTokens(text: string): string[] {
         .map(singularizeNameToken);
 }
 
+/** The fields word matching reads; recipes and stock rows can be matched too. */
+export type WordMatchable = Pick<Food, "id" | "name" | "brand" | "archivedAt">;
+
 function foodSearchTokenSet(
-    food: Food,
+    food: WordMatchable,
     aliases: readonly string[],
 ): { set: Set<string>; list: string[] } {
     const parts = [food.name, food.brand ?? "", ...aliases];
@@ -1780,17 +1783,17 @@ function queryTokensMatchFood(
     return foodTokens.list.some((token) => token.startsWith(last));
 }
 
-export function matchFoodsByWords(
+export function matchFoodsByWords<T extends WordMatchable = Food>(
     query: string,
-    foods: readonly Food[],
+    foods: readonly T[],
     aliasesByFoodId: ReadonlyMap<string, string[]>,
-): Food[] {
+): T[] {
     const queryTokens = foodNameTokens(query);
     if (queryTokens.length === 0) return [];
     const queryNorm = normalizeFoodName(query);
     const queryLoose = looseFoodKey(query);
     const queryTokenSet = new Set(queryTokens);
-    const hits: Food[] = [];
+    const hits: T[] = [];
     // A food every query word names outright ranks ahead of one reached only
     // by the last word's prefix, so "eggs" puts Duck eggs before Eggplant.
     const needsPrefix = new Map<string, number>();
@@ -1805,10 +1808,10 @@ export function matchFoodsByWords(
             queryTokens.every((token) => tokens.set.has(token)) ? 0 : 1,
         );
     }
-    const nameTokens = (food: Food) => foodNameTokens(food.name);
-    const extraNameTokens = (food: Food) =>
+    const nameTokens = (food: T) => foodNameTokens(food.name);
+    const extraNameTokens = (food: T) =>
         nameTokens(food).filter((token) => !queryTokenSet.has(token)).length;
-    const exactRank = (food: Food) => {
+    const exactRank = (food: T) => {
         if (normalizeFoodName(food.name) === queryNorm) return 0;
         if (looseFoodKey(food.name) === queryLoose) return 0;
         return 1;
