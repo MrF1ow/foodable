@@ -17,11 +17,7 @@ Run, in order:
 
 ## Title and body
 
-Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title `<type>(<scope>)[!]: <subject>` and the required sections: **Summary**, **Blast radius** (with **Level** and **Rollback**), **Changes**, **Migrations**, **Contracts**, **Testing**, **Planner**, and **Links**.
-
-## Planner
-
-Every PR says `Closes <ID>`, `Part of <ID>`, or `None.` under `## Planner`. When it names an item, follow the foodable-planner skill ([.claude/skills/foodable-planner/SKILL.md](.claude/skills/foodable-planner/SKILL.md)): after the PR is open, run `bun run planner --close <ID> --pr <number>` (or `--start` for `Part of`) and push the result. No check compares the item files with the body since #228.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title `<type>(<scope>)[!]: <subject>` and the required sections: **Summary**, **Blast radius** (with **Level** and **Rollback**), **Changes**, **Migrations**, **Contracts**, **Testing**, and **Links**.
 
 ## Merging
 

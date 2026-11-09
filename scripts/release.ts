@@ -155,10 +155,6 @@ ${contractText}
 
 Version bump only. CI runs the full suite on this PR.
 
-## Planner
-
-None.
-
 ## Links
 
 None.

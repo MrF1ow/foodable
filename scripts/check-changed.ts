@@ -138,10 +138,6 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^scripts\/conventions\/conventions\.test\.ts$/,
         },
         {
-            when: /^(ROADMAP\.md|planner\/)/,
-            tests: /^scripts\/conventions\/planner\.test\.ts$/,
-        },
-        {
             when: /^(CLAUDE\.md|AGENTS\.md|\.claude\/skills\/|\.agents\/skills)/,
             tests: /^scripts\/conventions\/skills\.test\.ts$/,
         },

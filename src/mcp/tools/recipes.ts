@@ -253,9 +253,9 @@ const MACROS_ITEM = z.object({
     sugar_g: z.number().nullable(),
     alcohol_g: z.number().nullable(),
     incomplete: z.boolean(),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
+    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it.
     incompleteReasons: z.array(z.string()),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
+    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it.
     gaps: z.array(
         z.object({
             ingredient_id: z.string(),

@@ -36,7 +36,6 @@ const FILES = [
     "scripts/check-changed.test.ts",
     "scripts/nav-check.ts",
     "scripts/conventions/conventions.test.ts",
-    "scripts/conventions/planner.test.ts",
     "scripts/conventions/skills.test.ts",
     "src/fetch-safe.test.ts",
     "src/flags.test.ts",
@@ -489,16 +488,6 @@ describe("changedChecks: docs that tests read", () => {
             "test",
             "scripts/conventions/conventions.test.ts",
         ]);
-    });
-
-    test("ROADMAP.md and planner/ run the planner test", () => {
-        for (const path of ["ROADMAP.md", "planner/calendar/CAL-1-x.md"]) {
-            expect(byId(run([path]), "test").cmd).toEqual([
-                "bun",
-                "test",
-                "scripts/conventions/planner.test.ts",
-            ]);
-        }
     });
 
     test("CLAUDE.md, AGENTS.md and skills run the skills test", () => {

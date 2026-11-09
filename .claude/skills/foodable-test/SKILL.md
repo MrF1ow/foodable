@@ -74,7 +74,7 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`. Only when the user asks; see below.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` uses a production copy over `railway ssh`: only when the user asks.
-- **Types / formatting:** `bun run typecheck`, `bun run format:check` (`bun run format` fixes your files).
+- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes).
 
 `e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. Its DB defaults to `E2E_DB_URL`, else `DATABASE_URL`, and the inner `bun` loads `.env`, so without `E2E_DB_URL` it can restore over whatever database `.env` names, possibly production. **Always set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`; never run it without both** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members, and a fresh `db:dev` database has none: sign up the owner, create the household, add a second member in Household › Members (`docs/self-hosting.md`, "First-user flow"), then sign Grok in. That setup is manual, so run `e2e:agent` only when the user asks. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 

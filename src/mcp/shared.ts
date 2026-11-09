@@ -579,7 +579,7 @@ export const TRENDS_DAY_ITEM = TOTALS_ITEM.extend({
 // widget hides the stat line entirely rather than picking a default.
 export const DRINK_UNIT_FIELD = z.enum(["us", "uk"]).nullable();
 
-// "Did you mean…?" (docs/food-duplicates-plan.md › 3): the six tools that
+// "Did you mean…?": the six tools that
 // create a food by name answer status "similar_foods" instead of writing.
 export const SIMILAR_FOOD_CANDIDATE = z.object({
     food_id: z.string(),
