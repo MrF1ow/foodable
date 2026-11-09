@@ -307,16 +307,21 @@ describeDb(pgAvailable !== null, "sql", (ctx) => {
         await sql`create table public._sql_late (id int primary key)`;
         try {
             let late: Promise<void> | undefined;
+            let committed!: () => void;
+            const outerCommitted = new Promise<void>((resolve) => {
+                committed = resolve;
+            });
             await run(async () => {
                 // Fire-and-forget: inherits the async context but only runs
                 // its query after the outer transaction has committed.
                 late = (async () => {
-                    await Bun.sleep(50);
+                    await outerCommitted;
                     await run(async (tx) => {
                         await tx`insert into public._sql_late values (1)`;
                     });
                 })();
             });
+            committed();
             await late;
             const [row] =
                 await sql`select count(*)::int as n from public._sql_late`;

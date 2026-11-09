@@ -277,6 +277,7 @@ const LOW_REPO_PREFIXES = [
     ".flow/",
     "scripts/",
     ".cursor/",
+    ".oxlintrc.json",
     "public/fonts/",
     "design/",
 ];

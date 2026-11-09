@@ -22,6 +22,7 @@
     "devDependencies": {
         "@modelcontextprotocol/client": "^2.4.0",
         "@types/bun": "latest",
+        "oxlint": "1.90.0",
         "prettier": "^3.9.10"
     },
     "peerDependencies": {
@@ -40,6 +41,7 @@
         "test": "bun test",
         "format": "bunx prettier --write .",
         "format:check": "bunx prettier --check .",
+        "lint": "bun scripts/lint-rules/lint.ts",
         "typecheck": "bun run scripts/typecheck.ts",
         "check:changed": "bun run scripts/check-changed.ts",
         "db:dryrun": "bun run scripts/migration-dryrun.ts",

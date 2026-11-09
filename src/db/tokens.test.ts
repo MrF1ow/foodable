@@ -85,6 +85,7 @@ async function waitForLockWaiters(sql: SQL, count: number): Promise<void> {
               and wait_event_type = 'Lock'
         `;
         if (row.n >= count) return;
+        // oxlint-disable-next-line foodable/no-wall-clock-waits -- polls pg_stat_activity for sessions blocked on the row lock; Postgres emits no event to await
         await Bun.sleep(10);
     }
     throw new Error(`expected ${count} sessions waiting on the row lock`);
@@ -204,6 +205,7 @@ describeDb(pgAvailable !== null, "tokens db", (getCtx) => {
 
     test("registerClient inserts without throwing", async () => {
         registerClient("test-client", ["http://localhost/a"]);
+        // oxlint-disable-next-line foodable/no-wall-clock-waits -- registerClient is fire-and-forget and returns no promise to await
         await new Promise((r) => setTimeout(r, 30));
         const { sql } = getCtx();
         setSqlForTests(sql);

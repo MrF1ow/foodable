@@ -98,7 +98,7 @@ describe("changedChecks", () => {
 
     test("one domain source file: format it, typecheck, run its sibling test", () => {
         const checks = run(["src/domain/fridge.ts"]);
-        expect(ids(checks)).toEqual(["format", "typecheck", "test"]);
+        expect(ids(checks)).toEqual(["format", "lint", "typecheck", "test"]);
         expect(byId(checks, "format").cmd).toEqual([
             "bunx",
             "prettier",
@@ -213,7 +213,7 @@ describe("changedChecks", () => {
 
     test("scripts with no test do not trigger the full suite", () => {
         const checks = run(["scripts/nav-check.ts"]);
-        expect(ids(checks)).toEqual(["format", "typecheck", "test"]);
+        expect(ids(checks)).toEqual(["format", "lint", "typecheck", "test"]);
         expect(byId(checks, "test").cmd).toEqual([
             "bun",
             "test",
@@ -307,6 +307,7 @@ describe("changedChecks", () => {
         const checks = changedChecks([], { all: true, base: "abc" });
         expect(checks.map((c) => c.cmd.join(" "))).toEqual([
             "bun run format:check",
+            "bun run lint",
             "bun run typecheck",
             "bun test",
             "bun run scripts/migration-safety.ts --base abc",
@@ -316,10 +317,53 @@ describe("changedChecks", () => {
 
     test("without a file list the changed files are taken to exist", () => {
         const checks = changedChecks(["src/foo.ts"]);
-        expect(ids(checks)).toEqual(["format", "typecheck", "test"]);
+        expect(ids(checks)).toEqual(["format", "lint", "typecheck", "test"]);
         // nothing maps src/foo.ts to a test, so everything runs
         expect(byId(checks, "test").cmd).toEqual(["bun", "test"]);
     });
+});
+
+describe("changedChecks: lint", () => {
+    test("lints the changed code files, one by one", () => {
+        const checks = run(["src/domain/fridge.ts", "docs/self-hosting.md"]);
+        expect(byId(checks, "lint").cmd).toEqual([
+            "bun",
+            "run",
+            "lint",
+            "--no-error-on-unmatched-pattern",
+            "src/domain/fridge.ts",
+        ]);
+    });
+
+    test("docs, json and html alone are not linted", () => {
+        expect(ids(run(["docs/self-hosting.md"]))).not.toContain("lint");
+        expect(
+            ids(run(["public/widgets/src/templates/fridge.html"])),
+        ).not.toContain("lint");
+    });
+
+    test("a deleted file is not linted", () => {
+        expect(ids(run(["src/gone.ts"]))).not.toContain("lint");
+    });
+
+    test.each([
+        ".oxlintrc.json",
+        "scripts/lint-rules/plugin.js",
+        // the pinned oxlint version lives here
+        "package.json",
+        "bun.lock",
+    ])(
+        "%s re-lints the whole tree: a rule can fail files nobody touched",
+        (path) => {
+            const files = [
+                ...FILES,
+                ".oxlintrc.json",
+                "scripts/lint-rules/plugin.js",
+            ];
+            const checks = changedChecks([path], { files });
+            expect(byId(checks, "lint").cmd).toEqual(["bun", "run", "lint"]);
+        },
+    );
 });
 
 describe("changedChecks: import graph", () => {
@@ -659,6 +703,19 @@ describe("changedChecks: edges the import graph cannot see", () => {
         const checks = changedChecks(["Dockerfile"], { files: FILES });
         expect(byId(checks, "test").cmd).toContain(
             "scripts/conventions/skills.test.ts",
+        );
+    });
+});
+
+describe("changedChecks: lint rules", () => {
+    test("a deleted rule file re-lints the tree and runs the rule test", () => {
+        const files = [...FILES, "scripts/lint-rules/rules.test.ts"];
+        const checks = changedChecks(["scripts/lint-rules/rules/gone.js"], {
+            files,
+        });
+        expect(byId(checks, "lint").label).toBe("lint: whole tree");
+        expect(byId(checks, "test").cmd).toContain(
+            "scripts/lint-rules/rules.test.ts",
         );
     });
 });

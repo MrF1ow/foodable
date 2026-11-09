@@ -87,7 +87,9 @@ export const DEFAULT_BASE = "origin/main";
 //   migrations  db/migrations/ → migration-safety (vs the base) and
 //               db:dryrun, plus the full suite (describeDb tests migrate
 //               from db/). Other db/ files and the dry-run script → db:dryrun.
-//   lint        see lintCheck(); no linter yet.
+//   lint        see lintCheck(): oxlint on the changed .ts/.tsx/.js/.mjs files,
+//               or the whole tree when .oxlintrc.json, scripts/lint-rules/,
+//               package.json or bun.lock (the oxlint pin) change.
 
 /** A change under any of these can break any test: run the whole suite. */
 const FULL_SUITE: RegExp[] = [
@@ -210,6 +212,12 @@ const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] = [
         tests: /^src\/(mcp|mcp\.format)\.test\.ts$|^src\/mcp\/[^/]+\.test\.ts$/,
     },
     // food-merge-job.test.ts spawns the script instead of importing it.
+    // The rule test runs oxlint over the fixtures (nothing imports them) and
+    // must also run when a rule file is deleted.
+    {
+        when: /^(scripts\/lint-rules\/|\.oxlintrc\.json$)/,
+        tests: /^scripts\/lint-rules\/rules\.test\.ts$/,
+    },
     {
         when: /^scripts\/merge-duplicate-foods\.ts$/,
         tests: /^src\/domain\/food-merge-job\.test\.ts$/,
@@ -239,12 +247,50 @@ const affectsTypecheck = (p: string) =>
 const isAppSource = (p: string) => /^(src|public)\//.test(p) && !isTest(p);
 
 /**
- * The single place a linter joins the checks. Return a Check to run it on
- * `files` (the changed files that still exist), or on the whole tree when
- * `all` is set; null while the repo has no linter.
+ * The single place the linter (oxlint, `bun run lint`) joins the checks. Runs
+ * on `files` (the changed files that still exist), or on the whole tree when
+ * `all` is set or the linter's own inputs changed (.oxlintrc.json, the rules
+ * in scripts/lint-rules/): a new rule can fail files nobody touched. Null when
+ * no lintable file changed. `--no-error-on-unmatched-pattern` keeps a change
+ * to nothing but ignored files (the rule fixtures, generated code) from
+ * failing with "No files found to lint".
  */
-function lintCheck(_files: readonly string[], _all: boolean): Check | null {
-    return null;
+function lintCheck(
+    files: readonly string[],
+    all: boolean,
+    changed: readonly string[] = files,
+): Check | null {
+    const wholeTree: Check = {
+        id: "lint",
+        label: "lint: whole tree",
+        cmd: ["bun", "run", "lint"],
+    };
+    if (all) return wholeTree;
+    if (
+        // `changed`, not `files`: deleting a rule or the config re-judges the
+        // whole tree too, and so does a bump of the pinned oxlint (package.json
+        // and bun.lock hold the version).
+        changed.some((p) =>
+            /^(\.oxlintrc\.json|package\.json|bun\.lock|scripts\/lint-rules\/)/.test(
+                p,
+            ),
+        )
+    ) {
+        return wholeTree;
+    }
+    const lintable = files.filter((p) => /\.(ts|tsx|js|mjs)$/.test(p));
+    if (lintable.length === 0) return null;
+    return {
+        id: "lint",
+        label: `lint: ${lintable.length} file${lintable.length === 1 ? "" : "s"}`,
+        cmd: [
+            "bun",
+            "run",
+            "lint",
+            "--no-error-on-unmatched-pattern",
+            ...lintable,
+        ],
+    };
 }
 
 const FORMAT_ALL: Check = {
@@ -294,7 +340,7 @@ export function changedChecks(
     }
 
     // lint
-    const lint = lintCheck(live, false);
+    const lint = lintCheck(live, false, changed);
     if (lint) checks.push(lint);
 
     // typecheck

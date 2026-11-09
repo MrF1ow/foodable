@@ -629,7 +629,7 @@ describe("Railway reader fake SDK", () => {
         expect(getFlags().evaluate("ui-v2", ctx).reason).toBe("NOT_READY");
         resolveInit?.();
         await initPromise;
-        await new Promise((r) => setTimeout(r, 10));
+        await new Promise((r) => setTimeout(r, 0));
         expect(getFlags().evaluate("ui-v2", ctx).reason).toBe(
             "TARGETING_MATCH",
         );
