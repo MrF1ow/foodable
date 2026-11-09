@@ -248,6 +248,7 @@ export function slotCheckResult(
 export function createMemoryRateLimitStore(options?: {
     now?: () => number;
 }): RateLimitStore {
+    // Per instance by design: in-process store for tests; production uses createPostgresRateLimitStore at boot.
     const buckets = new Map<string, number[]>();
     const bans = new Map<string, AuthFailureEntry>();
     const clock = options?.now ?? (() => Date.now());
@@ -329,6 +330,7 @@ export function createPostgresRateLimitStore(options?: {
     };
 }
 
+// Per instance by design: pointer to the store implementation; production sets Postgres at boot so every instance shares windows and bans in the database.
 let activeStore: RateLimitStore = createMemoryRateLimitStore();
 
 export function setRateLimitStore(store: RateLimitStore): void {
@@ -432,6 +434,7 @@ export async function _resetBuckets(): Promise<void> {
     await activeStore.reset();
 }
 
+// Per instance by design: one timer and overlap guard per process; sweeps delete stale Postgres rows and are safe to run concurrently.
 let sweepStarted = false;
 let sweepRunning = false;
 

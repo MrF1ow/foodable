@@ -591,12 +591,15 @@ export function flagsBootLine(args: {
     return "[flags] source=fallback (no RAILWAY_TOKEN): temporary flags off, kill switches on";
 }
 
+// Per instance by design: cached FlagReader from initFlags(); each instance loads its own Railway or env snapshot at boot.
 let activeReader: FlagReader | null = null;
 let initCompleted = false;
 let initInFlight: Promise<FlagReader> | null = null;
+// Per instance by design: test hook only.
 let testReaderOverride: FlagReader | null = null;
 // Bumped by resetFlagsForTests so an init still running from before a reset
 // cannot publish its reader (or mark it ready) over the newer state.
+// Per instance by design: invalidates in-flight initFlags() after resetFlagsForTests().
 let initGeneration = 0;
 
 function stripTokenFromMessage(message: string, token?: string): string {

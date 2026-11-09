@@ -13,9 +13,10 @@ import {
 } from "../domain/fetch-memory.js";
 import { rows, run } from "./sql.js";
 
+// Per instance by design: lazy singleton wrapping Postgres with an in-process LRU (default 5 min TTL per entry).
 let liveStore: FetchMemoryStore | null = null;
 
-/** One process-wide cached store (in-process LRU; coherent for one household per deploy). */
+/** Returns the process-wide fetch-memory store (Postgres plus per-instance LRU). */
 export function recipeFetchMemory(): FetchMemoryStore {
     if (!liveStore) {
         liveStore = createCachedFetchMemory(createPostgresFetchMemoryStore());

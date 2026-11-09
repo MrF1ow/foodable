@@ -16,6 +16,32 @@ bun src/index.ts               # http://localhost:8080
 
 `GET /health` returns `ok` when the process is up.
 
+## Running more than one instance
+
+You can run several Foodable processes behind a load balancer as long as they share one `DATABASE_URL` and the same environment variables for secrets and feature flags. Each process keeps its own in-memory caches; authoritative state lives in Postgres.
+
+**Shared in Postgres (every instance sees the same data):**
+
+- Household data (meals, foods, fridge, grocery, recipes, goals, and the rest of the `public` schema)
+- OAuth login sessions (`oauth_login_sessions`), including the short-lived site approve flow
+- Rate-limit windows and authentication bans (`rate_limit_*`)
+- Sticky flag pins and kill-switch snapshots (`flag_pins`, `flag_snapshots`)
+- Recipe fetch memory (host refusals and dead links)
+- Export download archives, notices, and every other table the app writes
+
+**Per instance by design (safe to differ between processes):**
+
+- Assembled widget HTML, `/app.css`, `/app.js`, and related boot caches (same bytes on every instance for the same deployment)
+- Flag pin and snapshot **read caches** (about five minutes TTL; Postgres remains source of truth)
+- Recipe fetch **LRU** over refusals and dead links (about five minutes per entry; Postgres remains source of truth)
+- Parsed client-IP configuration (from env, fixed for the life of the process)
+- The feature-flag reader loaded at boot (Railway or `FOODABLE_FLAGS`)
+- Database connection pool (`Bun.sql`) and request-scoped transaction context
+
+`GET /robots.txt` reads the file from disk on each request; there is no in-memory cache.
+
+**Background sweeps** (export archives, login sessions, rate limits, flag pins, unverified recipes, fetch-memory expiry, automatic restock checks) start on every instance. Each sweep uses overlap guards so one process does not run two ticks at once. Deletes and expirations target Postgres rows idempotently, so concurrent sweeps on different instances are safe.
+
 ## Database
 
 Foodable talks to Postgres through `DATABASE_URL` and nothing else. Any Postgres works: Railway, Neon, RDS, a local `initdb` cluster, or the Docker Compose service below. The app owns its user accounts (`public.users`), so there is no separate auth service to run.

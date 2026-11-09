@@ -231,6 +231,7 @@ app.use(
 // Registered after CORS so the refusal still carries Allow-Origin (a browser
 // client sees the 503 rather than an opaque CORS error) and is still access
 // logged. OPTIONS preflights never reach it: cors() answers those itself.
+// Per instance by design: graceful-shutdown gate for this process only.
 let shuttingDown = false;
 
 // Exported for src/index.test.ts. The gate's entire value is WHERE it sits — it

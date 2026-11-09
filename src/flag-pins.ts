@@ -123,9 +123,11 @@ export function createFlagPinRuntime(
     }
 
     // Insertion order is recency order: an entry is re-inserted on every use.
+    // Per instance by design (inside getFlagPins runtime): subject pin rows, TTL 5 min, backed by Postgres.
     const subjects = new Map<string, SubjectEntry>();
-    // Per flag and snapshot subject: the last reliable kill-switch value read.
+    // Per instance by design: last reliable kill-switch booleans for this process.
     const lastKnown = new Map<string, boolean>();
+    // Per instance by design: kill-switch snapshot TTL caches (5 min) for this process.
     const snapshotCaches = new Map<string, SnapshotEntry>();
 
     function subjectEntry(subject: FlagSubject): SubjectEntry {
@@ -368,6 +370,7 @@ type FlagPinDefKind = PinFlagDef["unit"];
 
 type LoadedPins = { entry: SubjectEntry; pins: Map<string, Pin> };
 
+// Per instance by design: holds per-subject pin and snapshot TTL caches (5 min) backed by Postgres; instances may disagree until refresh.
 let runtime: FlagPinRuntime | null = null;
 
 /**
@@ -416,6 +419,7 @@ export function sweepExpiredPins(): Promise<number> {
     return getFlagPins().sweepExpiredPins();
 }
 
+// Per instance by design: overlap guard; pin expiry deletes run against Postgres and are safe concurrently.
 let sweepRunning = false;
 
 /** Start the periodic pin sweep. Call once at server startup, not on import. */

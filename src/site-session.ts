@@ -4,6 +4,7 @@ export const SITE_COOKIE = "nm_site";
 const TTL_SECONDS = 30 * 24 * 60 * 60;
 const MIN_SESSION_SECRET_LEN = 32;
 
+// Per instance by design: log-once when SESSION_SECRET is missing in dev.
 let sessionSecretFallbackWarned = false;
 
 /** Test-only: reset the one-time fallback warning flag. */

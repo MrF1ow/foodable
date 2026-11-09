@@ -37,6 +37,7 @@ export interface LoginSessionStore {
 export function createMemoryLoginSessionStore(): LoginSessionStore & {
     countSiteSync(): number;
 } {
+    // Per instance by design: in-process store for tests; production uses createPostgresLoginSessionStore at boot.
     const rows = new Map<
         string,
         { session: OAuthSessionPayload; expiresAt: number }
@@ -193,6 +194,7 @@ export function createPostgresLoginSessionStore(): LoginSessionStore {
     };
 }
 
+// Per instance by design: pointer to the session store; production calls useLiveLoginSessionStore() at boot so OAuth state lives in Postgres.
 let activeStore: LoginSessionStore = createMemoryLoginSessionStore();
 
 export function getLoginSessionStore(): LoginSessionStore {
@@ -219,6 +221,7 @@ export function siteLoginSessionCountSync(): number {
     ).countSiteSync();
 }
 
+// Per instance by design: overlap guard for the periodic Postgres expiry sweep.
 let sweepRunning = false;
 
 export function startLoginSessionCleanup(

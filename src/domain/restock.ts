@@ -507,6 +507,7 @@ export async function runRestockCheck(
     }
 }
 
+// Per instance by design: overlap guard; restock plans write idempotently to Postgres.
 let restockRunning = false;
 
 export function startRestockRuns(runCheck: () => Promise<void>): void {

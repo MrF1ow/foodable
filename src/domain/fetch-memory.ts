@@ -283,6 +283,7 @@ export function createCachedFetchMemory(
     const maxEntries = opts.maxEntries ?? 1000;
     const clock = opts.now ?? (() => Date.now());
 
+    // Per instance by design: LRU read-through over Postgres (default 5 min entry TTL, 1000 entries per map).
     const refusalCache = new Map<string, CacheEntry<HostRefusalRow>>();
     const deadCache = new Map<string, CacheEntry<DeadLinkRow>>();
     let refusalGen = 0;

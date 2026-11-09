@@ -403,7 +403,9 @@ export function rateLimitKeyForIp(ip: string): string {
     return `${prefix}::/64`;
 }
 
+// Per instance by design: parsed CLIENT_IP_* env snapshot; stable for the life of the process.
 let cachedConfig: ClientIpConfig | null = null;
+// Per instance by design: test hook only.
 let testConfigOverride: ClientIpConfig | null = null;
 
 export function getClientIpConfig(): ClientIpConfig {

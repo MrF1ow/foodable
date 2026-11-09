@@ -10,13 +10,16 @@ import { actorForRun, jwtSubAndHouseholdForActor } from "./actor.js";
 
 export type Tx = TransactionSQL;
 
+// Per instance by design: one Bun.sql pool per process; all instances share data through Postgres.
 let cached: SQL | undefined;
+// Per instance by design: test harness override of getSql(); never set in production.
 let testSql: SQL | undefined;
 
 // `open` flips to false before the transaction commits. Async work started
 // inside a run callback inherits this store and can outlive the transaction
 // (a fire-and-forget write); it must then open its own transaction instead of
 // reusing a connection Bun has already released.
+// Per instance by design: request-scoped transaction nesting for this process only.
 const activeTx = new AsyncLocalStorage<{ tx: Tx; open: boolean }>();
 
 /** Fail fast at server boot when DATABASE_URL is unset (not at import time). */

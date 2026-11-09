@@ -84,6 +84,7 @@ export function buildRecipeLinkReaderPausedOutcome(
     };
 }
 
+// Per instance by design: stateless fetcher handles; one per process avoids reallocating clients.
 let singleton: SafeFetcher | null = null;
 let disabledSingleton: SafeFetcher | null = null;
 

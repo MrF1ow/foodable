@@ -69,11 +69,13 @@ export function jwtSubAndHouseholdForActor(actor: Actor | undefined): {
     }
 }
 
+// Per instance by design: log-once dedupe for missing actor warnings in this process.
 const warnedMissingActorSites = new Set<string>();
 
 // Set only by the database test harness (src/db/testing/pg.ts): the actor a
 // run() falls back to when no withActor / runAsSystem is active. Production
 // code never sets it, so a missing actor there still warns.
+// Per instance by design: test harness only; production never sets a fallback actor.
 let testFallbackActor: Actor | undefined;
 
 /** Test harness only: the actor run() uses when none is active (null clears it). */
