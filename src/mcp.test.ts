@@ -537,6 +537,7 @@ mock.module("./db/nutrition.js", () => ({
     getLatestWeight: async () => null,
     getWeightInRange: async () => [],
     getAllMeals: async () => db.meals,
+    searchMeals: async () => db.meals,
     getAllMealItems: async () => [],
     getAllWater: async () => db.water,
     getAllWeight: async () => [],
@@ -1417,6 +1418,59 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
         );
         expect(keys[0]).toBe(keys[1]!);
         expect(keys[0]).toBe(PRE_CAFFEINE_KEY);
+    });
+});
+
+describe("search_meals groups food-backed variations by food set", () => {
+    test("returns one variation for differently worded meals with the same foods", async () => {
+        const eggs = "11111111-1111-4111-8111-111111111101";
+        const toast = "11111111-1111-4111-8111-111111111102";
+        const item = (food_id: string): NonNullable<Meal["items"]>[number] => ({
+            id: `i-${food_id}`,
+            meal_id: "m",
+            user_id: "u1",
+            household_id: "hh-1",
+            food_id,
+            recipe_id: null,
+            label: "Item",
+            amount: 1,
+            unit: "each",
+            grams: 50,
+            portions: null,
+            calories: 100,
+            protein_g: 10,
+            carbs_g: 1,
+            fat_g: 5,
+            fiber_g: 0,
+            sugar_g: 0,
+            alcohol_g: null,
+            caffeine_mg: null,
+            sort_order: 0,
+            created_at: "2026-06-20T14:30:00.000Z",
+        });
+        db.meals = [
+            meal({
+                id: "m1",
+                description: "Eggs and toast",
+                logged_at: "2026-06-20T08:00:00.000Z",
+                items: [item(eggs), item(toast)],
+            }),
+            meal({
+                id: "m2",
+                description: "Breakfast plate",
+                logged_at: "2026-06-21T08:00:00.000Z",
+                items: [item(toast), item(eggs)],
+            }),
+        ];
+        await withTools(null, async (call) => {
+            const text = textOf(
+                await call("search_meals", { queries: ["eggs"] }),
+            );
+            expect(text).toContain("Found 2 past meals");
+            expect(text).toContain("logged 2×");
+            expect(text).toContain("Breakfast plate");
+            expect(text).not.toMatch(/2\.\s/);
+        });
     });
 });
 

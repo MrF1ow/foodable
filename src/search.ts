@@ -48,9 +48,10 @@ export interface MealVariation {
 }
 
 /**
- * Grouping is by exact normalized description, deliberately not fuzzy:
- * fuzzy matching would merge exactly the variations this feature exists to
- * distinguish ("oatmeal with raisins" vs "oatmeal with banana").
+ * Free-text meals group by exact normalized description, deliberately not
+ * fuzzy: fuzzy matching would merge exactly the variations this feature exists
+ * to distinguish ("oatmeal with raisins" vs "oatmeal with banana"). Food-backed
+ * meals group by the sorted set of food ids (amounts and wording ignored).
  */
 function normalizeDescription(description: string): string {
     return description
@@ -84,15 +85,17 @@ function medianOf(
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 function variationKey(meal: Meal): string {
-    const foodIds = (meal.items ?? [])
+    const items = meal.items ?? [];
+    const withFood = items
         .map((item) => item.food_id)
-        .filter((id): id is string => Boolean(id))
-        .slice()
-        .sort();
-    if (foodIds.length > 0 && foodIds.length === (meal.items?.length ?? 0)) {
+        .filter((id): id is string => Boolean(id));
+    // Only a meal made entirely of foods groups by food; a recipe portion
+    // (no food_id) keeps it on its description.
+    const foodIds = [...new Set(withFood)].sort();
+    if (withFood.length > 0 && withFood.length === items.length) {
         return `foods:${foodIds.join("\0")}`;
     }
-    return normalizeDescription(meal.description);
+    return `text:${normalizeDescription(meal.description)}`;
 }
 
 /** Group meals into recurring variations, most frequent first. */
