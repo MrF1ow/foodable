@@ -1,0 +1,20 @@
+{
+    "code": "6111242100985",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "6111242100985",
+        "product_name": "",
+        "nutriscore_grade": "b",
+        "nova_group": 1,
+        "ecoscore_grade": "b",
+        "additives_tags": [],
+        "nutrient_levels": {
+            "fat": "moderate",
+            "salt": "low",
+            "saturated-fat": "moderate",
+            "sugars": "low"
+        },
+        "nutriments": { "sugars_100g": 0, "saturated-fat_100g": 3.5 }
+    }
+}

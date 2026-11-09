@@ -299,6 +299,8 @@ const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
     { prefix: "src/domain/fixtures/recipe-pages/", area: "recipes" },
     { prefix: "src/domain/fixtures/captions/", area: "recipes" },
     { prefix: "src/domain/fixtures/social/", area: "recipes" },
+    { prefix: "src/domain/__fixtures__/off/", area: "foods" },
+    { prefix: "src/domain/__snapshots__/", area: "foods" },
     { prefix: "src/db/", area: "db" },
     { prefix: "public/app/", area: "web" },
     { prefix: "src/web/components/", area: "web" },

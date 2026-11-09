@@ -201,6 +201,10 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|social-readers)|db\/recipes|mcp)\.test\.ts$/,
         },
         {
+            when: /^src\/domain\/__fixtures__\/off\//,
+            tests: /^src\/domain\/product-score\.test\.ts$/,
+        },
+        {
             when: /^src\/web\/fixtures\//,
             tests: /^src\/web\/shell(-v2)?\.test\.ts$/,
         },

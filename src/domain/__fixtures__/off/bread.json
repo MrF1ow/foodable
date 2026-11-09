@@ -1,0 +1,29 @@
+{
+    "code": "5010044000251",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "5010044000251",
+        "product_name": "Wholemeal Bread",
+        "nutriscore_grade": "a",
+        "nova_group": 4,
+        "ecoscore_grade": "b",
+        "additives_tags": [
+            "en:e282",
+            "en:e300",
+            "en:e471",
+            "en:e472e",
+            "en:e481"
+        ],
+        "nutrient_levels": {
+            "fat": "low",
+            "salt": "moderate",
+            "saturated-fat": "low",
+            "sugars": "low"
+        },
+        "nutriments": {
+            "sugars_100g": 2.45535714285714,
+            "saturated-fat_100g": 0.446428571428571
+        }
+    }
+}
