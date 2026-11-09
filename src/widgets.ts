@@ -35,6 +35,11 @@ const INCLUDE_RE = /\/\*@include\s+([^\s@]+)\s*@\*\//g;
 // there is no bundler here, just type-stripping.
 const INLINE_TS_RE = /\/\*@inlinets\s+([^\s@]+)\s*@\*\//g;
 
+const WIDGET_JS_MINIFIER = new Bun.Transpiler({
+    loader: "js",
+    minifyWhitespace: true,
+});
+
 async function inlineTs(relPath: string): Promise<string> {
     const file = Bun.file(`./${relPath}`);
     if (!(await file.exists())) {
@@ -70,6 +75,17 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
     // tool reference it, so no client can reach it. View via `bun run harness`.
     "component-gallery": "component-gallery.html",
 };
+
+/** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */
+export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
+    Object.fromEntries(
+        Object.keys(WIDGET_TEMPLATES).map((key) => [
+            key,
+            key === "import-meals"
+                ? { raw: 80 * 1024, gzip: 24 * 1024 }
+                : { raw: 60 * 1024, gzip: 20 * 1024 },
+        ]),
+    );
 
 // Per instance by design: assembled widget HTML keyed by template; identical bytes on every instance for the same build.
 const cache = new Map<string, string>();
@@ -139,21 +155,189 @@ async function assemble(templateFile: string): Promise<string> {
     return withTs;
 }
 
+/** Unminified widget document (partials expanded). */
+export async function assembleSource(key: string): Promise<string> {
+    const templateFile = WIDGET_TEMPLATES[key];
+    if (!templateFile) throw new Error(`unknown widget: ${key}`);
+    return assemble(templateFile);
+}
+
+function stripCssBlockComments(css: string): string {
+    let out = "";
+    let i = 0;
+    while (i < css.length) {
+        const ch = css[i]!;
+        if (ch === '"' || ch === "'") {
+            const quote = ch;
+            out += ch;
+            i++;
+            while (i < css.length) {
+                const c = css[i]!;
+                out += c;
+                if (c === "\\" && i + 1 < css.length) {
+                    out += css[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if (c === quote) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (ch === "/" && css[i + 1] === "*") {
+            i += 2;
+            while (i < css.length && !(css[i] === "*" && css[i + 1] === "/")) {
+                i++;
+            }
+            i += 2;
+            continue;
+        }
+        out += ch;
+        i++;
+    }
+    return out;
+}
+
+function minifyCssInStrings(css: string, fn: (s: string) => string): string {
+    let out = "";
+    let i = 0;
+    while (i < css.length) {
+        const ch = css[i]!;
+        if (ch === '"' || ch === "'") {
+            const quote = ch;
+            let lit = ch;
+            i++;
+            while (i < css.length) {
+                const c = css[i]!;
+                lit += c;
+                if (c === "\\" && i + 1 < css.length) {
+                    lit += css[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if (c === quote) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            out += lit;
+            continue;
+        }
+        const rest = css.slice(i);
+        const m = rest.match(/^[^{}'"]+/);
+        if (m) {
+            out += fn(m[0]);
+            i += m[0].length;
+        } else {
+            out += ch;
+            i++;
+        }
+    }
+    return out;
+}
+
+function collapseCssWhitespace(chunk: string): string {
+    return chunk
+        .replace(/\s*\{\s*/g, "{")
+        .replace(/\s*\}\s*/g, "}")
+        .replace(/\s*;\s*/g, ";")
+        .replace(/,\s+/g, ",");
+}
+
+/** Conservative CSS minify for inline widget `<style>` bodies. */
+export function minifyCss(css: string): string {
+    const noComments = stripCssBlockComments(css);
+    const lines = noComments
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    const joined = lines.join("\n");
+    return minifyCssInStrings(joined, collapseCssWhitespace);
+}
+
+function trimHtmlLeadingIndent(html: string): string {
+    const lines = html.split("\n");
+    let minIndent = Infinity;
+    for (const line of lines) {
+        if (line.trim().length === 0) continue;
+        const m = line.match(/^(\s+)/);
+        if (m) minIndent = Math.min(minIndent, m[1]!.length);
+        else {
+            minIndent = 0;
+            break;
+        }
+    }
+    if (!Number.isFinite(minIndent) || minIndent === 0) {
+        return lines.map((l) => l.trimEnd()).join("\n");
+    }
+    return lines
+        .map((line) =>
+            line.trim().length === 0 ? "" : line.slice(minIndent).trimEnd(),
+        )
+        .join("\n");
+}
+
+// Bun's whitespace minifier also drops directive prologues, which would
+// silently turn a strict widget script into a sloppy one. Put it back.
+const USE_STRICT_RE = /^\s*(["'])use strict\1\s*;?/;
+
+function minifyScript(js: string): string {
+    const min = WIDGET_JS_MINIFIER.transformSync(js);
+    return USE_STRICT_RE.test(js) && !USE_STRICT_RE.test(min)
+        ? `"use strict";${min}`
+        : min;
+}
+
+const BLOCK_RE =
+    /(<script\b[^>]*>)([\s\S]*?)(<\/script>)|(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi;
+
+/** Minify assembled MCP widget HTML (scripts, styles, trim HTML indent). */
+export function minifyWidgetHtml(html: string): string {
+    const parts: string[] = [];
+    let lastIndex = 0;
+    for (const m of html.matchAll(BLOCK_RE)) {
+        const index = m.index ?? 0;
+        if (index > lastIndex) {
+            parts.push(trimHtmlLeadingIndent(html.slice(lastIndex, index)));
+        }
+        if (m[1] !== undefined) {
+            const open = m[1];
+            const body = m[2] ?? "";
+            const close = m[3] ?? "";
+            parts.push(`${open}${minifyScript(body)}${close}`);
+        } else if (m[4] !== undefined) {
+            const open = m[4];
+            const body = m[5] ?? "";
+            const close = m[6] ?? "";
+            parts.push(`${open}${minifyCss(body)}${close}`);
+        }
+        lastIndex = index + m[0].length;
+    }
+    if (lastIndex < html.length) {
+        parts.push(trimHtmlLeadingIndent(html.slice(lastIndex)));
+    }
+    return parts.join("");
+}
+
 // Return the fully-inlined HTML for a widget, assembling+caching on first use.
 export async function getWidgetHtml(key: string): Promise<string> {
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
-    const templateFile = WIDGET_TEMPLATES[key];
-    if (!templateFile) throw new Error(`unknown widget: ${key}`);
-    const html = await assemble(templateFile);
+    const raw = await assembleSource(key);
+    const html = minifyWidgetHtml(raw);
     cache.set(key, html);
     return html;
 }
 
-// The household web app's stylesheet, served at /app.css. Assembled from the
-// same shared partials as the widgets so the two surfaces cannot drift: its
-// @include markers resolve against public/widgets/src/ exactly like a
-// template's. Cached like a widget and warmed at boot.
+// The household web app's stylesheet, served at /app.css. Assembled from
+// public/app/app.css with the widget resolver, so its @include markers resolve
+// against public/widgets/src/: the generated shared/tokens.css is the only
+// widget partial it shares, and its own partials are ../../app/… paths. It is
+// not minified. Cached like a widget and warmed at boot.
 export const APP_CSS_SOURCE = "./public/app/app.css";
 // Per instance by design: /app.css bytes and content hash; same on every instance after warmWidgets.
 let appCss: string | undefined;

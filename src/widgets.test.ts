@@ -1,5 +1,12 @@
 import { test, expect } from "bun:test";
-import { getWidgetHtml, WIDGET_TEMPLATES } from "./widgets.js";
+import {
+    assembleSource,
+    getWidgetHtml,
+    minifyCss,
+    minifyWidgetHtml,
+    WIDGET_BUDGETS,
+    WIDGET_TEMPLATES,
+} from "./widgets.js";
 
 const KEYS = Object.keys(WIDGET_TEMPLATES);
 const SRC = "./public/widgets/src";
@@ -31,16 +38,57 @@ async function partialAsInlined(rel: string): Promise<string> {
     );
 }
 
+function widgetScriptBodies(html: string): string[] {
+    const bodies: string[] = [];
+    for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+        bodies.push(m[1]!);
+    }
+    return bodies;
+}
+
+function gzipByteLength(text: string): number {
+    return Bun.gzipSync(new TextEncoder().encode(text)).byteLength;
+}
+
+test("minifyCss keeps comment inside a string", () => {
+    const css = `.x{background:url("a/*not-comment*/b");}`;
+    expect(minifyCss(css)).toContain("/*not-comment*/");
+});
+
+test("minifyCss keeps calc() and descendant :hover spacing", () => {
+    const css = `
+        .box { width: calc(1px - 2px); }
+        .a :hover { color: red; }
+    `;
+    const out = minifyCss(css);
+    expect(out).toContain("calc(1px - 2px)");
+    expect(out).toContain(".a :hover");
+});
+
+test("minifyWidgetHtml keeps JS regex and template literal", () => {
+    const html = `<!doctype html><style></style><script>
+        const re = /foo\\/bar/g;
+        const t = \`x \${1} y\`;
+    </script>`;
+    const min = minifyWidgetHtml(html);
+    expect(min).toContain("foo");
+    expect(min).toContain("/g");
+    expect(min).toContain("`x ${1} y`");
+});
+
 // Every widget must assemble from its source partials into a self-contained
 // document — no unresolved @include markers, valid inline JS, single style/script.
 test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
     const html = await getWidgetHtml(key);
+    // Markers are checked before minifying, which strips comments and would
+    // hide one that was never resolved.
+    const source = await assembleSource(key);
 
     // No include marker left behind (the real marker, not the word in prose).
-    expect(html.match(/\/\*@include/g)).toBeNull();
+    expect(source.match(/\/\*@include/g)).toBeNull();
     // Same for the TS-inlining marker: an unresolved one would ship a widget
     // whose script silently lacks whole functions.
-    expect(html.match(/\/\*@inlinets/g)).toBeNull();
+    expect(source.match(/\/\*@inlinets/g)).toBeNull();
     // Module syntax must not survive into the inline <script>.
     expect(html).not.toMatch(/^export\s/m);
 
@@ -58,19 +106,17 @@ test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
     // Shared design tokens got inlined.
     expect(html).toContain("--accent: #28cf8b");
 
-    // The inlined <script> is syntactically valid JS.
-    const script = html.slice(
-        html.indexOf("<script>") + "<script>".length,
-        html.indexOf("</script>"),
-    );
-    expect(() =>
-        new Bun.Transpiler({ loader: "js" }).transformSync(script),
-    ).not.toThrow();
+    // Every inlined <script> body parses as JS after minification.
+    for (const script of widgetScriptBodies(html)) {
+        expect(() => {
+            new Function(script);
+        }).not.toThrow();
+    }
 });
 
 // Guard against a partial being inlined incompletely (e.g. an extraction that
 // truncates a component's CSS mid-block): every @include'd partial's full text
-// must appear verbatim in the assembled output.
+// must appear verbatim in the unminified assembly.
 test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
     const template = await Bun.file(
         `${SRC}/templates/${WIDGET_TEMPLATES[key]}`,
@@ -78,13 +124,38 @@ test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
     const includes = [...template.matchAll(INCLUDE_RE)].map((m) => m[1]!);
     expect(includes.length).toBeGreaterThan(0);
 
-    const html = await getWidgetHtml(key);
+    const html = await assembleSource(key);
     for (const rel of includes) {
         const partial = await partialAsInlined(rel);
         expect(html).toContain(partial);
     }
 });
 
+test("minified widgets fit size budgets", async () => {
+    const rows: string[] = [];
+    rows.push("widget".padEnd(22) + "raw".padStart(10) + "gzip".padStart(10));
+    for (const key of KEYS) {
+        const budget = WIDGET_BUDGETS[key];
+        expect(budget).toBeDefined();
+        const html = await getWidgetHtml(key);
+        const raw = new TextEncoder().encode(html).byteLength;
+        const gzip = gzipByteLength(html);
+        rows.push(
+            key.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
+        );
+        expect(raw).toBeLessThanOrEqual(budget!.raw);
+        expect(gzip).toBeLessThanOrEqual(budget!.gzip);
+    }
+    console.log(rows.join("\n"));
+});
+
 test("unknown widget key throws", async () => {
     expect(getWidgetHtml("nope")).rejects.toThrow(/unknown widget/);
+});
+
+test("minifying keeps a script's use strict directive", () => {
+    const min = minifyWidgetHtml(
+        '<script>\n    "use strict";\n    function f() { return 1; }\n</script>',
+    );
+    expect(min).toBe('<script>"use strict";function f(){return 1}</script>');
 });
