@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import {
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -115,13 +121,23 @@ describe("sizesFromTree", () => {
 });
 
 describe("sizesFromDisk", () => {
+    const roots: string[] = [];
+    const tempRoot = () => {
+        const root = mkdtempSync(join(tmpdir(), "budget-"));
+        roots.push(root);
+        return root;
+    };
+    afterAll(() => {
+        for (const root of roots)
+            rmSync(root, { recursive: true, force: true });
+    });
     const git = (root: string, ...args: string[]) => {
         const p = Bun.spawnSync(["git", ...args], { cwd: root });
         if (p.exitCode !== 0) throw new Error(p.stderr.toString());
     };
 
     test("tracked files only: symlinks skipped, folders summed, scratch ignored", () => {
-        const root = mkdtempSync(join(tmpdir(), "budget-"));
+        const root = tempRoot();
         git(root, "init", "-q");
         writeFileSync(join(root, "CLAUDE.md"), "x".repeat(30));
         symlinkSync("CLAUDE.md", join(root, "AGENTS.md"));
@@ -152,7 +168,7 @@ describe("sizesFromDisk", () => {
     });
 
     test("measures the working tree, and skips a tracked file deleted from it", () => {
-        const root = mkdtempSync(join(tmpdir(), "budget-"));
+        const root = tempRoot();
         git(root, "init", "-q");
         mkdirSync(join(root, ".claude/skills/a"), { recursive: true });
         writeFileSync(join(root, ".claude/skills/a/SKILL.md"), "y".repeat(10));

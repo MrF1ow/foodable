@@ -1,8 +1,11 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { SQL } from "bun";
-import { migrate } from "../migrate.js";
 import { findPgBin } from "./pg-shared.js";
-import { startTempPostgres } from "./pg-temp.js";
+import {
+    createMigratedDatabase,
+    DB_SETUP_TIMEOUT_MS,
+    prepareMigratedTemplate,
+} from "./pg.js";
 import {
     assertDistinctDatabaseUrls,
     assertMigrationParity,
@@ -14,15 +17,10 @@ import {
 
 const pgAvailable = !!(await findPgBin());
 
-async function migratedUrl(
-    pg: Awaited<ReturnType<typeof startTempPostgres>>,
-    database = "postgres",
-) {
-    const sql = new SQL(pg.url, { prepare: false, max: 1 });
-    await migrate(sql);
-    await sql.close();
-    return pg.url.replace(/\/postgres$/, `/${database}`);
-}
+// Source and target are two databases on the shared test server: separate
+// databases are all importPublicData needs, and copying the migrated template
+// is far cheaper than two clusters per test.
+if (pgAvailable) beforeAll(prepareMigratedTemplate, DB_SETUP_TIMEOUT_MS);
 
 export async function seedSource(
     url: string,
@@ -111,11 +109,11 @@ export async function seedSource(
 test.skipIf(!pgAvailable)(
     "importPublicData copies seeded public data",
     async () => {
-        const sourcePg = await startTempPostgres();
-        const targetPg = await startTempPostgres();
+        const sourcePg = await createMigratedDatabase();
+        const targetPg = await createMigratedDatabase();
         try {
-            const fromUrl = await migratedUrl(sourcePg);
-            const toUrl = await migratedUrl(targetPg);
+            const fromUrl = sourcePg.url;
+            const toUrl = targetPg.url;
             const { userId, mealId } = await seedSource(fromUrl);
 
             const result = await importPublicData(fromUrl, toUrl);
@@ -140,11 +138,11 @@ test.skipIf(!pgAvailable)(
 test.skipIf(!pgAvailable)(
     "reads a source history still under supabase_migrations",
     async () => {
-        const sourcePg = await startTempPostgres();
-        const targetPg = await startTempPostgres();
+        const sourcePg = await createMigratedDatabase();
+        const targetPg = await createMigratedDatabase();
         try {
-            const fromUrl = await migratedUrl(sourcePg);
-            const toUrl = await migratedUrl(targetPg);
+            const fromUrl = sourcePg.url;
+            const toUrl = targetPg.url;
             const sql = new SQL(fromUrl, { prepare: false, max: 1 });
             await sql`
                 alter schema foodable_migrations rename to supabase_migrations
@@ -161,11 +159,11 @@ test.skipIf(!pgAvailable)(
 );
 
 test.skipIf(!pgAvailable)("refuses non-empty target", async () => {
-    const sourcePg = await startTempPostgres();
-    const targetPg = await startTempPostgres();
+    const sourcePg = await createMigratedDatabase();
+    const targetPg = await createMigratedDatabase();
     try {
-        const fromUrl = await migratedUrl(sourcePg);
-        const toUrl = await migratedUrl(targetPg);
+        const fromUrl = sourcePg.url;
+        const toUrl = targetPg.url;
         await seedSource(fromUrl);
         await seedSource(toUrl);
         await expect(importPublicData(fromUrl, toUrl)).rejects.toThrow(
@@ -237,9 +235,9 @@ test("assertDistinctDatabaseUrls rejects same database", () => {
 test.skipIf(!pgAvailable)(
     "refuses when source and target are the same migrated database",
     async () => {
-        const pg = await startTempPostgres();
+        const pg = await createMigratedDatabase();
         try {
-            const url = await migratedUrl(pg);
+            const url = pg.url;
             await expect(importPublicData(url, url)).rejects.toThrow(
                 /same database/,
             );
@@ -252,11 +250,11 @@ test.skipIf(!pgAvailable)(
 test.skipIf(!pgAvailable)(
     "passwordHashParity detects altered hash",
     async () => {
-        const sourcePg = await startTempPostgres();
-        const targetPg = await startTempPostgres();
+        const sourcePg = await createMigratedDatabase();
+        const targetPg = await createMigratedDatabase();
         try {
-            const fromUrl = await migratedUrl(sourcePg);
-            const toUrl = await migratedUrl(targetPg);
+            const fromUrl = sourcePg.url;
+            const toUrl = targetPg.url;
             const { userId } = await seedSource(fromUrl);
             const result = await importPublicData(fromUrl, toUrl);
             expect(result.ok).toBe(true);
@@ -280,11 +278,11 @@ test.skipIf(!pgAvailable)(
 test.skipIf(!pgAvailable)(
     "assertMigrationParity on matching migrated DBs",
     async () => {
-        const a = await startTempPostgres();
-        const b = await startTempPostgres();
+        const a = await createMigratedDatabase();
+        const b = await createMigratedDatabase();
         try {
-            const fromUrl = await migratedUrl(a);
-            const toUrl = await migratedUrl(b);
+            const fromUrl = a.url;
+            const toUrl = b.url;
             await assertMigrationParity(fromUrl, toUrl);
         } finally {
             await a.stop();
