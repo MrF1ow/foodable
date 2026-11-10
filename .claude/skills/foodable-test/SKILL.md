@@ -70,7 +70,7 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`. Needs nothing.
-- **SQL, db adapters:** `bun --no-env-file test <file>` for tests wrapped in `describeDb`. A run shares one throwaway Postgres in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), never `db:dev`; each file gets a copy of a migrated template. Needs `initdb` (PATH or `PG_BIN`), else db tests skip. Adapters run as `foodable_app`, by default as the household owner (`src/db/testing/pg.ts`).
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy, used as `foodable_app` (household owner by default; `src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. About 45 s, PASS/FAIL per check. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223: one run at a time (a "harness crashed" FAIL usually means another run holds them; wait until `ss -ltn` shows both free). No database.
 - **App look:** `bun run preview:app --shots`. About 90 s, PNGs in tmp/app-preview. Without `--shots` it serves :4787. `FOODABLE_FLAGS=ui-v2:all` shows the new shell. Needs Chromium; fixture data.
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1` shows v2. `bun --no-env-file test src/widgets.test.ts` guards assembly.
