@@ -44,10 +44,10 @@ import {
     rotateHouseholdMcpToken,
     setHouseholdMemberRole,
     transferHouseholdOwnership,
+    removeHouseholdMemberAccount,
     updateHouseholdConfig,
     updateSocialReaderEnabled,
 } from "../../db/household.js";
-import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import {
@@ -691,7 +691,10 @@ householdRoutes.post(
             return c.html(page.html, page.status);
         }
         try {
-            await deleteAllUserData(check.target.userId);
+            await removeHouseholdMemberAccount(
+                owner.householdId,
+                check.target.userId,
+            );
         } catch (err) {
             const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);

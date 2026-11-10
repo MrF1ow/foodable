@@ -5,7 +5,7 @@ import { runRestockCheck } from "../domain/restock.js";
 import { liveRestockStore } from "./restock.js";
 import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
 import { currentActor, setFallbackActorForTests, type Actor } from "./actor.js";
-import { DB_TEST_ACTOR, describeDb } from "./testing/pg.js";
+import { describeDb, householdOwnerActor } from "./testing/pg.js";
 import {
     seedFood,
     seedFridgeItem,
@@ -272,7 +272,7 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
         try {
             await runRestockCheck(deps, now);
         } finally {
-            setFallbackActorForTests(DB_TEST_ACTOR);
+            setFallbackActorForTests(householdOwnerActor);
         }
         expect(ownerLookupActors).toEqual([{ kind: "household", householdId }]);
         const config = await getHouseholdConfig(householdId);

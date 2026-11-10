@@ -14,6 +14,8 @@ import {
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
 import { liveAuthStore } from "./users.js";
 import { getProfile, type Profile } from "./profiles.js";
+import { deleteAllUserData } from "./nutrition.js";
+import { runAsSystem } from "./actor.js";
 import { maybeOne, rows, run } from "./sql.js";
 
 export type HouseholdMembership = {
@@ -63,7 +65,17 @@ export async function getHouseholdMembership(
     });
 }
 
+// Whether the deploy has a household at all, for the first-user gate. Asked
+// by a signed-in user who may belong to none, and row level security shows
+// such a user no household, so it asks as the system. It returns only yes or
+// no.
 export async function householdExists(): Promise<boolean> {
+    return runAsSystem("whether the deploy has a household", () =>
+        householdExistsInTx(),
+    );
+}
+
+async function householdExistsInTx(): Promise<boolean> {
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ id: string }>(
@@ -179,12 +191,19 @@ function friendlyMemberError(message: string): string {
     return message;
 }
 
+// Creating a member's login, and removing it again when adding them fails,
+// writes another user's users row. Row level security keeps that row out of
+// the acting owner's reach, so it runs as the system; the routes and tools
+// that get here already checked the caller manages the household.
 function liveAuthAdmin(): AuthUserAdmin {
     const store = liveAuthStore();
     return {
         async createUser({ email, password }) {
             try {
-                const userId = await signUp(store, email, password);
+                const userId = await runAsSystem(
+                    "creating a household member's login",
+                    () => signUp(store, email, password),
+                );
                 return { ok: true, userId };
             } catch (err) {
                 const message =
@@ -207,7 +226,10 @@ function liveAuthAdmin(): AuthUserAdmin {
             }
         },
         async deleteUser(userId) {
-            const deleted = await store.deleteUser(userId);
+            const deleted = await runAsSystem(
+                "removing a household member's login after adding them failed",
+                () => store.deleteUser(userId),
+            );
             if (!deleted) {
                 throw new Error("User not found");
             }
@@ -502,4 +524,38 @@ export async function setHouseholdMemberRole(
             throw new Error(`Failed to change role: ${message}`);
         }
     });
+}
+
+/**
+ * An owner removing a member: the member's login and their own data go (as
+ * deleteAllUserData does for one's own account), the household's shared data
+ * stays. Row level security keeps another user's rows out of the owner's
+ * reach, so this runs as the system, in one transaction that first checks
+ * the user is a member of `householdId` and not its owner.
+ */
+export async function removeHouseholdMemberAccount(
+    householdId: string,
+    userId: string,
+): Promise<void> {
+    await runAsSystem("an owner removing a household member", () =>
+        run(async (tx) => {
+            const member = await maybeOne<{ role: string }>(
+                tx,
+                tx`
+                    select role
+                    from public.household_members
+                    where household_id = ${householdId}
+                      and user_id = ${userId}
+                    for update
+                `,
+                "load household member",
+            );
+            if (!member || member.role === "owner") {
+                throw new Error(
+                    "Only a member other than the owner can be removed.",
+                );
+            }
+            await deleteAllUserData(userId);
+        }),
+    );
 }

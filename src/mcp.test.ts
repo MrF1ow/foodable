@@ -674,6 +674,24 @@ mock.module("./db/household.js", () => ({
                     : member,
         );
     },
+    // The real one checks membership as the system, then runs
+    // deleteAllUserData, whose stub above records the wipe.
+    removeHouseholdMemberAccount: async (
+        householdId: string,
+        userId: string,
+    ) => {
+        const member = db.members.find(
+            (m) => m.householdId === householdId && m.userId === userId,
+        );
+        if (!member || member.role === "owner") {
+            throw new Error(
+                "Only a member other than the owner can be removed.",
+            );
+        }
+        db.accountWipes += 1;
+        db.wipedUsers.push(userId);
+        db.members = db.members.filter((m) => m.userId !== userId);
+    },
     rotateHouseholdMcpToken: async (args: {
         householdId: string;
         tokenHashHex: string;

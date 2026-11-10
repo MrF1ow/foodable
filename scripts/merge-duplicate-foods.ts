@@ -1,4 +1,5 @@
 import { closeSql, getSql, rows, run } from "../src/db/sql.js";
+import { runAsSystem } from "../src/db/actor.js";
 import { liveFoodsStore, mergeLiveFoods } from "../src/db/foods.js";
 import {
     formatMergeJobReport,
@@ -41,14 +42,18 @@ async function main() {
     getSql();
     let exitCode = 0;
     try {
-        const report = await runMergeJob(
-            {
-                listHouseholdIds,
-                store: liveFoodsStore(),
-                merge: (householdId, keepId, dropId) =>
-                    mergeLiveFoods(householdId, keepId, dropId),
-            },
-            { apply: parsed.apply },
+        // An operator job across every household: it runs as the system, on
+        // the owner connection (DATABASE_URL).
+        const report = await runAsSystem("merging duplicate foods", () =>
+            runMergeJob(
+                {
+                    listHouseholdIds,
+                    store: liveFoodsStore(),
+                    merge: (householdId, keepId, dropId) =>
+                        mergeLiveFoods(householdId, keepId, dropId),
+                },
+                { apply: parsed.apply },
+            ),
         );
 
         if (parsed.json) {

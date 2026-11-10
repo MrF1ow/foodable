@@ -10,6 +10,7 @@ import {
     getHouseholdMembership,
     householdExists,
     listHouseholdMembers,
+    removeHouseholdMemberAccount,
     rotateHouseholdMcpToken,
     setHouseholdMemberRole,
     transferHouseholdOwnership,
@@ -17,7 +18,7 @@ import {
     updateMemberDisplayName,
 } from "./household.js";
 import { describeDb } from "./testing/pg.js";
-import { seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { run, setSqlForTests } from "./sql.js";
 
@@ -77,6 +78,44 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         await truncateAll();
         setSqlForTests(sql);
         expect(await householdExists()).toBe(false);
+    });
+
+    test("householdExists for a signed-in user outside the household", async () => {
+        // Row level security shows that user no household; the first-user
+        // gate must still see that one exists.
+        const outsider = await seedUser(getCtx().sql);
+        expect(await asUser(outsider, () => householdExists())).toBe(true);
+    });
+
+    test("removeHouseholdMemberAccount removes a member's login and data, never the owner", async () => {
+        const { sql } = getCtx();
+        const member = await seedUser(sql);
+        const outsider = await seedUser(sql);
+        await sql`
+            insert into public.household_members (household_id, user_id, role, display_name)
+            values (${householdId}, ${member}, 'member', 'Sam')
+        `;
+        await sql`
+            insert into public.oauth_tokens (token, user_id, expires_at)
+            values (${`t-${member}`}, ${member}, now() + interval '1 day')
+        `;
+        await expectRejectsWithMessage(
+            removeHouseholdMemberAccount(householdId, ownerId),
+            "Only a member other than the owner can be removed.",
+        );
+        await expectRejectsWithMessage(
+            removeHouseholdMemberAccount(householdId, outsider),
+            "Only a member other than the owner can be removed.",
+        );
+        // Acting as the owner, the way the members page does.
+        await removeHouseholdMemberAccount(householdId, member);
+        const [left] = await sql`
+            select
+                (select count(*)::int from public.users where id = ${member}) as users,
+                (select count(*)::int from public.oauth_tokens where user_id = ${member}) as tokens,
+                (select count(*)::int from public.users where id = ${outsider}) as outsider
+        `;
+        expect(left).toEqual({ users: 0, tokens: 0, outsider: 1 });
     });
 
     test("createHouseholdForCaller success and already exists", async () => {

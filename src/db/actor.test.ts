@@ -7,7 +7,13 @@ import {
     withActor,
     type Actor,
 } from "./actor.js";
-import { rows, run, setSqlForTests } from "./sql.js";
+import {
+    APP_RUN_IN_SYSTEM_TX_MESSAGE,
+    rows,
+    run,
+    setSqlForTests,
+} from "./sql.js";
+import { seedHousehold } from "./testing/fixtures.js";
 import { describeDb } from "./testing/pg.js";
 import { findPgBin } from "./testing/pg-temp.js";
 
@@ -168,15 +174,115 @@ describeDb(
             );
         });
 
-        test("run() without an actor throws under the test runner", async () => {
+        test("run() without an actor throws, whatever NODE_ENV says", async () => {
             const { sql } = ctx();
             setSqlForTests(sql);
             expect(currentActor()).toBeUndefined();
+            const prev = process.env.NODE_ENV;
+            process.env.NODE_ENV = "production";
+            try {
+                await expect(run(async () => "unreachable")).rejects.toThrow(
+                    MISSING_ACTOR_MESSAGE,
+                );
+            } finally {
+                if (prev === undefined) delete process.env.NODE_ENV;
+                else process.env.NODE_ENV = prev;
+            }
             await expect(run(async () => "unreachable")).rejects.toThrow(
                 MISSING_ACTOR_MESSAGE,
             );
             expect(MISSING_ACTOR_MESSAGE).toContain("runAsSystem");
             expect(MISSING_ACTOR_MESSAGE).toContain("withActor");
+        });
+
+        test("a user or household runs as foodable_app, the system as the owner", async () => {
+            const { sql } = ctx();
+            setSqlForTests(sql);
+            const role = () =>
+                run(async (tx) => {
+                    const [row] = await rows<{ role: string }>(
+                        tx,
+                        tx`select current_user as role`,
+                    );
+                    return row!.role;
+                });
+            const householdId = randomUUID();
+            expect(
+                await withActor(
+                    { kind: "user", userId: randomUUID(), householdId },
+                    role,
+                ),
+            ).toBe("foodable_app");
+            expect(
+                await withActor({ kind: "household", householdId }, role),
+            ).toBe("foodable_app");
+            expect(await runAsSystem("role check", role)).toBe("postgres");
+        });
+
+        test("a system run inside a user transaction is its own transaction", async () => {
+            const { sql, truncateAll } = ctx();
+            await truncateAll();
+            setSqlForTests(sql);
+            const { userId, householdId } = await seedHousehold(sql);
+            const storeId = randomUUID();
+            const barcode = `sys-${randomUUID()}`;
+            const err = await withActor(
+                { kind: "user", userId, householdId },
+                () =>
+                    run(async (tx) => {
+                        await tx`
+                            insert into public.grocery_stores (id, household_id, name)
+                            values (${storeId}, ${householdId}, ${"Inner"})
+                        `;
+                        await runAsSystem("nested", () =>
+                            run(async (inner) => {
+                                const [seen] = await rows<{ n: number }>(
+                                    inner,
+                                    inner`
+                                        select count(*)::int as n
+                                        from public.grocery_stores
+                                        where id = ${storeId}
+                                    `,
+                                );
+                                // The outer insert is not committed yet.
+                                expect(seen!.n).toBe(0);
+                                await inner`
+                                    insert into public.food_cache (source, source_id, payload)
+                                    values ('off', ${barcode}, '{}'::jsonb)
+                                `;
+                            }),
+                        );
+                        throw new Error("roll the outer back");
+                    }),
+            ).then(
+                () => null,
+                (e: unknown) => e,
+            );
+            expect((err as Error).message).toBe("roll the outer back");
+            const [store] = await sql`
+                select count(*)::int as n from public.grocery_stores where id = ${storeId}
+            `;
+            const [cached] = await sql`
+                select count(*)::int as n from public.food_cache where source_id = ${barcode}
+            `;
+            // The outer work rolled back; the system's committed on its own.
+            expect(store.n).toBe(0);
+            expect(cached.n).toBe(1);
+        });
+
+        test("a user or household run inside a system transaction throws", async () => {
+            const { sql } = ctx();
+            setSqlForTests(sql);
+            await expect(
+                runAsSystem("outer", () =>
+                    run(() =>
+                        withActor(
+                            { kind: "household", householdId: randomUUID() },
+                            () => run(async () => "unreachable"),
+                        ),
+                    ),
+                ),
+            ).rejects.toThrow(APP_RUN_IN_SYSTEM_TX_MESSAGE);
         });
 
         test("a timer started inside runAsSystem keeps the system actor", async () => {

@@ -49,13 +49,10 @@ export function actorFromAuthContext(
     return { kind: "user", userId: auth.userId, householdId };
 }
 
-export function jwtSubAndHouseholdForActor(actor: Actor | undefined): {
+export function jwtSubAndHouseholdForActor(actor: Actor): {
     jwtSub: string;
     householdId: string;
 } {
-    if (!actor) {
-        return { jwtSub: "", householdId: "" };
-    }
     switch (actor.kind) {
         case "user":
             return {
@@ -69,17 +66,17 @@ export function jwtSubAndHouseholdForActor(actor: Actor | undefined): {
     }
 }
 
-// Per instance by design: log-once dedupe for missing actor warnings in this process.
-const warnedMissingActorSites = new Set<string>();
-
 // Set only by the database test harness (src/db/testing/pg.ts): the actor a
-// run() falls back to when no withActor / runAsSystem is active. Production
-// code never sets it, so a missing actor there still warns.
+// run() falls back to when no withActor / runAsSystem is active, or a function
+// that works it out from the database at the time. Production code never sets
+// it, so a missing actor there always throws.
 // Per instance by design: test harness only; production never sets a fallback actor.
-let testFallbackActor: Actor | undefined;
+let testFallbackActor: Actor | (() => Promise<Actor>) | undefined;
 
 /** Test harness only: the actor run() uses when none is active (null clears it). */
-export function setFallbackActorForTests(actor: Actor | null): void {
+export function setFallbackActorForTests(
+    actor: Actor | (() => Promise<Actor>) | null,
+): void {
     testFallbackActor = actor ?? undefined;
 }
 
@@ -87,39 +84,15 @@ export const MISSING_ACTOR_MESSAGE =
     "run() called without an actor: wrap the caller in withActor(actor, fn), " +
     'or runAsSystem("<reason>", fn) for background work';
 
-function isTestRuntime(): boolean {
-    if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
-        return true;
-    }
-    return process.argv.includes("test");
-}
-
 /**
- * The actor run() should apply. Without one it throws under the test runner,
- * so a missing actor fails the suite, and in production it logs a warning
- * once per call site and carries on with the settings cleared.
+ * The actor run() should apply. Without one it throws, in production as in
+ * tests: a transaction that does not say who is acting would run with no
+ * user and no household, which row level security reads as "nobody".
  */
-export function actorForRun(): Actor | undefined {
-    const actor = currentActor() ?? testFallbackActor;
+export async function actorForRun(): Promise<Actor> {
+    const actor = currentActor();
     if (actor) return actor;
-    if (isTestRuntime()) throw new Error(MISSING_ACTOR_MESSAGE);
-    warnMissingActor();
-    return undefined;
-}
-
-function warnMissingActor(): void {
-    const err = new Error();
-    const stack = err.stack ?? "";
-    const line =
-        stack
-            .split("\n")
-            .find(
-                (l) =>
-                    l.includes(" at ") &&
-                    !l.includes("/db/actor.") &&
-                    !l.includes("/db/sql."),
-            ) ?? "unknown";
-    if (warnedMissingActorSites.has(line)) return;
-    warnedMissingActorSites.add(line);
-    console.warn(`[db] ${MISSING_ACTOR_MESSAGE}; ${line.trim()}`);
+    if (typeof testFallbackActor === "function") return testFallbackActor();
+    if (testFallbackActor) return testFallbackActor;
+    throw new Error(MISSING_ACTOR_MESSAGE);
 }

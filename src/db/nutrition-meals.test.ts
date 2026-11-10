@@ -17,7 +17,7 @@ import {
     type MealInput,
 } from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
-import { seedFood, seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedFood, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { raceOnUniqueKey } from "./testing/lock-race.js";
 import { setSqlForTests } from "./sql.js";
@@ -261,13 +261,19 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
             meal_type: "snack",
             logged_at: "2024-08-01T12:00:00.000Z",
         });
-        await insertMeal(otherUserId, {
-            description: "Theirs",
-            meal_type: "snack",
-            logged_at: "2024-08-01T12:00:00.000Z",
-        });
+        await asUser(otherUserId, () =>
+            insertMeal(otherUserId, {
+                description: "Theirs",
+                meal_type: "snack",
+                logged_at: "2024-08-01T12:00:00.000Z",
+            }),
+        );
         expect(await countMeals(userId)).toBe(1);
-        expect(await countMeals(otherUserId)).toBe(1);
+        // Someone outside the household: invisible to its owner.
+        expect(await countMeals(otherUserId)).toBe(0);
+        expect(await asUser(otherUserId, () => countMeals(otherUserId))).toBe(
+            1,
+        );
     });
 
     test("existingIdempotencyKeys and existingMealIds", async () => {

@@ -46,6 +46,22 @@ You can run several Foodable processes behind a load balancer as long as they sh
 
 Foodable talks to Postgres through `DATABASE_URL` and nothing else. Any Postgres works: Railway, Neon, RDS, a local `initdb` cluster, or the Docker Compose service below. The app owns its user accounts (`public.users`), so there is no separate auth service to run.
 
+### Row level security and `DATABASE_APP_URL`
+
+Every transaction tells Postgres who is acting: a signed-in user, the household bot token, or the system. Row level security policies (in `db/migrations/`) use that to keep each household's rows, and each person's own logs, out of anyone else's reach. They bind only the `foodable_app` role, which the migrations create without a password. The app connects with two pools:
+
+- **App pool**, `DATABASE_APP_URL`: everything done for a user or the household token. Point it at the same database as the `foodable_app` role.
+- **Owner pool**, `DATABASE_URL`: work the system does (sign-up and sign-in, OAuth, rate limits, the background sweeps), which no household boundary applies to. Migrations always run with `DATABASE_URL`.
+
+To turn it on, set the role's password once as the owner, then set the variable and redeploy:
+
+```bash
+psql "$DATABASE_URL" -c "alter role foodable_app password '<a long random password>'"
+# DATABASE_APP_URL = DATABASE_URL with foodable_app:<that password> as the user and password
+```
+
+When `DATABASE_APP_URL` is unset, both pools use `DATABASE_URL` and the policies are not enforced: that is the state before you set it, and unsetting it is the rollback. The server logs at boot which one it uses (it never prints the URL). A transaction that names no actor fails instead of running as nobody.
+
 ### How migrations work
 
 The schema lives only in `db/migrations/`, one SQL file per change, named `<14-digit timestamp>_<snake_case>.sql`. Apply them with:
@@ -211,6 +227,7 @@ The reads the household pages depend on (fridge, grocery, recipes, food catalog)
 | Variable                | Required     | Purpose                                                                                                                     |
 | ----------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`          | yes          | Postgres connection string                                                                                                  |
+| `DATABASE_APP_URL`      | recommended  | The database as `foodable_app`, so row level security applies (see [Database](#database))                                   |
 | `OAUTH_CLIENT_ID`       | yes          | MCP OAuth client id (`bun run generate-oauth-creds`)                                                                        |
 | `OAUTH_CLIENT_SECRET`   | yes          | MCP OAuth client secret                                                                                                     |
 | `SESSION_SECRET`        | production   | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). Setting it on a live deploy logs everyone out of the web app once. |
@@ -303,6 +320,7 @@ Set the same variables as `.env.example` on the app service:
 | Variable                | Required                | Purpose                                                                                     |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`          | yes                     | Reference the database service: `${{Postgres.DATABASE_URL}}` (private network)              |
+| `DATABASE_APP_URL`      | recommended             | The private database URL with `foodable_app` and its password as the user                   |
 | `OAUTH_CLIENT_ID`       | yes                     | MCP OAuth client id (`bun run generate-oauth-creds`)                                        |
 | `OAUTH_CLIENT_SECRET`   | yes                     | MCP OAuth client secret                                                                     |
 | `SESSION_SECRET`        | yes                     | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). New value logs web users out once. |

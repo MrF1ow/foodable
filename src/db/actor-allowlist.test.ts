@@ -7,6 +7,10 @@ import { relative } from "node:path";
 // fails this test until it is added (with a reason in review); a listed file
 // that stops calling it fails too, so the list never outgrows the code.
 const RUN_AS_SYSTEM_ALLOWLIST = [
+    // The household token writing a member's export archive.
+    "src/db/exports.ts",
+    // Adding and removing a member's login, and the first-household check.
+    "src/db/household.ts",
     // Reading an archive by its signed link, which has no session.
     "src/exports-route.ts",
     // Process-wide flag pin and snapshot cache, and its sweep.
