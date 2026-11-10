@@ -203,6 +203,9 @@ Enable them once per database. `pg_stat_statements` must be in `shared_preload_l
 ```sql
 create extension if not exists pg_stat_statements;
 alter system set log_min_duration_statement = '200ms';
+-- Never write bound values to the log: they include login tokens.
+alter system set log_parameter_max_length = 0;
+alter system set log_parameter_max_length_on_error = 0;
 select pg_reload_conf();
 ```
 
