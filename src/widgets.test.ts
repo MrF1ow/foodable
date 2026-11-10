@@ -154,8 +154,8 @@ test("minified widgets fit size budgets", async () => {
 });
 
 test("v2 assembly falls back to the v1 template when no v2 file exists", async () => {
-    const v1 = await getWidgetHtml("trends");
-    const v2 = await getWidgetHtml("trends", { v2: true });
+    const v1 = await getWidgetHtml("fridge");
+    const v2 = await getWidgetHtml("fridge", { v2: true });
     expect(v2).toBe(v1);
 });
 
@@ -711,8 +711,26 @@ test("v2 macro copy carries no unused strings", async () => {
 // household app seeds a frame: window.__WIDGET_DATA__ is painted straight
 // through render(), with no host and no chat footer. Returns the card markup.
 function renderWidget(html: string, data: unknown): string {
+    return mountWidget(html, data).html();
+}
+
+// renderWidget, plus a click on a range toggle button: the event reaches the
+// template's delegated listener on #root, whose target answers closest()
+// with a button carrying data-range, as a real tap inside the toggle does.
+function mountWidget(
+    html: string,
+    data: unknown,
+): { html: () => string; clickRange: (value: number) => void } {
+    type Listener = (e: unknown) => void;
+    const clicks: Listener[] = [];
     // appendChild: the no-host sample path adds the chat footer.
-    const root = { innerHTML: "", appendChild: () => {} };
+    const root = {
+        innerHTML: "",
+        appendChild: () => {},
+        addEventListener: (type: string, fn: Listener) => {
+            if (type === "click") clicks.push(fn);
+        },
+    };
     const noop = () => {};
     const document = {
         getElementById: (id: string) => (id === "root" ? root : null),
@@ -730,7 +748,19 @@ function renderWidget(html: string, data: unknown): string {
     for (const script of widgetScriptBodies(html)) {
         new Function("window", "document", script)(window, document);
     }
-    return root.innerHTML;
+    const clickRange = (value: number) => {
+        const button = {
+            getAttribute: (name: string) =>
+                name === "data-range" ? String(value) : null,
+            dataset: { range: String(value) },
+        };
+        const target = {
+            closest: (sel: string) =>
+                sel.includes("data-range") ? button : null,
+        };
+        for (const fn of clicks) fn({ target });
+    };
+    return { html: () => root.innerHTML, clickRange };
 }
 
 // A local calendar date, written the way the payloads carry it.
@@ -1118,4 +1148,243 @@ test("v2 meal-logged: meal block over the strip, and the edge days", async () =>
         }),
     );
     expect(similar).toContain("Not logged yet");
+});
+
+// ---- v2 trends and weight-trends ---------------------------------------------
+
+// "2026-07-11" shifted by `delta` calendar days.
+function shiftIso(date: string, delta: number): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + delta);
+    return d.toISOString().slice(0, 10);
+}
+
+const TRENDS_END = "2026-07-11"; // a Saturday
+const TRENDS_GOALS = {
+    calories: 1600,
+    protein_g: 160,
+    carbs_g: 200,
+    fat_g: 70,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    caffeine_mg: null,
+    water_ml: null,
+};
+
+// A get_trends day: logged with `protein` grams (calories ten times that),
+// or the tool's unlogged bucket (zeros, nulls) when protein is 0.
+function trendsDay(date: string, protein: number) {
+    const on = protein > 0;
+    return {
+        date,
+        calories: protein * 10,
+        protein_g: protein,
+        carbs_g: on ? 150 : 0,
+        fat_g: on ? 50 : 0,
+        fiber_g: on ? 20 : null,
+        sugar_g: on ? 30 : null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        water_ml: 0,
+    };
+}
+
+// Thirty days ending TRENDS_END. Last seven: 140 g protein except three days
+// ago (unlogged). The seven before: 70 g. The sixteen before that: nothing.
+//   7d:  avg 840/7 = 120,  6/7 = 86% logged
+//   14d: avg 1330/14 = 95, 13/14 = 93%
+//   30d: avg 1330/30 = 44, 13/30 = 43%
+// Current streak: today, yesterday, the day before = 3.
+function trendsPayload(extra: Record<string, unknown> = {}) {
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+        const protein = i === 3 ? 0 : i < 7 ? 140 : i < 14 ? 70 : 0;
+        days.push(trendsDay(shiftIso(TRENDS_END, -i), protein));
+    }
+    return {
+        end_date: TRENDS_END,
+        default_range: 7,
+        drink_unit: "us",
+        locale: "en",
+        goals: TRENDS_GOALS,
+        days,
+        ...extra,
+    };
+}
+
+const ringCount = (html: string) => (html.match(/class="rday/g) ?? []).length;
+const pressed = (html: string) =>
+    html.match(/data-range="(\d+)" aria-pressed="true"/)?.[1];
+
+test("v2 trends: sample, and the toggle re-slices rings, averages and the streak line", async () => {
+    const html = await v2Widget("trends");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Trends<");
+    expect(ringCount(sample)).toBeGreaterThan(0);
+    expect(sample).toContain("day streak");
+
+    const w = mountWidget(html, trendsPayload());
+    let out = w.html();
+    expect(pressed(out)).toBe("7");
+    expect(ringCount(out)).toBe(7);
+    // The latest day is the one on the inset surface.
+    expect(out).toMatch(/class="rday on"[^]*?<span>S<\/span><\/div><\/div>/);
+    expect(out).toContain(">120 / 160<");
+    expect(out).toContain(`>${n(1200)} / ${n(1600)}<`);
+    expect(out).toContain('<span class="fig-v">3</span>');
+    expect(out).toContain('<span class="fig-v">86%</span>');
+    expect(out).toContain("7-day average · all days");
+
+    w.clickRange(14);
+    out = w.html();
+    expect(pressed(out)).toBe("14");
+    expect(ringCount(out)).toBe(14);
+    expect(out).toContain(">95 / 160<");
+    expect(out).toContain('<span class="fig-v">93%</span>');
+    expect(out).toContain("14-day average · all days");
+
+    w.clickRange(30);
+    out = w.html();
+    expect(pressed(out)).toBe("30");
+    expect(ringCount(out)).toBe(30);
+    expect(out).toContain(">44 / 160<");
+    expect(out).toContain('<span class="fig-v">43%</span>');
+    // The streak is today's, whatever the window.
+    expect(out).toContain('<span class="fig-v">3</span>');
+});
+
+test("v2 trends: empty payloads, and a range with missing days", async () => {
+    const html = await v2Widget("trends");
+    const emptyMsg = "No meals or water logged in this range yet.";
+    expect(renderWidget(html, trendsPayload({ days: [] }))).toContain(emptyMsg);
+    // Every bucket unlogged is empty too (v1).
+    const blank = trendsPayload();
+    blank.days = blank.days.map((d) => trendsDay(d.date, 0));
+    expect(renderWidget(html, blank)).toContain(emptyMsg);
+
+    // Only three of the last seven days arrive at all: the window is still
+    // seven calendar days, a missing day reads as unlogged.
+    const gaps = trendsPayload({
+        days: [0, 2, 5].map((i) => trendsDay(shiftIso(TRENDS_END, -i), 140)),
+    });
+    const out = renderWidget(html, gaps);
+    expect(ringCount(out)).toBe(7);
+    expect(out).toContain(">60 / 160<"); // 420 / 7
+    expect(out).toContain('<span class="fig-v">43%</span>'); // 3 / 7
+    expect(out).toContain('<span class="fig-v">1</span>'); // today only
+
+    // No goals: averages show the figure alone, never "/ 0".
+    const noGoal = renderWidget(html, trendsPayload({ goals: null }));
+    expect(noGoal).toContain(">120<");
+    expect(noGoal).not.toContain(" / 0<");
+});
+
+// One decimal, the way the weight widget prints every weight.
+const w1 = (x: number) =>
+    x.toLocaleString(undefined, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+    });
+
+// Weigh-ins 28, 20, 12, 5, 2 and 0 days before TRENDS_END (11 Jul).
+function weightPayload(extra: Record<string, unknown> = {}) {
+    const readings: [number, number][] = [
+        [28, 186.0],
+        [20, 185.0],
+        [12, 184.0],
+        [5, 183.6],
+        [2, 183.0],
+        [0, 182.4],
+    ];
+    return {
+        end_date: TRENDS_END,
+        unit: "lb",
+        target: 175,
+        default_range: 30,
+        locale: "en",
+        days: readings.map(([ago, weight]) => ({
+            date: shiftIso(TRENDS_END, -ago),
+            weight,
+        })),
+        ...extra,
+    };
+}
+
+test("v2 weight-trends: sample, and the toggle re-slices figure, change and chart", async () => {
+    const html = await v2Widget("weight-trends");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Weight<");
+    expect(sample).toContain('class="wchart"');
+
+    const w = mountWidget(html, weightPayload());
+    let out = w.html();
+    // The tool sends at most 30 days, so the toggle offers what it can fill.
+    expect(out).toContain(">7d<");
+    expect(out).toContain(">14d<");
+    expect(out).toContain(">30d<");
+    expect(out).not.toContain(">1y<");
+    expect(pressed(out)).toBe("30");
+    expect(out).toContain(`<span class="fig-v xl">${w1(182.4)}</span>`);
+    expect(out).toContain(`↓ ${w1(3.6)} lb since Jun 13`);
+    expect(out).toContain("is-ok"); // closer to the target
+    expect(out).toContain(">Jun 13<");
+    expect(out).toContain(">Jul 11<");
+    expect(out).toContain('class="goalline"');
+    expect(out).toContain(`Goal ${w1(175)} lb · ${w1(7.4)} lb to lose`);
+    expect(out).toContain("6 weigh-ins");
+
+    w.clickRange(7);
+    out = w.html();
+    expect(pressed(out)).toBe("7");
+    expect(out).toContain(`↓ ${w1(1.2)} lb since Jul 6`);
+    expect(out).toContain("3 weigh-ins");
+
+    w.clickRange(14);
+    out = w.html();
+    expect(pressed(out)).toBe("14");
+    expect(out).toContain(`↓ ${w1(1.6)} lb since Jun 29`);
+    expect(out).toContain("4 weigh-ins");
+});
+
+test("v2 weight-trends: no target, one reading, an empty range and no data", async () => {
+    const html = await v2Widget("weight-trends");
+
+    const noTarget = renderWidget(html, weightPayload({ target: null }));
+    expect(noTarget).toContain("No target set");
+    expect(noTarget).not.toContain('class="goalline"');
+    // No target, no direction to judge the change by: neutral.
+    expect(noTarget).toMatch(/is-dim">↓/);
+
+    const one = renderWidget(
+        html,
+        weightPayload({ days: [{ date: TRENDS_END, weight: 182.4 }] }),
+    );
+    expect(one).toContain(`<span class="fig-v xl">${w1(182.4)}</span>`);
+    expect(one).toContain("need 2+ weigh-ins");
+    expect(one).toContain("1 weigh-in");
+    expect((one.match(/<circle/g) ?? []).length).toBe(1);
+
+    // Nothing in the last seven days: say so, keep the toggle to widen.
+    const w = mountWidget(
+        html,
+        weightPayload({
+            default_range: 7,
+            days: [
+                { date: shiftIso(TRENDS_END, -20), weight: 185 },
+                { date: shiftIso(TRENDS_END, -12), weight: 184 },
+            ],
+        }),
+    );
+    expect(w.html()).toContain(
+        "No weigh-ins in the last 7 days. Try a wider range.",
+    );
+    w.clickRange(30);
+    expect(w.html()).toContain(`<span class="fig-v xl">${w1(184)}</span>`);
+
+    expect(renderWidget(html, weightPayload({ days: [] }))).toContain(
+        "No weight logged in this range yet.",
+    );
 });

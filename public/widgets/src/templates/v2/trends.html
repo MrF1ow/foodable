@@ -1,0 +1,306 @@
+<!doctype html>
+<!--
+  Trends widget, v2 look (MCP Apps). Served for get_trends to callers with the
+  mcp-widgets-v2 flag on; the v1 template beside the templates/ folder stays
+  the default.
+
+  One card: "Trends" with the 7d / 14d / 30d toggle, a ring per day (protein,
+  carbs, fat against their goals; the latest day on the inset surface), the
+  macro legend, the trailing averages against goal, then "N day streak ·
+  P% days logged".
+
+  The tool sends up to 30 days of daily series; the toggle slices it in the
+  widget and re-renders, so switching ranges is instant and needs no tool
+  call. The window is the last N CALENDAR days ending on end_date: a day the
+  payload leaves out reads as an unlogged day, exactly the bucket the tool
+  sends for one (zeros), so it still pulls the average down. That is v1's
+  denominator — every calendar day, not just the logged ones (issue #70) —
+  and the label above the averages names it, so keep it if you touch them.
+
+  The streak is the current one: consecutive logged days ending on the latest
+  day of the payload, whatever window is selected (src/domain/insights.ts
+  counts it the same way).
+
+  Same structuredContent and coerce contract as the v1 template. Standalone
+  preview uses the SAMPLE below.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Trends</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            /*@include shared/v2/macros.js@*/
+
+            const T = {
+                title: "Trends",
+                loading: "Loading your trends…",
+                empty: "No meals or water logged in this range yet.",
+                windowAriaLabel: "Trend window",
+                rangeLabel: "{n}d",
+                avgAllDays: "{range}-day average · all days",
+                streak: "day streak ·",
+                logged: "days logged",
+            };
+            const RANGES = [7, 14, 30];
+            const INITIALS = ["S", "M", "T", "W", "T", "F", "S"];
+            // The keys the tool sends as 0 (not null) on an unlogged day; a
+            // day missing from the payload is filled the same way.
+            const ZERO_KEYS = [
+                "calories",
+                "protein_g",
+                "carbs_g",
+                "fat_g",
+                "water_ml",
+            ];
+
+            // ---- Dates --------------------------------------------------------
+            // Payload dates are calendar days already resolved in the user's
+            // timezone; they are read by parts on a UTC date so no timezone
+            // can move them.
+            function utcDay(s) {
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ""));
+                return m
+                    ? new Date(
+                          Date.UTC(
+                              Number(m[1]),
+                              Number(m[2]) - 1,
+                              Number(m[3]),
+                          ),
+                      )
+                    : null;
+            }
+            function shiftDate(s, delta) {
+                const d = utcDay(s);
+                if (!d) return String(s);
+                d.setUTCDate(d.getUTCDate() + delta);
+                return d.toISOString().slice(0, 10);
+            }
+            function initial(s) {
+                const d = utcDay(s);
+                return d ? INITIALS[d.getUTCDay()] : "";
+            }
+
+            // ---- Sample: the design's week, ending on a Saturday ---------------
+            function buildSample() {
+                const end = "2026-11-07";
+                const week = [
+                    [205, 210, 80],
+                    null,
+                    [200, 207, 84],
+                    [206, 205, 79],
+                    [205, 211, 81],
+                    [212, 212, 83],
+                    [96, 118, 42],
+                ];
+                const days = [];
+                for (let i = 29; i >= 0; i--) {
+                    const pcf =
+                        i < 7 ? week[6 - i] : i % 9 ? week[i % 7] : null;
+                    const date = shiftDate(end, -i);
+                    if (!pcf) {
+                        days.push({ date, ...unlogged() });
+                        continue;
+                    }
+                    const [p, c, f] = pcf;
+                    days.push({
+                        date,
+                        calories: p * 4 + c * 4 + f * 9,
+                        protein_g: p,
+                        carbs_g: c,
+                        fat_g: f,
+                        fiber_g: 30,
+                        sugar_g: 42,
+                        alcohol_g: null,
+                        caffeine_mg: 180,
+                        water_ml: 2400,
+                    });
+                }
+                return {
+                    end_date: end,
+                    default_range: 7,
+                    drink_unit: "us",
+                    locale: "en",
+                    goals: {
+                        calories: 2421,
+                        protein_g: 210,
+                        carbs_g: 213,
+                        fat_g: 81,
+                        fiber_g: 38,
+                        sugar_g: 50,
+                        alcohol_g: null,
+                        caffeine_mg: 400,
+                        water_ml: 3000,
+                    },
+                    days,
+                };
+            }
+            function unlogged() {
+                const d = {};
+                for (const k of MACROS.map((m) => m.key)) d[k] = null;
+                for (const k of ZERO_KEYS) d[k] = 0;
+                return d;
+            }
+            const SAMPLE = buildSample();
+
+            // v1's trailing average: sum over the days that carry the key.
+            // Calories and the three macros are never null on a day, so they
+            // divide by every calendar day in the window.
+            function avgOf(days, key) {
+                let sum = 0;
+                let seen = 0;
+                for (const d of days) {
+                    if (d[key] == null) continue;
+                    seen++;
+                    sum += d[key] || 0;
+                }
+                return seen ? sum / seen : null;
+            }
+
+            // Consecutive logged days ending on the last day of `days`.
+            function currentStreak(days) {
+                let n = 0;
+                for (let i = days.length - 1; i >= 0; i--) {
+                    if (!dayHasData(days[i])) break;
+                    n++;
+                }
+                return n;
+            }
+
+            // ---- State + rendering ----------------------------------------------
+            const STATE = { data: null, range: 7, byDate: null, end: null };
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            // The last `n` calendar days ending on STATE.end, a missing day
+            // filled as the tool's unlogged bucket.
+            function windowDays(n) {
+                const out = [];
+                for (let i = n - 1; i >= 0; i--) {
+                    const date = shiftDate(STATE.end, -i);
+                    out.push(STATE.byDate.get(date) || { date, ...unlogged() });
+                }
+                return out;
+            }
+
+            function render(data) {
+                STATE.data = data;
+                const root = document.getElementById("root");
+                // The tool sends a bucket for every calendar day (zeros for
+                // unlogged days), so an all-zero series is empty too.
+                const days = Array.isArray(data?.days)
+                    ? data.days.filter((d) => d && utcDay(d.date))
+                    : [];
+                if (!days.some(dayHasData)) {
+                    root.innerHTML = card(
+                        v2Header(T.title) +
+                            `<p class="note">${esc(T.empty)}</p>`,
+                    );
+                    return;
+                }
+                STATE.byDate = new Map(days.map((d) => [d.date, d]));
+                const last = days
+                    .map((d) => d.date)
+                    .sort()
+                    .at(-1);
+                STATE.end = utcDay(data.end_date) ? data.end_date : last;
+                STATE.range = RANGES.includes(data.default_range)
+                    ? data.default_range
+                    : 30;
+                paint();
+            }
+
+            function paint() {
+                const data = STATE.data;
+                const range = STATE.range;
+                const slice = windowDays(range);
+
+                const avg = {};
+                for (const m of MACROS) avg[m.key] = avgOf(slice, m.key);
+                const logged = slice.filter(dayHasData).length;
+                const pct = Math.round((logged / range) * 100);
+                const streak = currentStreak(windowDays(RANGES.at(-1)));
+
+                const seg = v2Seg(
+                    RANGES.map((r) => ({
+                        value: r,
+                        label: tpl(T.rangeLabel, { n: r }),
+                    })),
+                    range,
+                    T.windowAriaLabel,
+                );
+                const rings = ringsV2(
+                    slice.map((d) => ({
+                        label: initial(d.date),
+                        protein_g: d.protein_g,
+                        carbs_g: d.carbs_g,
+                        fat_g: d.fat_g,
+                    })),
+                    data.goals,
+                    slice.length - 1,
+                );
+
+                document.getElementById("root").innerHTML = card(
+                    v2Header(T.title, null, seg) +
+                        rings +
+                        macroLegendV2() +
+                        `<div class="grp">${v2Label(tpl(T.avgAllDays, { range }))}${averagesV2(avg, data.goals)}</div>` +
+                        v2Figures([
+                            { value: String(streak), unit: T.streak },
+                            { value: `${pct}%`, unit: T.logged },
+                        ]),
+                );
+            }
+
+            // Delegated on #root, which survives paint()'s innerHTML rewrites.
+            document.getElementById("root").addEventListener("click", (e) => {
+                const btn = e.target?.closest?.("button[data-range]");
+                if (!btn) return;
+                const n = Number(btn.getAttribute("data-range"));
+                if (RANGES.includes(n) && n !== STATE.range && STATE.data) {
+                    STATE.range = n;
+                    paint();
+                }
+            });
+
+            // ---- Rendering intake ----------------------------------------------
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.days)) return payload;
+                if (payload.structuredContent) return payload.structuredContent;
+                return null;
+            }
+
+            initWidget({
+                name: "trends-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render,
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>
