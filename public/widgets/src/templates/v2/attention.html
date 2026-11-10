@@ -1,0 +1,412 @@
+<!doctype html>
+<!--
+  Needs attention digest (MCP Apps). Served for list_notices when the
+  widget-attention flag is on. No v1 twin.
+
+  One card: grouped notice rows with Dismiss calling dismiss_notice when the
+  host supports server tools.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Needs attention</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .row-wrap .err {
+                margin: 4px 0 0;
+                padding: 0 4px;
+                font-size: 11px;
+                line-height: 14px;
+            }
+            button.act[aria-disabled="true"] {
+                pointer-events: none;
+                opacity: 0.45;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Needs attention",
+                loading: "Loading notices…",
+                empty: "Nothing needs attention.",
+                emptyFiltered: "Nothing matches this filter.",
+            };
+
+            const GROUP_ORDER = [
+                "expiring",
+                "running_low",
+                "recipe_gaps",
+                "household",
+                "other",
+            ];
+
+            // Design sample (FigCraft Widget/Needs attention).
+            const SAMPLE = {
+                count: 5,
+                notices: [
+                    {
+                        code: "fridge.expiring",
+                        severity: "warn",
+                        subject: {
+                            kind: "fridge_item",
+                            id: "fi-salmon",
+                            recipe_id: null,
+                        },
+                        related: [],
+                        message: "Salmon 1 lb expires tomorrow",
+                        action: null,
+                        title: "Salmon",
+                        detail: "tomorrow",
+                        detail_tone: "over",
+                        group_key: "expiring",
+                        group_label: "Expiring",
+                        dot_tone: "over",
+                        can_dismiss: true,
+                        dismiss_label: "Dismiss",
+                        dismiss: {
+                            code: "fridge.expiring",
+                            subject_kind: "fridge_item",
+                            subject_id: "fi-salmon",
+                            related_id: null,
+                        },
+                    },
+                    {
+                        code: "fridge.expiring",
+                        severity: "info",
+                        subject: {
+                            kind: "fridge_item",
+                            id: "fi-spinach",
+                            recipe_id: null,
+                        },
+                        related: [],
+                        message: "Baby spinach ½ bag expires in 2 days",
+                        action: null,
+                        title: "Baby spinach",
+                        detail: "2 days",
+                        detail_tone: "warn",
+                        group_key: "expiring",
+                        group_label: "Expiring",
+                        dot_tone: "warn",
+                        can_dismiss: true,
+                        dismiss_label: "Dismiss",
+                        dismiss: {
+                            code: "fridge.expiring",
+                            subject_kind: "fridge_item",
+                            subject_id: "fi-spinach",
+                            related_id: null,
+                        },
+                    },
+                    {
+                        code: "grocery.restocked",
+                        severity: "info",
+                        subject: {
+                            kind: "grocery_line",
+                            id: "gl-eggs",
+                            recipe_id: null,
+                        },
+                        related: [],
+                        message: "Added because Eggs expires Friday",
+                        action: null,
+                        title: "Eggs",
+                        detail: "Friday",
+                        detail_tone: null,
+                        group_key: "running_low",
+                        group_label: "Running low",
+                        dot_tone: "warn",
+                        can_dismiss: true,
+                        dismiss_label: "Dismiss",
+                        dismiss: {
+                            code: "grocery.restocked",
+                            subject_kind: "grocery_line",
+                            subject_id: "gl-eggs",
+                            related_id: null,
+                        },
+                    },
+                    {
+                        code: "recipe.no_nutrition",
+                        severity: "warn",
+                        subject: {
+                            kind: "recipe_ingredient",
+                            id: "ing-lemon",
+                            recipe_id: "rec-salmon",
+                        },
+                        related: [],
+                        message:
+                            "Lemon: no nutrition — add it, or pick a usual product",
+                        action: { label: "Pick usual product" },
+                        title: "Lemon",
+                        detail: "Sat · salmon",
+                        detail_tone: null,
+                        group_key: "recipe_gaps",
+                        group_label: "Missing for planned meals",
+                        dot_tone: "warn",
+                        can_dismiss: false,
+                        dismiss_label: "Dismiss",
+                        dismiss: null,
+                    },
+                    {
+                        code: "recipe.no_food",
+                        severity: "warn",
+                        subject: {
+                            kind: "recipe_ingredient",
+                            id: "ing-beans",
+                            recipe_id: "rec-chili",
+                        },
+                        related: [],
+                        message: "Kidney beans: not linked to a food",
+                        action: null,
+                        title: "Kidney beans",
+                        detail: "Sun · chili",
+                        detail_tone: null,
+                        group_key: "recipe_gaps",
+                        group_label: "Missing for planned meals",
+                        dot_tone: "warn",
+                        can_dismiss: false,
+                        dismiss_label: "Dismiss",
+                        dismiss: null,
+                    },
+                ],
+            };
+
+            let MODEL = null;
+            let API = null;
+            let rootEl = null;
+            const dismissing = new Set();
+            const DISMISS_SETTLE_MS = 500;
+            let dismissSettleUntil = 0;
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function noticeDismissKey(n) {
+                if (!n || !n.dismiss) return "";
+                const d = n.dismiss;
+                const rel = d.related_id == null ? "" : String(d.related_id);
+                return [d.code, d.subject_kind, d.subject_id, rel].join("|");
+            }
+
+            function rowNotice(n, showDismiss) {
+                const dot = n.dot_tone ? { tone: n.dot_tone } : {};
+                const key = noticeDismissKey(n);
+                const inFlight = key !== "" && dismissing.has(key);
+                const row = {
+                    dot,
+                    title: n.title,
+                    sub: n.detail,
+                    subTone:
+                        n.detail && n.detail_tone ? n.detail_tone : undefined,
+                    attrs: {
+                        "data-notice-key": key,
+                    },
+                };
+                if (showDismiss && n.can_dismiss && n.dismiss) {
+                    row.action = inFlight ? "…" : n.dismiss_label || "Dismiss";
+                    row.actionAttrs = {
+                        "data-dismiss-key": key,
+                        title: n.dismiss_label || "Dismiss",
+                        "aria-disabled": inFlight ? "true" : "false",
+                    };
+                }
+                const err = MODEL && MODEL.errors && MODEL.errors[key];
+                const errHtml = err
+                    ? `<p class="err note is-warn">${esc(err)}</p>`
+                    : "";
+                return `<div class="row-wrap" data-notice-key="${esc(key)}">${v2Row(
+                    row,
+                )}${errHtml}</div>`;
+            }
+
+            function renderBody(data, showDismiss) {
+                const notices = Array.isArray(data.notices) ? data.notices : [];
+                if (notices.length === 0) {
+                    const emptyCopy =
+                        typeof data.count === "number" && data.count > 0
+                            ? T.emptyFiltered
+                            : T.empty;
+                    return card(
+                        v2Header(T.title) +
+                            `<p class="note">${esc(emptyCopy)}</p>`,
+                    );
+                }
+                const byGroup = new Map();
+                notices.forEach((n) => {
+                    const key = n.group_key || "other";
+                    const list = byGroup.get(key) || {
+                        label: n.group_label || "Other",
+                        rows: [],
+                    };
+                    list.rows.push(rowNotice(n, showDismiss));
+                    byGroup.set(key, list);
+                });
+                const groups = [];
+                for (const key of GROUP_ORDER) {
+                    const g = byGroup.get(key);
+                    if (g) {
+                        groups.push(
+                            `<div class="grp">${v2Label(g.label)}<div class="rows">${g.rows.join("")}</div></div>`,
+                        );
+                        byGroup.delete(key);
+                    }
+                }
+                for (const g of byGroup.values()) {
+                    groups.push(
+                        `<div class="grp">${v2Label(g.label)}<div class="rows">${g.rows.join("")}</div></div>`,
+                    );
+                }
+                const count =
+                    typeof data.count === "number"
+                        ? String(data.count)
+                        : String(notices.length);
+                return card(v2Header(T.title, count) + groups.join(""));
+            }
+
+            function render(data) {
+                rootEl = document.getElementById("root");
+                if (!data || typeof data !== "object") {
+                    rootEl.innerHTML = card(
+                        v2Header(T.title) +
+                            `<p class="note">${esc(T.empty)}</p>`,
+                    );
+                    return;
+                }
+                MODEL = {
+                    count: data.count ?? 0,
+                    notices: Array.isArray(data.notices)
+                        ? data.notices.map((n) => ({ ...n }))
+                        : [],
+                    errors: MODEL && MODEL.errors ? { ...MODEL.errors } : {},
+                };
+                const showDismiss = !!(API && API.canCallTools);
+                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+            }
+
+            function removeNoticeByKey(key) {
+                if (!MODEL || !key) return;
+                const before = MODEL.notices.length;
+                MODEL.notices = MODEL.notices.filter(
+                    (n) => noticeDismissKey(n) !== key,
+                );
+                if (MODEL.notices.length === before) return;
+                MODEL.count = Math.max(
+                    0,
+                    (typeof MODEL.count === "number"
+                        ? MODEL.count
+                        : MODEL.notices.length + 1) - 1,
+                );
+                if (MODEL.errors[key]) delete MODEL.errors[key];
+                const showDismiss = !!(API && API.canCallTools);
+                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+            }
+
+            function setRowError(key, message) {
+                if (!MODEL) return;
+                MODEL.errors[key] = message;
+                const showDismiss = !!(API && API.canCallTools);
+                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+            }
+
+            async function onDismissClick(key) {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (!key || dismissing.has(key)) return;
+                const notice = MODEL.notices.find(
+                    (n) => noticeDismissKey(n) === key,
+                );
+                if (!notice || !notice.dismiss) return;
+                const args = { ...notice.dismiss };
+                if (args.related_id == null) delete args.related_id;
+                if (MODEL.errors[key]) delete MODEL.errors[key];
+                dismissing.add(key);
+                const showDismiss = !!(API && API.canCallTools);
+                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+                try {
+                    const res = await API.callTool("dismiss_notice", args);
+                    const sc =
+                        (res && res.structuredContent) ||
+                        (res && res.result && res.result.structuredContent);
+                    const dismissed = sc && sc.dismissed === true;
+                    if (dismissed) {
+                        dismissing.delete(key);
+                        dismissSettleUntil = Date.now() + DISMISS_SETTLE_MS;
+                        removeNoticeByKey(key);
+                        return;
+                    }
+                    const text =
+                        (res &&
+                            res.content &&
+                            res.content[0] &&
+                            res.content[0].text) ||
+                        "Could not dismiss.";
+                    dismissing.delete(key);
+                    setRowError(key, text);
+                } catch (e) {
+                    dismissing.delete(key);
+                    setRowError(
+                        key,
+                        e && e.message
+                            ? String(e.message)
+                            : "Could not dismiss.",
+                    );
+                }
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (
+                    typeof payload.count === "number" &&
+                    Array.isArray(payload.notices)
+                ) {
+                    return payload;
+                }
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "attention-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render,
+                sample: SAMPLE,
+                onReady(api) {
+                    API = api;
+                    if (MODEL) render(MODEL);
+                    const root = document.getElementById("root");
+                    root.addEventListener("click", (e) => {
+                        const btn =
+                            e.target && e.target.closest
+                                ? e.target.closest("button.act")
+                                : null;
+                        if (!btn) return;
+                        if (btn.disabled) return;
+                        if (btn.getAttribute("aria-disabled") === "true")
+                            return;
+                        if (Date.now() < dismissSettleUntil) return;
+                        const raw = btn.getAttribute("data-dismiss-key");
+                        if (raw == null || raw === "") return;
+                        e.preventDefault();
+                        onDismissClick(raw);
+                    });
+                },
+            });
+        </script>
+    </body>
+</html>

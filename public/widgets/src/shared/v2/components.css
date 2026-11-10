@@ -491,7 +491,8 @@
     min-width: 0;
     border-bottom: 1px solid var(--line);
 }
-.row:last-child {
+.row:last-child,
+.row-wrap:last-child > .row {
     border-bottom: 0;
 }
 .row-t {

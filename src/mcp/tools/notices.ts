@@ -14,9 +14,15 @@ import {
 } from "../../domain/notices-for.js";
 import { needsAttentionCount } from "../../domain/notices.js";
 import { NoticeDismissError } from "../../domain/notice-dismissals.js";
-import { NOTICE_SCHEMA, noticeToWire, type ToolContext } from "../shared.js";
+import {
+    NOTICE_SCHEMA,
+    noticeToWire,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
+    type ToolContext,
+} from "../shared.js";
 
-const LIST_NOTICES_OUTPUT_SCHEMA = z.object({
+export const LIST_NOTICES_OUTPUT_SCHEMA = z.object({
     count: z.number(),
     notices: z.array(NOTICE_SCHEMA),
 });
@@ -46,6 +52,15 @@ function noticeDeps(): NoticesForDeps {
 export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, actorUserId, analytics } = ctx;
 
+    registerV2OnlyWidgetResource(server, ctx, {
+        key: "attention",
+        resourceName: "attention",
+        title: "Needs attention",
+        description:
+            "Household notices grouped for the Needs attention digest card.",
+        flag: "widget-attention",
+    });
+
     server.registerTool(
         "list_notices",
         {
@@ -64,6 +79,10 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                 subject_kind: SUBJECT_KIND_SCHEMA.optional(),
             }),
             outputSchema: LIST_NOTICES_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "attention", {
+                v2: true,
+                flag: "widget-attention",
+            }),
         },
         async (input) => {
             return withAnalytics(

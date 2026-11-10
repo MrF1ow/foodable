@@ -31,6 +31,9 @@ flags:
     mcp-widgets-v2:
         default: false
         rules: []
+    widget-attention:
+        default: false
+        rules: []
     flags-epoch:
         default: 0
         rules: []

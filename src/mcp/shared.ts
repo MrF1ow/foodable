@@ -72,7 +72,14 @@ import { effectiveFoodsByIds } from "../domain/foods.js";
 import type { Food, OnSimilar, SimilarFoodsEntry } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
-import { noticeActionFor, noticeSentence } from "../copy/notices.js";
+import {
+    noticeActionFor,
+    noticeCodeDismissible,
+    noticeDismissLabel,
+    noticeDismissPair,
+    noticeDigestWire,
+    noticeSentence,
+} from "../copy/notices.js";
 import type { FlagName } from "../flags.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { getWidgetHtml, widgetTemplateName } from "../widgets.js";
@@ -112,6 +119,7 @@ export const WEIGHT_TRENDS_WIDGET_URI = widgetUri("weight-trends.html");
 export const IMPORT_MEALS_WIDGET_URI = widgetUri("import-meals.html");
 export const GROCERY_LIST_WIDGET_URI = widgetUri("grocery-list.html");
 export const FRIDGE_WIDGET_URI = widgetUri("fridge.html");
+export const ATTENTION_WIDGET_URI = widgetUri("attention.html", true);
 
 export type WidgetResourceDef = {
     key: string;
@@ -119,6 +127,54 @@ export type WidgetResourceDef = {
     title: string;
     description: string;
 };
+
+export type V2OnlyWidgetResourceDef = WidgetResourceDef & { flag: FlagName };
+
+/** Register a v2-only ui:// resource when `flag` is on for this caller. */
+export function registerV2OnlyWidgetResource(
+    server: McpServer,
+    ctx: ToolContext,
+    def: V2OnlyWidgetResourceDef,
+): void {
+    if (!isViewerFlagOn(ctx.flags, def.flag)) return;
+    const { key, resourceName, title, description } = def;
+    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
+    server.registerResource(
+        resourceName,
+        widgetUriForKey(key, true),
+        listing,
+        async (uri) => ({
+            contents: [
+                {
+                    uri: uri.href,
+                    mimeType: APP_UI_MIME_TYPE,
+                    text: await getWidgetHtml(key, { v2: true }),
+                    _meta: { ui: { prefersBorder: true } },
+                },
+            ],
+        }),
+    );
+}
+
+/** Link a tool to a widget, optionally gated and forced to a v2 URI. */
+export function uiMetaForKey(
+    ctx: Pick<ToolContext, "widgetsEnabled" | "flags">,
+    widgetKey: string,
+    opts?: { v2?: boolean; flag?: FlagName },
+): Record<string, unknown> {
+    if (!ctx.widgetsEnabled) return {};
+    if (opts?.flag && !isViewerFlagOn(ctx.flags, opts.flag)) return {};
+    const uri = widgetUriForKey(
+        widgetKey,
+        opts?.v2 ?? isViewerFlagOn(ctx.flags, "mcp-widgets-v2"),
+    );
+    return {
+        _meta: {
+            ui: { resourceUri: uri },
+            "openai/outputTemplate": uri,
+        },
+    };
+}
 
 /** Register the v1 ui:// resource and, when mcp-widgets-v2 is on, its v2 twin. */
 export function registerWidgetResource(
@@ -210,11 +266,52 @@ export const NOTICE_SCHEMA = z.object({
             "Full sentence for the model and UI, from the notice registry.",
         ),
     action: z.object({ label: z.string() }).nullable(),
+    title: z.string(),
+    detail: z.string().nullable(),
+    group_key: z.string(),
+    group_label: z.string(),
+    dot_tone: z.enum(["over", "warn", "dim"]).nullable(),
+    detail_tone: z.enum(["over", "warn", "dim"]).nullable(),
+    can_dismiss: z.boolean(),
+    dismiss_label: z.string(),
+    dismiss: z
+        .object({
+            code: z.string(),
+            subject_kind: NOTICE_SUBJECT_KIND,
+            subject_id: z.string(),
+            related_id: z.string().nullable(),
+        })
+        .nullable(),
 });
 export type WireNotice = z.infer<typeof NOTICE_SCHEMA>;
 
+export const NOTICE_DIGEST_GROUP_ORDER = [
+    "expiring",
+    "running_low",
+    "recipe_gaps",
+    "household",
+    "other",
+] as const;
+
+function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
+    if (!noticeCodeDismissible(notice.code)) return null;
+    let related_id: string | null = null;
+    if (noticeDismissPair(notice.code)) {
+        const foodRel = notice.related.find((r) => r.kind === "food");
+        related_id = foodRel?.id ?? null;
+    }
+    return {
+        code: notice.code,
+        subject_kind: notice.subject.kind,
+        subject_id: notice.subject.id,
+        related_id,
+    };
+}
+
 export function noticeToWire(notice: Notice): WireNotice {
     const subject = notice.subject;
+    const digest = noticeDigestWire(notice);
+    const canDismiss = noticeCodeDismissible(notice.code);
     return {
         code: notice.code,
         severity: notice.severity,
@@ -234,6 +331,15 @@ export function noticeToWire(notice: Notice): WireNotice {
             const row = noticeActionFor(notice);
             return row ? { label: row.label } : null;
         })(),
+        title: digest.title,
+        detail: digest.detail,
+        group_key: digest.group_key,
+        group_label: digest.group_label,
+        dot_tone: digest.dot_tone,
+        detail_tone: digest.detail_tone,
+        can_dismiss: canDismiss,
+        dismiss_label: noticeDismissLabel(notice.code),
+        dismiss: noticeWireDismiss(notice),
     };
 }
 

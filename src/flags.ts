@@ -40,6 +40,15 @@ export const FLAGS = {
         removeWhen:
             "v2 widgets are on for everyone and the v1 widget URIs are retired.",
     },
+    "widget-attention": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Needs attention digest card for list_notices.",
+        removeWhen:
+            "the attention widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

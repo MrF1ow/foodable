@@ -531,4 +531,5 @@ test("formatMissingNutrientList matches 1, 2, 3+ nutrients", () => {
     expect(formatMissingNutrientList(one)).toBe("protein");
     expect(formatMissingNutrientList(two)).toBe("protein and fat");
     expect(formatMissingNutrientList(three)).toBe("calories, protein and fat");
+    expect(formatMissingNutrientList([])).toBe("");
 });

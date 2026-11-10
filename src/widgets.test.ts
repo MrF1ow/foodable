@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, jest, afterEach, setSystemTime } from "bun:test";
 import {
     assembleSource,
     getWidgetHtml,
@@ -1924,4 +1924,378 @@ test("import-meals v2: file names and cells reach the markup escaped", async () 
     await w.click("preview");
     expect(w.html()).not.toContain("<script>");
     expect(w.html()).not.toContain("<img");
+});
+
+// ---- attention v2 -----------------------------------------------------------
+
+type DismissArgs = {
+    code: string;
+    subject_kind: string;
+    subject_id: string;
+    related_id?: string | null;
+};
+
+async function mountAttention(
+    html: string,
+    opts: {
+        data: { count: number; notices: object[] };
+        canCallTools?: boolean;
+        /** Test-only: click handler still respects aria-disabled unless set. */
+        bypassAriaDisabled?: boolean;
+        reply?: (args: DismissArgs) =>
+            | {
+                  structuredContent: { dismissed: boolean };
+                  content?: { type: string; text: string }[];
+              }
+            | Promise<{
+                  structuredContent: { dismissed: boolean };
+                  content?: { type: string; text: string }[];
+              }>;
+    },
+) {
+    type Fn = (e: unknown) => void;
+    const calls: DismissArgs[] = [];
+    const listeners: Record<string, Fn[]> = {};
+    const windowListeners: Fn[] = [];
+    const root = {
+        innerHTML: "",
+        appendChild: () => {},
+        addEventListener: (type: string, fn: Fn) =>
+            (listeners[type] ??= []).push(fn),
+        querySelector: () => null,
+    };
+    const noop = () => {};
+    const document = {
+        getElementById: (id: string) => (id === "root" ? root : null),
+        documentElement: {
+            setAttribute: noop,
+            style: {} as object,
+            getBoundingClientRect: () => ({ height: 120 }),
+        },
+        body: {},
+        addEventListener: noop,
+        createElement: () => ({
+            className: "",
+            textContent: "",
+            style: {},
+        }),
+    };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const deliver = (data: object) => {
+        for (const fn of windowListeners) fn({ source: host, data });
+    };
+    const host = {
+        postMessage(msg: {
+            id?: number;
+            method: string;
+            params: { name?: string; arguments?: DismissArgs };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: opts.data },
+                });
+            } else if (
+                method === "tools/call" &&
+                params.name === "dismiss_notice"
+            ) {
+                const args = structuredClone(params.arguments!);
+                calls.push(args);
+                void (async () => {
+                    const out = (await opts.reply?.(args)) ?? {
+                        structuredContent: { dismissed: true },
+                        content: [{ type: "text", text: "Notice dismissed." }],
+                    };
+                    deliver({
+                        jsonrpc: "2.0",
+                        id,
+                        result: {
+                            content: out.content ?? [
+                                { type: "text", text: "ok" },
+                            ],
+                            structuredContent: out.structuredContent,
+                        },
+                    });
+                })();
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    await tick();
+    await tick();
+    const mount = {
+        html: () => root.innerHTML,
+        calls,
+        clickDismissKey(key: string) {
+            for (const fn of listeners.click ?? []) {
+                fn({
+                    preventDefault: noop,
+                    target: {
+                        closest: (sel: string) =>
+                            sel === "button.act"
+                                ? {
+                                      disabled: false,
+                                      getAttribute: (n: string) => {
+                                          if (n === "data-dismiss-key")
+                                              return key;
+                                          if (n === "aria-disabled") {
+                                              if (opts.bypassAriaDisabled)
+                                                  return "false";
+                                              const re = new RegExp(
+                                                  `data-dismiss-key="${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*aria-disabled="([^"]+)"`,
+                                              );
+                                              const m =
+                                                  root.innerHTML.match(re);
+                                              return m ? m[1]! : "false";
+                                          }
+                                          return null;
+                                      },
+                                  }
+                                : null,
+                    },
+                });
+            }
+        },
+        async dismissKey(key: string) {
+            mount.clickDismissKey(key);
+            for (let i = 0; i < 8; i++) await tick();
+        },
+        async doubleDismissKey(key: string) {
+            mount.clickDismissKey(key);
+            mount.clickDismissKey(key);
+            for (let i = 0; i < 12; i++) await tick();
+        },
+    };
+    return mount;
+}
+
+const ATTENTION_DISMISS_A = "fridge.expiring|fridge_item|fi-1|";
+const ATTENTION_DISMISS_B = "fridge.expiring|fridge_item|fi-2|";
+
+const ATTENTION_SAMPLE = {
+    count: 2,
+    notices: [
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: {
+                kind: "fridge_item",
+                id: "fi-1",
+                recipe_id: null,
+            },
+            related: [],
+            message: "Test &lt;img&gt;",
+            action: null,
+            title: "Baby <img> spinach",
+            detail: "tomorrow",
+            detail_tone: "over",
+            group_key: "expiring",
+            group_label: "Expiring",
+            dot_tone: "over",
+            can_dismiss: true,
+            dismiss_label: "Dismiss",
+            dismiss: {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: "fi-1",
+                related_id: null,
+            },
+        },
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: {
+                kind: "fridge_item",
+                id: "fi-2",
+                recipe_id: null,
+            },
+            related: [],
+            message: "Second item",
+            action: null,
+            title: "Second row",
+            detail: "2 days",
+            detail_tone: "warn",
+            group_key: "expiring",
+            group_label: "Expiring",
+            dot_tone: "warn",
+            can_dismiss: true,
+            dismiss_label: "Dismiss",
+            dismiss: {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: "fi-2",
+                related_id: null,
+            },
+        },
+    ],
+};
+
+test("attention v2 sample renders grouped rows", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, ATTENTION_SAMPLE);
+    expect(body).toContain("Expiring");
+    expect(body).not.toContain("Salmon");
+    expect(body).toContain("Baby &lt;img&gt; spinach");
+});
+
+test("attention v2: Dismiss calls dismiss_notice and removes the row", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    expect(w.html()).toContain('class="act"');
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls[0]).toEqual({
+        code: "fridge.expiring",
+        subject_kind: "fridge_item",
+        subject_id: "fi-1",
+    });
+    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.html()).toContain("Second row");
+    expect(w.html()).toContain('class="hd-meta">1</span>');
+});
+
+test("attention v2: rapid double Dismiss removes only the targeted row", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        bypassAriaDisabled: true,
+    });
+    await w.doubleDismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls.length).toBe(1);
+    expect(w.calls[0]?.subject_id).toBe("fi-1");
+    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.html()).toContain("Second row");
+});
+
+test("attention v2: Dismiss is aria-disabled while the call is in flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+        release = r;
+    });
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        reply: async () => {
+            await gate;
+            return {
+                structuredContent: { dismissed: true },
+                content: [{ type: "text", text: "Notice dismissed." }],
+            };
+        },
+    });
+    w.clickDismissKey(ATTENTION_DISMISS_A);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.html()).toMatch(
+        new RegExp(
+            `data-dismiss-key="${ATTENTION_DISMISS_A.replace(/\|/g, "\\|")}"[^>]*aria-disabled="true"`,
+        ),
+    );
+    release();
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0));
+});
+
+afterEach(() => {
+    jest.useRealTimers();
+    setSystemTime();
+});
+
+test("attention v2: after a fast dismiss, settle window blocks the next row", async () => {
+    const t0 = Date.now();
+    setSystemTime(t0);
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls.length).toBe(1);
+    setSystemTime(t0 + 100);
+    w.clickDismissKey(ATTENTION_DISMISS_B);
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(w.calls.length).toBe(1);
+    setSystemTime(t0 + 500);
+    await w.dismissKey(ATTENTION_DISMISS_B);
+    expect(w.calls.length).toBe(2);
+    expect(w.calls[1]?.subject_id).toBe("fi-2");
+});
+
+test("attention v2: a failed dismiss keeps the row and shows the error", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        reply: () => ({
+            structuredContent: { dismissed: false },
+            content: [{ type: "text", text: "Could not dismiss." }],
+        }),
+    });
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.html()).toContain("Baby &lt;img&gt; spinach");
+    const html = w.html();
+    expect(html).toContain('class="err note is-warn"');
+    expect(html).toMatch(
+        /<div class="row-wrap"[^>]*>[\s\S]*?<div class="row"[\s\S]*?<\/div>\s*<p class="err note is-warn">Could not dismiss\.<\/p>/,
+    );
+});
+
+test("attention v2: empty filter copy when count is positive", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, { count: 3, notices: [] });
+    expect(body).toContain("Nothing matches this filter.");
+});
+
+test("attention v2: urgency detail tone without toning stock detail", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, {
+        count: 2,
+        notices: [
+            {
+                ...ATTENTION_SAMPLE.notices[0],
+                detail: "9 left",
+                detail_tone: null,
+                dot_tone: "warn",
+            },
+            ATTENTION_SAMPLE.notices[1],
+        ],
+    });
+    expect(body).toContain("9 left");
+    expect(body).not.toContain('row-s is-warn">9 left');
+    expect(body).not.toContain('row-s is-over">9 left');
+    expect(body).toContain('row-s is-warn">2 days');
+});
+
+test("attention v2: canCallTools false hides every Dismiss", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        canCallTools: false,
+    });
+    expect(w.html()).not.toContain('class="act"');
+});
+
+test("attention v2: notice text is escaped", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, ATTENTION_SAMPLE);
+    expect(body).not.toContain("<script>");
+    expect(body).not.toContain("<img");
+    expect(body).toContain("&lt;img&gt;");
 });

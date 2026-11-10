@@ -78,7 +78,9 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
 
 // Widget keys with a v2 template but no v1 twin (later phases). v1 getWidgetHtml
 // does not resolve these keys; MCP v2 URIs may once templates land.
-export const WIDGET_TEMPLATES_V2: Record<string, string> = {};
+export const WIDGET_TEMPLATES_V2: Record<string, string> = {
+    attention: "attention.html",
+};
 
 /** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */
 export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
