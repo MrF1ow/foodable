@@ -34,6 +34,7 @@ begin
     foreach t in array array[
         'meal_items',
         'meals',
+        'nutrition_goal_days',
         'nutrition_goals',
         'water_log',
         'weight_log'
@@ -53,9 +54,9 @@ begin
         );
     end loop;
 
-    -- Per-day goal overrides and profiles are read the same way. Nothing in
-    -- the app writes goal overrides, so they get no write policy.
-    foreach t in array array['nutrition_goal_days', 'profiles']
+    -- Profiles are read the same way; their writes are split by command
+    -- below so one member can never edit another's profile.
+    foreach t in array array['profiles']
     loop
         execute format(
             $policy$

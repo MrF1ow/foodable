@@ -45,13 +45,13 @@ const HOUSEHOLD_OF: Record<string, string | null> = {
 const MEMBER_WRITE_TABLES = [
     "meal_items",
     "meals",
+    "nutrition_goal_days",
     "nutrition_goals",
     "water_log",
     "weight_log",
 ];
-// Read the same way; written only by the person (profiles, plus the household
-// bot token) or not at all (goal overrides).
-const READ_ONLY_FOR_PEERS = ["nutrition_goal_days", "profiles"];
+// Read the same way; written only by the person (plus the household bot token).
+const READ_ONLY_FOR_PEERS = ["profiles"];
 const PERSONAL_TABLES = [...MEMBER_WRITE_TABLES, ...READ_ONLY_FOR_PEERS].sort();
 
 function personRows(user: string): string {
@@ -361,7 +361,7 @@ describeDb(
             ).toEqual({ ok: true, out: "1" });
         });
 
-        test("a member reads but never edits another member's profile or goal overrides", async () => {
+        test("a member reads but never edits another member's profile", async () => {
             const { pg } = ctx();
             for (const table of READ_ONLY_FOR_PEERS) {
                 for (const sql of [
@@ -402,14 +402,6 @@ describeDb(
                     ),
                 ),
             ).toEqual({ ok: true, out: "1" });
-            // Goal overrides have no write path in the app.
-            expect(
-                await asApp(
-                    pg,
-                    tokenA,
-                    updateOf("nutrition_goal_days", USER_A2),
-                ),
-            ).toEqual({ ok: true, out: "0" });
         });
 
         test("leaving the household ends another member's reach", async () => {

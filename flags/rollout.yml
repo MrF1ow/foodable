@@ -22,6 +22,12 @@ flags:
     restock-runner:
         default: true
         rules: []
+    mcp-rate-product:
+        default: false
+        rules: []
+    mcp-household-digest:
+        default: false
+        rules: []
     flags-epoch:
         default: 0
         rules: []
