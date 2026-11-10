@@ -1187,22 +1187,24 @@ export function computeWeeklyDigest(
     lines.push(line("Water", avgWater, " ml", waterT, "target"));
 
     // Best and worst day: per-day calorie targets when every logged day has one.
-    if (logged.length > 0) {
-        const perDayTargets = logged.every((b) => {
+    // Only days with meals count: a water-only day is not a 0 kcal day.
+    const mealDays = logged.filter((b) => b.meals.length > 0);
+    if (mealDays.length > 0) {
+        const perDayTargets = mealDays.every((b) => {
             const t = goalNumber(goalsOn, b.date, "daily_calories");
             return t != null && t > 0;
         });
         let best: DailyBucket;
         let worst: DailyBucket;
         if (perDayTargets) {
-            best = logged.reduce((a, b) => {
+            best = mealDays.reduce((a, b) => {
                 const ta = goalNumber(goalsOn, a.date, "daily_calories")!;
                 const tb = goalNumber(goalsOn, b.date, "daily_calories")!;
                 return Math.abs(a.calories - ta) <= Math.abs(b.calories - tb)
                     ? a
                     : b;
             });
-            worst = logged.reduce((a, b) => {
+            worst = mealDays.reduce((a, b) => {
                 const ta = goalNumber(goalsOn, a.date, "daily_calories")!;
                 const tb = goalNumber(goalsOn, b.date, "daily_calories")!;
                 return Math.abs(a.calories - ta) >= Math.abs(b.calories - tb)
@@ -1210,8 +1212,10 @@ export function computeWeeklyDigest(
                     : b;
             });
         } else {
-            best = logged.reduce((a, b) => (a.calories < b.calories ? a : b));
-            worst = logged.reduce((a, b) => (a.calories > b.calories ? a : b));
+            best = mealDays.reduce((a, b) => (a.calories < b.calories ? a : b));
+            worst = mealDays.reduce((a, b) =>
+                a.calories > b.calories ? a : b,
+            );
         }
         lines.push("");
         lines.push(

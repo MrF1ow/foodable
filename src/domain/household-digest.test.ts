@@ -952,3 +952,84 @@ test("a usual supply with stock on hand is not suggested", () => {
         } as never),
     ).toEqual([]);
 });
+
+test("the member summary never names a water-only day as best or roughest", () => {
+    const meal = {
+        id: "m1",
+        user_id: "u1",
+        logged_at: "2026-06-02T12:00:00Z",
+        meal_type: "lunch",
+        description: "test",
+        calories: 1500,
+        protein_g: 30,
+        carbs_g: 50,
+        fat_g: 20,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+    };
+    const water = {
+        id: "w1",
+        user_id: "u1",
+        amount_ml: 500,
+        logged_at: "2026-06-03T12:00:00Z",
+        notes: null,
+        created_at: "2026-06-03T12:00:00Z",
+        idempotency_key: null,
+    };
+    const buckets = buildDailyBuckets(
+        [meal] as never,
+        [water] as never,
+        "2026-06-01",
+        "2026-06-07",
+        "UTC",
+    );
+    const text = computeWeeklyDigest(buckets, {
+        daily_calories: 2000,
+        daily_protein_g: 150,
+    } as never);
+    expect(text).toContain("Best day: 2026-06-02");
+    expect(text).toContain("Roughest day: 2026-06-02");
+    expect(text).not.toContain("2026-06-03 (0 kcal");
+});
+
+test("ran-out list is ordered by time even across whole-second timestamps", () => {
+    const decrement = (id: string, foodId: string, createdAt: string) => ({
+        id,
+        householdId: "hh-1",
+        foodId,
+        fridgeItemId: null,
+        delta: -1,
+        unit: "each",
+        reason: "eat" as const,
+        groceryLineId: null,
+        recipeId: null,
+        mealId: null,
+        actorUserId: null,
+        createdAt,
+    });
+    const purchase = (id: string, foodId: string, createdAt: string) => ({
+        ...decrement(id, foodId, createdAt),
+        delta: 1,
+        reason: "purchase" as const,
+    });
+    const ranOut = ranOutInWindow(
+        {
+            movements: [
+                purchase("p1", "milk", "2026-06-03T09:00:00+00:00"),
+                purchase("p2", "eggs", "2026-06-03T09:00:00+00:00"),
+                decrement("e1", "milk", "2026-06-03T10:00:00+00:00"),
+                decrement("e2", "eggs", "2026-06-03T10:00:00.5+00:00"),
+            ],
+            fridgeItems: [],
+            displayNameByFoodId: new Map([
+                ["milk", "Milk"],
+                ["eggs", "Eggs"],
+            ]),
+        },
+        { from: "2026-06-01", to: "2026-06-07" },
+        "UTC",
+    );
+    expect(ranOut.map((r) => r.displayName)).toEqual(["Milk", "Eggs"]);
+});

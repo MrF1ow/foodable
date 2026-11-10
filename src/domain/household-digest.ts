@@ -374,7 +374,7 @@ export function ranOutInWindow(
 
     return out.sort(
         (a, b) =>
-            a.at.localeCompare(b.at) ||
+            Date.parse(a.at) - Date.parse(b.at) ||
             a.displayName.localeCompare(b.displayName) ||
             a.movementId.localeCompare(b.movementId),
     );
