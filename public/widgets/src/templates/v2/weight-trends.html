@@ -1,0 +1,428 @@
+<!doctype html>
+<!--
+  Weight-trends widget, v2 look (MCP Apps). Served for get_weight_trends to
+  callers with the mcp-widgets-v2 flag on; the v1 template beside the
+  templates/ folder stays the default.
+
+  One card: "Weight" with the range toggle, the latest reading as the big
+  figure with its change since the first weigh-in in the window, the weight
+  line over an accent fade with date ticks under it, then the target line.
+
+  The tool sends up to 30 days of per-day weight (same-day weigh-ins
+  averaged); the toggle filters it in the widget and re-renders, with no tool
+  call. It offers only ranges the payload can fill: 7, 14 and 30 days, plus 90
+  days or a year should a payload ever reach further back than 30 or 90.
+
+  As in v1, the weight axis is scaled to the data (and the target), not to
+  zero, so small changes stay visible; the target is a dashed line. The x axis
+  is time: readings sit at their date, so a gap between weigh-ins reads as one.
+  There is no pace or forecast: the payload carries none and v1 shows none.
+
+  Same structuredContent and coerce contract as the v1 template. Standalone
+  preview uses the SAMPLE below.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Weight Trends</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            /* The weight line, as the design draws it: 84px of chart across
+               the card, ticks in 11px tertiary under it. */
+            .wchart {
+                display: block;
+                width: 100%;
+                height: auto;
+                overflow: visible;
+            }
+            .wline {
+                fill: none;
+                stroke: var(--accent-fill);
+                stroke-width: 2;
+                stroke-linejoin: round;
+                stroke-linecap: round;
+            }
+            .wdot {
+                fill: var(--accent-fill);
+            }
+            .wstop {
+                stop-color: var(--accent-fill);
+            }
+            .goalline {
+                stroke: var(--text-tertiary);
+                stroke-dasharray: 3 3;
+            }
+            .wticks {
+                display: flex;
+                justify-content: space-between;
+                margin-top: -6px;
+                font-size: 11px;
+                line-height: 13px;
+                color: var(--text-tertiary);
+            }
+            .wticks.one {
+                justify-content: center;
+            }
+            .wfoot {
+                margin: 0;
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-secondary);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/date.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Weight",
+                loading: "Loading your weight trends…",
+                empty: "No weight logged in this range yet.",
+                rangeEmpty:
+                    "No weigh-ins in the last {range} days. Try a wider range.",
+                windowAriaLabel: "Trend window",
+                chartAriaLabel: "Weight from {from} to {to}, latest {latest}",
+                needTwo: "need 2+ weigh-ins",
+                since: "{change} {unit} since {date}",
+                weighIns: { one: "{n} weigh-in", other: "{n} weigh-ins" },
+                atTarget: "at target",
+                toLose: "{amount} to lose",
+                toGain: "{amount} to gain",
+                goal: "Goal {value}",
+                noTarget: "No target set",
+            };
+            // Every range the widget knows, and the label its toggle shows.
+            // 7, 14 and 30 are always offered (the tool's own window); a
+            // longer one only when the payload holds a reading past the
+            // range before it.
+            const RANGES = [
+                { value: 7, label: "7d" },
+                { value: 14, label: "14d" },
+                { value: 30, label: "30d" },
+                { value: 90, label: "90d" },
+                { value: 365, label: "1y" },
+            ];
+            const BASE_RANGES = 3;
+
+            // ---- Dates --------------------------------------------------------
+            function utcDay(s) {
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ""));
+                return m
+                    ? new Date(
+                          Date.UTC(
+                              Number(m[1]),
+                              Number(m[2]) - 1,
+                              Number(m[3]),
+                          ),
+                      )
+                    : null;
+            }
+            function shiftDate(s, delta) {
+                const d = utcDay(s);
+                if (!d) return String(s);
+                d.setUTCDate(d.getUTCDate() + delta);
+                return d.toISOString().slice(0, 10);
+            }
+            function dayNumber(s) {
+                const d = utcDay(s);
+                return d ? d.getTime() / 86400000 : 0;
+            }
+            // "2026-07-11" -> "Jul 11", the design's tick format.
+            function tickDate(s) {
+                const d = utcDay(s);
+                return d
+                    ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+                    : String(s ?? "");
+            }
+
+            // ---- Sample: a month of weigh-ins toward a target -------------------
+            function buildSample() {
+                const end = "2026-11-07";
+                const days = [];
+                for (let i = 27; i >= 0; i -= 3) {
+                    const t = (27 - i) / 27;
+                    const w = 186.4 - t * 4 + Math.sin(i) * 0.5;
+                    days.push({
+                        date: shiftDate(end, -i),
+                        weight: Math.round(w * 10) / 10,
+                    });
+                }
+                return {
+                    end_date: end,
+                    unit: "lb",
+                    target: 175,
+                    default_range: 30,
+                    locale: "en",
+                    days,
+                };
+            }
+            const SAMPLE = buildSample();
+
+            // Every weight carries exactly one decimal (v1): 175.0, not 175,
+            // so the figure, the change and the goal read at one precision.
+            function w1(n) {
+                if (n == null || isNaN(n)) return "0.0";
+                return Number(n).toLocaleString(undefined, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                });
+            }
+
+            // ---- Chart ----------------------------------------------------------
+            // Weight over time: x by date across the window's readings, y
+            // scaled to the readings and the target with room under the line
+            // for the fade. A single reading is a dot in the middle.
+            function weightChart(days, target, unit) {
+                const W = 366,
+                    H = 84,
+                    padX = 2,
+                    padT = 6;
+                const n = days.length;
+                const weights = days.map((d) => d.weight);
+                let lo = Math.min(...weights);
+                let hi = Math.max(...weights);
+                if (target != null) {
+                    lo = Math.min(lo, target);
+                    hi = Math.max(hi, target);
+                }
+                if (hi === lo) {
+                    hi += 1;
+                    lo -= 1;
+                }
+                const span = hi - lo;
+                const yMax = hi + span * 0.1;
+                const yMin = lo - span * 0.45;
+                const t0 = dayNumber(days[0].date);
+                const tSpan = dayNumber(days[n - 1].date) - t0;
+                const x = (d) =>
+                    tSpan > 0
+                        ? padX +
+                          ((W - 2 * padX) * (dayNumber(d.date) - t0)) / tSpan
+                        : W / 2;
+                const y = (v) =>
+                    padT + (H - padT) * ((yMax - v) / (yMax - yMin));
+                const pts = days.map((d) => [x(d), y(d.weight)]);
+                const xy = (p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
+
+                let body;
+                if (n >= 2) {
+                    const line = pts
+                        .map((p, i) => `${i ? "L" : "M"}${xy(p)}`)
+                        .join(" ");
+                    const area = `${line} L${pts[n - 1][0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`;
+                    body = `<defs><linearGradient id="wfade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="wstop" stop-opacity="0.22"/><stop offset="1" class="wstop" stop-opacity="0"/></linearGradient></defs><path d="${area}" fill="url(#wfade)"/><path class="wline" d="${line}"/>`;
+                } else {
+                    body = `<circle class="wdot" cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="3.5"/>`;
+                }
+                const goal =
+                    target != null
+                        ? `<line class="goalline" x1="0" y1="${y(target).toFixed(1)}" x2="${W}" y2="${y(target).toFixed(1)}"/>`
+                        : "";
+                const label = tpl(T.chartAriaLabel, {
+                    from: tickDate(days[0].date),
+                    to: tickDate(days[n - 1].date),
+                    latest: `${w1(weights[n - 1])} ${unit}`,
+                });
+                return `<svg class="wchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${goal}${body}</svg>${ticks(days[0].date, days[n - 1].date)}`;
+            }
+
+            // First, middle and last date under the chart; a short span drops
+            // the middle, a single day is one centred tick.
+            function ticks(from, to) {
+                const days = Math.round(dayNumber(to) - dayNumber(from));
+                const dates =
+                    days <= 0
+                        ? [from]
+                        : days < 4
+                          ? [from, to]
+                          : [from, shiftDate(from, Math.round(days / 2)), to];
+                return `<div class="wticks${dates.length === 1 ? " one" : ""}">${dates
+                    .map((d) => `<span>${esc(tickDate(d))}</span>`)
+                    .join("")}</div>`;
+            }
+
+            // The latest reading, and how far it moved since the first
+            // weigh-in in the window (dated from that weigh-in, not from the
+            // window's length, as in v1).
+            function figure(slice, target, unit) {
+                const n = slice.length;
+                const first = slice[0].weight;
+                const last = slice[n - 1].weight;
+                let end;
+                if (n < 2) {
+                    end = `<span class="is-dim">${esc(T.needTwo)}</span>`;
+                } else {
+                    const change = Math.round((last - first) * 10) / 10;
+                    // Accent when the change shrinks the gap to the target,
+                    // red when it widens it; no target or no change is
+                    // neutral.
+                    let tone = "is-dim";
+                    if (target != null && change !== 0) {
+                        tone =
+                            Math.abs(last - target) < Math.abs(first - target)
+                                ? "is-ok"
+                                : "is-over";
+                    }
+                    const arrow = change < 0 ? "↓ " : change > 0 ? "↑ " : "";
+                    const text = tpl(T.since, {
+                        change: `${arrow}${w1(Math.abs(change))}`,
+                        unit,
+                        date: tickDate(slice[0].date),
+                    });
+                    end = `<span class="${tone}">${esc(text)}</span>`;
+                }
+                return v2Figures([{ value: w1(last), unit, xl: true }], end);
+            }
+
+            function footer(slice, target, unit) {
+                const n = slice.length;
+                const parts = [];
+                if (target != null) {
+                    parts.push(tpl(T.goal, { value: `${w1(target)} ${unit}` }));
+                    const delta =
+                        Math.round((slice[n - 1].weight - target) * 10) / 10;
+                    parts.push(
+                        Math.abs(delta) < 0.05
+                            ? T.atTarget
+                            : tpl(delta > 0 ? T.toLose : T.toGain, {
+                                  amount: `${w1(Math.abs(delta))} ${unit}`,
+                              }),
+                    );
+                } else {
+                    parts.push(T.noTarget);
+                }
+                parts.push(plural(T.weighIns, n));
+                return `<p class="wfoot">${esc(parts.join(" · "))}</p>`;
+            }
+
+            // ---- State + rendering ----------------------------------------------
+            const STATE = {
+                data: null,
+                range: 30,
+                ranges: [],
+                all: [],
+                end: "",
+            };
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function render(data) {
+                STATE.data = data;
+                const root = document.getElementById("root");
+                const all = Array.isArray(data?.days)
+                    ? data.days
+                          .filter(
+                              (d) =>
+                                  d &&
+                                  utcDay(d.date) &&
+                                  typeof d.weight === "number" &&
+                                  Number.isFinite(d.weight),
+                          )
+                          .sort((a, b) => (a.date < b.date ? -1 : 1))
+                    : [];
+                if (all.length === 0) {
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
+                    );
+                    return;
+                }
+                STATE.all = all;
+                STATE.end = utcDay(data.end_date)
+                    ? data.end_date
+                    : all[all.length - 1].date;
+                // A longer range is offered only when the range before it
+                // leaves a reading out.
+                const oldest = all[0].date;
+                STATE.ranges = RANGES.filter(
+                    (r, i) =>
+                        i < BASE_RANGES ||
+                        oldest <
+                            shiftDate(STATE.end, -(RANGES[i - 1].value - 1)),
+                );
+                const values = STATE.ranges.map((r) => r.value);
+                STATE.range = values.includes(data.default_range)
+                    ? data.default_range
+                    : 30;
+                paint();
+            }
+
+            function paint() {
+                const data = STATE.data;
+                const unit = data.unit || "kg";
+                const target =
+                    typeof data.target === "number" && data.target > 0
+                        ? data.target
+                        : null;
+                const range = STATE.range;
+                const cutoff = shiftDate(STATE.end, -(range - 1));
+                const slice = STATE.all.filter(
+                    (d) => d.date >= cutoff && d.date <= STATE.end,
+                );
+
+                const seg = v2Seg(STATE.ranges, range, T.windowAriaLabel);
+                const body =
+                    slice.length === 0
+                        ? `<p class="note">${esc(tpl(T.rangeEmpty, { range }))}</p>`
+                        : figure(slice, target, unit) +
+                          `<div>${weightChart(slice, target, unit)}</div>` +
+                          footer(slice, target, unit);
+                v2Paint(card(v2Header(T.title, null, seg) + body));
+            }
+
+            // Delegated on #root so clicks reach the mount and the bridge footer.
+            document.getElementById("root").addEventListener("click", (e) => {
+                const btn = e.target?.closest?.("button[data-range]");
+                if (!btn) return;
+                const n = Number(btn.getAttribute("data-range"));
+                if (
+                    STATE.ranges.some((r) => r.value === n) &&
+                    n !== STATE.range &&
+                    STATE.data
+                ) {
+                    STATE.range = n;
+                    paint();
+                }
+            });
+
+            // ---- Rendering intake ----------------------------------------------
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.days)) return payload;
+                if (payload.structuredContent) return payload.structuredContent;
+                return null;
+            }
+
+            initWidget({
+                name: "weight-trends-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

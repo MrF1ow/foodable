@@ -20,7 +20,12 @@
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
-import { getWidgetHtml, WIDGET_TEMPLATES } from "../src/widgets.js";
+import {
+    getWidgetHtml,
+    harnessNeedsV2,
+    WIDGET_TEMPLATES,
+    WIDGET_TEMPLATES_V2,
+} from "../src/widgets.js";
 import { runImport } from "../src/domain/import.js";
 import type { MealInput, MealInsertResult } from "../src/db/nutrition.js";
 
@@ -47,13 +52,19 @@ async function fakeInsert(input: MealInput): Promise<MealInsertResult> {
 }
 
 const PORT = Number(process.env.HARNESS_PORT ?? 8787);
-const KEYS = Object.keys(WIDGET_TEMPLATES);
+const KEYS = [
+    ...new Set([
+        ...Object.keys(WIDGET_TEMPLATES),
+        ...Object.keys(WIDGET_TEMPLATES_V2),
+    ]),
+];
 
 function indexPage(): string {
-    const links = KEYS.map(
-        (k) =>
-            `<li><a href="/host?widget=${encodeURIComponent(k)}">${k}</a></li>`,
-    ).join("");
+    const links = KEYS.map((k) => {
+        const v2 = harnessNeedsV2(k);
+        const qs = v2 ? "&v2=1" : "";
+        return `<li><a href="/host?widget=${encodeURIComponent(k)}${qs}">${k}</a></li>`;
+    }).join("");
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Widget harness</title>
 <style>
@@ -65,7 +76,8 @@ function indexPage(): string {
   <h1>MCP Apps widget harness</h1>
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
-     <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>.</p>
+     <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
+     <code>?v2=1</code> (the v2 assembly).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -76,6 +88,8 @@ function hostPage(widget: string, params: URLSearchParams): string {
     const delay = Number(params.get("delay") ?? 0);
     const maxHeight = params.get("maxHeight");
     const failCalls = params.get("fail") === "1";
+    // ?v2=1 frames the widget's v2 assembly (getWidgetHtml(key, { v2: true })).
+    const v2 = params.get("v2") === "1" || harnessNeedsV2(widget);
     // The alcohol opt-in, as every tool that touches alcohol sends it:
     // "us"/"uk" when the user tracks alcohol, null when they do not. Default
     // null, because that is the default account state and the state the
@@ -303,6 +317,132 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 weight: 82.4 - i * 0.1,
             })),
         },
+        attention: {
+            count: 5,
+            notices: [
+                {
+                    code: "fridge.expiring",
+                    severity: "warn",
+                    subject: {
+                        kind: "fridge_item",
+                        id: "fi-salmon",
+                        recipe_id: null,
+                    },
+                    related: [],
+                    message: "Salmon 1 lb expires tomorrow",
+                    action: null,
+                    title: "Salmon",
+                    detail: "tomorrow",
+                    detail_tone: "over",
+                    group_key: "expiring",
+                    group_label: "Expiring",
+                    dot_tone: "over",
+                    can_dismiss: true,
+                    dismiss_label: "Dismiss",
+                    dismiss: {
+                        code: "fridge.expiring",
+                        subject_kind: "fridge_item",
+                        subject_id: "fi-salmon",
+                        related_id: null,
+                    },
+                },
+                {
+                    code: "fridge.expiring",
+                    severity: "info",
+                    subject: {
+                        kind: "fridge_item",
+                        id: "fi-spinach",
+                        recipe_id: null,
+                    },
+                    related: [],
+                    message: "Baby spinach ½ bag expires in 2 days",
+                    action: null,
+                    title: "Baby spinach",
+                    detail: "2 days",
+                    detail_tone: "warn",
+                    group_key: "expiring",
+                    group_label: "Expiring",
+                    dot_tone: "warn",
+                    can_dismiss: true,
+                    dismiss_label: "Dismiss",
+                    dismiss: {
+                        code: "fridge.expiring",
+                        subject_kind: "fridge_item",
+                        subject_id: "fi-spinach",
+                        related_id: null,
+                    },
+                },
+                {
+                    code: "grocery.restocked",
+                    severity: "info",
+                    subject: {
+                        kind: "grocery_line",
+                        id: "gl-eggs",
+                        recipe_id: null,
+                    },
+                    related: [],
+                    message: "Added because Eggs expires Friday",
+                    action: null,
+                    title: "Eggs",
+                    detail: "Friday",
+                    detail_tone: null,
+                    group_key: "running_low",
+                    group_label: "Running low",
+                    dot_tone: "warn",
+                    can_dismiss: true,
+                    dismiss_label: "Dismiss",
+                    dismiss: {
+                        code: "grocery.restocked",
+                        subject_kind: "grocery_line",
+                        subject_id: "gl-eggs",
+                        related_id: null,
+                    },
+                },
+                {
+                    code: "recipe.no_nutrition",
+                    severity: "warn",
+                    subject: {
+                        kind: "recipe_ingredient",
+                        id: "ing-lemon",
+                        recipe_id: "rec-salmon",
+                    },
+                    related: [],
+                    message:
+                        "Lemon: no nutrition — add it, or pick a usual product",
+                    action: { label: "Pick usual product" },
+                    title: "Lemon",
+                    detail: "Sat · salmon",
+                    detail_tone: null,
+                    group_key: "recipe_gaps",
+                    group_label: "Missing for planned meals",
+                    dot_tone: "warn",
+                    can_dismiss: false,
+                    dismiss_label: "Dismiss",
+                    dismiss: null,
+                },
+                {
+                    code: "recipe.no_food",
+                    severity: "warn",
+                    subject: {
+                        kind: "recipe_ingredient",
+                        id: "ing-beans",
+                        recipe_id: "rec-chili",
+                    },
+                    related: [],
+                    message: "Kidney beans: not linked to a food",
+                    action: null,
+                    title: "Kidney beans",
+                    detail: "Sun · chili",
+                    detail_tone: null,
+                    group_key: "recipe_gaps",
+                    group_label: "Missing for planned meals",
+                    dot_tone: "warn",
+                    can_dismiss: false,
+                    dismiss_label: "Dismiss",
+                    dismiss: null,
+                },
+            ],
+        },
         "grocery-list": {
             locale: "en",
             stores: [
@@ -394,7 +534,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
 <body>
   <strong>${widget}</strong>
   <span class="cfg">serverTools=${serverTools} answerTools=${answerTools} delay=${delay}ms${maxHeight ? " maxHeight=" + maxHeight : ""}${failCalls ? " fail=1" : ""} drinkUnit=${drinkUnit ?? "null (tracking off)"}</span>
-  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}"></iframe></div>
+  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}${v2 ? "?v2=1" : ""}"></iframe></div>
   <div style="margin-top:8px">
     <button onclick="hostRequest(1)">host req id=1</button>
     <button onclick="hostRequest(2)">host req id=2</button>
@@ -495,6 +635,14 @@ window.addEventListener("message", (e) => {
       if (CFG.fail) {
         send({ jsonrpc: "2.0", id: d.id, error: { code: -32603, message: "harness: simulated failure" } });
         log("-> error for id " + d.id);
+        return;
+      }
+      if (name === "dismiss_notice") {
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Notice dismissed." }],
+          structuredContent: { dismissed: true },
+        }});
+        log("-> dismiss_notice dismissed=true for id " + d.id);
         return;
       }
       // bulk_import_meals runs for real, server-side, against an in-memory store.
@@ -602,7 +750,8 @@ Bun.serve({
             }
             // Same CSP the MCP Apps sandbox applies, so a widget that reaches
             // for the network here fails here too.
-            return new Response(await getWidgetHtml(key), {
+            const v2 = url.searchParams.get("v2") === "1";
+            return new Response(await getWidgetHtml(key, { v2 }), {
                 headers: {
                     "content-type": "text/html; charset=utf-8",
                     "content-security-policy":

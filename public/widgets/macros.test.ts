@@ -3,33 +3,45 @@
 //
 // Widget code is inline template JS, so it has no import surface: `macros.js` is
 // evaluated here the way the assembler splices it into a page — with util.js
-// (fmt/esc/tpl) and i18n.js, in the same order every template includes them —
+// (fmt/esc/tpl/plural) and macros.js, in the same order every template includes them —
 // and the caption strings are asserted against real values. Without this the
 // wording is pinned by nothing at all.
 import { test, expect } from "bun:test";
-import { WIDGET_STRINGS_EN } from "../../src/copy/widgets";
 
 const SRC = "./public/widgets/src";
+const INLINE_TS_RE = /\/\*@inlinets\s+([^\s@]+)\s*@\*\//g;
+
+async function transpileTsModule(tsPath: string): Promise<string> {
+    const ts = await Bun.file(`./${tsPath}`).text();
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(ts);
+    return js
+        .replace(/^export\s+default\s+/gm, "")
+        .replace(/^export\s+/gm, "")
+        .replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, "");
+}
+
+async function expandInlineTs(src: string): Promise<string> {
+    const compiled = new Map<string, string>();
+    for (const m of src.matchAll(INLINE_TS_RE)) {
+        const path = m[1]!;
+        if (!compiled.has(path))
+            compiled.set(path, await transpileTsModule(path));
+    }
+    return src.replace(INLINE_TS_RE, (_full, path) => compiled.get(path) ?? "");
+}
 
 type Bits = { goalLine: string; over: boolean; pct: number | null };
 type Macro = { key: string; direction?: string };
 type Vals = Record<string, number | null>;
 const macrosApi = await (async () => {
-    // shared/util.js then shared/i18n.js then shared/macros.js — util.js
-    // supplies fmt/esc/tpl, i18n.js supplies T/plural. Only the "en"
-    // dictionary is wired in (WIDGET_STRINGS = { en: ... }): these tests
-    // assert English wording, and macroLabel()/T.macros.* fall back to
-    // English by construction whenever a locale is missing.
     const utilSrc = await Bun.file(`${SRC}/shared/util.js`).text();
-    const i18nSrc = await Bun.file(`${SRC}/shared/i18n.js`).text();
-    const macrosSrc = await Bun.file(`${SRC}/shared/macros.js`).text();
-    // `document`/`window` are left undefined so the partial's delegated event
-    // wiring (guarded by `typeof document`) stays out of the way.
-    const factory = new Function(
-        "WIDGET_STRINGS",
-        `${utilSrc}\n${i18nSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
+    const macrosSrc = await expandInlineTs(
+        await Bun.file(`${SRC}/shared/macros.js`).text(),
     );
-    return factory({ en: WIDGET_STRINGS_EN }) as {
+    const factory = new Function(
+        `${utilSrc}\n${macrosSrc}\nreturn { fmt, macroBits, MACROS, macroPanel, macroLimit, macroCtxOf, dayHasData, mealList };`,
+    );
+    return factory() as {
         fmt: (n: number, decimals?: number) => string;
         macroBits: (
             m: Macro,

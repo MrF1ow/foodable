@@ -34,12 +34,9 @@ import {
     MAX_CAFFEINE_MG,
     type BulkImportArgs,
 } from "../../domain/import.js";
-import { getWidgetHtml } from "../../widgets.js";
 import {
     NUTRIENT_COVERAGE,
-    APP_UI_MIME_TYPE,
-    MEAL_LOGGED_WIDGET_URI,
-    IMPORT_MEALS_WIDGET_URI,
+    registerWidgetResource,
     sumMeals,
     nutrientPresence,
     sumWater,
@@ -423,7 +420,7 @@ export function registerNutritionWriteTools(
         uiMeta,
         hasGoals,
     } = ctx;
-    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
+    const mealLoggedUiMeta = hasGoals ? uiMeta("meal-logged") : {};
     server.registerTool(
         "log_meal",
         {
@@ -746,30 +743,13 @@ export function registerNutritionWriteTools(
         },
     );
 
-    // UI resource for the import widget. Registered unconditionally, like every
-    // other widget resource — only the tool's _meta.ui link is gated per user.
-    server.registerResource(
-        "import-meals-widget",
-        IMPORT_MEALS_WIDGET_URI,
-        {
-            title: "Import Meals",
-            description:
-                "Interactive importer for a meal-history export: reads the file in the browser, maps its columns, previews the rows, then writes them via bulk_import_meals.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("import-meals"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "import-meals",
+        resourceName: "import-meals-widget",
+        title: "Import Meals",
+        description:
+            "Interactive importer for a meal-history export: reads the file in the browser, maps its columns, previews the rows, then writes them via bulk_import_meals.",
+    });
 
     server.registerTool(
         "start_meal_import",
@@ -785,7 +765,7 @@ export function registerNutritionWriteTools(
                 destructiveHint: false,
                 idempotentHint: true,
             },
-            ...uiMeta(IMPORT_MEALS_WIDGET_URI),
+            ...uiMeta("import-meals"),
         },
         async (args) => {
             return withAnalytics(
@@ -1021,7 +1001,7 @@ export function registerNutritionEditTools(
         uiMeta,
         hasGoals,
     } = ctx;
-    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
+    const mealLoggedUiMeta = hasGoals ? uiMeta("meal-logged") : {};
     server.registerTool(
         "delete_meal",
         {

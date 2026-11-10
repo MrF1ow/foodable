@@ -31,6 +31,24 @@ export const FLAGS = {
         removeWhen:
             "ui-v2 is on for everyone with no rollback for a few days, and the old app is deleted.",
     },
+    "mcp-widgets-v2": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "Restyled MCP chat widgets served at ui://widget/v2/… URIs.",
+        removeWhen:
+            "v2 widgets are on for everyone and the v1 widget URIs are retired.",
+    },
+    "widget-attention": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Needs attention digest card for list_notices.",
+        removeWhen:
+            "the attention widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

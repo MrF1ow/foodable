@@ -1,23 +1,100 @@
-import { test, expect } from "bun:test";
-import { getWidgetHtml, WIDGET_TEMPLATES } from "./widgets.js";
+import { test, expect, jest, afterEach, setSystemTime } from "bun:test";
+import {
+    assembleSource,
+    getWidgetHtml,
+    minifyCss,
+    minifyWidgetHtml,
+    WIDGET_BUDGETS,
+    WIDGET_TEMPLATES,
+    WIDGET_TEMPLATES_V2,
+    harnessNeedsV2,
+    widgetAssemblies,
+    widgetTemplateName,
+} from "./widgets.js";
 
 const KEYS = Object.keys(WIDGET_TEMPLATES);
 const SRC = "./public/widgets/src";
 const INCLUDE_RE = /\/\*@include\s+([^\s@]+)\s*@\*\//g;
+const INLINE_TS_RE = /\/\*@inlinets\s+([^\s@]+)\s*@\*\//g;
+
+async function transpileForWidget(tsPath: string): Promise<string> {
+    const ts = await Bun.file(`./${tsPath}`).text();
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(ts);
+    return js
+        .replace(/^export\s+default\s+/gm, "")
+        .replace(/^export\s+/gm, "")
+        .replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, "");
+}
+
+/** Partial source as it appears after assembly (@inlinets markers expanded). */
+async function partialAsInlined(rel: string): Promise<string> {
+    let partial = (await Bun.file(`${SRC}/${rel}`).text()).trim();
+    const compiled = new Map<string, string>();
+    for (const m of partial.matchAll(INLINE_TS_RE)) {
+        const path = m[1]!;
+        if (!compiled.has(path)) {
+            compiled.set(path, await transpileForWidget(path));
+        }
+    }
+    return partial.replace(
+        INLINE_TS_RE,
+        (_full, path) => compiled.get(path) ?? "",
+    );
+}
+
+function widgetScriptBodies(html: string): string[] {
+    const bodies: string[] = [];
+    for (const m of html.matchAll(
+        /<script\b[^>]*>([\s\S]*?)<\/script[^>]*>/gi,
+    )) {
+        bodies.push(m[1]!);
+    }
+    return bodies;
+}
+
+function gzipByteLength(text: string): number {
+    return Bun.gzipSync(new TextEncoder().encode(text)).byteLength;
+}
+
+test("minifyCss keeps comment inside a string", () => {
+    const css = `.x{background:url("a/*not-comment*/b");}`;
+    expect(minifyCss(css)).toContain("/*not-comment*/");
+});
+
+test("minifyCss keeps calc() and descendant :hover spacing", () => {
+    const css = `
+        .box { width: calc(1px - 2px); }
+        .a :hover { color: red; }
+    `;
+    const out = minifyCss(css);
+    expect(out).toContain("calc(1px - 2px)");
+    expect(out).toContain(".a :hover");
+});
+
+test("minifyWidgetHtml keeps JS regex and template literal", () => {
+    const html = `<!doctype html><style></style><script>
+        const re = /foo\\/bar/g;
+        const t = \`x \${1} y\`;
+    </script>`;
+    const min = minifyWidgetHtml(html);
+    expect(min).toContain("foo");
+    expect(min).toContain("/g");
+    expect(min).toContain("`x ${1} y`");
+});
 
 // Every widget must assemble from its source partials into a self-contained
 // document — no unresolved @include markers, valid inline JS, single style/script.
 test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
     const html = await getWidgetHtml(key);
+    // Markers are checked before minifying, which strips comments and would
+    // hide one that was never resolved.
+    const source = await assembleSource(key);
 
     // No include marker left behind (the real marker, not the word in prose).
-    expect(html.match(/\/\*@include/g)).toBeNull();
+    expect(source.match(/\/\*@include/g)).toBeNull();
     // Same for the TS-inlining marker: an unresolved one would ship a widget
     // whose script silently lacks whole functions.
-    expect(html.match(/\/\*@inlinets/g)).toBeNull();
-    // Same for the i18n marker: an unresolved one would ship the literal
-    // comment instead of the WIDGET_STRINGS dictionary shared/i18n.js needs.
-    expect(html.match(/\/\*@i18n@\*\//g)).toBeNull();
+    expect(source.match(/\/\*@inlinets/g)).toBeNull();
     // Module syntax must not survive into the inline <script>.
     expect(html).not.toMatch(/^export\s/m);
 
@@ -35,19 +112,17 @@ test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
     // Shared design tokens got inlined.
     expect(html).toContain("--accent: #28cf8b");
 
-    // The inlined <script> is syntactically valid JS.
-    const script = html.slice(
-        html.indexOf("<script>") + "<script>".length,
-        html.indexOf("</script>"),
-    );
-    expect(() =>
-        new Bun.Transpiler({ loader: "js" }).transformSync(script),
-    ).not.toThrow();
+    // Every inlined <script> body parses as JS after minification.
+    for (const script of widgetScriptBodies(html)) {
+        expect(() => {
+            new Function(script);
+        }).not.toThrow();
+    }
 });
 
 // Guard against a partial being inlined incompletely (e.g. an extraction that
 // truncates a component's CSS mid-block): every @include'd partial's full text
-// must appear verbatim in the assembled output.
+// must appear verbatim in the unminified assembly.
 test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
     const template = await Bun.file(
         `${SRC}/templates/${WIDGET_TEMPLATES[key]}`,
@@ -55,13 +130,2426 @@ test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
     const includes = [...template.matchAll(INCLUDE_RE)].map((m) => m[1]!);
     expect(includes.length).toBeGreaterThan(0);
 
-    const html = await getWidgetHtml(key);
+    const html = await assembleSource(key);
     for (const rel of includes) {
-        const partial = (await Bun.file(`${SRC}/${rel}`).text()).trim();
+        const partial = await partialAsInlined(rel);
         expect(html).toContain(partial);
+    }
+});
+
+test("minified widgets fit size budgets", async () => {
+    const rows: string[] = [];
+    rows.push("widget".padEnd(22) + "raw".padStart(10) + "gzip".padStart(10));
+    for (const { key, v2 } of widgetAssemblies()) {
+        const budget = WIDGET_BUDGETS[key];
+        expect(budget).toBeDefined();
+        const html = await getWidgetHtml(key, { v2 });
+        const raw = new TextEncoder().encode(html).byteLength;
+        const gzip = gzipByteLength(html);
+        const label = v2 ? `${key}:v2` : key;
+        rows.push(
+            label.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
+        );
+        expect(raw).toBeLessThanOrEqual(budget!.raw);
+        expect(gzip).toBeLessThanOrEqual(budget!.gzip);
+    }
+    console.log(rows.join("\n"));
+});
+
+test("v2 assembly falls back to the v1 template when no v2 file exists", async () => {
+    const v1 = await getWidgetHtml("fridge");
+    const v2 = await getWidgetHtml("fridge", { v2: true });
+    expect(v2).toBe(v1);
+});
+
+test("v2-only keys resolve only through the v2 variant", () => {
+    const v2Only = "__v2_only_fixture__";
+    (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only] =
+        "fixture-only.html";
+    try {
+        expect(widgetTemplateName(v2Only)).toBe("");
+        expect(widgetTemplateName(v2Only, { v2: true })).toBe(
+            "fixture-only.html",
+        );
+        // A v2-only key is assembled only as v2: warming and the budget
+        // test must never ask for its v1 twin.
+        expect(widgetAssemblies().filter((a) => a.key === v2Only)).toEqual([
+            { key: v2Only, v2: true },
+        ]);
+    } finally {
+        delete (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only];
     }
 });
 
 test("unknown widget key throws", async () => {
     expect(getWidgetHtml("nope")).rejects.toThrow(/unknown widget/);
+});
+
+test("minifying keeps a script's use strict directive", () => {
+    const min = minifyWidgetHtml(
+        '<script>\n    "use strict";\n    function f() { return 1; }\n</script>',
+    );
+    expect(min).toBe('<script>"use strict";function f(){return 1}</script>');
+});
+
+// ---- v2 shared partials ----------------------------------------------------
+
+const V2_TEMPLATES = [
+    ...new Bun.Glob("*.html").scanSync(`${SRC}/templates/v2`),
+].sort();
+
+test("v2 templates exist for the gallery", () => {
+    expect(V2_TEMPLATES).toContain("component-gallery.html");
+});
+
+test.each(V2_TEMPLATES)(
+    "v2 %s assembles self-contained on v2 partials only",
+    async (file) => {
+        const key = file.replace(/\.html$/, "");
+        const source = await assembleSource(key, { v2: true });
+        const html = await getWidgetHtml(key, { v2: true });
+
+        expect(source.match(/\/\*@include/g)).toBeNull();
+        expect(source.match(/\/\*@inlinets/g)).toBeNull();
+        expect((html.match(/<style>/g) ?? []).length).toBe(1);
+        expect((html.match(/<script\b[^>]*>/gi) ?? []).length).toBe(1);
+        expect(html).not.toContain("<link");
+        expect(html).not.toMatch(/<script[^>]+src=/i);
+        expect((html.match(/initWidget\(\{/g) ?? []).length).toBe(1);
+
+        // The Theme palette, never the v1 NEUTRAL tokens or a web font.
+        expect(source).toContain("MCP chat widgets v2");
+        expect(html).not.toContain("--accent: #28cf8b");
+        for (const marker of ["Geist", "Bricolage", "/fonts/"]) {
+            expect(source).not.toContain(marker);
+        }
+        for (const script of widgetScriptBodies(html)) {
+            expect(() => new Function(script)).not.toThrow();
+        }
+
+        // Every included partial appears verbatim (v1 partials included).
+        const template = await Bun.file(`${SRC}/templates/v2/${file}`).text();
+        const includes = [...template.matchAll(INCLUDE_RE)].map((m) => m[1]!);
+        expect(includes.length).toBeGreaterThan(0);
+        for (const rel of includes) {
+            expect(source).toContain(await partialAsInlined(rel));
+        }
+    },
+);
+
+// The v2 builders are plain browser functions. Load them the way a template
+// does (util.js, v1 macros.js with the geometry inlined, then the v2 files)
+// and drive them directly.
+type V2Api = {
+    macroStripV2(v: object, g: object | null, o?: object): string;
+    gaugeV2(
+        v: object,
+        g: object | null,
+        attrs?: object,
+    ): { html: string; status: string };
+    goalListV2(v: object, g: object | null, o?: object): string;
+    ringsV2(days: object[], g: object | null, active?: number): string;
+    averagesV2(v: object, g: object | null): string;
+    pcfV2(v: object): string;
+    v2Row(r: object): string;
+    v2Header(t: string, m?: string | null, end?: string): string;
+    v2Seg(o: object[], active: unknown, label?: string): string;
+    v2Chips(items: object[]): string;
+    v2Bar(f: number, c: string, o?: object): string;
+    v2Dot(c?: string | null, tone?: string, large?: boolean): string;
+    v2Buttons(items: object[]): string;
+    v2Tiles(items: object[]): string;
+    v2Attrs(a: object | undefined): string;
+    mealBlockV2(name: string, v: object): string;
+    v2ClaimStrip(target: unknown): unknown;
+    macroCtx(): unknown;
+};
+
+async function loadV2(): Promise<V2Api> {
+    const parts = await Promise.all(
+        [
+            "shared/util.js",
+            "shared/macros.js",
+            "shared/v2/ui.js",
+            "shared/v2/macros.js",
+        ].map(partialAsInlined),
+    );
+    const names = [
+        "macroStripV2",
+        "gaugeV2",
+        "goalListV2",
+        "ringsV2",
+        "averagesV2",
+        "pcfV2",
+        "v2Row",
+        "v2Header",
+        "v2Seg",
+        "v2Chips",
+        "v2Bar",
+        "v2Dot",
+        "v2Buttons",
+        "v2Tiles",
+        "v2Attrs",
+        "mealBlockV2",
+        "v2ClaimStrip",
+    ];
+    return new Function(
+        `${parts.join("\n")}\nreturn { ${names.join(", ")}, macroCtx: () => __macroCtx };`,
+    )() as V2Api;
+}
+
+// fmt() groups thousands with toLocaleString, so expected figures are
+// written through the same locale rather than with a hard-coded comma.
+const n = (x: number) => x.toLocaleString();
+
+const V2_GOAL = {
+    calories: 2421,
+    protein_g: 210,
+    carbs_g: 213,
+    fat_g: 81,
+    fiber_g: 38,
+    sugar_g: 50,
+    caffeine_mg: 400,
+    water_ml: 3000,
+};
+const V2_DAY = {
+    calories: 1284,
+    protein_g: 96,
+    carbs_g: 118,
+    fat_g: 42,
+    fiber_g: 18,
+    sugar_g: 31,
+    alcohol_g: 0,
+    caffeine_mg: 180,
+    water_ml: 1600,
+};
+
+test("v2 gauge reads kcal left, over, at goal and eaten", async () => {
+    const v2 = await loadV2();
+    const under = v2.gaugeV2(V2_DAY, V2_GOAL);
+    expect(under.status).toBe("under");
+    expect(under.html).toContain(`>${n(1137)}<`);
+    expect(under.html).toContain("kcal left");
+    // Three macro segments over the track, each in its macro colour.
+    expect(under.html.match(/<path /g)?.length).toBe(4);
+    expect(under.html).toContain("stroke:var(--protein)");
+
+    const over = v2.gaugeV2({ ...V2_DAY, calories: 2690 }, V2_GOAL);
+    expect(over.status).toBe("over");
+    expect(over.html).toContain('gauge-v is-over">269<');
+    expect(over.html).toContain("kcal over");
+
+    expect(v2.gaugeV2({ ...V2_DAY, calories: 2421 }, V2_GOAL).html).toContain(
+        "at goal",
+    );
+
+    const none = v2.gaugeV2(V2_DAY, null);
+    expect(none.status).toBe("no-goal");
+    expect(none.html).toContain(`>${n(1284)}<`);
+    expect(none.html).toContain("kcal eaten");
+    expect(none.html.match(/<path /g)?.length).toBe(1);
+});
+
+test("v2 strip lays limits out in the design's order and keeps v1's gates", async () => {
+    const v2 = await loadV2();
+    const html = v2.macroStripV2(V2_DAY, V2_GOAL);
+    const labels = [...html.matchAll(/class="lim-l">([^<]+)</g)].map(
+        (m) => m[1],
+    );
+    expect(labels).toEqual(["Sugar", "Fiber", "Caffeine", "Alcohol"]);
+    // Alcohol reads in drinks; with no limit set there is no "/ …".
+    expect(html).toContain('<span class="v">0</span><span class="vs">drinks');
+    expect(html).toContain("1.6 / 3 L");
+
+    // Never-recorded alcohol and caffeine render no cell (null is the gate),
+    // and an untouched water line is left out.
+    const empty = v2.macroStripV2(
+        { ...V2_DAY, alcohol_g: null, caffeine_mg: null, water_ml: 0 },
+        V2_GOAL,
+    );
+    expect(empty).not.toContain(">Alcohol<");
+    expect(empty).not.toContain(">Caffeine<");
+    expect(empty).not.toContain('class="water"');
+    expect(empty).toContain('style="--n:2"');
+
+    // A ceiling past its limit flags the figure; a floor past it does not.
+    const over = v2.macroStripV2(
+        { ...V2_DAY, sugar_g: 61.3, protein_g: 250, alcohol_g: 31.6 },
+        { ...V2_GOAL, alcohol_g: 28 },
+        { drinkUnit: "uk" },
+    );
+    expect(over).toContain('<span class="v is-over">61.3</span>');
+    expect(over).toContain('<span class="v is-over">4.0</span>');
+    expect(over).toContain("/ 3.5 UK units");
+    expect(over).toContain('<span class="v">250</span>');
+});
+
+test("v2 strip opens v1's breakdown only when meals are behind it", async () => {
+    const v2 = await loadV2();
+    const meals = [
+        { description: "Bowl", calories: 852, protein_g: 69, carbs_g: 76 },
+    ];
+    const live = v2.macroStripV2(V2_DAY, V2_GOAL, { meals });
+    expect(live).toContain("data-macro-panel");
+    expect(live).toContain('data-macro="carbs_g"');
+    expect(live).not.toContain('data-macro="fat_g"');
+    expect(live).toContain('class="macro-detail" hidden');
+    const ctx = v2.macroCtx();
+
+    // A static strip drawn afterwards leaves the slot to the live one.
+    const still = v2.macroStripV2(V2_DAY, V2_GOAL);
+    expect(still).not.toContain("data-macro");
+    expect(v2.macroCtx()).toBe(ctx);
+});
+
+test("v2 goal list, rings and averages", async () => {
+    const v2 = await loadV2();
+    const goals = v2.goalListV2(V2_DAY, V2_GOAL);
+    expect(goals).toContain(`${n(1284)} / ${n(2421)} kcal`);
+    expect(goals).toContain(">53%<");
+    expect(v2.goalListV2(V2_DAY, null)).toContain("no goal");
+
+    const rings = v2.ringsV2(
+        [
+            { label: "S", protein_g: 96, carbs_g: 118, fat_g: 42 },
+            { label: "M" },
+        ],
+        V2_GOAL,
+        0,
+    );
+    expect(rings.match(/class="rday/g)?.length).toBe(2);
+    expect(rings).toContain('class="rday on"');
+    // A day with data draws three tracks and three fills; an empty day only
+    // its tracks.
+    expect(rings.match(/r-track/g)?.length).toBe(6);
+    expect(rings.match(/style="stroke:/g)?.length).toBe(3);
+    expect(rings).toContain('width="40" height="22"');
+
+    const avg = v2.averagesV2(
+        { protein_g: 189, carbs_g: 190, fat_g: 98, calories: 2365 },
+        V2_GOAL,
+    );
+    expect(avg).toContain('row-end is-over">98 / 81<');
+    expect(avg).toContain('row-end">189 / 210<');
+    expect(avg).toContain('<b style="left:92.0%">');
+});
+
+test("v2 generic builders escape text and mark state", async () => {
+    const v2 = await loadV2();
+    expect(v2.v2Header("<b>", "a & b")).toContain("&lt;b&gt;");
+    expect(v2.v2Header("T", "a & b")).toContain("a &amp; b");
+    const row = v2.v2Row({
+        dot: { tone: "over" },
+        title: "Salmon",
+        sub: "tomorrow",
+        subTone: "over",
+        action: "Cook it",
+    });
+    expect(row).toContain('class="dot lg s-over"');
+    expect(row).toContain('row-s is-over">tomorrow<');
+    expect(row).toContain('<button type="button" class="act">Cook it</button>');
+    const done = v2.v2Row({ check: true, done: true, title: "Oil" });
+    expect(done).toContain('class="row done"');
+    expect(done).toContain('aria-pressed="true"');
+    expect(
+        v2.v2Seg(
+            [
+                { value: 7, label: "7d" },
+                { value: 14, label: "14d" },
+            ],
+            14,
+        ),
+    ).toContain('data-range="14" aria-pressed="true"');
+    expect(v2.v2Chips([{ label: "Costco", count: 5, on: true }])).toContain(
+        'aria-pressed="true">Costco<span class="chip-n">5</span>',
+    );
+    expect(v2.v2Bar(0, "var(--water)")).toBe('<div class="bar"></div>');
+    expect(v2.v2Bar(2, "var(--water)", { size: "thin" })).toContain(
+        "width:100.0%",
+    );
+    expect(v2.pcfV2({ protein_g: 69, carbs_g: 76, fat_g: 25 })).toContain(
+        '<span class="p">P 69</span>',
+    );
+});
+
+// ---- v2 hardening ----------------------------------------------------------
+
+const EVIL = '"><img src=x onerror=alert(1)>';
+
+test("v2 attributes: unsafe names dropped, values escaped", async () => {
+    const v2 = await loadV2();
+    expect(
+        v2.v2Attrs({
+            "data-id": EVIL,
+            "aria-label": "a & b",
+            role: "button",
+            tabindex: 0,
+            onclick: "alert(1)",
+            "data-x onmouseover": "1",
+            style: "color:red",
+            hidden: true,
+            title: null,
+        }),
+    ).toBe(
+        ' data-id="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;" aria-label="a &amp; b" role="button" tabindex="0"',
+    );
+    // A string is not an attribute map: nothing reaches the markup.
+    expect(v2.v2Attrs("><img src=x onerror=alert(1)>" as never)).toBe("");
+});
+
+test("v2 builders never splice caller attributes or classes raw", async () => {
+    const v2 = await loadV2();
+    const hostile = [
+        v2.v2Row({ title: "Eggs", attrs: "><img src=x onerror=alert(1)>" }),
+        v2.v2Row({ title: "Eggs", attrs: { onclick: "alert(1)" } }),
+        v2.v2Row({ title: "Eggs", attrs: { "data-id": EVIL } }),
+        v2.v2Row({
+            title: "Eggs",
+            action: "Add",
+            actionAttrs: ' onclick="alert(1)"',
+        }),
+        v2.v2Row({ title: "Eggs", kind: 'x" onmouseover="alert(1)' }),
+        v2.v2Row({
+            title: "Eggs",
+            end: "Nov 1",
+            endKind: 'x" onmouseover="alert(1)',
+        }),
+        v2.v2Chips([{ label: "A", attrs: ' onclick="alert(1)"' }]),
+        v2.v2Buttons([{ label: "A", attrs: ' onclick="alert(1)"' }]),
+        v2.v2Bar(0.5, 'red" onmouseover="alert(1)'),
+        v2.v2Bar(0.5, "var(--water)", { size: 'x" onmouseover="alert(1)' }),
+        v2.v2Dot('red" onmouseover="alert(1)'),
+        v2.v2Dot(null, 'x" onmouseover="alert(1)'),
+        v2.v2Tiles([{ when: "1", name: "A", tone: '" onclick="x' }]),
+        v2.gaugeV2(V2_DAY, V2_GOAL, { onclick: "alert(1)" } as never).html,
+        v2.gaugeV2(V2_DAY, V2_GOAL, ' onclick="alert(1)"' as never).html,
+    ];
+    for (const html of hostile) {
+        expect(html).not.toContain("<img");
+        // No event handler outside a quoted (escaped) attribute value.
+        expect(html.replace(/"[^"]*"/g, '""')).not.toMatch(/\son[a-z]+=/);
+    }
+    // Known values still get through.
+    expect(v2.v2Row({ title: "Eggs", attrs: { "data-id": "7" } })).toContain(
+        '<div class="row" data-id="7">',
+    );
+    expect(
+        v2.v2Row({
+            title: "Eggs",
+            action: "Add",
+            actionAttrs: { "data-act": "add" },
+        }),
+    ).toContain('class="act" data-act="add">Add<');
+    expect(v2.v2Row({ title: "A", kind: "avg" })).toContain('class="row avg"');
+    expect(v2.v2Row({ title: "A", end: "Nov 1", endKind: "date" })).toContain(
+        'class="row-end date"',
+    );
+    expect(v2.v2Row({ title: "A", kind: "nope" })).toContain('class="row"');
+    expect(v2.v2Bar(0.5, "var(--water)", { size: "thin" })).toContain(
+        'class="bar thin"',
+    );
+    expect(v2.v2Bar(0.5, "var(--water)", { size: "huge" })).toContain(
+        'class="bar"',
+    );
+    // Colours: a MACROS colour or a known token, nothing else.
+    expect(v2.v2Bar(0.5, "var(--water)")).toContain("--c:var(--water)");
+    expect(v2.v2Dot("accent-fill")).toContain("--c:var(--accent-fill)");
+    expect(v2.v2Dot("var(--status-warn)")).toContain("--c:var(--status-warn)");
+    expect(v2.v2Dot("red")).toBe('<span class="dot"></span>');
+    expect(v2.v2Dot("var(--evil)")).toBe('<span class="dot"></span>');
+    expect(v2.v2Dot(null, "warn", true)).toBe(
+        '<span class="dot lg s-warn"></span>',
+    );
+    expect(v2.v2Dot(null, "bogus")).toBe('<span class="dot"></span>');
+    expect(
+        v2.v2Chips([{ label: "A", attrs: { "data-store": "costco" } }]),
+    ).toContain('aria-pressed="false" data-store="costco">A');
+    expect(
+        v2.v2Buttons([{ label: "Go", attrs: { "data-act": "cook" } }]),
+    ).toContain('class="btn" data-act="cook">Go<');
+});
+
+test("v2 escapes food names in rows and the meal block", async () => {
+    const v2 = await loadV2();
+    const row = v2.v2Row({ title: "<b>Eggs</b>", sub: "<i>" });
+    expect(row).toContain("&lt;b&gt;Eggs&lt;/b&gt;");
+    expect(row).not.toContain("<b>");
+    expect(row).not.toContain("<i>");
+    const meal = v2.mealBlockV2("<img src=x onerror=alert(1)>", {
+        calories: 10,
+    });
+    expect(meal).not.toContain("<img");
+    expect(meal).toContain("&lt;img src=x onerror=alert(1)&gt;");
+});
+
+test("v2 dim text tone renders tertiary", async () => {
+    const v2 = await loadV2();
+    const row = v2.v2Row({
+        title: "Yogurt",
+        sub: "12 oz",
+        subTone: "dim",
+        end: "5 days",
+        endTone: "dim",
+    });
+    expect(row).toContain('row-s is-dim">12 oz<');
+    expect(row).toContain('row-end is-dim">5 days<');
+    expect(v2.v2Tiles([{ when: "5 days", tone: "dim", name: "A" }])).toContain(
+        'tile-w is-dim"',
+    );
+    const css = await Bun.file(`${SRC}/shared/v2/components.css`).text();
+    expect(css).toMatch(/\.is-dim \{\s*color: var\(--text-tertiary\);/);
+});
+
+test("v2 tones beat the date column; v2 controls show focus", async () => {
+    const css = await Bun.file(`${SRC}/shared/v2/components.css`).text();
+    // `.row-end.date` (0,2,0) used to outrank `.is-over` (0,1,0), so an
+    // overdue date stayed tertiary. The date rule must stay at (0,1,0).
+    expect(css).not.toMatch(/\.row-end\.date\s*\{/);
+    expect(css).toMatch(/\.row-end:where\(\.date\)\s*\{/);
+    expect(css.indexOf(".row-end:where(.date)")).toBeLessThan(
+        css.indexOf(".is-over {"),
+    );
+    for (const sel of [
+        ".check:focus-visible",
+        ".chip:focus-visible",
+        ".md-close:focus-visible",
+        ".strip [data-macro]:focus-visible",
+    ]) {
+        expect(css).toContain(sel);
+    }
+    const focus = [...css.matchAll(/([^{}]*:focus-visible[^{}]*)\{([^}]*)\}/g)];
+    for (const sel of [".check", ".chip", ".md-close"]) {
+        const rule = focus.find((m) => m[1]!.includes(`${sel}:focus-visible`));
+        expect(rule?.[2]).toContain("var(--accent-fill)");
+    }
+});
+
+test("v2 rings survive empty days and fit a 30-day range", async () => {
+    const v2 = await loadV2();
+    const one = v2.ringsV2([null as never, undefined as never], V2_GOAL, 0);
+    expect(one.match(/class="rday/g)?.length).toBe(2);
+    expect(one.match(/r-track/g)?.length).toBe(6);
+    expect(one).not.toContain('style="stroke:');
+
+    const days = (k: number) =>
+        Array.from({ length: k }, (_, i) => ({
+            label: String(i + 1),
+            protein_g: 100,
+        }));
+    // Seven across as the design draws them, fourteen in one row, thirty
+    // wrapped into two rows of fifteen; the cell shrinks its ring to fit.
+    expect(v2.ringsV2(days(7), V2_GOAL, 6)).toContain('style="--cols:7"');
+    expect(v2.ringsV2(days(14), V2_GOAL, 13)).toContain('style="--cols:14"');
+    expect(v2.ringsV2(days(30), V2_GOAL, 29)).toContain('style="--cols:15"');
+    expect(v2.ringsV2(days(30), V2_GOAL, 30)).not.toContain("rday on");
+    expect(v2.ringsV2(days(7), V2_GOAL, -1)).not.toContain("rday on");
+    const css = await Bun.file(`${SRC}/shared/v2/components.css`).text();
+    expect(css).toMatch(
+        /\.rings \{[^}]*grid-template-columns: repeat\(var\(--cols\), minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(
+        /\.rday svg \{[^}]*max-width: calc\(100% - 4px\);[^}]*height: auto;/,
+    );
+});
+
+test("v2 water reads small amounts and figures clamp at zero", async () => {
+    const v2 = await loadV2();
+    const tiny = v2.macroStripV2({ ...V2_DAY, water_ml: 40 }, V2_GOAL);
+    expect(tiny).toContain("&lt;0.1 / 3 L");
+    expect(v2.macroStripV2(V2_DAY, V2_GOAL)).toContain("1.6 / 3 L");
+    expect(v2.macroStripV2({ ...V2_DAY, water_ml: 3000 }, V2_GOAL)).toContain(
+        "3 / 3 L",
+    );
+
+    const neg = { ...V2_DAY, calories: -50, protein_g: -3, sugar_g: -1 };
+    const strip = v2.macroStripV2(neg, V2_GOAL);
+    expect(strip).not.toMatch(/>-\d/);
+    expect(strip).toContain(`>${n(2421)}<`);
+    const goals = v2.goalListV2(neg, V2_GOAL);
+    expect(goals).not.toMatch(/>-\d/);
+    expect(goals).toContain(">0%<");
+    expect(v2.gaugeV2(neg, null).html).toContain('gauge-v">0<');
+    expect(v2.pcfV2({ protein_g: -2 })).toContain("P 0<");
+    expect(v2.mealBlockV2("x", { calories: -9 })).toContain("+0<");
+    expect(v2.averagesV2({ protein_g: -4 }, V2_GOAL)).not.toMatch(/>-\d/);
+});
+
+test("v2 interactive strips each keep their own breakdown", async () => {
+    const v2 = await loadV2();
+    const first = [{ description: "Oats", protein_g: 27 }];
+    const second = [{ description: "Bowl", protein_g: 69 }];
+    const a = v2.macroStripV2(V2_DAY, V2_GOAL, { meals: first });
+    const b = v2.macroStripV2(V2_DAY, V2_GOAL, { meals: second });
+    const idOf = (html: string) =>
+        html.match(/data-macro-strip="([^"]+)"/)?.[1];
+    expect(idOf(a)).toBeDefined();
+    expect(idOf(b)).toBeDefined();
+    expect(idOf(a)).not.toBe(idOf(b));
+
+    // A tap on the first strip claims the shared slot for that strip before
+    // v1's handler reads it.
+    const tapOn = (html: string) => ({
+        closest: (sel: string) =>
+            sel === "[data-macro-strip]"
+                ? { getAttribute: () => idOf(html) }
+                : null,
+    });
+    v2.v2ClaimStrip(tapOn(a));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(first);
+    v2.v2ClaimStrip(tapOn(b));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+    // A tap outside any v2 strip leaves the slot alone.
+    v2.v2ClaimStrip({ closest: () => null });
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+});
+
+test("v2 macro copy carries no unused strings", async () => {
+    const src = await Bun.file(`${SRC}/shared/v2/macros.js`).text();
+    expect(src).not.toContain("legend:");
+});
+
+// ---- v2 macro-strip widgets --------------------------------------------------
+
+const WIDGET_FOOTER =
+    "You can enable or disable these widgets anytime — just ask to update your settings.";
+
+// #root stub: records #widget-mount and any footer nodes bridge.js appends.
+function widgetRootStub(clickSink?: (fn: (e: unknown) => void) => void) {
+    let legacyInner = "";
+    let mountEl: { id: string; innerHTML: string } | null = null;
+    const footerText: string[] = [];
+    const root = {
+        get innerHTML() {
+            return mountEl ? mountEl.innerHTML : legacyInner;
+        },
+        set innerHTML(v: string) {
+            legacyInner = v;
+            mountEl = null;
+            footerText.length = 0;
+        },
+        appendChild(node: {
+            id?: string;
+            innerHTML?: string;
+            textContent?: string;
+        }) {
+            if (node.id === "widget-mount") {
+                mountEl = node as { id: string; innerHTML: string };
+            } else if (
+                node.textContent &&
+                node.textContent.includes("enable or disable these widgets")
+            ) {
+                footerText.push(node.textContent);
+            }
+        },
+        addEventListener: (type: string, fn: (e: unknown) => void) => {
+            if (type === "click") clickSink?.(fn);
+        },
+        querySelector: () => null,
+    };
+    return {
+        root,
+        document: {
+            getElementById: (id: string) => {
+                if (id === "root") return root;
+                if (id === "widget-mount") return mountEl;
+                return null;
+            },
+            documentElement: {
+                setAttribute: () => {},
+                style: {} as object,
+                getBoundingClientRect: () => ({ height: 120 }),
+            },
+            body: {},
+            addEventListener: () => {},
+            createElement: () => ({
+                id: "",
+                innerHTML: "",
+                textContent: "",
+                style: {} as object,
+            }),
+        },
+        html: () =>
+            // A real DOM keeps whatever #root held before the mount was
+            // appended (e.g. the bridge's loading text), so the stub does too.
+            (mountEl ? legacyInner + mountEl.innerHTML : legacyInner) +
+            footerText.join(""),
+    };
+}
+
+// Run an assembled widget's script against a stub document, the way the
+// household app seeds a frame: window.__WIDGET_DATA__ is painted straight
+// through render(), with no host and no chat footer. Returns the card markup.
+function renderWidget(html: string, data: unknown): string {
+    return mountWidget(html, data).html();
+}
+
+// renderWidget, plus a click on a range toggle button: the event reaches the
+// template's delegated listener on #root, whose target answers closest()
+// with a button carrying data-range, as a real tap inside the toggle does.
+function mountWidget(
+    html: string,
+    data: unknown,
+): { html: () => string; clickRange: (value: number) => void } {
+    type Listener = (e: unknown) => void;
+    const clicks: Listener[] = [];
+    const dom = widgetRootStub((fn) => clicks.push(fn));
+    const { root, document } = dom;
+    const noop = () => {};
+    const window: Record<string, unknown> = {
+        __WIDGET_DATA__: data,
+        addEventListener: noop,
+        innerWidth: 400,
+    };
+    window.parent = window;
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    const clickRange = (value: number) => {
+        const button = {
+            getAttribute: (name: string) =>
+                name === "data-range" ? String(value) : null,
+            dataset: { range: String(value) },
+        };
+        const target = {
+            closest: (sel: string) =>
+                sel.includes("data-range") ? button : null,
+        };
+        for (const fn of clicks) fn({ target });
+    };
+    return { html: dom.html, clickRange };
+}
+
+// Chat host paint path (no __WIDGET_DATA__): bridge appends the settings footer.
+async function mountChatWidget(
+    html: string,
+    data: unknown,
+): Promise<{
+    html: () => string;
+    clickRange: (value: number) => void;
+    redeliver: (next: unknown) => Promise<void>;
+}> {
+    type Listener = (e: unknown) => void;
+    const clicks: Listener[] = [];
+    const dom = widgetRootStub((fn) => clicks.push(fn));
+    const { document } = dom;
+    const windowListeners: Listener[] = [];
+    const deliver = (payload: object) => {
+        for (const fn of windowListeners) fn({ source: host, data: payload });
+    };
+    const host = {
+        postMessage(msg: { id?: number; method: string; params?: object }) {
+            if (msg.method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id: msg.id,
+                    result: {
+                        hostCapabilities: { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (msg.method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: data },
+                });
+            }
+        },
+    };
+    const noop = () => {};
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Listener) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    for (let i = 0; i < 32; i++) await Promise.resolve();
+    const clickRange = (value: number) => {
+        const button = {
+            getAttribute: (name: string) =>
+                name === "data-range" ? String(value) : null,
+            dataset: { range: String(value) },
+        };
+        const target = {
+            closest: (sel: string) =>
+                sel.includes("data-range") ? button : null,
+        };
+        for (const fn of clicks) fn({ target });
+    };
+    const redeliver = async (next: unknown) => {
+        deliver({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: { structuredContent: next },
+        });
+        for (let i = 0; i < 32; i++) await Promise.resolve();
+    };
+    return { html: dom.html, clickRange, redeliver };
+}
+
+// A local calendar date, written the way the payloads carry it.
+function isoDay(offset = 0): string {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const p = (x: number) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+test("v2 goal list opens the breakdown per list, like a strip", async () => {
+    const v2 = await loadV2();
+    const first = [{ description: "Oats", calories: 432, protein_g: 27 }];
+    const second = [{ description: "Bowl", calories: 852, protein_g: 69 }];
+    const a = v2.goalListV2(V2_DAY, V2_GOAL, { meals: first });
+    const b = v2.goalListV2(V2_DAY, V2_GOAL, { meals: second });
+    // Every row a meal contributed to is a tile button; the others are not.
+    expect(a).toContain("data-macro-panel");
+    expect(a).toContain('<div class="gl" role="button"');
+    expect(a).toContain('data-macro="calories"');
+    expect(a).toContain('data-macro="protein_g"');
+    expect(a).not.toContain('data-macro="fat_g"');
+    expect(a.match(/class="gl"/g)?.length).toBe(4);
+    expect(a.match(/class="gl" role="button"/g)?.length).toBe(2);
+    expect(a).toContain('class="macro-detail" hidden');
+    expect(a).toContain("data-macro-hint");
+
+    const idOf = (html: string) =>
+        html.match(/data-macro-strip="([^"]+)"/)?.[1];
+    expect(idOf(a)).toBeDefined();
+    expect(idOf(a)).not.toBe(idOf(b));
+    const tapOn = (html: string) => ({
+        closest: (sel: string) =>
+            sel === "[data-macro-strip]"
+                ? { getAttribute: () => idOf(html) }
+                : null,
+    });
+    v2.v2ClaimStrip(tapOn(a));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(first);
+    v2.v2ClaimStrip(tapOn(b));
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+
+    // No meals behind it: plain rows, and the shared slot is left alone.
+    const still = v2.goalListV2(V2_DAY, V2_GOAL, { withLimits: true });
+    expect(still).not.toContain("data-macro");
+    expect((v2.macroCtx() as { meals: unknown }).meals).toBe(second);
+});
+
+test("v2 goal list carries the strip's limits row and water line on request", async () => {
+    const v2 = await loadV2();
+    const plain = v2.goalListV2(V2_DAY, V2_GOAL);
+    expect(plain).toMatch(/^<div class="goals">/);
+    expect(plain).not.toContain('class="limits"');
+    expect(plain).not.toContain('class="water"');
+
+    const full = v2.goalListV2(V2_DAY, V2_GOAL, {
+        withLimits: true,
+        withWater: true,
+    });
+    expect(full).toMatch(/^<div class="strip"><div class="goals">/);
+    // The strip's own limits and water: the design's order, v1's gates
+    // (alcohol at 0 never recorded is hidden).
+    const strip = v2.macroStripV2(V2_DAY, V2_GOAL);
+    const limits = strip.match(
+        /<div class="limits"[\s\S]*?(?=<div class="water">)/,
+    )?.[0];
+    expect(limits).toBeDefined();
+    expect(full).toContain(limits as string);
+    expect(full).toContain("1.6 / 3 L");
+    expect(full.indexOf('class="limits"')).toBeLessThan(
+        full.indexOf('class="water"'),
+    );
+    expect(v2.goalListV2(V2_DAY, V2_GOAL, { withLimits: true })).not.toContain(
+        'class="water"',
+    );
+    expect(v2.goalListV2(V2_DAY, V2_GOAL, { withWater: true })).not.toContain(
+        'class="limits"',
+    );
+
+    // Alcohol in the caller's drink unit, and a limit tile some meal fed is
+    // a button too.
+    const uk = v2.goalListV2({ ...V2_DAY, alcohol_g: 16 }, V2_GOAL, {
+        withLimits: true,
+        drinkUnit: "uk",
+        meals: [{ description: "Coffee", caffeine_mg: 95 }],
+    });
+    expect(uk).toContain(">2.0<");
+    expect(uk).toContain('data-macro="caffeine_mg"');
+});
+
+test("v2 meal block leaves out unrecorded macros instead of printing 0", async () => {
+    const v2 = await loadV2();
+    const apple = v2.mealBlockV2("Apple", {
+        calories: 95,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: null,
+    });
+    expect(apple).not.toContain('class="pcf"');
+    expect(apple).toContain(">+95<");
+    const part = v2.mealBlockV2("Toast", {
+        calories: 120,
+        protein_g: 0,
+        carbs_g: 22,
+        fat_g: null,
+    });
+    // A recorded 0 still shows; a null part is left out.
+    expect(part).toContain('<span class="p">P 0</span>');
+    expect(part).toContain('<span class="c">C 22</span>');
+    expect(part).not.toContain('class="f"');
+});
+
+test("v2 meal block shows +kcal only for a recorded figure", async () => {
+    const v2 = await loadV2();
+    expect(v2.mealBlockV2("Bowl", { calories: 852 })).toContain(
+        '<span class="meal-k">+852</span><span class="fig-u">kcal</span>',
+    );
+    // A real zero is a measurement (v1 prints it too).
+    expect(v2.mealBlockV2("Water", { calories: 0 })).toContain(">+0<");
+    for (const calories of [null, undefined]) {
+        const html = v2.mealBlockV2("Mystery", { calories, protein_g: 4 });
+        expect(html).not.toContain('class="meal-k"');
+        expect(html).not.toContain("kcal");
+        expect(html).toContain("P 4<");
+    }
+});
+
+const V2_TOTALS = { ...V2_DAY, alcohol_g: null };
+const V2_GOALS_PAYLOAD = { ...V2_GOAL, alcohol_g: null };
+const V2_ZERO = {
+    calories: 0,
+    protein_g: 0,
+    carbs_g: 0,
+    fat_g: 0,
+    fiber_g: 0,
+    sugar_g: 0,
+    alcohol_g: null,
+    caffeine_mg: null,
+    water_ml: 0,
+};
+const V2_OVER = { ...V2_TOTALS, calories: 2690, protein_g: 230 };
+const V2_MEALS = [
+    {
+        description: "Chicken rice bowl",
+        meal_type: "lunch",
+        date: null,
+        calories: 852,
+        protein_g: 69,
+        carbs_g: 76,
+        fat_g: 25,
+        fiber_g: 8.6,
+        sugar_g: 12.8,
+        alcohol_g: null,
+        caffeine_mg: 85,
+    },
+];
+
+function summaryPayload(day: object, goals: object | null, date = isoDay()) {
+    return {
+        start_date: date,
+        end_date: date,
+        logged_days: 1,
+        days_in_range: 1,
+        drink_unit: null,
+        locale: "en",
+        goals,
+        averages: day,
+        days: [{ date, meal_count: 1, ...day }],
+        meals: V2_MEALS,
+    };
+}
+
+function progressPayload(totals: object, goals: object | null, extra = {}) {
+    return {
+        date: isoDay(),
+        meal_count: 1,
+        water_entries: 2,
+        drink_unit: null,
+        locale: "en",
+        goals,
+        totals,
+        weight: {
+            current: 82.7,
+            target: 79.4,
+            unit: "kg",
+            logged_on: isoDay(-1),
+        },
+        meals: V2_MEALS,
+        ...extra,
+    };
+}
+
+function mealPayload(totals: object, goals: object | null, extra = {}) {
+    return {
+        action: "logged",
+        status: "ok",
+        similar_foods: [],
+        date: isoDay(),
+        drink_unit: null,
+        locale: "en",
+        logged_meal: { ...V2_MEALS[0] },
+        has_goals: goals != null,
+        goals,
+        totals,
+        meals: V2_MEALS,
+        ...extra,
+    };
+}
+
+async function v2Widget(key: string) {
+    const html = await getWidgetHtml(key, { v2: true });
+    // The v2 template, not the v1 fallback: only v2 tokens name this.
+    expect(html).toContain("--surface-panel");
+    return html;
+}
+
+test("v2 nutrition-summary: the design's day, its sample, and the edge days", async () => {
+    const html = await v2Widget("nutrition-summary");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Today<");
+    expect(sample).toContain(`>${n(1137)}<`);
+    expect(sample).toContain("kcal left");
+
+    const day = renderWidget(html, summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD));
+    expect(day).toContain(">Today<");
+    expect(day).toContain(`>${n(1137)}<`);
+    expect(day).toContain("1.6 / 3 L");
+    // Tiles a meal contributed to open the breakdown, as in v1.
+    expect(day).toContain("data-macro-panel");
+    expect(day).toContain('data-macro="protein_g"');
+
+    const noGoal = renderWidget(html, summaryPayload(V2_TOTALS, null));
+    expect(noGoal).toContain(`>${n(1284)}<`);
+    expect(noGoal).toContain("kcal eaten");
+
+    const over = renderWidget(html, summaryPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain(`>${n(269)}<`);
+    expect(over).toContain("kcal over");
+
+    const zero = renderWidget(html, summaryPayload(V2_ZERO, V2_GOALS_PAYLOAD));
+    expect(zero).toContain(`>${n(2421)}<`);
+
+    const empty = renderWidget(html, {
+        ...summaryPayload(V2_ZERO, null),
+        days: [],
+    });
+    expect(empty).toContain("No meals or water logged in this range.");
+
+    // A past day is named, not called "Today".
+    const past = renderWidget(
+        html,
+        summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD, "2026-11-07"),
+    );
+    expect(past).not.toContain(">Today<");
+    expect(past).toContain("Sat 7 Nov");
+});
+
+test("v2 nutrition-summary keeps v1's range chart and logged-days count", async () => {
+    const html = await v2Widget("nutrition-summary");
+    const range = renderWidget(html, {
+        ...summaryPayload(V2_TOTALS, V2_GOALS_PAYLOAD, "2026-07-07"),
+        start_date: "2026-07-01",
+        logged_days: 2,
+        days_in_range: 7,
+        days: [
+            { date: "2026-07-07", meal_count: 2, ...V2_TOTALS },
+            { date: "2026-07-05", meal_count: 3, ...V2_OVER },
+        ],
+    });
+    expect(range).toContain("1–7 Jul");
+    expect(range).toContain("2 of 7 days logged");
+    expect(range).toContain("Calories / day");
+    expect(range).toContain("<svg");
+    expect(range).toContain("Daily average · logged days");
+});
+
+test("v2 goal-progress tip counts only goals above 0", async () => {
+    const html = await v2Widget("goal-progress");
+    const eaten = { ...V2_TOTALS, calories: 1000, protein_g: 40 };
+    const tip = (goals: object) =>
+        renderWidget(html, progressPayload(eaten, goals)).match(
+            /class="tip">.*?<span>([^<]*)</,
+        )?.[1];
+    // No protein goal (null or 0): the tip never calls it met.
+    for (const protein_g of [null, 0]) {
+        const text = tip({ ...V2_GOALS_PAYLOAD, protein_g });
+        expect(text).toBe(`${n(1421)} kcal to go.`);
+    }
+    // A calorie goal of 0 is no goal: no calorie sentence at all.
+    const noCal = tip({ ...V2_GOALS_PAYLOAD, calories: 0 });
+    expect(noCal).toBe(`${n(170)} g of protein to go.`);
+    expect(tip({ ...V2_GOALS_PAYLOAD, calories: 0, protein_g: 0 })).toBe(
+        undefined,
+    );
+});
+
+test("v2 goal-progress: goal list, tip, limits, weight and the edge days", async () => {
+    const html = await v2Widget("goal-progress");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Goal progress");
+    expect(sample).toContain(`${n(1284)} / ${n(2421)} kcal`);
+    expect(sample).toContain(">53%<");
+
+    const day = renderWidget(
+        html,
+        progressPayload(V2_TOTALS, V2_GOALS_PAYLOAD),
+    );
+    expect(day).toContain(">46%<");
+    expect(day).toContain('class="tip"');
+    expect(day).toContain(`${n(114)} g of protein`);
+    // v1's limits, water and weight stay.
+    expect(day).toContain(">Sugar<");
+    expect(day).toContain("1.6 / 3 L");
+    expect(day).toContain("3.3 kg to lose");
+    // The goal list rows open the breakdown like v1's strip tiles.
+    expect(day).toContain("data-macro-panel");
+    expect(day).toContain('data-macro="calories"');
+
+    const noGoal = renderWidget(html, progressPayload(V2_TOTALS, null));
+    expect(noGoal).toContain("no goal");
+    expect(noGoal).not.toContain('class="tip"');
+
+    const over = renderWidget(html, progressPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain(`${n(269)} kcal over`);
+
+    const empty = renderWidget(
+        html,
+        progressPayload(V2_ZERO, V2_GOALS_PAYLOAD, {
+            meal_count: 0,
+            water_entries: 0,
+            weight: null,
+            meals: [],
+        }),
+    );
+    expect(empty).toContain("Nothing logged yet for today.");
+});
+
+test("v2 meal-logged: meal block over the strip, and the edge days", async () => {
+    const html = await v2Widget("meal-logged");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Logged to lunch");
+    expect(sample).toContain("Chicken rice bowl");
+    expect(sample).toContain(`>${n(1137)}<`);
+
+    const day = renderWidget(html, mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD));
+    expect(day).toContain("Logged to lunch");
+    expect(day).toContain(">+852<");
+    expect(day).toContain('<span class="p">P 69</span>');
+    expect(day).toContain("data-macro-panel");
+
+    const updated = renderWidget(
+        html,
+        mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD, { action: "updated" }),
+    );
+    expect(updated).toContain("Meal updated");
+    // An updated meal keeps its slot on the header line, beside the day.
+    expect(updated).toContain('<span class="hd-meta">lunch · today</span>');
+
+    // No goals: nothing to show progress against, so nothing at all (v1).
+    expect(renderWidget(html, mealPayload(V2_TOTALS, null))).toBe("");
+
+    const over = renderWidget(html, mealPayload(V2_OVER, V2_GOALS_PAYLOAD));
+    expect(over).toContain("kcal over");
+
+    const zero = renderWidget(
+        html,
+        mealPayload(V2_ZERO, V2_GOALS_PAYLOAD, {
+            logged_meal: { ...V2_MEALS[0], calories: null, meal_type: null },
+            meals: [],
+        }),
+    );
+    expect(zero).toContain("Meal logged");
+    // No calorie figure on the meal: no "+0 kcal" claiming a measured zero.
+    expect(zero).not.toContain('class="meal-k"');
+    expect(zero).toContain(`>${n(2421)}<`);
+
+    const similar = renderWidget(
+        html,
+        mealPayload(V2_TOTALS, V2_GOALS_PAYLOAD, {
+            status: "similar_foods",
+            logged_meal: null,
+        }),
+    );
+    expect(similar).toContain("Not logged yet");
+});
+
+// ---- v2 trends and weight-trends ---------------------------------------------
+
+// "2026-07-11" shifted by `delta` calendar days.
+function shiftIso(date: string, delta: number): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + delta);
+    return d.toISOString().slice(0, 10);
+}
+
+const TRENDS_END = "2026-07-11"; // a Saturday
+const TRENDS_GOALS = {
+    calories: 1600,
+    protein_g: 160,
+    carbs_g: 200,
+    fat_g: 70,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    caffeine_mg: null,
+    water_ml: null,
+};
+
+// A get_trends day: logged with `protein` grams (calories ten times that),
+// or the tool's unlogged bucket (zeros, nulls) when protein is 0.
+function trendsDay(date: string, protein: number) {
+    const on = protein > 0;
+    return {
+        date,
+        calories: protein * 10,
+        protein_g: protein,
+        carbs_g: on ? 150 : 0,
+        fat_g: on ? 50 : 0,
+        fiber_g: on ? 20 : null,
+        sugar_g: on ? 30 : null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        water_ml: 0,
+    };
+}
+
+// Thirty days ending TRENDS_END. Last seven: 140 g protein except three days
+// ago (unlogged). The seven before: 70 g. The sixteen before that: nothing.
+//   7d:  avg 840/7 = 120,  6/7 = 86% logged
+//   14d: avg 1330/14 = 95, 13/14 = 93%
+//   30d: avg 1330/30 = 44, 13/30 = 43%
+// Current streak: today, yesterday, the day before = 3.
+function trendsPayload(extra: Record<string, unknown> = {}) {
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+        const protein = i === 3 ? 0 : i < 7 ? 140 : i < 14 ? 70 : 0;
+        days.push(trendsDay(shiftIso(TRENDS_END, -i), protein));
+    }
+    return {
+        end_date: TRENDS_END,
+        default_range: 7,
+        drink_unit: "us",
+        locale: "en",
+        goals: TRENDS_GOALS,
+        days,
+        ...extra,
+    };
+}
+
+const ringCount = (html: string) => (html.match(/class="rday/g) ?? []).length;
+const pressed = (html: string) =>
+    html.match(/data-range="(\d+)" aria-pressed="true"/)?.[1];
+
+test("v2 trends: sample, and the toggle re-slices rings, averages and the streak line", async () => {
+    const html = await v2Widget("trends");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Trends<");
+    expect(ringCount(sample)).toBeGreaterThan(0);
+    expect(sample).toContain("day streak");
+
+    const w = mountWidget(html, trendsPayload());
+    let out = w.html();
+    expect(pressed(out)).toBe("7");
+    expect(ringCount(out)).toBe(7);
+    // The latest day is the one on the inset surface.
+    expect(out).toMatch(/class="rday on"[^]*?<span>S<\/span><\/div><\/div>/);
+    expect(out).toContain(">120 / 160<");
+    expect(out).toContain(`>${n(1200)} / ${n(1600)}<`);
+    expect(out).toContain('<span class="fig-v">3</span>');
+    expect(out).toContain('<span class="fig-v">86%</span>');
+    expect(out).toContain("7-day average · all days");
+
+    w.clickRange(14);
+    out = w.html();
+    expect(pressed(out)).toBe("14");
+    expect(ringCount(out)).toBe(14);
+    expect(out).toContain(">95 / 160<");
+    expect(out).toContain('<span class="fig-v">93%</span>');
+    expect(out).toContain("14-day average · all days");
+
+    w.clickRange(30);
+    out = w.html();
+    expect(pressed(out)).toBe("30");
+    expect(ringCount(out)).toBe(30);
+    expect(out).toContain(">44 / 160<");
+    expect(out).toContain('<span class="fig-v">43%</span>');
+    // The streak is today's, whatever the window.
+    expect(out).toContain('<span class="fig-v">3</span>');
+});
+
+test("v2 trends: range toggle keeps the chat settings footer", async () => {
+    const html = await v2Widget("trends");
+    const w = await mountChatWidget(html, trendsPayload());
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    w.clickRange(14);
+    expect(w.html()).toContain(WIDGET_FOOTER);
+});
+
+test("v2 first paint replaces the loading text instead of sitting beside it", async () => {
+    // A template may paint before the tool result arrives (the importer does
+    // from onReady). #root then still holds the bridge's loading markup, and
+    // the first mount must not leave it standing above the card.
+    const ui = await partialAsInlined("shared/v2/ui.js");
+    const dom = widgetRootStub();
+    dom.root.innerHTML = '<div class="empty">Preparing import…</div>';
+    new Function("document", `${ui}\nv2Paint('<div class="card">Card</div>');`)(
+        dom.document,
+    );
+    expect(dom.html()).toContain("Card");
+    expect(dom.html()).not.toContain("Preparing import");
+});
+
+test("v2 re-rendering widgets drop the loading text and keep one footer per tool result", async () => {
+    const count = (h: string, needle: string) => h.split(needle).length - 1;
+    for (const [key, payload] of [
+        ["trends", trendsPayload()],
+        ["weight-trends", weightPayload()],
+        ["import-meals", { ...IMPORT_CFG }],
+    ] as const) {
+        const w = await mountChatWidget(await v2Widget(key), payload);
+        expect(w.html(), key).not.toContain("Loading");
+        expect(count(w.html(), WIDGET_FOOTER), key).toBe(1);
+        await w.redeliver(payload);
+        expect(count(w.html(), WIDGET_FOOTER), key).toBe(1);
+    }
+});
+
+test("v2 trends: empty payloads, and a range with missing days", async () => {
+    const html = await v2Widget("trends");
+    const emptyMsg = "No meals or water logged in this range yet.";
+    expect(renderWidget(html, trendsPayload({ days: [] }))).toContain(emptyMsg);
+    // Every bucket unlogged is empty too (v1).
+    const blank = trendsPayload();
+    blank.days = blank.days.map((d) => trendsDay(d.date, 0));
+    expect(renderWidget(html, blank)).toContain(emptyMsg);
+
+    // Only three of the last seven days arrive at all: the window is still
+    // seven calendar days, a missing day reads as unlogged.
+    const gaps = trendsPayload({
+        days: [0, 2, 5].map((i) => trendsDay(shiftIso(TRENDS_END, -i), 140)),
+    });
+    const out = renderWidget(html, gaps);
+    expect(ringCount(out)).toBe(7);
+    expect(out).toContain(">60 / 160<"); // 420 / 7
+    expect(out).toContain('<span class="fig-v">43%</span>'); // 3 / 7
+    expect(out).toContain('<span class="fig-v">1</span>'); // today only
+
+    // No goals: averages show the figure alone, never "/ 0".
+    const noGoal = renderWidget(html, trendsPayload({ goals: null }));
+    expect(noGoal).toContain(">120<");
+    expect(noGoal).not.toContain(" / 0<");
+});
+
+// One decimal, the way the weight widget prints every weight.
+const w1 = (x: number) =>
+    x.toLocaleString(undefined, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+    });
+
+// Weigh-ins 28, 20, 12, 5, 2 and 0 days before TRENDS_END (11 Jul).
+function weightPayload(extra: Record<string, unknown> = {}) {
+    const readings: [number, number][] = [
+        [28, 186.0],
+        [20, 185.0],
+        [12, 184.0],
+        [5, 183.6],
+        [2, 183.0],
+        [0, 182.4],
+    ];
+    return {
+        end_date: TRENDS_END,
+        unit: "lb",
+        target: 175,
+        default_range: 30,
+        locale: "en",
+        days: readings.map(([ago, weight]) => ({
+            date: shiftIso(TRENDS_END, -ago),
+            weight,
+        })),
+        ...extra,
+    };
+}
+
+test("v2 weight-trends: sample, and the toggle re-slices figure, change and chart", async () => {
+    const html = await v2Widget("weight-trends");
+
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain(">Weight<");
+    expect(sample).toContain('class="wchart"');
+
+    const w = mountWidget(html, weightPayload());
+    let out = w.html();
+    // The tool sends at most 30 days, so the toggle offers what it can fill.
+    expect(out).toContain(">7d<");
+    expect(out).toContain(">14d<");
+    expect(out).toContain(">30d<");
+    expect(out).not.toContain(">1y<");
+    expect(pressed(out)).toBe("30");
+    expect(out).toContain(`<span class="fig-v xl">${w1(182.4)}</span>`);
+    expect(out).toContain(`↓ ${w1(3.6)} lb since Jun 13`);
+    expect(out).toContain("is-ok"); // closer to the target
+    expect(out).toContain(">Jun 13<");
+    expect(out).toContain(">Jul 11<");
+    expect(out).toContain('class="goalline"');
+    expect(out).toContain(`Goal ${w1(175)} lb · ${w1(7.4)} lb to lose`);
+    expect(out).toContain("6 weigh-ins");
+
+    w.clickRange(7);
+    out = w.html();
+    expect(pressed(out)).toBe("7");
+    expect(out).toContain(`↓ ${w1(1.2)} lb since Jul 6`);
+    expect(out).toContain("3 weigh-ins");
+
+    w.clickRange(14);
+    out = w.html();
+    expect(pressed(out)).toBe("14");
+    expect(out).toContain(`↓ ${w1(1.6)} lb since Jun 29`);
+    expect(out).toContain("4 weigh-ins");
+});
+
+test("v2 weight-trends: range toggle keeps the chat settings footer", async () => {
+    const html = await v2Widget("weight-trends");
+    const w = await mountChatWidget(html, weightPayload());
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    w.clickRange(7);
+    expect(w.html()).toContain(WIDGET_FOOTER);
+});
+
+test("v2 weight-trends: no target, one reading, an empty range and no data", async () => {
+    const html = await v2Widget("weight-trends");
+
+    const noTarget = renderWidget(html, weightPayload({ target: null }));
+    expect(noTarget).toContain("No target set");
+    expect(noTarget).not.toContain('class="goalline"');
+    // No target, no direction to judge the change by: neutral.
+    expect(noTarget).toMatch(/is-dim">↓/);
+
+    const one = renderWidget(
+        html,
+        weightPayload({ days: [{ date: TRENDS_END, weight: 182.4 }] }),
+    );
+    expect(one).toContain(`<span class="fig-v xl">${w1(182.4)}</span>`);
+    expect(one).toContain("need 2+ weigh-ins");
+    expect(one).toContain("1 weigh-in");
+    expect((one.match(/<circle/g) ?? []).length).toBe(1);
+
+    // Nothing in the last seven days: say so, keep the toggle to widen.
+    const w = mountWidget(
+        html,
+        weightPayload({
+            default_range: 7,
+            days: [
+                { date: shiftIso(TRENDS_END, -20), weight: 185 },
+                { date: shiftIso(TRENDS_END, -12), weight: 184 },
+            ],
+        }),
+    );
+    expect(w.html()).toContain(
+        "No weigh-ins in the last 7 days. Try a wider range.",
+    );
+    w.clickRange(30);
+    expect(w.html()).toContain(`<span class="fig-v xl">${w1(184)}</span>`);
+
+    expect(renderWidget(html, weightPayload({ days: [] }))).toContain(
+        "No weight logged in this range yet.",
+    );
+});
+
+// ---- import-meals: v1 and v2 driven through one fake host ------------------
+
+// What start_meal_import sends (the harness's payload).
+const IMPORT_CFG = {
+    tz: "America/Denver",
+    tz_configured: true,
+    today: "2026-11-09",
+    max_rows_per_call: 50,
+    import_tool_name: "bulk_import_meals",
+    known_source_apps: ["myfitnesspal", "cronometer"],
+    drink_unit: null as string | null,
+    user_id: "u1",
+};
+
+type ToolArgs = { meals: Record<string, unknown>[] } & Record<string, unknown>;
+type ToolReply = (args: ToolArgs) => object;
+
+// A bulk_import_meals that accepts every row.
+const acceptAll: ToolReply = (args) => ({
+    structuredContent: {
+        dry_run: args.dry_run,
+        status: "ok",
+        summary: {
+            created: args.dry_run ? 0 : args.meals.length,
+            deduplicated: 0,
+            failed: 0,
+        },
+        results: [],
+        warnings: [],
+    },
+});
+
+const tick = async (n = 40) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+// Mount an import-meals assembly inside a fake strict host: ui/initialize is
+// answered (serverTools on or off), the start_meal_import payload arrives as
+// a tool-result notification, and every tools/call is recorded and answered
+// by `reply`. The DOM is a stub that serves both templates: v1 wires handlers
+// onto elements by id after each render, v2 listens once on #root.
+async function mountImport(
+    html: string,
+    opts: { cfg?: object; canCallTools?: boolean; reply?: ToolReply } = {},
+) {
+    type Fn = (e: unknown) => unknown;
+    const calls: ToolArgs[] = [];
+    const contexts: string[] = [];
+    const listeners: Record<string, Fn[]> = {};
+    const windowListeners: Fn[] = [];
+    let legacyInner = "";
+    let mountEl: { id: string; innerHTML: string } | null = null;
+    const footerText: string[] = [];
+    const cardHtml = () =>
+        mountEl ? legacyInner + mountEl.innerHTML : legacyInner;
+    const root = {
+        get innerHTML() {
+            return cardHtml();
+        },
+        set innerHTML(v: string) {
+            legacyInner = v;
+            mountEl = null;
+            footerText.length = 0;
+        },
+        appendChild(node: {
+            id?: string;
+            innerHTML?: string;
+            textContent?: string;
+        }) {
+            if (node.id === "widget-mount") {
+                mountEl = node as { id: string; innerHTML: string };
+            } else if (
+                node.textContent &&
+                node.textContent.includes("enable or disable these widgets")
+            ) {
+                footerText.push(node.textContent);
+            }
+        },
+        addEventListener: (type: string, fn: Fn) =>
+            (listeners[type] ??= []).push(fn),
+    };
+    const els = new Map<string, Record<string, unknown>>();
+    const el = (key: string) => {
+        if (!els.has(key))
+            els.set(key, { classList: { add() {}, remove() {} }, dataset: {} });
+        return els.get(key)!;
+    };
+    const noop = () => {};
+    const document = {
+        getElementById: (id: string) => {
+            if (id === "root") return root;
+            if (id === "widget-mount") return mountEl;
+            return cardHtml().includes(`id="${id}"`) ? el(id) : null;
+        },
+        querySelectorAll: (sel: string) =>
+            sel === ".map-sel"
+                ? [...cardHtml().matchAll(/map-sel" data-field="(\w+)"/g)].map(
+                      (m) => {
+                          const e = el(`map:${m[1]}`);
+                          (e.dataset as Record<string, string>).field = m[1]!;
+                          return e;
+                      },
+                  )
+                : [],
+        documentElement: {
+            setAttribute: noop,
+            style: {} as object,
+            getBoundingClientRect: () => ({ height: 100 }),
+        },
+        body: {},
+        addEventListener: noop,
+        createElement: () => ({
+            id: "",
+            innerHTML: "",
+            textContent: "",
+            style: {} as object,
+        }),
+    };
+    const deliver = (data: object) =>
+        setTimeout(() => {
+            for (const fn of windowListeners) fn({ source: host, data });
+        }, 0);
+    const host = {
+        postMessage(msg: {
+            id?: string;
+            method: string;
+            params: {
+                name?: string;
+                arguments?: ToolArgs;
+                content?: { text: string }[];
+            };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize")
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "dark" },
+                    },
+                });
+            else if (method === "ui/notifications/initialized")
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: {
+                        structuredContent: { ...IMPORT_CFG, ...opts.cfg },
+                    },
+                });
+            else if (method === "tools/call") {
+                const args = structuredClone(params.arguments!);
+                calls.push(args);
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: (opts.reply ?? acceptAll)(structuredClone(args)),
+                });
+            } else if (method === "ui/update-model-context") {
+                contexts.push(params.content![0]!.text);
+                deliver({ jsonrpc: "2.0", id, result: {} });
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        innerWidth: 400,
+        parent: host,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    await tick();
+
+    const v2 = html.includes("--surface-panel");
+    const fire = (type: string, target: object) => {
+        for (const fn of listeners[type] ?? []) fn({ target });
+    };
+    const ctl = (name: string, extra: object) => ({
+        dataset: { ctl: name },
+        closest: () => null,
+        ...extra,
+    });
+    // v1 ids for each v2 data-act.
+    const V1_IDS: Record<string, string> = {
+        preview: "toPreview",
+        import: "doImport",
+        "back-map": "backToMap",
+        "back-file": "backToFile",
+        restart: "restart",
+    };
+    const handler = (id: string, name: string) => {
+        const e = document.getElementById(id) as Record<string, Fn> | null;
+        if (!e || typeof e[name] !== "function")
+            throw new Error(`v1 has no ${name} on #${id}`);
+        return e[name]!;
+    };
+    const redeliver = async (cfg: object = {}) => {
+        deliver({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                structuredContent: { ...IMPORT_CFG, ...opts.cfg, ...cfg },
+            },
+        });
+        await tick();
+    };
+    return {
+        calls,
+        contexts,
+        html: () => cardHtml() + footerText.join(""),
+        redeliver,
+        async chooseFile(name: string, text: string) {
+            const file = {
+                name,
+                arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+            };
+            if (v2) fire("change", ctl("file", { files: [file] }));
+            else handler("file", "onchange")({ target: { files: [file] } });
+            await tick();
+        },
+        async click(act: string) {
+            if (v2) {
+                const button = { dataset: { act } };
+                fire("click", { closest: () => button, dataset: {} });
+            } else handler(V1_IDS[act]!, "onclick")({});
+            await tick();
+        },
+        mapField(field: string, index: number) {
+            if (v2)
+                fire(
+                    "change",
+                    ctl("map", {
+                        dataset: { ctl: "map", field },
+                        value: String(index),
+                    }),
+                );
+            else
+                (el(`map:${field}`).onchange as Fn)({
+                    target: { dataset: { field }, value: String(index) },
+                });
+        },
+        choose(name: "dateFormat" | "energyUnit", value: string) {
+            if (v2) fire("change", ctl(name, { value }));
+            else handler(name, "onchange")({ target: { value } });
+        },
+        sourceApp(value: string) {
+            if (v2) fire("input", ctl("srcapp", { value }));
+            else handler("srcapp", "oninput")({ target: { value } });
+        },
+    };
+}
+
+// Five exports the widget must turn into the same server calls in v1 and v2.
+const mfpCsv = [
+    "Date,Meal,Calories,Fat (g),Saturated Fat,Carbohydrates (g),Protein (g),Note",
+    ...Array.from({ length: 64 }, (_, i) => {
+        const day = String(1 + Math.floor(i / 4)).padStart(2, "0");
+        const meal = ["Breakfast", "Lunch", "Dinner", "Snacks"][i % 4];
+        return `2026-10-${day},${meal},${300 + i},${10 + (i % 7)},2,${40 + (i % 9)},${20 + (i % 5)},${i % 6 === 0 ? '"late, tired"' : ""}`;
+    }),
+    "TOTAL:,,20000,700,128,2800,1400,",
+].join("\r\n");
+
+const cronoKjCsv = [
+    "Day,Time,Group,Food Name,Amount,Energy (kJ),Carbs (g),Fat (g),Protein (g),Fiber (g),Sugars (g),Caffeine (mg),Alcohol (g)",
+    "2026-11-01,9:15 AM,Breakfast,Oats,80 g,1250,54,6,11,8,1.2,,",
+    "2026-11-01,1:05 PM,Lunch,Chicken bowl,1 bowl,3565,76,25,69,8.6,12.8,,",
+    "2026-11-01,,Snacks,Espresso,1 cup,8,0,0,0.1,,,64,",
+    "2026-11-02,7:40 PM,Dinner,Red wine,150 ml,520,4,0,0.1,,0.9,,14",
+];
+
+// Day-first or month-first cannot be told apart; the user picks day-first.
+// It also carries an added-sugar column, a caffeine-in-grams column, an
+// alcohol column with tracking off, and one unreadable date.
+const ambiguousCsv = [
+    "Date,Food,Calories,Added Sugar (g),Caffeine (g),Alcohol",
+    "05/06/2026 08:30,Toast,210,3,,",
+    "06/05/2026 12:00,Soup,340,1,,",
+    "07/06/2026,Cola,140,35,0.03,",
+    "08/06/2026 21:00,Beer,150,,,13",
+    "garbage,Mystery,99,,,",
+];
+
+const ownExportCsv = [
+    "id,logged_at,timezone,meal_type,description,calories,protein_g,carbs_g,fat_g,fiber_g,sugar_g,alcohol_g,caffeine_mg,notes",
+    "6f1c8f3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f,2026-11-03 08:05:00,Europe/Kyiv,breakfast,Overnight oats,432,27,42,17,9.4,18.2,,95,",
+    "7a2d9f4e-3b5c-4d6e-9fa0-1b2c3d4e5f60,2026-11-03 13:10:00,Europe/Kyiv,lunch,Chicken rice bowl,852,69,76,25,8.6,12.8,0,85,with extra rice",
+];
+
+const loseItCsv = [
+    "Date,Name,Type,Quantity,Units,Calories,Fat (g),Protein (g),Carbohydrates (g),Deleted",
+    "11/02/2026,Banana,Breakfast,1,Each,105,0.4,1.3,27,false",
+    "11/02/2026,Pizza,Dinner,2,Slice,570,24,24,66,true",
+    "11/03/2026,Apple,Snacks,1,Each,95,0.3,0.5,25,false",
+];
+
+// "Energy (kJ)" is no calories alias, so the user maps it; the remap re-reads
+// the unit from the header.
+const mapKj = (w: Awaited<ReturnType<typeof mountImport>>) =>
+    w.mapField("calories", 5);
+
+type ImportScenario = {
+    name: string;
+    file: string;
+    text: string;
+    cfg?: object;
+    steps?: (w: Awaited<ReturnType<typeof mountImport>>) => void;
+};
+const IMPORT_SCENARIOS: ImportScenario[] = [
+    {
+        name: "myfitnesspal, 64 rows over 16 days",
+        file: "mfp.csv",
+        text: mfpCsv,
+    },
+    {
+        name: "cronometer in kJ, alcohol tracked",
+        file: "crono.csv",
+        text: cronoKjCsv.join("\n"),
+        cfg: { drink_unit: "us" },
+        steps: mapKj,
+    },
+    {
+        name: "cronometer in kJ, alcohol off",
+        file: "crono.csv",
+        text: cronoKjCsv.join("\n"),
+        steps: mapKj,
+    },
+    {
+        name: "ambiguous dates read day-first, source app typed",
+        file: "diary.csv",
+        text: ambiguousCsv.join("\n"),
+        steps: (w) => {
+            w.choose("dateFormat", "dmy");
+            w.sourceApp("myapp");
+        },
+    },
+    {
+        name: "our own export, by id and timezone",
+        file: "meals.csv",
+        text: ownExportCsv.join("\n"),
+    },
+    {
+        name: "lose it, deleted rows, calories remapped",
+        file: "loseit.csv",
+        text: loseItCsv.join("\n"),
+        steps: (w) => {
+            w.mapField("calories", 5);
+            w.mapField("notes", 4);
+            w.choose("energyUnit", "kj");
+        },
+    },
+];
+
+async function runImportScenario(html: string, s: ImportScenario) {
+    const w = await mountImport(html, { cfg: s.cfg });
+    await w.chooseFile(s.file, s.text);
+    s.steps?.(w);
+    await w.click("preview");
+    await w.click("import");
+    return w;
+}
+
+test.each(IMPORT_SCENARIOS.map((s) => [s.name, s] as const))(
+    "import-meals v2 sends v1's bulk_import_meals arguments: %s",
+    async (_name, s) => {
+        const v1 = await runImportScenario(
+            await getWidgetHtml("import-meals"),
+            s,
+        );
+        const v2 = await runImportScenario(await v2Widget("import-meals"), s);
+        expect(v1.calls.length).toBeGreaterThan(1);
+        expect(JSON.stringify(v2.calls)).toBe(JSON.stringify(v1.calls));
+        expect(v2.contexts).toEqual(v1.contexts);
+    },
+);
+
+test("import-meals v2: step changes keep the chat settings footer", async () => {
+    const count = (h: string, needle: string) => h.split(needle).length - 1;
+    const w = await mountImport(await v2Widget("import-meals"));
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.chooseFile("meals.csv", "Date,Food,Calories\n2026-07-01,Oats,100");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.click("back-file");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.redeliver();
+    expect(w.html()).not.toContain("Preparing import");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+});
+
+test("import-meals v2: a MyFitnessPal export auto-maps and previews its counts", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    expect(w.html()).toContain("Step 1 of 4");
+    expect(w.html()).toContain('data-ctl="file"');
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    const map = w.html();
+    expect(map).toContain("Step 2 of 4");
+    expect(map).toContain("64 rows · 8 columns · utf-8, delimiter ,");
+    // Recognised columns are pre-selected; the source app is guessed.
+    const selected = (field: string) =>
+        new RegExp(
+            `data-field="${field}"><option[^]*?<option value="(\\d+)" selected`,
+        ).exec(map)?.[1];
+    expect(selected("logged_at")).toBe("0");
+    expect(selected("meal_type")).toBe("1");
+    expect(selected("calories")).toBe("2");
+    expect(selected("protein_g")).toBe("6");
+    expect(map).toContain('value="myfitnesspal"');
+    // Alcohol tracking is off, so no alcohol row is offered.
+    expect(map).not.toContain('data-field="alcohol_g"');
+
+    await w.click("preview");
+    const pv = w.html();
+    expect(pv).toContain("Step 3 of 4");
+    expect(pv).toContain("64 meals · Oct 2026<");
+    expect(pv).toContain("Date → Date / time");
+    expect(pv).toContain("1 rows skipped · 2 batches");
+    expect(pv).toContain("Times read in <b>America/Denver</b>");
+    expect(pv).toContain("Showing 30 of 64 rows");
+    expect(pv).toContain(">Import 64 meals<");
+    expect(pv).toContain('<span class="row-s">Oct 1</span>');
+});
+
+test("import-meals v2: ambiguous dates prompt, and day-first is applied once chosen", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile("diary.csv", ambiguousCsv.join("\n"));
+    const map = w.html();
+    expect(map).toContain("could not be determined from this file");
+    // Added sugar, caffeine in grams and alcohol-while-off all say why.
+    expect(map).toContain("added-sugar column (Added Sugar (g))");
+    expect(map).toContain("caffeine column (Caffeine (g)) is in grams");
+    expect(map).toContain(
+        "alcohol column (Alcohol), but alcohol tracking is off",
+    );
+    w.choose("dateFormat", "dmy");
+    expect(w.html()).not.toContain("could not be determined");
+    expect(w.html()).toContain("05/06/2026 08:30 → 2026-06-05 08:30");
+    await w.click("preview");
+    expect(w.html()).toContain(
+        "1 row(s) were skipped because their date could not be read as Day/Month/Year (e.g. line 6: garbage)",
+    );
+    expect(w.html()).toContain("Details for a bug report");
+    await w.click("import");
+    const sent = w.calls[0]!.meals;
+    expect(sent.map((m) => m.logged_at)).toEqual([
+        "2026-06-05 08:30",
+        "2026-05-06 12:00",
+        "2026-06-07",
+        "2026-06-08 21:00",
+    ]);
+    expect(sent.every((m) => m.alcohol_g === undefined)).toBe(true);
+    expect(sent.every((m) => m.caffeine_mg === undefined)).toBe(true);
+});
+
+test("import-meals v2: a kJ column converts to kcal in the example and the rows", async () => {
+    const w = await mountImport(await v2Widget("import-meals"), {
+        cfg: { drink_unit: "us" },
+    });
+    await w.chooseFile("crono.csv", cronoKjCsv.join("\n"));
+    mapKj(w);
+    expect(w.html()).toContain("1250 kJ → 299 kcal");
+    await w.click("preview");
+    expect(w.html()).toContain("energy converted from kJ to kcal");
+    await w.click("import");
+    const sent = w.calls[0]!.meals;
+    expect(sent.map((m) => m.calories)).toEqual([299, 852, 2, 124]);
+    expect(sent.map((m) => m.logged_at)).toEqual([
+        "2026-11-01 09:15",
+        "2026-11-01 13:05",
+        "2026-11-01",
+        "2026-11-02 19:40",
+    ]);
+    expect(sent[3]!.alcohol_g).toBe(14);
+    expect(w.calls[0]!.expected_total_kcal).toBe(1277);
+});
+
+test("import-meals v2: imports, reports the counts, and tells the model", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    await w.click("preview");
+    await w.click("import");
+    // Dry run of the first chunk, then each chunk for real.
+    expect(w.calls.map((c) => c.dry_run)).toEqual([true, false, false]);
+    const done = w.html();
+    expect(done).toContain(">Done<");
+    expect(done).toContain("64 meals imported");
+    expect(done).toContain(
+        '<span class="row-t">Imported</span><span class="row-end">64</span>',
+    );
+    expect(done).not.toContain("Details for a bug report");
+    expect(w.contexts).toEqual([
+        "Bulk meal import finished: 64 meals imported, 0 already logged, 0 failed, 1 rows skipped. Source: mfp-export.csv.",
+    ]);
+});
+
+test("import-meals v2: a failed result shows the per-row report", async () => {
+    const failing: ToolReply = (args) => ({
+        structuredContent: {
+            dry_run: args.dry_run,
+            status: args.dry_run ? "ok" : "partial",
+            summary: { created: 1, deduplicated: 1, failed: 1 },
+            results: [
+                {
+                    source_line: 3,
+                    error: { message: "calories <out of range>" },
+                },
+            ],
+            warnings: ["Timezone not set; times read as UTC."],
+        },
+    });
+    const w = await mountImport(await v2Widget("import-meals"), {
+        reply: failing,
+    });
+    await w.chooseFile("meals.csv", ownExportCsv.join("\n"));
+    await w.click("preview");
+    expect(w.html()).toContain("each row&#39;s own timezone column");
+    await w.click("import");
+    const done = w.html();
+    expect(done).toContain('class="disc warn"');
+    expect(done).toContain(
+        '<span class="row-s">Line 3</span><span class="row-t is-over">calories &lt;out of range&gt;</span>',
+    );
+    expect(done).toContain("Timezone not set; times read as UTC.");
+    expect(done).toContain("Details for a bug report");
+    expect(done).toContain(
+        "first error, line 3: calories &lt;out of range&gt;",
+    );
+
+    // A failed dry run writes nothing and stays on the preview, saying why.
+    const pre = await mountImport(await v2Widget("import-meals"), {
+        reply: (args) => ({
+            structuredContent: {
+                dry_run: args.dry_run,
+                status: "failed",
+                summary: { created: 0, deduplicated: 0, failed: 2 },
+                results: [{ source_line: 2, error: { message: "bad date" } }],
+                warnings: ["expected_row_count mismatch"],
+            },
+        }),
+    });
+    await pre.chooseFile("meals.csv", ownExportCsv.join("\n"));
+    await pre.click("preview");
+    await pre.click("import");
+    expect(pre.calls.map((c) => c.dry_run)).toEqual([true]);
+    expect(pre.html()).toContain("Rows 2–3: expected_row_count mismatch");
+    expect(pre.html()).toContain("1 row(s) would fail, e.g. line 2: bad date");
+    expect(pre.html()).toContain("Step 3 of 4");
+});
+
+test("import-meals v2: without host tool calls it asks for Claude instead", async () => {
+    const w = await mountImport(await v2Widget("import-meals"), {
+        canCallTools: false,
+        cfg: { tz_configured: false },
+    });
+    expect(w.html()).toContain("Ask Claude to import the file instead");
+    expect(w.html()).toContain("Your timezone is not set");
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    await w.click("preview");
+    expect(w.html()).toMatch(/data-act="import" disabled/);
+    await w.click("import");
+    expect(w.calls).toEqual([]);
+});
+
+test("import-meals v2: file names and cells reach the markup escaped", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile(
+        '"><img src=x onerror=alert(1)>.csv',
+        'Date,Food,Calories\n2026-11-01,"<script>x</script>",100\n',
+    );
+    await w.click("preview");
+    await w.click("restart");
+    await w.chooseFile(
+        '"><img src=x onerror=alert(1)>.csv',
+        'Date,"<b onclick=x>",Calories\n2026-11-01,"<script>x</script>",100\n',
+    );
+    const map = w.html();
+    expect(map).not.toContain("<img");
+    expect(map).not.toContain("<b onclick");
+    await w.click("preview");
+    expect(w.html()).not.toContain("<script>");
+    expect(w.html()).not.toContain("<img");
+});
+
+// ---- attention v2 -----------------------------------------------------------
+
+type DismissArgs = {
+    code: string;
+    subject_kind: string;
+    subject_id: string;
+    related_id?: string | null;
+};
+
+async function mountAttention(
+    html: string,
+    opts: {
+        data: { count: number; notices: object[] };
+        canCallTools?: boolean;
+        /** Test-only: click handler still respects aria-disabled unless set. */
+        bypassAriaDisabled?: boolean;
+        reply?: (args: DismissArgs) =>
+            | {
+                  structuredContent: { dismissed: boolean };
+                  content?: { type: string; text: string }[];
+              }
+            | Promise<{
+                  structuredContent: { dismissed: boolean };
+                  content?: { type: string; text: string }[];
+              }>;
+    },
+) {
+    type Fn = (e: unknown) => void;
+    const calls: DismissArgs[] = [];
+    const listeners: Record<string, Fn[]> = {};
+    const windowListeners: Fn[] = [];
+    const dom = widgetRootStub((fn) => (listeners.click ??= []).push(fn));
+    const { root, document } = dom;
+    const noop = () => {};
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const deliver = (data: object) => {
+        for (const fn of windowListeners) fn({ source: host, data });
+    };
+    const host = {
+        postMessage(msg: {
+            id?: number;
+            method: string;
+            params: { name?: string; arguments?: DismissArgs };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: opts.data },
+                });
+            } else if (
+                method === "tools/call" &&
+                params.name === "dismiss_notice"
+            ) {
+                const args = structuredClone(params.arguments!);
+                calls.push(args);
+                void (async () => {
+                    const out = (await opts.reply?.(args)) ?? {
+                        structuredContent: { dismissed: true },
+                        content: [{ type: "text", text: "Notice dismissed." }],
+                    };
+                    deliver({
+                        jsonrpc: "2.0",
+                        id,
+                        result: {
+                            content: out.content ?? [
+                                { type: "text", text: "ok" },
+                            ],
+                            structuredContent: out.structuredContent,
+                        },
+                    });
+                })();
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    await tick();
+    await tick();
+    const mount = {
+        html: dom.html,
+        calls,
+        clickDismissKey(key: string) {
+            for (const fn of listeners.click ?? []) {
+                fn({
+                    preventDefault: noop,
+                    target: {
+                        closest: (sel: string) =>
+                            sel === "button.act"
+                                ? {
+                                      disabled: false,
+                                      getAttribute: (n: string) => {
+                                          if (n === "data-dismiss-key")
+                                              return key;
+                                          if (n === "aria-disabled") {
+                                              if (opts.bypassAriaDisabled)
+                                                  return "false";
+                                              const re = new RegExp(
+                                                  `data-dismiss-key="${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*aria-disabled="([^"]+)"`,
+                                              );
+                                              const m = dom.html().match(re);
+                                              return m ? m[1]! : "false";
+                                          }
+                                          return null;
+                                      },
+                                  }
+                                : null,
+                    },
+                });
+            }
+        },
+        async dismissKey(key: string) {
+            mount.clickDismissKey(key);
+            for (let i = 0; i < 8; i++) await tick();
+        },
+        async doubleDismissKey(key: string) {
+            mount.clickDismissKey(key);
+            mount.clickDismissKey(key);
+            for (let i = 0; i < 12; i++) await tick();
+        },
+    };
+    return mount;
+}
+
+const ATTENTION_DISMISS_A = "fridge.expiring|fridge_item|fi-1|";
+const ATTENTION_DISMISS_B = "fridge.expiring|fridge_item|fi-2|";
+
+const ATTENTION_SAMPLE = {
+    count: 2,
+    notices: [
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: {
+                kind: "fridge_item",
+                id: "fi-1",
+                recipe_id: null,
+            },
+            related: [],
+            message: "Test &lt;img&gt;",
+            action: null,
+            title: "Baby <img> spinach",
+            detail: "tomorrow",
+            detail_tone: "over",
+            group_key: "expiring",
+            group_label: "Expiring",
+            dot_tone: "over",
+            can_dismiss: true,
+            dismiss_label: "Dismiss",
+            dismiss: {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: "fi-1",
+                related_id: null,
+            },
+        },
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: {
+                kind: "fridge_item",
+                id: "fi-2",
+                recipe_id: null,
+            },
+            related: [],
+            message: "Second item",
+            action: null,
+            title: "Second row",
+            detail: "2 days",
+            detail_tone: "warn",
+            group_key: "expiring",
+            group_label: "Expiring",
+            dot_tone: "warn",
+            can_dismiss: true,
+            dismiss_label: "Dismiss",
+            dismiss: {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: "fi-2",
+                related_id: null,
+            },
+        },
+    ],
+};
+
+test("attention v2 sample renders grouped rows", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, ATTENTION_SAMPLE);
+    expect(body).toContain("Expiring");
+    expect(body).not.toContain("Salmon");
+    expect(body).toContain("Baby &lt;img&gt; spinach");
+});
+
+test("attention v2: Dismiss success keeps the chat settings footer", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.html()).toContain(WIDGET_FOOTER);
+});
+
+test("attention v2: Dismiss calls dismiss_notice and removes the row", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    expect(w.html()).toContain('class="act"');
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls[0]).toEqual({
+        code: "fridge.expiring",
+        subject_kind: "fridge_item",
+        subject_id: "fi-1",
+    });
+    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.html()).toContain("Second row");
+    expect(w.html()).toContain('class="hd-meta">1</span>');
+});
+
+test("attention v2: rapid double Dismiss removes only the targeted row", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        bypassAriaDisabled: true,
+    });
+    await w.doubleDismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls.length).toBe(1);
+    expect(w.calls[0]?.subject_id).toBe("fi-1");
+    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.html()).toContain("Second row");
+});
+
+test("attention v2: Dismiss is aria-disabled while the call is in flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+        release = r;
+    });
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        reply: async () => {
+            await gate;
+            return {
+                structuredContent: { dismissed: true },
+                content: [{ type: "text", text: "Notice dismissed." }],
+            };
+        },
+    });
+    w.clickDismissKey(ATTENTION_DISMISS_A);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.html()).toMatch(
+        new RegExp(
+            `data-dismiss-key="${ATTENTION_DISMISS_A.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*aria-disabled="true"`,
+        ),
+    );
+    release();
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0));
+});
+
+afterEach(() => {
+    jest.useRealTimers();
+    setSystemTime();
+});
+
+test("attention v2: after a fast dismiss, settle window blocks the next row", async () => {
+    const t0 = Date.now();
+    setSystemTime(t0);
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.calls.length).toBe(1);
+    setSystemTime(t0 + 100);
+    w.clickDismissKey(ATTENTION_DISMISS_B);
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(w.calls.length).toBe(1);
+    setSystemTime(t0 + 500);
+    await w.dismissKey(ATTENTION_DISMISS_B);
+    expect(w.calls.length).toBe(2);
+    expect(w.calls[1]?.subject_id).toBe("fi-2");
+});
+
+test("attention v2: a failed dismiss keeps the row and shows the error", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        reply: () => ({
+            structuredContent: { dismissed: false },
+            content: [{ type: "text", text: "Could not dismiss." }],
+        }),
+    });
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.html()).toContain("Baby &lt;img&gt; spinach");
+    const html = w.html();
+    expect(html).toContain('class="err note is-warn"');
+    expect(html).toMatch(
+        /<div class="row-wrap"[^>]*>[\s\S]*?<div class="row"[\s\S]*?<\/div>\s*<p class="err note is-warn">Could not dismiss\.<\/p>/,
+    );
+});
+
+test("attention v2: empty filter copy when count is positive", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, { count: 3, notices: [] });
+    expect(body).toContain("Nothing matches this filter.");
+});
+
+test("attention v2: urgency detail tone without toning stock detail", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, {
+        count: 2,
+        notices: [
+            {
+                ...ATTENTION_SAMPLE.notices[0],
+                detail: "9 left",
+                detail_tone: null,
+                dot_tone: "warn",
+            },
+            ATTENTION_SAMPLE.notices[1],
+        ],
+    });
+    expect(body).toContain("9 left");
+    expect(body).not.toContain('row-s is-warn">9 left');
+    expect(body).not.toContain('row-s is-over">9 left');
+    expect(body).toContain('row-s is-warn">2 days');
+});
+
+test("attention v2: canCallTools false hides every Dismiss", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+        canCallTools: false,
+    });
+    expect(w.html()).not.toContain('class="act"');
+});
+
+test("attention v2: notice text is escaped", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, ATTENTION_SAMPLE);
+    expect(body).not.toContain("<script>");
+    expect(body).not.toContain("<img");
+    expect(body).toContain("&lt;img&gt;");
+});
+
+// ---- widget harness (v2-only keys) ------------------------------------------
+
+test("harnessNeedsV2 marks attention and not v1 twins", () => {
+    expect(harnessNeedsV2("attention")).toBe(true);
+    expect(harnessNeedsV2("trends")).toBe(false);
+});
+
+test("harness index and widget route serve v2-only attention", async () => {
+    const port = 18840;
+    const proc = Bun.spawn(["bun", "run", "scripts/widget-harness.ts"], {
+        cwd: import.meta.dir + "/..",
+        env: { ...process.env, HARNESS_PORT: String(port) },
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    try {
+        let ready = false;
+        for (let i = 0; i < 2000 && !ready; i++) {
+            try {
+                const r = await fetch(`http://127.0.0.1:${port}/`);
+                if (r.ok) ready = true;
+            } catch {
+                /* server still starting */
+            }
+            await Promise.resolve();
+        }
+        expect(ready).toBe(true);
+        const index = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+        expect(index).toContain('href="/host?widget=attention&v2=1"');
+        const widget = await fetch(
+            `http://127.0.0.1:${port}/widget/attention?v2=1`,
+        );
+        expect(widget.status).toBe(200);
+    } finally {
+        proc.kill();
+        await proc.exited;
+    }
 });

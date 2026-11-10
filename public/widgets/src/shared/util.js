@@ -1,4 +1,4 @@
-// Shared widget helpers — esc, fmt, tpl, setLocaleFrom.
+// Shared widget helpers — esc, fmt, tpl, plural.
 //
 // Each template @include's this file directly, beside shared/bridge.js, and
 // deletes its local copies. Do not pull it in from another partial:
@@ -25,22 +25,21 @@ function fmt(n, decimals) {
     return Number(r).toLocaleString();
 }
 
-// Fill {placeholders} in a translated template string, e.g.
-// tpl(T.macros.byMealTitle, { label: "Protein" }) -> "Protein by meal".
+// Fill {placeholders} in a template string, e.g.
+// tpl(MACRO_COPY.byMealTitle, { label: "Protein" }) -> "Protein by meal".
 function tpl(s, vars) {
     return String(s).replace(/\{(\w+)\}/g, (_, k) =>
         vars && vars[k] != null ? String(vars[k]) : "",
     );
 }
 
-// Convenience wrapper combining pickLocale+setLocale (shared/i18n.js) for
-// the common "resolve this render's locale from the payload and host
-// context" case every widget template needs.
-function setLocaleFrom(data, api) {
-    return setLocale(
-        pickLocale(
-            data && data.locale,
-            api && api.hostContext ? api.hostContext.locale : null,
-        ),
-    );
+// Pick the right grammatical form of a PluralForms value ({ one, other }) for
+// count `n` in English, then fill {n} (and any other placeholder in vars).
+function plural(forms, n, vars) {
+    let category = "other";
+    try {
+        category = new Intl.PluralRules("en").select(n);
+    } catch (_) {}
+    const form = forms[category] || forms.other || forms.one || "";
+    return tpl(form, Object.assign({ n }, vars));
 }

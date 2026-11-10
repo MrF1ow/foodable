@@ -28,7 +28,6 @@ import { WIDGET_LOCALE } from "../../routes.js";
 import { toGrams, formatWeight, fromGrams } from "../../domain/units.js";
 import { MAX_CALORIES } from "../../domain/import.js";
 import {
-    GOAL_PROGRESS_WIDGET_URI,
     MAX_GOAL_G,
     MAX_GOAL_MG,
     sumMeals,
@@ -507,7 +506,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                 meals: z.array(MEAL_BREAKDOWN_ITEM),
             }),
             // Link the tool to its progress UI (MCP Apps).
-            ...uiMeta(GOAL_PROGRESS_WIDGET_URI),
+            ...uiMeta("goal-progress"),
         },
         async ({ date, user_id }) => {
             return withAnalytics(

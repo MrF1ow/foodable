@@ -1,0 +1,182 @@
+<!doctype html>
+<!--
+  Meal-logged widget, v2 look (MCP Apps). Served for log_meal, update_meal and
+  log_recipe_portion to callers with the mcp-widgets-v2 flag on; the v1
+  template stays the default.
+
+  One card, as the design draws it: a header line naming the meal slot, the
+  meal block (name, P/C/F, "+852 kcal"), a hairline, then the day's macro strip
+  against the goals. The `action` field ("logged" / "updated") and a
+  similar_foods status only change the header wording, as in v1. With no goals
+  it renders nothing at all (the tools only link it when the caller has
+  goals), so the host collapses it.
+
+  Same structuredContent and coerce contract as the v1 template. Standalone
+  preview uses the SAMPLE below, which is the design's lunch.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Meal Logged</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/date.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            /*@include shared/v2/macros.js@*/
+
+            const T = {
+                titleLogged: "Meal logged",
+                titleLoggedTo: "Logged to {slot}",
+                titleUpdated: "Meal updated",
+                titleNotLogged: "Not logged yet",
+                today: "today",
+            };
+
+            function localToday() {
+                const d = new Date();
+                const p = (x) => String(x).padStart(2, "0");
+                return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+            }
+
+            // ---- Sample: the design's lunch, dated today -----------------------
+            const LUNCH = {
+                description: "Chicken rice bowl",
+                meal_type: "lunch",
+                calories: 852,
+                protein_g: 69,
+                carbs_g: 76,
+                fat_g: 25,
+                fiber_g: 8.6,
+                sugar_g: 12.8,
+                alcohol_g: 0,
+                caffeine_mg: 85,
+            };
+            const SAMPLE = {
+                action: "logged",
+                status: "ok",
+                similar_foods: [],
+                date: localToday(),
+                locale: "en",
+                drink_unit: "us",
+                logged_meal: LUNCH,
+                has_goals: true,
+                goals: {
+                    calories: 2421,
+                    protein_g: 210,
+                    carbs_g: 213,
+                    fat_g: 81,
+                    fiber_g: 38,
+                    sugar_g: 50,
+                    alcohol_g: null,
+                    caffeine_mg: 400,
+                    water_ml: 3000,
+                },
+                totals: {
+                    calories: 1284,
+                    protein_g: 96,
+                    carbs_g: 118,
+                    fat_g: 42,
+                    fiber_g: 18,
+                    sugar_g: 31,
+                    alcohol_g: 0,
+                    caffeine_mg: 180,
+                    water_ml: 1600,
+                },
+                meals: [
+                    {
+                        description: "Overnight oats with berries",
+                        meal_type: "breakfast",
+                        date: null,
+                        calories: 432,
+                        protein_g: 27,
+                        carbs_g: 42,
+                        fat_g: 17,
+                        fiber_g: 9.4,
+                        sugar_g: 18.2,
+                        alcohol_g: 0,
+                        caffeine_mg: 95,
+                    },
+                    { ...LUNCH, date: null },
+                ],
+            };
+
+            function title(data) {
+                if (data.status === "similar_foods") return T.titleNotLogged;
+                if (data.action === "updated") return T.titleUpdated;
+                const slot = data.logged_meal?.meal_type;
+                return slot ? tpl(T.titleLoggedTo, { slot }) : T.titleLogged;
+            }
+
+            function render(data) {
+                const root = document.getElementById("root");
+                // No goals: nothing to show progress against, so nothing at all.
+                if (!data || !data.has_goals || !data.goals) {
+                    root.innerHTML = "";
+                    return;
+                }
+                // The strip is that whole day's totals, so the header names the
+                // day when it is not today (update_meal and a backdated
+                // log_meal can land on another day).
+                const day = isToday(data.date) ? T.today : shortDate(data.date);
+                const meal = data.logged_meal;
+                const top =
+                    meal && meal.description
+                        ? `${mealBlockV2(meal.description, meal)}<hr class="rule" />`
+                        : "";
+                const strip = macroStripV2(data.totals || {}, data.goals, {
+                    meals: data.meals,
+                    drinkUnit: data.drink_unit,
+                });
+                // "Meal updated" names no slot, so the slot joins the day.
+                const slot =
+                    data.action === "updated" && meal?.meal_type
+                        ? `${meal.meal_type} · `
+                        : "";
+                root.innerHTML = `<section class="card">${v2Header(title(data), slot + day)}${top}${strip}</section>`;
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (
+                    payload.totals ||
+                    payload.logged_meal ||
+                    "has_goals" in payload
+                )
+                    return payload;
+                if (payload.structuredContent) return payload.structuredContent;
+                return null;
+            }
+
+            initWidget({
+                name: "meal-logged-widget",
+                // No loading state: the widget may legitimately end up empty
+                // (no goals), so it starts blank and fills in on data.
+                loading: "",
+                coerce,
+                render,
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

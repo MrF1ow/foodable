@@ -26,14 +26,8 @@ import {
 } from "../../domain/insights.js";
 import { exportAllData } from "../../domain/export.js";
 import { formatMealSearchResults } from "../../search.js";
-import { getWidgetHtml } from "../../widgets.js";
 import {
-    SUMMARY_WIDGET_URI,
-    APP_UI_MIME_TYPE,
-    GOAL_PROGRESS_WIDGET_URI,
-    MEAL_LOGGED_WIDGET_URI,
-    TRENDS_WIDGET_URI,
-    WEIGHT_TRENDS_WIDGET_URI,
+    registerWidgetResource,
     resolveDateWindow,
     emptyTotals,
     sumMeals,
@@ -244,133 +238,41 @@ export function registerNutritionReadTools(
         },
     );
 
-    // UI resource for the get_nutrition_summary dashboard widget. Served as an
-    // MCP Apps resource; the host fetches it and renders it in a sandboxed
-    // iframe. Self-contained HTML (inline CSS/JS) — the sandbox blocks external
-    // hosts, so nothing may be loaded over the network.
-    server.registerResource(
-        "nutrition-summary-widget",
-        SUMMARY_WIDGET_URI,
-        {
-            title: "Nutrition Summary Dashboard",
-            description:
-                "Interactive dashboard UI for get_nutrition_summary: macro tiles vs goals and a per-day breakdown, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("nutrition-summary"),
-                        // Prefer a bordered container in hosts that honor it.
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_goal_progress widget (single-day intake vs goal
-    // rings + a weight card). Same self-contained-HTML contract as above.
-    server.registerResource(
-        "goal-progress-widget",
-        GOAL_PROGRESS_WIDGET_URI,
-        {
-            title: "Goal Progress",
-            description:
-                "Interactive UI for get_goal_progress: intake-vs-goal rings for a single day plus body-weight progress, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("goal-progress"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the log_meal widget (day's running totals vs goals as
-    // rings; renders nothing when no goals are set). Same contract as above.
-    server.registerResource(
-        "meal-logged-widget",
-        MEAL_LOGGED_WIDGET_URI,
-        {
-            title: "Meal Logged",
-            description:
-                "Interactive UI shown after log_meal: the day's running intake-vs-goal rings, with automatic light/dark theming. Shows nothing when no nutrition goals are set.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("meal-logged"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_trends widget (interactive 7/14/30-day toggle over
-    // a daily calories chart + trailing-average rings). Same contract as above.
-    server.registerResource(
-        "trends-widget",
-        TRENDS_WIDGET_URI,
-        {
-            title: "Trends",
-            description:
-                "Interactive UI for get_trends: a 7/14/30-day toggle over a daily calories chart and trailing-average-vs-goal rings, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("trends"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_weight_trends widget (weight-over-time line chart
-    // with a 7/14/30-day toggle and target line). Same contract as above.
-    server.registerResource(
-        "weight-trends-widget",
-        WEIGHT_TRENDS_WIDGET_URI,
-        {
-            title: "Weight Trends",
-            description:
-                "Interactive UI for get_weight_trends: a 7/14/30-day toggle over a weight-over-time chart (data-scaled axis, target line) plus latest/change/target stats, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("weight-trends"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "nutrition-summary",
+        resourceName: "nutrition-summary-widget",
+        title: "Nutrition Summary Dashboard",
+        description:
+            "Interactive dashboard UI for get_nutrition_summary: macro tiles vs goals and a per-day breakdown, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "goal-progress",
+        resourceName: "goal-progress-widget",
+        title: "Goal Progress",
+        description:
+            "Interactive UI for get_goal_progress: intake-vs-goal rings for a single day plus body-weight progress, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "meal-logged",
+        resourceName: "meal-logged-widget",
+        title: "Meal Logged",
+        description:
+            "Interactive UI shown after log_meal: the day's running intake-vs-goal rings, with automatic light/dark theming. Shows nothing when no nutrition goals are set.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "trends",
+        resourceName: "trends-widget",
+        title: "Trends",
+        description:
+            "Interactive UI for get_trends: a 7/14/30-day toggle over a daily calories chart and trailing-average-vs-goal rings, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "weight-trends",
+        resourceName: "weight-trends-widget",
+        title: "Weight Trends",
+        description:
+            "Interactive UI for get_weight_trends: a 7/14/30-day toggle over a weight-over-time chart (data-scaled axis, target line) plus latest/change/target stats, with automatic light/dark theming.",
+    });
 
     server.registerTool(
         "get_nutrition_summary",
@@ -427,7 +329,7 @@ export function registerNutritionReadTools(
                 meals: z.array(MEAL_BREAKDOWN_ITEM),
             }),
             // Link the tool to its dashboard UI (MCP Apps).
-            ...uiMeta(SUMMARY_WIDGET_URI),
+            ...uiMeta("nutrition-summary"),
         },
         async ({ start_date, end_date, user_id }) => {
             return withAnalytics(
@@ -694,7 +596,7 @@ export function registerNutritionInsightTools(
                 days: z.array(TRENDS_DAY_ITEM),
             }),
             // Link the tool to its interactive trends UI (MCP Apps).
-            ...uiMeta(TRENDS_WIDGET_URI),
+            ...uiMeta("trends"),
         },
         async ({ days, end_date, user_id }) => {
             return withAnalytics(

@@ -23,7 +23,7 @@ function topLevelNames(src: string): Set<string> {
     return names;
 }
 
-test("geometry.ts has no import statements", async () => {
+test("geometry.ts has no runtime imports (@inlinets)", async () => {
     const src = await Bun.file(`${import.meta.dir}/geometry.ts`).text();
     expect(/^\s*import\s/m.test(src)).toBe(false);
 });

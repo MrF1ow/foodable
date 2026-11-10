@@ -73,7 +73,7 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 - **SQL, db adapters:** `bun --no-env-file test <file>` for tests wrapped in `describeDb`. Each file starts its own temp Postgres, so no `db:dev`. Needs `initdb` (PATH or `PG_BIN`); without it the db tests skip silently. Adapters run as `foodable_app`, by default as the household owner (`src/db/testing/pg.ts`).
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. About 45 s, PASS/FAIL per check. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223: one run at a time (a "harness crashed" FAIL usually means another run holds them; wait until `ss -ltn` shows both free). No database.
 - **App look:** `bun run preview:app --shots`. About 90 s, PNGs in tmp/app-preview. Without `--shots` it serves :4787. `FOODABLE_FLAGS=ui-v2:all` shows the new shell. Needs Chromium; fixture data.
-- **Chat widgets:** `bun run harness` serves :8787 (`HARNESS_PORT` overrides) until killed, so background it. `bun --no-env-file test src/widgets.test.ts` guards assembly.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1` shows v2. `bun --no-env-file test src/widgets.test.ts` guards assembly.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`. Only when the user asks; see below.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` uses a production copy over `railway ssh`: only when the user asks.

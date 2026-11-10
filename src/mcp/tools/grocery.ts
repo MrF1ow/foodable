@@ -36,7 +36,6 @@ import {
     putAwayGroceryLines,
     StockInputError,
 } from "../../domain/stock.js";
-import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
     groceryLineExtras,
@@ -50,8 +49,7 @@ import {
     similarFoodsWire,
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
-    APP_UI_MIME_TYPE,
-    GROCERY_LIST_WIDGET_URI,
+    registerWidgetResource,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -122,7 +120,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 openWorldHint: false,
             },
             outputSchema: GROCERY_LIST_OUTPUT_SCHEMA,
-            ...uiMeta(GROCERY_LIST_WIDGET_URI),
+            ...uiMeta("grocery-list"),
         },
         async () =>
             withAnalytics(
@@ -284,28 +282,13 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    server.registerResource(
-        "grocery-list-widget",
-        GROCERY_LIST_WIDGET_URI,
-        {
-            title: "Grocery List",
-            description:
-                "Interactive UI for list_grocery_lines: stores, sections, and lines with already-have tags and check-off.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("grocery-list"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "grocery-list",
+        resourceName: "grocery-list-widget",
+        title: "Grocery List",
+        description:
+            "Interactive UI for list_grocery_lines: stores, sections, and lines with already-have tags and check-off.",
+    });
 
     server.registerTool(
         "add_grocery_line",

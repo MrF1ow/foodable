@@ -23,7 +23,6 @@ import { computeWeightTrend } from "../../domain/insights.js";
 import { toGrams, formatWeight, fromGrams } from "../../domain/units.js";
 import type { WeightUnit } from "../../domain/units.js";
 import {
-    WEIGHT_TRENDS_WIDGET_URI,
     formatWeightEntry,
     LOGGED_AT_FORMS,
     LOGGED_AT_OMIT_IF_NOW,
@@ -295,7 +294,7 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                 ),
             }),
             // Link the tool to its interactive weight-trends UI (MCP Apps).
-            ...uiMeta(WEIGHT_TRENDS_WIDGET_URI),
+            ...uiMeta("weight-trends"),
         },
         async ({ days, end_date, user_id }) => {
             return withAnalytics(
