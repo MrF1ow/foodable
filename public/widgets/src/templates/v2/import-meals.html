@@ -258,6 +258,8 @@
 
             /*@include shared/util.js@*/
 
+            /*@include shared/v2/ui.js@*/
+
             const T = {
                 title: "Import meals",
                 step: "Step {n} of 4",
@@ -1505,8 +1507,6 @@
             }
 
             function render() {
-                const el = document.getElementById("root");
-                if (!el) return;
                 const body =
                     S.step === "file"
                         ? fileStep()
@@ -1515,7 +1515,7 @@
                           : S.step === "preview"
                             ? previewStep()
                             : doneStep();
-                el.innerHTML = '<div class="card">' + body + "</div>";
+                v2Paint('<div class="card">' + body + "</div>");
             }
 
             // ---- events: one listener per type on #root -----------------------
@@ -1621,12 +1621,12 @@
                         return payload.structuredContent;
                     return null;
                 },
-                render: (data) => {
+                render: v2BridgeRender((data) => {
                     if (data && data.import_tool_name) {
                         CFG = Object.assign({}, CFG, data);
                     }
                     render();
-                },
+                }),
                 sample: {
                     tz: "America/Denver",
                     today: "2026-11-09",

@@ -1394,6 +1394,7 @@ test("v2 re-rendering widgets drop the loading text and keep one footer per tool
     for (const [key, payload] of [
         ["trends", trendsPayload()],
         ["weight-trends", weightPayload()],
+        ["import-meals", { ...IMPORT_CFG }],
     ] as const) {
         const w = await mountChatWidget(await v2Widget(key), payload);
         expect(w.html(), key).not.toContain("Loading");
@@ -1595,9 +1596,33 @@ async function mountImport(
     const contexts: string[] = [];
     const listeners: Record<string, Fn[]> = {};
     const windowListeners: Fn[] = [];
+    let legacyInner = "";
+    let mountEl: { id: string; innerHTML: string } | null = null;
+    const footerText: string[] = [];
+    const cardHtml = () => (mountEl ? mountEl.innerHTML : legacyInner);
     const root = {
-        innerHTML: "",
-        appendChild: () => {},
+        get innerHTML() {
+            return cardHtml();
+        },
+        set innerHTML(v: string) {
+            legacyInner = v;
+            mountEl = null;
+            footerText.length = 0;
+        },
+        appendChild(node: {
+            id?: string;
+            innerHTML?: string;
+            textContent?: string;
+        }) {
+            if (node.id === "widget-mount") {
+                mountEl = node as { id: string; innerHTML: string };
+            } else if (
+                node.textContent &&
+                node.textContent.includes("enable or disable these widgets")
+            ) {
+                footerText.push(node.textContent);
+            }
+        },
         addEventListener: (type: string, fn: Fn) =>
             (listeners[type] ??= []).push(fn),
     };
@@ -1609,23 +1634,20 @@ async function mountImport(
     };
     const noop = () => {};
     const document = {
-        getElementById: (id: string) =>
-            id === "root"
-                ? root
-                : root.innerHTML.includes(`id="${id}"`)
-                  ? el(id)
-                  : null,
+        getElementById: (id: string) => {
+            if (id === "root") return root;
+            if (id === "widget-mount") return mountEl;
+            return cardHtml().includes(`id="${id}"`) ? el(id) : null;
+        },
         querySelectorAll: (sel: string) =>
             sel === ".map-sel"
-                ? [
-                      ...root.innerHTML.matchAll(
-                          /map-sel" data-field="(\w+)"/g,
-                      ),
-                  ].map((m) => {
-                      const e = el(`map:${m[1]}`);
-                      (e.dataset as Record<string, string>).field = m[1]!;
-                      return e;
-                  })
+                ? [...cardHtml().matchAll(/map-sel" data-field="(\w+)"/g)].map(
+                      (m) => {
+                          const e = el(`map:${m[1]}`);
+                          (e.dataset as Record<string, string>).field = m[1]!;
+                          return e;
+                      },
+                  )
                 : [],
         documentElement: {
             setAttribute: noop,
@@ -1634,7 +1656,12 @@ async function mountImport(
         },
         body: {},
         addEventListener: noop,
-        createElement: () => ({ style: {} }),
+        createElement: () => ({
+            id: "",
+            innerHTML: "",
+            textContent: "",
+            style: {} as object,
+        }),
     };
     const deliver = (data: object) =>
         setTimeout(() => {
@@ -1720,10 +1747,21 @@ async function mountImport(
             throw new Error(`v1 has no ${name} on #${id}`);
         return e[name]!;
     };
+    const redeliver = async (cfg: object = {}) => {
+        deliver({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                structuredContent: { ...IMPORT_CFG, ...opts.cfg, ...cfg },
+            },
+        });
+        await tick();
+    };
     return {
         calls,
         contexts,
-        html: () => root.innerHTML,
+        html: () => cardHtml() + footerText.join(""),
+        redeliver,
         async chooseFile(name: string, text: string) {
             const file = {
                 name,
@@ -1888,6 +1926,19 @@ test.each(IMPORT_SCENARIOS.map((s) => [s.name, s] as const))(
         expect(v2.contexts).toEqual(v1.contexts);
     },
 );
+
+test("import-meals v2: step changes keep the chat settings footer", async () => {
+    const count = (h: string, needle: string) => h.split(needle).length - 1;
+    const w = await mountImport(await v2Widget("import-meals"));
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.chooseFile("meals.csv", "Date,Food,Calories\n2026-07-01,Oats,100");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.click("back-file");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+    await w.redeliver();
+    expect(w.html()).not.toContain("Preparing import");
+    expect(count(w.html(), WIDGET_FOOTER)).toBe(1);
+});
 
 test("import-meals v2: a MyFitnessPal export auto-maps and previews its counts", async () => {
     const w = await mountImport(await v2Widget("import-meals"));
