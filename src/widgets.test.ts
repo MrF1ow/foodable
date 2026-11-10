@@ -44,7 +44,9 @@ async function partialAsInlined(rel: string): Promise<string> {
 
 function widgetScriptBodies(html: string): string[] {
     const bodies: string[] = [];
-    for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    for (const m of html.matchAll(
+        /<script\b[^>]*>([\s\S]*?)<\/script[^>]*>/gi,
+    )) {
         bodies.push(m[1]!);
     }
     return bodies;
