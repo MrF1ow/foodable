@@ -276,7 +276,7 @@ function withKitchenTabs(body: string, chrome: AppChrome): string {
 }
 
 function topBar(): string {
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
 /** Head for the new shell: the shared meta, then the old stylesheet and script

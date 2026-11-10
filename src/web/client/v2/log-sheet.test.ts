@@ -17,6 +17,41 @@ type LogMacroApi = {
     ) => void;
 };
 
+type ShortcutEvent = {
+    defaultPrevented: boolean;
+    altKey: boolean;
+    shiftKey: boolean;
+    metaKey: boolean;
+    ctrlKey: boolean;
+    key: string;
+};
+
+type FakeEl = EventTarget & {
+    tagName?: string;
+    type?: string;
+    disabled?: boolean;
+    readOnly?: boolean;
+    isContentEditable?: boolean;
+    closest?: (sel: string) => FakeEl | null;
+    matches?: (sel: string) => boolean;
+    classList?: { contains: (c: string) => boolean };
+};
+
+type LogKeyboardApi = {
+    isEditableTarget: (el: EventTarget | null) => boolean;
+    isLogSearchShortcut: (event: ShortcutEvent) => boolean;
+    nextSearchRowIndex: (
+        current: number,
+        count: number,
+        direction: 1 | -1,
+    ) => number;
+    shouldAmountEnterSubmit: (target: EventTarget | null) => boolean;
+    amountFormSubmitButton: (
+        form: { id?: string; querySelector: (sel: string) => unknown } | null,
+        dialog: { querySelector: (sel: string) => unknown } | null,
+    ) => unknown;
+};
+
 const docListeners: Array<{ type: string; capture: boolean }> = [];
 const onLoadHooks: Array<(root: unknown) => void> = [];
 const rootStub = {
@@ -42,16 +77,48 @@ const documentStub = {
 };
 
 const savedDocument = (globalThis as unknown as { document: unknown }).document;
+class Element {}
+class HTMLElement extends Element {
+    tagName = "";
+    disabled = false;
+    readOnly = false;
+    isContentEditable = false;
+    closest() {
+        return null;
+    }
+    matches() {
+        return false;
+    }
+    classList = { contains: () => false };
+}
+class HTMLFormElement extends HTMLElement {
+    id = "";
+    querySelector() {
+        return null;
+    }
+}
+class HTMLButtonElement extends HTMLElement {}
 const g = globalThis as typeof globalThis & {
     window?: Record<string, unknown>;
     document?: unknown;
     HTMLDialogElement?: unknown;
+    Element?: typeof Element;
+    HTMLElement?: typeof HTMLElement;
+    HTMLFormElement?: typeof HTMLFormElement;
+    HTMLButtonElement?: typeof HTMLButtonElement;
 };
 g.document = documentStub;
-g.HTMLDialogElement = class HTMLDialogElement {};
+g.Element = Element;
+g.HTMLElement = HTMLElement;
+g.HTMLFormElement = HTMLFormElement;
+g.HTMLButtonElement = HTMLButtonElement;
+g.HTMLDialogElement = class HTMLDialogElement extends HTMLElement {};
 g.window = {
     FOODABLE_EXPOSE_LOG_MACROS: (fn: LogMacroApi) => {
         api = fn;
+    },
+    FOODABLE_EXPOSE_LOG_KEYBOARD: (fn: LogKeyboardApi) => {
+        keyboard = fn;
     },
     FoodableApp: {
         onLoad(fn: (root: unknown) => void) {
@@ -61,6 +128,7 @@ g.window = {
 };
 
 let api: LogMacroApi;
+let keyboard: LogKeyboardApi;
 // oxlint-disable-next-line no-eval -- test seam matches other v2 client modules
 eval(readFileSync("./src/web/client/v2/log-sheet.js", "utf8"));
 onLoadHooks.forEach((fn) => fn(rootStub));
@@ -185,6 +253,134 @@ test("formatLogMacroGrams matches domain helper", () => {
         if (server !== client) drifts.push(`${v}`);
     }
     expect(drifts).toEqual([]);
+});
+
+test("isLogSearchShortcut accepts Meta+K and Control+K, not plain K", () => {
+    expect(
+        keyboard.isLogSearchShortcut({
+            defaultPrevented: false,
+            altKey: false,
+            shiftKey: false,
+            metaKey: true,
+            ctrlKey: false,
+            key: "k",
+        }),
+    ).toBe(true);
+    expect(
+        keyboard.isLogSearchShortcut({
+            defaultPrevented: false,
+            altKey: false,
+            shiftKey: false,
+            metaKey: false,
+            ctrlKey: true,
+            key: "K",
+        }),
+    ).toBe(true);
+    expect(
+        keyboard.isLogSearchShortcut({
+            defaultPrevented: false,
+            altKey: false,
+            shiftKey: false,
+            metaKey: false,
+            ctrlKey: false,
+            key: "k",
+        }),
+    ).toBe(false);
+});
+
+function fakeEl(
+    tag: string,
+    extra: Partial<FakeEl> = {},
+): EventTarget & FakeEl {
+    return Object.assign(Object.create(HTMLElement.prototype), {
+        tagName: tag,
+        disabled: false,
+        readOnly: false,
+        closest: () => null,
+        matches: () => false,
+        classList: { contains: () => false },
+        ...extra,
+    });
+}
+
+test("isEditableTarget matches real control kinds", () => {
+    expect(keyboard.isEditableTarget(null)).toBe(false);
+    expect(
+        keyboard.isEditableTarget(
+            fakeEl("INPUT", { type: "text" }) as EventTarget,
+        ),
+    ).toBe(true);
+    expect(keyboard.isEditableTarget(fakeEl("TEXTAREA") as EventTarget)).toBe(
+        true,
+    );
+    expect(
+        keyboard.isEditableTarget(
+            fakeEl("DIV", { isContentEditable: true }) as EventTarget,
+        ),
+    ).toBe(true);
+    expect(keyboard.isEditableTarget(fakeEl("BUTTON") as EventTarget)).toBe(
+        false,
+    );
+    expect(
+        keyboard.isEditableTarget(
+            fakeEl("INPUT", { type: "checkbox" }) as EventTarget,
+        ),
+    ).toBe(false);
+    expect(
+        keyboard.isEditableTarget(
+            fakeEl("INPUT", { type: "hidden" }) as EventTarget,
+        ),
+    ).toBe(false);
+});
+
+test("shouldAmountEnterSubmit allows amount field and panel, not chips", () => {
+    const numberInput = fakeEl("INPUT", {
+        matches: (sel) => sel === 'input[type="number"]',
+        closest: () => null,
+    });
+    expect(keyboard.shouldAmountEnterSubmit(numberInput as EventTarget)).toBe(
+        true,
+    );
+    const chip = fakeEl("SPAN", {
+        closest: (sel) => (sel === ".fd-chip" ? chip : null),
+    });
+    expect(keyboard.shouldAmountEnterSubmit(chip as EventTarget)).toBe(false);
+    const panel = Object.assign(Object.create(HTMLElement.prototype), {
+        classList: { contains: (c: string) => c === "fd-sheet-panel" },
+        matches: () => false,
+        closest: () => null,
+    });
+    expect(keyboard.shouldAmountEnterSubmit(panel)).toBe(true);
+});
+
+test("amountFormSubmitButton finds submit outside the form", () => {
+    const submit = Object.create(HTMLButtonElement.prototype);
+    const form = Object.create(HTMLFormElement.prototype);
+    form.id = "fd-log-amount-form";
+    form.querySelector = () => null;
+    const prev = documentStub.querySelector;
+    documentStub.querySelector = (sel: string) => {
+        if (sel.includes("fd-log-amount-form")) return submit;
+        return prev(sel);
+    };
+    const prevDoc = g.document;
+    g.document = documentStub;
+    const btn = keyboard.amountFormSubmitButton(
+        form as unknown as HTMLFormElement,
+        { querySelector: () => null },
+    );
+    expect(btn).toBe(submit);
+    documentStub.querySelector = prev;
+    g.document = prevDoc;
+});
+
+test("nextSearchRowIndex wraps at the ends", () => {
+    expect(keyboard.nextSearchRowIndex(-1, 3, 1)).toBe(0);
+    expect(keyboard.nextSearchRowIndex(-1, 3, -1)).toBe(2);
+    expect(keyboard.nextSearchRowIndex(0, 3, -1)).toBe(2);
+    expect(keyboard.nextSearchRowIndex(2, 3, 1)).toBe(0);
+    expect(keyboard.nextSearchRowIndex(1, 3, 1)).toBe(2);
+    expect(keyboard.nextSearchRowIndex(0, 0, 1)).toBe(-1);
 });
 
 test("rebuildUnitChips creates only allowed unit radios", () => {

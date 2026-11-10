@@ -1956,6 +1956,64 @@ try {
             v2DesktopKitchen.side === "Kitchen",
         { v2Desktop, sidebarW, exposedNavs, v2DesktopKitchen, ex: drain() },
     );
+
+    await goto("/");
+    await setMarker();
+    const modK = process.platform === "darwin" ? 4 : 2;
+    await send("Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await sleep(400);
+    const v2CmdK = await ev<{
+        open: string[];
+        activeId: string | null;
+    }>(`({
+        open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+        activeId: document.activeElement?.id ?? null,
+    })`);
+    record(
+        "v2 desktop ⌘K/Ctrl+K opens log search with the query field focused",
+        v2CmdK.open.includes("fd-log-search") &&
+            v2CmdK.activeId === "fd-log-search-q",
+        { v2CmdK, ex: drain() },
+    );
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await sleep(200);
+
     await goto("/recipes");
     await setMarker();
     await clickSel("a.fd-household");

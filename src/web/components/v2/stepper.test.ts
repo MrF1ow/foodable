@@ -116,6 +116,21 @@ test("the no-JS width hint sits on the root, where stepper.js updates it", () =>
     expect(html).not.toMatch(/<input[^>]*--fd-chars/);
 });
 
+test("inputStep any keeps typed values valid while buttons use step", () => {
+    const html = stepper({
+        name: "amount",
+        label: "Amount",
+        value: 100,
+        min: 0,
+        step: 1,
+        inputStep: "any",
+    });
+    expect(html).toContain(`step="any"`);
+    expect(html).toContain(`data-fd-button-step="1"`);
+    expect(html).toContain(`min="0"`);
+    expect(html).toContain(`value="100"`);
+});
+
 test("non-finite and exponent-form numbers throw instead of rendering", () => {
     expect(() => stepper({ name: "n", label: "N", value: NaN })).toThrow();
     expect(() =>

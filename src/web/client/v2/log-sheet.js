@@ -110,6 +110,64 @@ const FILTER = {
     "My foods": new Set(["food", "stock"]),
 };
 
+const MEAL_ADDING_LABEL = {
+    breakfast: "Adding to breakfast",
+    lunch: "Adding to lunch",
+    dinner: "Adding to dinner",
+    snack: "Adding to snacks",
+};
+
+/** @param {EventTarget | null} el */
+function isEditableTarget(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const tag = el.tagName;
+    if (tag === "BUTTON") return false;
+    if (tag === "TEXTAREA") {
+        const ta = /** @type {HTMLTextAreaElement} */ (el);
+        return !ta.disabled && !ta.readOnly;
+    }
+    if (tag === "SELECT") {
+        return !(/** @type {HTMLSelectElement} */ (el).disabled);
+    }
+    if (tag === "INPUT") {
+        const input = /** @type {HTMLInputElement} */ (el);
+        const type = (input.type || "text").toLowerCase();
+        if (
+            type === "button" ||
+            type === "submit" ||
+            type === "reset" ||
+            type === "checkbox" ||
+            type === "radio" ||
+            type === "file" ||
+            type === "hidden"
+        )
+            return false;
+        return !input.disabled && !input.readOnly;
+    }
+    return /** @type {HTMLElement} */ (el).isContentEditable;
+}
+
+/** @param {KeyboardEvent} event */
+function isLogSearchShortcut(event) {
+    if (event.defaultPrevented || event.altKey || event.shiftKey) return false;
+    if (!(event.metaKey || event.ctrlKey)) return false;
+    return String(event.key).toLowerCase() === "k";
+}
+
+/**
+ * @param {number} current -1 when none active
+ * @param {number} count
+ * @param {1 | -1} direction
+ */
+function nextSearchRowIndex(current, count, direction) {
+    if (count <= 0) return -1;
+    if (current < 0) return direction > 0 ? 0 : count - 1;
+    let next = current + direction;
+    if (next < 0) next = count - 1;
+    if (next >= count) next = 0;
+    return next;
+}
+
 function esc(s) {
     return String(s)
         .replace(/&/g, "&amp;")
@@ -216,14 +274,18 @@ function plusIcon() {
     return `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>`;
 }
 
-function searchRowHtml(item, kind) {
+function searchRowHtml(item, kind, rowIndex) {
     const relivable = kind !== "history" || logItemIsRelivable(item);
     const subtitle = itemSubtitle(item, kind);
     const macros = macroLineHtml(macroParts(rowPreviewMacros(item, kind)));
     const add = relivable
         ? `<button type="button" class="fd-icon-btn" aria-label="Add ${esc(item.name)}" data-fd-log-pick="${esc(JSON.stringify({ ...item, kind }))}">${plusIcon()}</button>`
         : "";
-    return `<li class="fd-row fd-row--search"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span></span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
+    const rowId = rowIndex != null ? ` id="fd-log-result-${rowIndex}"` : "";
+    const pickAttr = relivable
+        ? ` data-fd-log-row-pick="${esc(JSON.stringify({ ...item, kind }))}"`
+        : "";
+    return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span></span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
 }
 
 function recentChipHtml(item) {
@@ -268,11 +330,40 @@ function rebuildUnitChips(form, units, selected) {
     fieldset.innerHTML = `<legend class="fd-sr">Unit</legend><div class="fd-chips">${chips}</div>`;
 }
 
-function openSheet(id) {
+let lastLogOpener = null;
+
+function openSheet(id, opener) {
+    if (opener) lastLogOpener = opener;
     const d = document.getElementById(id);
     if (d instanceof HTMLDialogElement && typeof d.showModal === "function") {
         if (!d.open) d.showModal();
     }
+}
+
+function focusLogSearchInput(dialog, query) {
+    const input = dialog?.querySelector(".fd-log-search-input");
+    if (!(input instanceof HTMLInputElement)) return;
+    if (query != null && query !== "") input.value = query;
+    input.focus();
+}
+
+function visibleLogOpener() {
+    const desktop = document.querySelector("a.fd-search[data-fd-open-sheet]");
+    if (desktop instanceof HTMLElement && desktop.offsetParent !== null)
+        return desktop;
+    const phone = document.querySelector("a.fd-log[data-fd-open-sheet]");
+    if (phone instanceof HTMLElement && phone.offsetParent !== null)
+        return phone;
+    return (
+        document.querySelector("a.fd-logfood[data-fd-open-sheet]") ??
+        document.querySelector("[data-fd-open-sheet]")
+    );
+}
+
+function openLogSearchSheet(opener, initialQuery) {
+    openSheet(SEARCH_ID, opener ?? visibleLogOpener());
+    const dialog = document.getElementById(SEARCH_ID);
+    if (dialog?.open) focusLogSearchInput(dialog, initialQuery);
 }
 
 function closeSheet(id) {
@@ -321,6 +412,59 @@ function bindSearchSheet(root) {
     let activeFilter = "All";
     let lastData = null;
     let fetchSeq = 0;
+    let activeRow = -1;
+
+    function resultListRoot() {
+        if (list?.isConnected) return list;
+        return dialog.querySelector("[data-fd-log-result-list]");
+    }
+
+    function resultRows() {
+        const root = resultListRoot();
+        return /** @type {HTMLElement[]} */ ([
+            ...(root?.querySelectorAll(".fd-row--search") ?? []),
+        ]);
+    }
+
+    function syncActiveRow() {
+        const rows = resultRows();
+        for (let i = 0; i < rows.length; i++) {
+            const on = i === activeRow;
+            rows[i].classList.toggle("fd-row--active", on);
+        }
+        if (input instanceof HTMLInputElement) {
+            if (activeRow >= 0 && rows[activeRow]?.id) {
+                input.setAttribute("aria-activedescendant", rows[activeRow].id);
+            } else {
+                input.removeAttribute("aria-activedescendant");
+            }
+        }
+        const row = rows[activeRow];
+        row?.scrollIntoView({ block: "nearest" });
+    }
+
+    function pickActiveRow() {
+        const rows = resultRows();
+        const row = rows[activeRow];
+        if (!row) return;
+        const raw =
+            row.getAttribute("data-fd-log-row-pick") ??
+            row
+                .querySelector("[data-fd-log-pick]")
+                ?.getAttribute("data-fd-log-pick");
+        if (!raw) return;
+        try {
+            pickItem(JSON.parse(raw));
+        } catch (_) {}
+    }
+
+    function syncSearchSubtitle() {
+        const meal = searchMealType(dialog);
+        const sub = dialog.querySelector(".fd-sheet-sub");
+        if (sub)
+            sub.textContent =
+                MEAL_ADDING_LABEL[meal] ?? MEAL_ADDING_LABEL.dinner;
+    }
 
     const isPreview = !!dialog.querySelector(
         ".fd-log-search-results:not([hidden]) .fd-row",
@@ -350,13 +494,15 @@ function bindSearchSheet(root) {
     function paintRows(data) {
         const rows = filteredItems(data);
         const html = rows
-            .map(({ item, kind }) => searchRowHtml(item, kind))
+            .map(({ item, kind }, i) => searchRowHtml(item, kind, i))
             .join("");
+        activeRow = -1;
         if (list) {
             list.innerHTML = html;
         } else if (results) {
-            results.innerHTML = `<ul class="fd-list" data-fd-log-result-list>${html}</ul>`;
+            results.innerHTML = `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list>${html}</ul>`;
         }
+        syncActiveRow();
     }
 
     function paintEmpty(data) {
@@ -396,7 +542,11 @@ function bindSearchSheet(root) {
             return;
         }
         if (has) paintRows(data);
-        else if (list) list.innerHTML = "";
+        else {
+            if (list) list.innerHTML = "";
+            activeRow = -1;
+            syncActiveRow();
+        }
     }
 
     async function run() {
@@ -445,18 +595,57 @@ function bindSearchSheet(root) {
     });
 
     dialog.addEventListener("toggle", () => {
-        if (!dialog.open || isPreview) return;
-        const cur = String(input?.value || "").trim();
-        if (lastQ !== cur) {
-            lastQ = cur;
-            run();
+        if (dialog.open) {
+            focusLogSearchInput(dialog);
+            if (isPreview) return;
+            const cur = String(input?.value || "").trim();
+            if (lastQ !== cur) {
+                lastQ = cur;
+                run();
+            }
+            return;
+        }
+        activeRow = -1;
+        syncActiveRow();
+        const back =
+            lastLogOpener instanceof HTMLElement ? lastLogOpener : null;
+        if (back?.isConnected) back.focus();
+    });
+
+    input?.addEventListener("keydown", (event) => {
+        const rows = resultRows();
+        if (rows.length === 0 || results?.hidden) return;
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            activeRow = nextSearchRowIndex(activeRow, rows.length, 1);
+            syncActiveRow();
+        } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            activeRow = nextSearchRowIndex(activeRow, rows.length, -1);
+            syncActiveRow();
+        } else if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (activeRow >= 0) {
+                pickActiveRow();
+            } else if (rows.length > 0) {
+                activeRow = 0;
+                pickActiveRow();
+            }
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            closeSheet(SEARCH_ID);
         }
     });
+    input?.setAttribute("role", "combobox");
+    input?.setAttribute("aria-autocomplete", "list");
+    input?.setAttribute("aria-controls", "fd-log-result-listbox");
+    if (list && !list.id) list.id = "fd-log-result-listbox";
 
     dialog
         .querySelector(".fd-log-meals-search")
         ?.addEventListener("change", () => {
             syncMealToAmount(root, searchMealType(dialog));
+            syncSearchSubtitle();
         });
 }
 
@@ -585,6 +774,51 @@ function bindAmountSheet(root) {
     dialog.addEventListener("toggle", () => {
         if (dialog.open) refreshMacros();
     });
+    dialog.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
+        if (!shouldAmountEnterSubmit(event.target)) return;
+        const submit = amountFormSubmitButton(form, dialog);
+        if (!(submit instanceof HTMLButtonElement) || !form) return;
+        event.preventDefault();
+        if (typeof form.requestSubmit === "function") {
+            form.requestSubmit(submit);
+        } else {
+            submit.click();
+        }
+    });
+}
+
+/** @param {EventTarget | null} target */
+function shouldAmountEnterSubmit(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest(".fd-log-time-input")) return false;
+    if (target.closest("[data-fd-step]")) return false;
+    if (target.closest(".fd-chip")) return false;
+    if (target.closest(".fd-icon-btn")) return false;
+    if (target.closest('button[type="submit"]')) return false;
+    if (target.matches('input[type="number"]')) return true;
+    if (target.classList.contains("fd-sheet-panel")) return true;
+    return false;
+}
+
+/**
+ * @param {HTMLFormElement | null | undefined} form
+ * @param {HTMLElement | null | undefined} dialog
+ */
+function amountFormSubmitButton(form, dialog) {
+    if (!(form instanceof HTMLFormElement)) {
+        return dialog?.querySelector("[data-fd-log-submit]") ?? null;
+    }
+    const id = form.id;
+    if (id) {
+        const external = document.querySelector(
+            `[form="${id}"][data-fd-log-submit]`,
+        );
+        if (external instanceof HTMLButtonElement) return external;
+    }
+    const inner = form.querySelector("[data-fd-log-submit]");
+    if (inner instanceof HTMLButtonElement) return inner;
+    return dialog?.querySelector("[data-fd-log-submit]") ?? null;
 }
 
 function pickItem(item) {
@@ -641,7 +875,8 @@ function bindOpeners() {
             const id = open.getAttribute("data-fd-open-sheet");
             if (id) {
                 event.preventDefault();
-                openSheet(id);
+                if (id === SEARCH_ID) openLogSearchSheet(open);
+                else openSheet(id, open);
             }
         }
         const pick = event.target.closest?.("[data-fd-log-pick]");
@@ -658,7 +893,7 @@ function bindOpeners() {
         "click",
         (event) => {
             const open = event.target.closest?.(
-                "a.fd-log[data-fd-open-sheet], a.fd-search[data-fd-open-sheet]",
+                "a.fd-log[data-fd-open-sheet], a.fd-search[data-fd-open-sheet], a.fd-logfood[data-fd-open-sheet]",
             );
             if (
                 !open ||
@@ -673,11 +908,26 @@ function bindOpeners() {
             const id = open.getAttribute("data-fd-open-sheet");
             if (id) {
                 event.preventDefault();
-                openSheet(id);
+                if (id === SEARCH_ID) openLogSearchSheet(open);
+                else openSheet(id, open);
             }
         },
         true,
     );
+}
+
+let logShortcutsBound = false;
+
+function bindLogShortcuts() {
+    if (logShortcutsBound) return;
+    logShortcutsBound = true;
+    document.addEventListener("keydown", (event) => {
+        if (!isLogSearchShortcut(event)) return;
+        if (isEditableTarget(document.activeElement)) return;
+        if (!document.querySelector(".fd-shell")) return;
+        event.preventDefault();
+        openLogSearchSheet(visibleLogOpener());
+    });
 }
 
 // The log dialogs are rendered after .fd-shell, directly in <body>, so they
@@ -689,6 +939,7 @@ function init() {
     bindQuickCalSheet(document);
     bindWeighInSheet(document);
     bindOpeners();
+    bindLogShortcuts();
 }
 
 window.FoodableApp.onLoad(init);
@@ -701,5 +952,15 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
         formatLogMacroKcal,
         formatLogMacroGrams,
         rebuildUnitChips,
+    });
+}
+
+if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_KEYBOARD) {
+    window.FOODABLE_EXPOSE_LOG_KEYBOARD({
+        isEditableTarget,
+        isLogSearchShortcut,
+        nextSearchRowIndex,
+        shouldAmountEnterSubmit,
+        amountFormSubmitButton,
     });
 }

@@ -367,9 +367,99 @@
     text-decoration-thickness: 2px;
 }
 
+.fd-log-search-sheet .fd-sheet-close {
+    display: none;
+}
+
 @media (min-width: 1024px) {
+    .fd-row--search.fd-row--active {
+        border-radius: var(--radius-md);
+        outline: 2px solid var(--accent-text);
+        outline-offset: -2px;
+        background: color-mix(in srgb, var(--accent-fill) 12%, transparent);
+    }
     .fd-log-search-field {
         margin-bottom: var(--space-gutter);
+    }
+
+    .fd-log-search-sheet .fd-sheet-title,
+    .fd-log-search-sheet .fd-sheet-sub {
+        position: static;
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+        clip: auto;
+        white-space: normal;
+        border: 0;
+    }
+
+    .fd-log-search-sheet .fd-sheet-sub {
+        margin-top: 3px;
+    }
+
+    .fd-log-search-sheet .fd-sheet-close {
+        display: grid;
+    }
+
+    .fd-log-search-sheet,
+    .fd-log-amount-sheet,
+    .fd-log-quick-cal-sheet,
+    .fd-log-weigh-in-sheet {
+        inset: 0;
+        margin: auto;
+        width: 600px;
+        max-width: calc(100% - 2 * var(--space-gutter));
+        height: fit-content;
+        max-height: min(90vh, 90dvh);
+        overflow: hidden;
+        border-radius: var(--radius-sheet);
+        box-shadow: 0 24px 60px var(--fd-sheet-shadow);
+    }
+
+    .fd-log-search-sheet .fd-sheet-panel,
+    .fd-log-amount-sheet .fd-sheet-panel,
+    .fd-log-quick-cal-sheet .fd-sheet-panel,
+    .fd-log-weigh-in-sheet .fd-sheet-panel {
+        flex: 0 1 auto;
+        min-height: 0;
+        max-height: min(90vh, 90dvh);
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+        border-left: 1px solid var(--line);
+        border-radius: var(--radius-sheet);
+    }
+
+    .fd-log-search-sheet .fd-log-search-results {
+        max-height: min(50vh, 50dvh);
+        overflow-y: auto;
+    }
+
+    .fd-log-search-sheet[open],
+    .fd-log-amount-sheet[open],
+    .fd-log-quick-cal-sheet[open],
+    .fd-log-weigh-in-sheet[open] {
+        animation-name: fd-sheet-pop;
+    }
+
+    .fd-log-quick-grid {
+        /* A left-aligned row of fixed-width tiles (83 px pitch in the
+           design); auto tracks would spread across the dialog. */
+        grid-template-columns: repeat(auto-fill, 76px);
+        column-gap: 7px;
+        justify-content: start;
+        justify-items: center;
+    }
+
+    .fd-quick-tile {
+        font-size: 11px;
+        font-weight: 400;
+    }
+
+    .fd-quick-tile__label {
+        white-space: nowrap;
     }
 }
 

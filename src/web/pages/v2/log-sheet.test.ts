@@ -4,6 +4,7 @@ import {
     FD_LOG_QUICK_CAL_SHEET_ID,
     FD_LOG_SEARCH_SHEET_ID,
     FD_LOG_WEIGH_IN_SHEET_ID,
+    isStepValid,
     logAmountUnitChips,
     renderLogSheets,
     todayTimeLabel24,
@@ -32,6 +33,23 @@ describe("renderLogSheets", () => {
         expect(html).toContain("Search foods, recipes, barcodes");
         expect(html).toContain("ADD TO");
         expect(html).toContain("RECENT");
+    });
+
+    test("amount stepper accepts default 100 g with step any", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Milk",
+                food_id: "f1",
+                unit_hints: ["g"],
+            },
+        });
+        const amountInput = html.match(/id="fd-log-amount-value"[^>]*>/)?.[0];
+        expect(amountInput).toContain('step="any"');
+        expect(amountInput).toContain('min="0"');
+        expect(amountInput).toContain('value="100"');
+        expect(isStepValid(100, 0, "any")).toBe(true);
+        expect(isStepValid(100, 0.1, 1)).toBe(false);
     });
 
     test("amount sheet lists only allowed unit chips and stepper-first layout", () => {
@@ -67,10 +85,12 @@ describe("renderLogSheets", () => {
         expect(html).not.toContain('value="g"');
     });
 
-    test("search sheet omits the close button", () => {
+    test("search sheet titles the dialog and shows which meal is selected", () => {
         const html = renderLogSheets({ timezone: "UTC" });
         const searchOnly = html.slice(0, html.indexOf(FD_LOG_AMOUNT_SHEET_ID));
-        expect(searchOnly).not.toContain("fd-sheet-close");
+        expect(searchOnly).toContain(">Log food</h2>");
+        expect(searchOnly).toMatch(/fd-sheet-sub[^>]*>Adding to /);
+        expect(searchOnly).toContain("fd-sheet-close");
     });
 
     test("preview amount macros use fixture nutrition", () => {
@@ -168,6 +188,7 @@ describe("renderLogSheets", () => {
         expect(html).toContain("fd-log-filters");
         expect(html).toContain("Chicken breast, grilled");
         expect(html).toContain("fd-row--search");
+        expect(html).toContain('role="listbox"');
     });
 
     test("water validation error shows in the search sheet", () => {

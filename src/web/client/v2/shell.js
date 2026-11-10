@@ -7,7 +7,7 @@
 //    scrolls to the card (then drops the fragment so a morph does not reopen
 //    it). On any other page the link navigates to `/`, and the same code runs
 //    after the visit.
-// 2. ⌘K / Ctrl+K activates the top bar's search field.
+// 2. ⌘K / Ctrl+K opens the log search sheet (log-sheet.js handles it).
 // 3. The tapped nav entry becomes current right away, as app.js does for the
 //    old nav, so it fades up while the visit loads. (Not the Trends tab: its
 //    fragment link stays on the same page.)
@@ -88,21 +88,6 @@ document.addEventListener("click", (event) => {
         return;
     if (actOnFragment(decodeURIComponent(url.hash.slice(1))))
         event.preventDefault();
-});
-
-document.addEventListener("keydown", (event) => {
-    if (
-        event.defaultPrevented ||
-        event.altKey ||
-        event.shiftKey ||
-        !(event.metaKey || event.ctrlKey) ||
-        String(event.key).toLowerCase() !== "k"
-    )
-        return;
-    const search = document.querySelector("a.fd-search");
-    if (!search || search.offsetParent === null) return;
-    event.preventDefault();
-    search.click();
 });
 
 document.addEventListener("click", (event) => {

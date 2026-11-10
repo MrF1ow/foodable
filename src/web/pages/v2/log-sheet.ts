@@ -12,7 +12,7 @@ import { choiceGroup } from "../../components/v2/chips.js";
 import { stepper } from "../../components/v2/stepper.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { sheet } from "../../components/v2/sheet.js";
-import { rowList, searchResultRow } from "../../components/v2/rows.js";
+import { searchResultRow } from "../../components/v2/rows.js";
 
 export const FD_LOG_SEARCH_SHEET_ID = "fd-log-search";
 export const FD_LOG_AMOUNT_SHEET_ID = "fd-log-amount";
@@ -22,6 +22,20 @@ export const FD_LOG_POST = "/log";
 export const FD_LOG_QUICK_POST = "/log/quick";
 export const FD_LOG_WATER_POST = "/log/water";
 export const FD_LOG_WEIGHT_POST = "/log/weight";
+
+/** Whether `value` satisfies an `<input type="number">` with these constraints. */
+export function isStepValid(
+    value: number,
+    min: number | undefined,
+    step: number | "any",
+): boolean {
+    if (!Number.isFinite(value)) return false;
+    if (min != null && value < min) return false;
+    if (step === "any") return value > 0;
+    const base = min ?? 0;
+    const n = (value - base) / step;
+    return Math.abs(n - Math.round(n)) < 1e-9;
+}
 
 const MEAL_TYPES = [
     { value: "breakfast", label: "Breakfast" },
@@ -35,6 +49,13 @@ const MEAL_SUBMIT_LABEL: Record<string, string> = {
     lunch: "Add to lunch",
     dinner: "Add to dinner",
     snack: "Add to snacks",
+};
+
+const MEAL_ADDING_LABEL: Record<string, string> = {
+    breakfast: "Adding to breakfast",
+    lunch: "Adding to lunch",
+    dinner: "Adding to dinner",
+    snack: "Adding to snacks",
 };
 
 export type LogAmountPrefill = {
@@ -316,8 +337,9 @@ ${stepper({
     name: "weight",
     label: "Weight",
     value: weight,
-    min: 0.1,
+    min: 0,
     step: 0.1,
+    inputStep: "any",
     unit,
     id: "fd-log-weight-value",
     className: "fd-log-stepper",
@@ -419,7 +441,7 @@ function previewResultRows(): string {
             },
         }),
     ];
-    return rowList(rows, { label: "Search results" }).toString();
+    return `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" aria-label="Search results">${rows.map((r) => r.toString()).join("")}</ul>`;
 }
 
 function amountSubtitle(prefill: LogAmountPrefill | undefined): string {
@@ -508,7 +530,7 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
     const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml()}`;
     const resultsBody = showResults
         ? previewResultRows()
-        : `<ul class="fd-list" data-fd-log-result-list></ul>`;
+        : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;
     const body = `<div class="fd-log-search-panel">
 ${searchFieldHtml(query)}
 ${filterChipsHtml(!showResults)}
@@ -520,10 +542,11 @@ ${filterChipsHtml(!showResults)}
         id: FD_LOG_SEARCH_SHEET_ID,
         kind: "edit",
         title: "Log food",
+        subtitle: MEAL_ADDING_LABEL[meal] ?? MEAL_ADDING_LABEL.dinner,
         body,
         openOnLoad: opts.searchOpenOnLoad,
         closeLabel: "Close search",
-        showClose: false,
+        showClose: true,
     }).replace(
         'class="fd-sheet fd-sheet--edit" id="fd-log-search"',
         'class="fd-sheet fd-sheet--edit fd-log-search-sheet" id="fd-log-search"',
@@ -619,8 +642,9 @@ ${stepper({
     name: "amount",
     label: "Amount",
     value: amount,
-    min: 0.1,
+    min: 0,
     step: unit === "portion" ? 0.25 : 1,
+    inputStep: "any",
     unit,
     id: "fd-log-amount-value",
     className: "fd-log-stepper",

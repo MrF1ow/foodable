@@ -393,6 +393,7 @@ describe("flag on: the new shell", () => {
         expect(scan).toContain('aria-label="Scan a barcode"');
         const log = between(top, /<a class="fd-logfood"/, "</a>");
         expect(log).toContain(`href="${FD_LOG_HREF}"`);
+        expect(log).toContain('data-fd-open-sheet="fd-log-search"');
         expect(log).toContain("<span>Log food</span>");
         expect(top).not.toContain("disabled");
         expect(top).not.toContain("aria-disabled");
