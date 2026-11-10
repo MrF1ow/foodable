@@ -36,14 +36,15 @@ import {
 
 /** The nutrition page's log-meal dialog (`NUTRITION_LOG_MEAL_MODAL_ID`) and its
  *  Trends card (`data-nutrition-card="trends"`). Search, Scan and Log food link
- *  to the dialog by fragment; the Trends tab links to the card. v2/shell.js
- *  acts on the fragment (opens the dialog, scrolls to the card). A test pins
- *  both against their sources. */
+ *  to the dialog by fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
+ *  v2/shell.js acts on the log-meal fragment only. A test pins both against
+ *  their sources. */
 export const FD_LOG_MEAL_HASH = "nutrition-log-meal";
 export const FD_TRENDS_HASH = "trends";
 
 export const FD_LOG_HREF = `${APP_PATHS.nutrition}#${FD_LOG_MEAL_HASH}`;
-export const FD_TRENDS_HREF = `${APP_PATHS.nutrition}#${FD_TRENDS_HASH}`;
+export const FD_TRENDS_PATH = "/trends";
+export const FD_TRENDS_HREF = FD_TRENDS_PATH;
 
 type FdTab = {
     id: Exclude<V2NavId, "settings" | "none">;

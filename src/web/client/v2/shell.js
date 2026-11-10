@@ -1,16 +1,15 @@
 // New shell behaviour (flag `ui-v2`). Loaded after /app.js, so FoodableApp and
 // Turbo are already there.
 //
-// 1. The log-meal dialog and the Trends card are reached by fragment. Search,
-//    Scan and Log food link to `/#nutrition-log-meal`; the Trends tab links to
-//    `/#trends`. On the nutrition page the fragment opens the dialog or
-//    scrolls to the card (then drops the fragment so a morph does not reopen
-//    it). On any other page the link navigates to `/`, and the same code runs
-//    after the visit.
+// 1. The log-meal dialog is reached by fragment. Search, Scan and Log food link
+//    to `/#nutrition-log-meal`. The Trends tab goes to `/trends`. On the
+//    nutrition page the fragment opens the dialog (then drops it so a morph
+//    does not reopen it). On any other page that link navigates to `/`, and the
+//    same code runs after the visit.
 // 2. ⌘K / Ctrl+K opens the log search sheet (log-sheet.js handles it).
 // 3. The tapped nav entry becomes current right away, as app.js does for the
-//    old nav, so it fades up while the visit loads. (Not the Trends tab: its
-//    fragment link stays on the same page.)
+//    old nav, so it fades up while the visit loads. (Not fragment links,
+//    which stay on the same page.)
 // 4. Login HTML coming back during an in-app visit full-loads instead of
 //    morphing into app chrome (the old shell's guard looks for nav.bottom-nav).
 

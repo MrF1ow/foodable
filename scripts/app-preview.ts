@@ -67,6 +67,12 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
+import {
+    buildPreviewTrendsPageData,
+    renderTrendsV2Page,
+} from "../src/web/pages/v2/trends.js";
+import { goalsResolver } from "../src/domain/insights.js";
+import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
 import { renderAppShell } from "../src/web/shell.js";
 import { isNutritionCard } from "../src/domain/layout.js";
@@ -111,6 +117,73 @@ const PREVIEW_STORES = [
 
 // The widget templates carry a SAMPLE payload for standalone preview; reuse it
 // so the nutrition page shows real cards.
+const PREVIEW_TRENDS_GOALS: NutritionGoals = {
+    user_id: "u1",
+    daily_calories: 2200,
+    daily_protein_g: 160,
+    daily_carbs_g: 220,
+    daily_fat_g: 70,
+    daily_fiber_g: 30,
+    daily_sugar_g: 45,
+    daily_alcohol_g: 0,
+    daily_caffeine_mg: 400,
+    daily_water_ml: 2500,
+    target_weight_g: null,
+    updated_at: "2026-01-01T00:00:00Z",
+};
+
+function previewTrendsDays(today: string) {
+    const days = [];
+    for (let i = 364; i >= 0; i--) {
+        const d = new Date(`${today}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - i);
+        const date = d.toISOString().slice(0, 10);
+        const logged = i % 9 !== 0 && i % 17 !== 0;
+        const wobble = Math.sin(i / 5);
+        days.push({
+            date,
+            calories: logged ? Math.round(2050 + wobble * 220) : 0,
+            protein_g: logged ? Math.round(140 + wobble * 12) : 0,
+            carbs_g: logged ? Math.round(210 + wobble * 20) : 0,
+            fat_g: logged ? Math.round(68 + wobble * 8) : 0,
+            logged,
+        });
+    }
+    return days;
+}
+
+function previewTrendsPage(chrome: ReturnType<typeof previewChrome>) {
+    const today = "2026-11-09";
+    const data = buildPreviewTrendsPageData(
+        chrome as Parameters<typeof buildPreviewTrendsPageData>[0],
+        previewTrendsDays(today),
+        goalsResolver(PREVIEW_TRENDS_GOALS, [
+            {
+                user_id: "u1",
+                date: "2026-10-15",
+                updated_at: "x",
+                daily_calories: 1900,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ]),
+        [
+            { date: "2026-10-01", weight_g: 81_500 },
+            { date: "2026-10-20", weight_g: 80_200 },
+            { date: "2026-11-05", weight_g: 79_800 },
+        ],
+        today,
+        "kg",
+    );
+    return renderTrendsV2Page(data);
+}
+
 async function widgetSample(key: string): Promise<unknown> {
     const src = await Bun.file(
         `./public/widgets/src/templates/${key}.html`,
@@ -1062,6 +1135,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       theme,
                       "weigh-in",
                   ),
+                  "trends-v2": previewTrendsPage(chrome),
               }
             : {}),
     };

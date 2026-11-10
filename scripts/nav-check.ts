@@ -2120,25 +2120,36 @@ try {
     const v2Log = await v2Snap();
     await goto("/");
     await setMarker();
-    const trendsBefore = await ev<number>(
-        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
-    );
-    await clickSel('.fd-tabs a[href="/#trends"]');
-    await sleep(400);
+    await clickSel('.fd-tabs a[href="/trends"]');
+    await sleep(500);
     const v2Trends = await v2Snap();
-    const trendsTop = await ev<number>(
-        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
-    );
+    const trendsPage = await ev<{ path: string; title: string | null }>(`({
+        path: location.pathname,
+        title: document.querySelector(".fd-trends-title")?.textContent?.trim() ?? null,
+    })`);
+    await clickSel('[data-fd-trends-range="7"]');
+    await sleep(200);
+    const trends7d = await ev<{
+        pressed: string | null;
+        panel: string | null;
+        hidden30: boolean;
+    }>(`({
+        pressed: document.querySelector('[data-fd-trends-range][aria-pressed="true"]')?.getAttribute("data-fd-trends-range") ?? null,
+        panel: document.querySelector("[data-fd-trends-panel]:not([hidden])")?.getAttribute("data-fd-trends-panel") ?? null,
+        hidden30: document.querySelector('[data-fd-trends-panel="30"]')?.hasAttribute("hidden") ?? false,
+    })`);
     record(
-        "v2 Log opens the search sheet; Trends scrolls to its card",
+        "v2 Log opens the search sheet; Trends tab reaches /trends",
         v2Log.marker === "stay" &&
             v2Log.open.includes("fd-log-search") &&
             v2Log.hash === "" &&
-            v2Trends.marker === "stay" &&
-            v2Trends.active === "Today" &&
-            v2Trends.hash === "" &&
-            trendsTop < trendsBefore - 300,
-        { v2Log, v2Trends, trendsBefore, trendsTop, ex: drain() },
+            v2Trends.active === "Trends" &&
+            trendsPage.path === "/trends" &&
+            trendsPage.title === "Trends" &&
+            trends7d.pressed === "7" &&
+            trends7d.panel === "7" &&
+            trends7d.hidden30,
+        { v2Log, v2Trends, trendsPage, trends7d, ex: drain() },
     );
 
     await goto("/");

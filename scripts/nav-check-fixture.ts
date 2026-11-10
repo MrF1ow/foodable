@@ -48,6 +48,12 @@ import {
     getEmbedWidgetHtml,
 } from "../src/widgets.js";
 import { defaultViewerFlags } from "../src/viewer-flags.js";
+import {
+    buildPreviewTrendsPageData,
+    renderTrendsV2Page,
+} from "../src/web/pages/v2/trends.js";
+import { goalsResolver } from "../src/domain/insights.js";
+import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
 import {
     settingsBackHref,
@@ -296,6 +302,53 @@ function food(id: string, name: string, calories: number | null) {
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
 // The shell the page renders in: the old one, or the new one (flag ui-v2) for
 // the -v2 renders the v2 scenarios navigate.
+const FIXTURE_TRENDS_GOALS: NutritionGoals = {
+    user_id: "u1",
+    daily_calories: 2200,
+    daily_protein_g: 160,
+    daily_carbs_g: 220,
+    daily_fat_g: 70,
+    daily_fiber_g: 30,
+    daily_sugar_g: 45,
+    daily_alcohol_g: 0,
+    daily_caffeine_mg: 400,
+    daily_water_ml: 2500,
+    target_weight_g: null,
+    updated_at: "2026-01-01T00:00:00Z",
+};
+
+function fixtureTrendsDays(today: string) {
+    const days = [];
+    for (let i = 364; i >= 0; i--) {
+        const d = new Date(`${today}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - i);
+        const date = d.toISOString().slice(0, 10);
+        const logged = i % 9 !== 0;
+        days.push({
+            date,
+            calories: logged ? 2100 : 0,
+            protein_g: logged ? 150 : 0,
+            carbs_g: logged ? 200 : 0,
+            fat_g: logged ? 65 : 0,
+            logged,
+        });
+    }
+    return days;
+}
+
+function previewTrendsPage(chrome: ReturnType<typeof fixtureChrome>) {
+    const today = "2026-11-09";
+    const data = buildPreviewTrendsPageData(
+        chrome as Parameters<typeof buildPreviewTrendsPageData>[0],
+        fixtureTrendsDays(today),
+        goalsResolver(FIXTURE_TRENDS_GOALS, []),
+        [{ date: "2026-11-01", weight_g: 79_000 }],
+        today,
+        "kg",
+    );
+    return renderTrendsV2Page(data);
+}
+
 function fixtureChrome(theme: "light" | "dark", v2: boolean) {
     return {
         ...viewerChromeFromProfile({ theme }),
@@ -422,6 +475,7 @@ async function pages(
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
+        ...(v2 ? { trends: previewTrendsPage(chrome) } : {}),
     };
 }
 
@@ -477,6 +531,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/kitchen/fridge": "fridge",
     "/kitchen/groceries": "grocery",
     "/recipes": "recipes",
+    "/trends": "trends",
     "/settings": "settings",
     "/settings/help": "help",
     "/settings/household-settings": "settings-household",

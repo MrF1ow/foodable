@@ -1,0 +1,352 @@
+/* Trends page (phone layout). Month grid and desktop columns land in a later phase. */
+
+.fd-trends-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-trends-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-trends-header__top {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-trends-title {
+    margin: 0;
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-trends-subject {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-trends-empty {
+    margin: var(--fd-s-12) 0;
+    font: 400 15px/22px var(--font-body);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.fd-seg {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+}
+
+.fd-seg-btn {
+    border: 0;
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-seg-btn--on,
+.fd-seg-btn[aria-pressed="true"] {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .fd-seg-btn {
+        transition:
+            background 0.15s ease,
+            color 0.15s ease;
+    }
+}
+
+.fd-trends-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-trends-section__title {
+    margin: 0;
+    font: 600 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-trends-page .fd-tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--fd-s-6);
+}
+
+.fd-trends-page .fd-tile__value {
+    white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+    .fd-trends-page .fd-tiles {
+        display: flex;
+        flex-wrap: wrap;
+    }
+}
+
+.fd-trends-rings__list {
+    display: flex;
+    flex-direction: row;
+    gap: var(--fd-s-6);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-x: auto;
+}
+
+.fd-trends-rings__day {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-s-4);
+    min-width: 2.75rem;
+}
+
+.fd-trends-rings__ring .fd-trends-ring {
+    width: 2.75rem;
+    height: auto;
+}
+
+.fd-trends-rings__date {
+    font: 400 11px/14px var(--font-body);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.fd-trends-range-empty {
+    margin: var(--fd-s-12) 0;
+    font: 400 15px/22px var(--font-body);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.fd-trends-panel[hidden] {
+    display: none !important;
+}
+
+.fd-trends-ring__track {
+    stroke: var(--surface-track);
+}
+
+.fd-trends-ring__fill--protein {
+    stroke: var(--macro-protein);
+}
+
+.fd-trends-ring__fill--carbs {
+    stroke: var(--macro-carbs);
+}
+
+.fd-trends-ring__fill--fat {
+    stroke: var(--macro-fat);
+}
+
+.fd-trends-ring__fill {
+    stroke-linecap: round;
+}
+
+.fd-trends-avg {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-trends-avg__row {
+    display: grid;
+    grid-template-columns: 5rem 1fr;
+    gap: var(--fd-s-6);
+    align-items: center;
+}
+
+.fd-trends-avg__label {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-trends-avg__body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-trends-avg__nums {
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-trends-avg__sep {
+    margin: 0 0.2em;
+    color: var(--text-tertiary);
+}
+
+.fd-trends-avg__track {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    overflow: hidden;
+}
+
+.fd-trends-avg__fill {
+    height: 100%;
+    border-radius: var(--radius-pill);
+    min-width: 2px;
+}
+
+.fd-trends-avg__fill--calories {
+    background: var(--macro-calories);
+}
+
+.fd-trends-avg__fill--protein {
+    background: var(--macro-protein);
+}
+
+.fd-trends-avg__fill--carbs {
+    background: var(--macro-carbs);
+}
+
+.fd-trends-avg__fill--fat {
+    background: var(--macro-fat);
+}
+
+.fd-trends-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 7rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-x: auto;
+}
+
+.fd-trends-bar {
+    position: relative;
+    flex: 1 0 6px;
+    max-width: 10px;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    border-radius: 3px;
+    background: var(--surface-track);
+}
+
+.fd-trends-bar__fill {
+    display: block;
+    width: 100%;
+    border-radius: 3px;
+    background: var(--text-tertiary);
+    min-height: 4px;
+}
+
+.fd-trends-bar--near .fd-trends-bar__fill {
+    background: var(--accent-fill);
+}
+
+.fd-trends-bar--off .fd-trends-bar__fill {
+    background: var(--status-over);
+}
+
+.fd-trends-bar--logged .fd-trends-bar__fill {
+    background: var(--macro-calories);
+}
+
+.fd-trends-bar--empty .fd-trends-bar__fill {
+    background: var(--surface-track);
+    opacity: 0.5;
+}
+
+.fd-trends-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--fd-s-10);
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-trends-legend__item::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+}
+
+.fd-trends-legend__item--near::before {
+    background: var(--accent-fill);
+}
+
+.fd-trends-legend__item--off::before {
+    background: var(--status-over);
+}
+
+.fd-trends-legend__item--logged::before {
+    background: var(--macro-calories);
+}
+
+.fd-trends-legend__item--empty::before {
+    background: var(--surface-track);
+    opacity: 0.5;
+}
+
+.fd-trends-weight__chart {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.fd-trends-weight__area {
+    fill: var(--accent-fill);
+    opacity: 0.16;
+}
+
+.fd-trends-weight__line {
+    fill: none;
+    stroke: var(--accent-fill);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.fd-trends-weight__chart circle {
+    fill: var(--accent-fill);
+}
+
+.fd-trends-weight__summary {
+    margin: var(--fd-s-6) 0 0;
+    font: 600 17px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-trends-weight__change {
+    margin-left: 0.35em;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.fd-trends-weight__empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}

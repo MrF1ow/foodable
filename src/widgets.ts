@@ -572,6 +572,7 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/swipe-rows.js",
     "./src/web/client/v2/log-sheet.js",
     "./src/web/client/v2/recipes.js",
+    "./src/web/client/v2/trends.js",
 ] as const;
 // Per instance by design: /app-v2.js bytes and hash; warmed at boot.
 let appV2Js: string | undefined;
