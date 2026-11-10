@@ -2,7 +2,6 @@ import type { AppChromeBase } from "../../attention.js";
 import { initialsOf } from "../../shell-v2.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { iconChevronRight } from "../../components/v2/icons.js";
-import { sectionHeader } from "../../components/v2/rows.js";
 import { renderAppShell } from "../../shell.js";
 import { APP_PATHS } from "../../route-map.js";
 
@@ -227,11 +226,22 @@ export function settingsProfileCard(view: SettingsProfile): Html {
     );
 }
 
-/** Desktop Settings home only: Household card with a Display shortcut. */
-export function settingsHouseholdHomeCard(active: SettingsV2Section): Html {
-    const displayCurrent = active === "display" ? ' aria-current="page"' : "";
+/** Desktop Settings home pane (member table is not loaded on this route). */
+export function settingsDesktopHomePane(opts: {
+    householdName?: string;
+    memberCount?: number;
+}): Html {
+    const title = opts.householdName ?? "Household";
+    const members =
+        opts.memberCount != null && opts.memberCount > 0
+            ? `${esc(String(opts.memberCount))} member${opts.memberCount === 1 ? "" : "s"}`
+            : "";
+    const membersMeta = members
+        ? `<span class="fd-settings-home-pane__meta">${members}</span>`
+        : "";
+    const manage = `<a class="fd-settings-home-pane__link" href="${esc(APP_PATHS.settingsHousehold)}">Manage household and stores<span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a>`;
     return raw(
-        `<section class="fd-settings-card fd-settings-card--household" aria-labelledby="fd-settings-household-title">${String(sectionHeader({ title: "Household", level: 2, id: "fd-settings-household-title" }))}<ul class="fd-settings-menu__list fd-settings-menu__list--inset"><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(APP_PATHS.settingsHousehold)}">${settingsMenuIcon("users")}<span class="fd-settings-menu__label">Members and stores</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="/settings/display"${displayCurrent}>${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li></ul></section>`,
+        `<section class="fd-settings-home-pane" aria-labelledby="fd-settings-home-pane-title"><header class="fd-settings-home-pane__head"><h2 class="fd-settings-home-pane__title" id="fd-settings-home-pane-title">${esc(title)}</h2>${membersMeta}</header><p class="fd-settings-home-pane__lead">Members, stores, and household preferences live on the household screen.</p>${manage}</section>`,
     );
 }
 
@@ -247,7 +257,6 @@ export type SettingsV2Layout = {
     title: string;
     body: Html | string;
     profile?: SettingsProfile;
-    homeHouseholdCard?: boolean;
     /** Raw `profiles.theme` (null = Auto) for the home menu theme control. */
     storedTheme?: "light" | "dark" | null;
 };
@@ -283,18 +292,20 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
         isHome && profileSource
             ? `<div class="fd-settings-profile-phone">${String(settingsProfileCard(profileSource))}</div>`
             : "";
-    const householdCard =
-        isHome && layout.homeHouseholdCard
-            ? settingsHouseholdHomeCard(layout.page)
-            : raw("");
     const back = isHome ? raw("") : settingsBackLink();
     const phoneTop = isHome ? settingsPhoneTopBar(layout.title) : raw("");
-    const homeMainHeader = isHome
-        ? settingsPageHeader(layout.title, undefined, { desktopOnly: true })
-        : raw("");
+    const desktopBanner = settingsDesktopPageBanner();
     const mainInner =
         typeof layout.body === "string" ? layout.body : String(layout.body);
-    return `<div class="fd-settings" data-fd-settings-page="${esc(layout.page)}">${String(phoneTop)}<aside class="fd-settings-aside">${profilePhone}${String(menu)}</aside><div class="fd-settings-main">${String(back)}<div class="fd-settings-content">${String(profileMain)}${String(homeMainHeader)}${mainInner}</div>${isHome ? String(householdCard) : ""}</div></div>`;
+    return `<div class="fd-settings" data-fd-settings-page="${esc(layout.page)}">${String(phoneTop)}${String(desktopBanner)}<div class="fd-settings-columns"><aside class="fd-settings-aside">${profilePhone}${String(menu)}</aside><div class="fd-settings-main">${String(back)}<div class="fd-settings-content">${String(profileMain)}${mainInner}</div></div></div></div>`;
+}
+
+const SETTINGS_DESKTOP_SUBTITLE = "Household, people and preferences";
+
+function settingsDesktopPageBanner(): Html {
+    return raw(
+        `<header class="fd-settings-desktop-banner"><h1 class="fd-settings-desktop-banner__title">Settings</h1><p class="fd-settings-desktop-banner__sub">${esc(SETTINGS_DESKTOP_SUBTITLE)}</p></header>`,
+    );
 }
 
 export function renderSettingsV2Page(layout: SettingsV2Layout): string {
@@ -307,17 +318,12 @@ export function renderSettingsV2Page(layout: SettingsV2Layout): string {
     });
 }
 
-export function settingsPageHeader(
-    title: string,
-    actions?: string,
-    opts?: { desktopOnly?: boolean },
-): Html {
+export function settingsPageHeader(title: string, actions?: string): Html {
     const extra = actions
         ? `<div class="fd-settings-head-actions">${actions}</div>`
         : "";
-    const mod = opts?.desktopOnly ? " fd-settings-head--desktop" : "";
     return raw(
-        `<header class="fd-settings-head${mod}"><h1 class="fd-settings-title">${esc(title)}</h1>${extra}</header>`,
+        `<header class="fd-settings-head fd-settings-head--phone"><h1 class="fd-settings-title">${esc(title)}</h1>${extra}</header>`,
     );
 }
 

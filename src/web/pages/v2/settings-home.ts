@@ -1,5 +1,8 @@
 import type { AppChromeBase } from "../../attention.js";
-import { renderSettingsV2Page } from "./settings-shared.js";
+import {
+    renderSettingsV2Page,
+    settingsDesktopHomePane,
+} from "./settings-shared.js";
 
 export type SettingsHomeV2View = {
     chrome: AppChromeBase;
@@ -27,8 +30,10 @@ export function renderSettingsHomeV2Page(view: SettingsHomeV2View): string {
             householdName: id?.householdName,
             memberCount: id?.memberCount,
         },
-        homeHouseholdCard: true,
         storedTheme: view.storedTheme ?? null,
-        body: "",
+        body: settingsDesktopHomePane({
+            householdName: id?.householdName,
+            memberCount: id?.memberCount,
+        }),
     });
 }

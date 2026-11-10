@@ -70,9 +70,21 @@ describe("settings home v2", () => {
         expect(html).toContain("fd-account-chip");
     });
 
-    test("household card is hidden on phone in settings.css", () => {
+    test("desktop home pane is hidden on phone in settings.css", () => {
         expect(settingsCss).toMatch(
-            /\.fd-settings\[data-fd-settings-page="home"\][\s\S]*?\.fd-settings-main[\s\S]*?\.fd-settings-card--household\s*\{[^}]*display:\s*none/,
+            /\.fd-settings-home-pane\s*\{[^}]*display:\s*none/,
         );
+    });
+
+    test("desktop home pane markup on home", () => {
+        const html = renderSettingsHomeV2Page({
+            chrome,
+            displayName: "Ethan Flow",
+            email: "ethan@example.com",
+        });
+        expect(html).toContain("fd-settings-home-pane");
+        expect(html).toContain("fd-settings-desktop-banner");
+        expect(html).toContain("Household, people and preferences");
+        expect(html).toContain("fd-settings-columns");
     });
 });

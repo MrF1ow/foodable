@@ -175,8 +175,40 @@
     flex: none;
 }
 
-.fd-settings-card--household {
-    margin-top: var(--fd-s-6);
+.fd-settings-home-pane__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-gap);
+    flex-wrap: wrap;
+}
+
+.fd-settings-home-pane__title {
+    margin: 0;
+    font: 600 1.125rem/1.25 var(--font-display);
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+}
+
+.fd-settings-home-pane__meta {
+    font: 400 0.8125rem/1.2 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-home-pane__lead {
+    margin: var(--space-section) 0 0;
+    font: 400 0.875rem/1.4 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-home-pane__link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+    margin-top: var(--space-section);
+    font: 600 0.875rem/1.25 var(--font-body);
+    color: var(--accent-text);
+    text-decoration: none;
 }
 
 .fd-settings-phone-top {
@@ -212,7 +244,15 @@
     width: 2.25rem;
 }
 
-.fd-settings-head.fd-settings-head--desktop {
+.fd-settings-desktop-banner {
+    display: none;
+}
+
+.fd-settings-columns {
+    display: contents;
+}
+
+.fd-settings-home-pane {
     display: none;
 }
 
@@ -734,12 +774,6 @@
     display: none;
 }
 
-.fd-settings[data-fd-settings-page="home"]
-    .fd-settings-main
-    .fd-settings-card--household {
-    display: none;
-}
-
 /* The home's in-content profile card is desktop-only (the phone shows its
    own above the menu). */
 .fd-settings[data-fd-settings-page="home"]
@@ -750,16 +784,48 @@
 
 @media (min-width: 1024px) {
     .fd-settings {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        max-width: none;
+        padding: 0;
+        padding-bottom: 0;
+    }
+
+    .fd-settings-desktop-banner {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 0 0 auto;
+        width: 15rem;
+        max-width: 100%;
+        margin-bottom: var(--space-section);
+    }
+
+    .fd-settings-desktop-banner__title {
+        margin: 0;
+        font: 600 2.125rem/1.2 var(--font-display);
+        letter-spacing: -0.02em;
+        color: var(--text-primary);
+    }
+
+    .fd-settings-desktop-banner__sub {
+        margin: 0;
+        font: 400 0.875rem/1.3 var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-settings-columns {
+        display: flex;
         flex-direction: row;
         align-items: flex-start;
         gap: var(--space-section);
-        max-width: none;
-        padding: 0;
-        padding-bottom: var(--space-gutter);
+        min-width: 0;
     }
 
     .fd-settings-aside {
-        flex: 0 0 15.5rem;
+        flex: 0 0 15rem;
+        width: 15rem;
         position: sticky;
         top: var(--fd-s-12);
     }
@@ -770,12 +836,13 @@
         display: block;
     }
 
-    .fd-settings-phone-top {
+    .fd-settings-phone-top,
+    .fd-settings[data-fd-settings-page="home"] .fd-settings-phone-top {
         display: none;
     }
 
-    .fd-settings-head.fd-settings-head--desktop {
-        display: flex;
+    .fd-settings-head--phone {
+        display: none;
     }
 
     .fd-settings-menu__link--display-nav {
@@ -816,8 +883,8 @@
     }
 
     .fd-settings-menu__link {
-        min-height: 0;
-        padding: 10px 12px;
+        min-height: 42px;
+        padding: 9px 12px;
         gap: 12px;
         border-radius: var(--radius-sm);
         color: var(--text-secondary);
@@ -856,17 +923,12 @@
         display: none;
     }
 
-    .fd-settings[data-fd-settings-page="home"]
-        .fd-settings-main
-        .fd-settings-card--household {
-        display: block;
-    }
-
-    .fd-settings-head {
-        margin-bottom: var(--space-section);
-    }
-
-    .fd-settings-title {
-        font: 600 1.375rem/1.2 var(--font-display);
+    .fd-settings-home-pane {
+        display: flex;
+        flex-direction: column;
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
     }
 }
