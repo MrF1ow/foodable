@@ -3,20 +3,33 @@
 .fd-trends-page {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-12);
+    gap: var(--space-section);
     padding: 0 0 var(--fd-s-12);
 }
 
 .fd-trends-header {
     display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-10);
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--fd-s-6);
+    padding-top: var(--space-gap);
+    padding-bottom: var(--fd-s-14);
+    /* Leave the floating account chip (shell.css) clear of the range toggle. */
+    padding-right: 48px;
 }
 
 .fd-trends-header__top {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--fd-s-4);
+}
+
+.fd-trends-range {
+    flex-shrink: 0;
+    margin-top: var(--space-gap);
 }
 
 .fd-trends-title {
@@ -30,6 +43,9 @@
     margin: 0;
     font: 400 14px/20px var(--font-body);
     color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .fd-trends-subject {
@@ -45,32 +61,32 @@
     text-align: center;
 }
 
-.fd-seg {
+.fd-trends-page .fd-seg {
     display: inline-flex;
     padding: 2px;
     border-radius: var(--radius-pill);
-    background: var(--surface-raised);
+    background: var(--surface-panel);
     border: 1px solid var(--line);
 }
 
-.fd-seg-btn {
+.fd-trends-page .fd-seg-btn {
     border: 0;
     background: transparent;
-    padding: 6px 12px;
+    padding: 4px 8px;
     border-radius: var(--radius-pill);
-    font: 500 13px/18px var(--font-body);
+    font: 500 12px/16px var(--font-body);
     color: var(--text-secondary);
     cursor: pointer;
 }
 
-.fd-seg-btn--on,
-.fd-seg-btn[aria-pressed="true"] {
-    background: var(--accent-fill);
-    color: var(--accent-on);
+.fd-trends-page .fd-seg-btn--on,
+.fd-trends-page .fd-seg-btn[aria-pressed="true"] {
+    background: var(--text-primary);
+    color: var(--surface-bg);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-    .fd-seg-btn {
+    .fd-trends-page .fd-seg-btn {
         transition:
             background 0.15s ease,
             color 0.15s ease;
@@ -81,41 +97,85 @@
     display: flex;
     flex-direction: column;
     gap: var(--fd-s-10);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
+.fd-trends-section + .fd-trends-section,
+.fd-trends-summary + .fd-trends-section,
+.fd-trends-col + .fd-trends-section {
+    padding-top: var(--space-section);
+    border-top: 1px solid var(--line);
+}
+
+.fd-trends-section.fd-trends-rings {
+    padding: 0;
+    border: none;
+    background: transparent;
 }
 
 .fd-trends-section__title {
     margin: 0;
-    font: 600 15px/20px var(--font-body);
-    color: var(--text-primary);
+    padding-bottom: var(--fd-s-7);
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
 }
 
-.fd-trends-page .fd-tiles {
+.fd-trends-section__title-desktop {
+    display: none;
+}
+
+.fd-trends-section.fd-trends-rings .fd-trends-section__title {
+    padding-bottom: var(--fd-s-7);
+}
+
+/* Phone: summary strip (2×2). Desktop overrides below. */
+.fd-trends-page .fd-trends-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--fd-s-6);
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
 }
 
-.fd-trends-page .fd-tile__value {
-    white-space: nowrap;
+.fd-trends-page .fd-trends-summary .fd-strip__cell {
+    flex: unset;
+    min-width: 0;
+    padding: var(--fd-s-13) var(--fd-s-10);
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-trends-page .fd-trends-summary .fd-strip__cell:nth-child(odd) {
+    border-right: 1px solid var(--line);
+}
+
+.fd-trends-page .fd-trends-summary .fd-strip__cell:nth-last-child(-n + 2) {
+    border-bottom: none;
 }
 
 .fd-trends-rings__list {
     display: flex;
     flex-direction: row;
-    gap: var(--fd-s-6);
+    gap: var(--fd-s-4);
     margin: 0;
     padding: 0;
     list-style: none;
-    overflow-x: auto;
+    justify-content: space-between;
 }
 
 .fd-trends-rings__day {
     display: flex;
-    flex: 0 0 auto;
+    flex: 1 1 0;
+    min-width: 0;
     flex-direction: column;
     align-items: center;
     gap: var(--fd-s-4);
-    min-width: 2.75rem;
 }
 
 .fd-trends-rings__ring .fd-trends-ring {
@@ -143,19 +203,51 @@
 .fd-trends-body {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-12);
+    gap: var(--space-section);
 }
 
 .fd-trends-panels {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-12);
+    gap: var(--space-section);
 }
 
 .fd-trends-col {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-12);
+    gap: var(--space-section);
+}
+
+.fd-trends-panel:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-trends-col--left,
+.fd-trends-col--right,
+.fd-trends-col--weight {
+    display: contents;
+}
+
+.fd-trends-panel:not([hidden]) .fd-trends-rings {
+    order: 1;
+}
+
+.fd-trends-panel:not([hidden]) .fd-trends-summary {
+    order: 2;
+}
+
+.fd-trends-panel:not([hidden]) .fd-trends-averages {
+    order: 3;
+}
+
+.fd-trends-panel:not([hidden]) .fd-trends-calories {
+    order: 4;
+}
+
+.fd-trends-panel:not([hidden]) .fd-trends-weight {
+    order: 5;
 }
 
 .fd-trends-month__head {
@@ -282,14 +374,24 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-6);
 }
 
 .fd-trends-avg__row {
     display: grid;
-    grid-template-columns: 5rem 1fr;
+    grid-template-columns: 4.5rem 1fr auto;
     gap: var(--fd-s-6);
     align-items: center;
+    padding: var(--fd-s-6) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-trends-avg__row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.fd-trends-avg__row:first-child {
+    padding-top: 0;
 }
 
 .fd-trends-avg__label {
@@ -298,16 +400,21 @@
     color: var(--text-secondary);
 }
 
-.fd-trends-avg__body {
+.fd-trends-avg__track-wrap {
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
+    min-width: 0;
 }
 
 .fd-trends-avg__nums {
-    font: 500 13px/18px var(--font-body);
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
     color: var(--text-primary);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.fd-trends-avg__nums--over {
+    color: var(--status-over);
 }
 
 .fd-trends-avg__sep {
@@ -316,16 +423,26 @@
 }
 
 .fd-trends-avg__track {
+    position: relative;
     height: 4px;
     border-radius: var(--radius-pill);
     background: var(--surface-track);
-    overflow: hidden;
 }
 
 .fd-trends-avg__fill {
     height: 100%;
     border-radius: var(--radius-pill);
     min-width: 2px;
+}
+
+.fd-trends-avg__tick {
+    position: absolute;
+    top: -3px;
+    right: 0;
+    width: 1px;
+    height: 10px;
+    background: var(--text-tertiary);
+    border-radius: 1px;
 }
 
 .fd-trends-avg__fill--calories {
@@ -427,6 +544,37 @@
     opacity: 0.5;
 }
 
+.fd-trends-legend__item--protein::before {
+    background: var(--macro-protein);
+}
+
+.fd-trends-legend__item--carbs::before {
+    background: var(--macro-carbs);
+}
+
+.fd-trends-legend__item--fat::before {
+    background: var(--macro-fat);
+}
+
+.fd-trends-rings__legend {
+    justify-content: center;
+    padding-top: var(--fd-s-6);
+}
+
+.fd-trends-weight {
+    display: flex;
+    flex-direction: column;
+}
+
+.fd-trends-weight__headline {
+    margin: 0 0 var(--fd-s-10);
+    order: 1;
+}
+
+.fd-trends-weight__chart {
+    order: 2;
+}
+
 .fd-trends-weight__chart {
     width: 100%;
     height: auto;
@@ -450,18 +598,6 @@
     fill: var(--accent-fill);
 }
 
-.fd-trends-weight__summary {
-    margin: var(--fd-s-6) 0 0;
-    font: 600 17px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-trends-weight__change {
-    margin-left: 0.35em;
-    font-weight: 500;
-    color: var(--text-secondary);
-}
-
 .fd-trends-weight__empty {
     margin: 0;
     font: 400 14px/20px var(--font-body);
@@ -475,6 +611,28 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: var(--fd-s-12);
+        padding: 0;
+    }
+
+    .fd-trends-subtitle {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+    }
+
+    .fd-trends-range {
+        margin-top: 0;
+    }
+
+    .fd-trends-page .fd-seg-btn {
+        padding: 6px 12px;
+        font: 500 13px/18px var(--font-body);
+    }
+
+    .fd-trends-page .fd-seg-btn--on,
+    .fd-trends-page .fd-seg-btn[aria-pressed="true"] {
+        background: var(--accent-fill);
+        color: var(--accent-on);
     }
 
     .fd-trends-body {
@@ -492,27 +650,68 @@
         display: contents;
     }
 
-    .fd-trends-page .fd-tiles {
+    .fd-trends-page .fd-trends-summary {
         grid-column: 1 / -1;
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--fd-s-6);
+        border-top: none;
+        border-bottom: none;
+    }
+
+    .fd-trends-page .fd-trends-summary .fd-strip__cell {
+        display: flex;
+        flex-direction: column;
+        gap: var(--fd-s-4);
+        padding: var(--fd-s-10) var(--fd-s-12);
+        border: 1px solid var(--line);
+        border-radius: var(--fd-radius-tile);
+        border-bottom: 1px solid var(--line);
+    }
+
+    .fd-trends-page .fd-trends-summary .fd-strip__cell:nth-child(odd) {
+        border-right: none;
+    }
+
+    .fd-trends-page .fd-trends-summary .fd-strip__label {
+        order: unset;
+        font: 400 12px/16px var(--font-body);
+    }
+
+    .fd-trends-page .fd-trends-summary .fd-strip__value {
+        order: unset;
+        font: 600 17px/22px var(--font-body);
     }
 
     .fd-trends-col--left {
-        grid-column: 1;
         display: flex;
+        grid-column: 1;
         flex-direction: column;
         gap: var(--fd-s-12);
         min-width: 0;
     }
 
     .fd-trends-col--right {
+        display: flex;
         grid-column: 2;
+        flex-direction: column;
+        gap: var(--fd-s-12);
+        min-width: 0;
+    }
+
+    .fd-trends-col--weight {
         display: flex;
         flex-direction: column;
         gap: var(--fd-s-12);
         min-width: 0;
+    }
+
+    .fd-trends-panel:not([hidden]) .fd-trends-rings,
+    .fd-trends-panel:not([hidden]) .fd-trends-summary,
+    .fd-trends-panel:not([hidden]) .fd-trends-averages,
+    .fd-trends-panel:not([hidden]) .fd-trends-calories,
+    .fd-trends-panel:not([hidden]) .fd-trends-weight {
+        order: unset;
     }
 
     /* Right column, top to bottom: Averages, the month card, Weight (the
@@ -551,5 +750,56 @@
         border: 1px solid var(--line);
         border-radius: var(--radius-md);
         background: var(--surface-raised);
+    }
+
+    .fd-trends-section + .fd-trends-section,
+    .fd-trends-summary + .fd-trends-section,
+    .fd-trends-col + .fd-trends-section {
+        padding-top: var(--fd-s-12);
+        border-top: 1px solid var(--line);
+    }
+
+    .fd-trends-section__title {
+        font: 600 15px/20px var(--font-body);
+        letter-spacing: normal;
+        text-transform: none;
+        color: var(--text-primary);
+    }
+
+    .fd-trends-section__title-phone {
+        display: none;
+    }
+
+    .fd-trends-section__title-desktop {
+        display: inline;
+    }
+
+    .fd-trends-avg__row {
+        grid-template-columns: 5rem 1fr;
+        grid-template-rows: auto auto;
+    }
+
+    .fd-trends-avg__label {
+        grid-row: 1 / -1;
+    }
+
+    .fd-trends-avg__nums {
+        grid-column: 2;
+        grid-row: 1;
+        text-align: left;
+    }
+
+    .fd-trends-avg__track-wrap {
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    .fd-trends-weight__headline {
+        order: 2;
+        margin: var(--fd-s-10) 0 0;
+    }
+
+    .fd-trends-weight__chart {
+        order: 1;
     }
 }

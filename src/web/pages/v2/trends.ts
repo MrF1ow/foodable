@@ -38,7 +38,12 @@ import {
     listHouseholdMembers,
 } from "../../../db/household.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
+import {
+    deltaStat,
+    statStrip,
+    type StatDelta,
+    type StatTile,
+} from "../../components/v2/stat-tiles.js";
 import { renderAppShell } from "../../shell.js";
 
 export const TRENDS_RANGES = [7, 30, 90, 365] as const;
@@ -251,11 +256,6 @@ function fmtMacro(value: number | null): string {
     return (Math.round(value * 10) / 10).toFixed(1);
 }
 
-function fmtWeight(value: number | null, unit: string): string {
-    if (value == null || !Number.isFinite(value)) return "—";
-    return `${(Math.round(value * 10) / 10).toFixed(1)} ${unit}`;
-}
-
 function shortDay(date: string): string {
     const d = new Date(`${date}T12:00:00Z`);
     return d.toLocaleDateString("en-US", {
@@ -263,6 +263,22 @@ function shortDay(date: string): string {
         day: "numeric",
         timeZone: "UTC",
     });
+}
+
+function ringDayLabel(date: string, range: TrendsRange): string {
+    if (range === 7) {
+        const d = new Date(`${date}T12:00:00Z`);
+        return d.toLocaleDateString("en-US", {
+            weekday: "narrow",
+            timeZone: "UTC",
+        });
+    }
+    return shortDay(date);
+}
+
+function trendsAveragesTitle(range: TrendsRange): string {
+    const span = range === 365 ? "Last year" : `Last ${range} days`;
+    return `Averages · ${span}`;
 }
 
 function ringSvg(day: TrendsDayRing): string {
@@ -304,7 +320,10 @@ function tilesMarkup(view: TrendsView): Html {
             unit: "days",
         },
     ];
-    return statTiles(tiles, { label: "Summary for selected range" });
+    return statStrip(tiles, {
+        className: "fd-trends-summary",
+        label: "Summary for selected range",
+    });
 }
 
 function averagesMarkup(view: TrendsView): Html {
@@ -314,6 +333,11 @@ function averagesMarkup(view: TrendsView): Html {
         const row = view.averagesVsGoals[key];
         const pct =
             row.ratio != null ? Math.min(100, Math.round(row.ratio * 100)) : 0;
+        const over =
+            row.ratio != null &&
+            row.goal != null &&
+            row.goal > 0 &&
+            row.ratio > 1;
         const label =
             key === "calories"
                 ? "Calories"
@@ -322,10 +346,15 @@ function averagesMarkup(view: TrendsView): Html {
             key === "calories" ? fmtKcal(row.actual) : fmtMacro(row.actual);
         const goal =
             key === "calories" ? fmtKcal(row.goal) : fmtMacro(row.goal);
-        return `<div class="fd-trends-avg__row"><dt class="fd-trends-avg__label">${esc(label)}</dt><dd class="fd-trends-avg__body"><span class="fd-trends-avg__nums">${esc(actual)}<span class="fd-trends-avg__sep">/</span>${esc(goal)}</span><div class="fd-trends-avg__track"><div class="fd-trends-avg__fill fd-trends-avg__fill--${esc(key)}" style="width:${pct}%"></div></div></dd></div>`;
+        const numsClass = over ? " fd-trends-avg__nums--over" : "";
+        const tick =
+            row.goal != null
+                ? `<span class="fd-trends-avg__tick" aria-hidden="true"></span>`
+                : "";
+        return `<div class="fd-trends-avg__row"><dt class="fd-trends-avg__label">${esc(label)}</dt><dd class="fd-trends-avg__track-wrap"><div class="fd-trends-avg__track"><div class="fd-trends-avg__fill fd-trends-avg__fill--${esc(key)}" style="width:${pct}%"></div>${tick}</div></dd><dd class="fd-trends-avg__nums${numsClass}">${esc(actual)}<span class="fd-trends-avg__sep">/</span>${esc(goal)}</dd></div>`;
     });
     return raw(
-        `<section class="fd-trends-section fd-trends-averages" aria-label="Averages vs goals"><h2 class="fd-trends-section__title">Averages vs goals</h2><dl class="fd-trends-avg">${rows.join("")}</dl></section>`,
+        `<section class="fd-trends-section fd-trends-averages" aria-label="Averages vs goals"><h2 class="fd-trends-section__title"><span class="fd-trends-section__title-phone">${esc(trendsAveragesTitle(view.range))}</span><span class="fd-trends-section__title-desktop">Averages vs goals</span></h2><dl class="fd-trends-avg">${rows.join("")}</dl></section>`,
     );
 }
 
@@ -357,11 +386,11 @@ function ringsMarkup(view: TrendsView): Html {
     const days = ringDays
         .map(
             (day) =>
-                `<li class="fd-trends-rings__day"><span class="fd-trends-rings__ring">${ringSvg(day)}</span><span class="fd-trends-rings__date">${esc(shortDay(day.date))}</span></li>`,
+                `<li class="fd-trends-rings__day"><span class="fd-trends-rings__ring">${ringSvg(day)}</span><span class="fd-trends-rings__date">${esc(ringDayLabel(day.date, view.range))}</span></li>`,
         )
         .join("");
     return raw(
-        `<section class="fd-trends-section fd-trends-rings" aria-label="Macros by day"><h2 class="fd-trends-section__title">Macros by day</h2><ul class="fd-trends-rings__list">${days}</ul></section>`,
+        `<section class="fd-trends-section fd-trends-rings" aria-label="Macros by day"><h2 class="fd-trends-section__title">Macros by day</h2><ul class="fd-trends-rings__list">${days}</ul><p class="fd-trends-legend fd-trends-rings__legend"><span class="fd-trends-legend__item fd-trends-legend__item--protein">Protein</span><span class="fd-trends-legend__item fd-trends-legend__item--carbs">Carbs</span><span class="fd-trends-legend__item fd-trends-legend__item--fat">Fat</span></p></section>`,
     );
 }
 
@@ -415,18 +444,42 @@ function weightChartSvg(view: TrendsView): string {
 function weightMarkup(view: TrendsView): Html {
     const { weight } = view;
     const chart = weightChartSvg(view);
-    const latest = fmtWeight(weight.latest, weight.unit);
-    let change = "";
-    if (weight.change != null && Number.isFinite(weight.change)) {
-        const signed =
-            weight.change > 0
-                ? `+${(Math.round(weight.change * 10) / 10).toFixed(1)}`
-                : (Math.round(weight.change * 10) / 10).toFixed(1);
-        change = `<span class="fd-trends-weight__change">${esc(signed)} ${esc(weight.unit)}</span>`;
+    if (weight.points.length === 0) {
+        return raw(
+            `<section class="fd-trends-section fd-trends-weight" aria-label="Weight"><h2 class="fd-trends-section__title">Weight</h2><p class="fd-trends-weight__empty">No weigh-ins in this range</p></section>`,
+        );
     }
-    const body = chart
-        ? `${chart}<p class="fd-trends-weight__summary"><span class="fd-trends-weight__latest">${esc(latest)}</span>${change}</p>`
-        : `<p class="fd-trends-weight__empty">No weigh-ins in this range</p>`;
+    let delta: StatDelta | undefined;
+    if (weight.change != null && Number.isFinite(weight.change)) {
+        const magnitude = Math.abs(Math.round(weight.change * 10) / 10).toFixed(
+            1,
+        );
+        delta = {
+            text: magnitude,
+            direction:
+                weight.change > 0 ? "up" : weight.change < 0 ? "down" : "flat",
+            tone: "neutral",
+        };
+    }
+    const value =
+        weight.latest != null && Number.isFinite(weight.latest)
+            ? (Math.round(weight.latest * 10) / 10).toFixed(1)
+            : "—";
+    const headline =
+        delta != null
+            ? deltaStat(
+                  {
+                      label: "Weight",
+                      value,
+                      unit: weight.unit,
+                      delta,
+                  },
+                  { className: "fd-trends-weight__headline" },
+              )
+            : raw(
+                  `<p class="fd-delta-stat fd-trends-weight__headline">${esc(value)}<span class="fd-delta-stat__unit">${esc(weight.unit)}</span></p>`,
+              );
+    const body = `${headline}${chart}`;
     return raw(
         `<section class="fd-trends-section fd-trends-weight" aria-label="Weight"><h2 class="fd-trends-section__title">Weight</h2>${body}</section>`,
     );
@@ -531,10 +584,10 @@ function rangePanel(
 
 function rangeToggle(active: TrendsRange): Html {
     const labels: Record<TrendsRange, string> = {
-        7: "7 days",
-        30: "30 days",
-        90: "90 days",
-        365: "1 year",
+        7: "7d",
+        30: "30d",
+        90: "90d",
+        365: "1y",
     };
     const buttons = TRENDS_RANGES.map(
         (r) =>
