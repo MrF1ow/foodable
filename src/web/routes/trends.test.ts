@@ -61,7 +61,26 @@ mock.module("../../db/profiles.js", () => ({
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns a nutrition stub in this file
 mock.module("../../db/nutrition.js", () => ({
     ...realNutrition,
-    getMealsInRange: async () => [],
+    getMealsInRange: async () => [
+        {
+            id: "meal-1",
+            user_id: ALICE,
+            logged_at: "2026-11-10T12:00:00.000Z",
+            meal_type: "lunch",
+            description: "Test",
+            calories: 2100,
+            protein_g: 100,
+            carbs_g: 200,
+            fat_g: 70,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            notes: null,
+            idempotency_key: null,
+            items: [],
+        },
+    ],
     getWaterInRange: async () => [],
     getWeightInRange: async () => [],
     getGoalsForRange: async () => ({
@@ -137,5 +156,35 @@ describe("GET /trends", () => {
         const html = await res.text();
         expect(html).toContain("fd-trends-page");
         expect(html).toContain('href="/trends"');
+    });
+
+    test("range query selects the default toggle", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await hono.request("http://test/trends?range=7", {
+            headers: { cookie: cookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain('data-fd-trends-range="7"');
+        expect(html).toMatch(
+            /data-fd-trends-range="7"[^>]*aria-pressed="true"/,
+        );
+    });
+
+    test("month query is accepted and drives prev link range param", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await hono.request(
+            "http://test/trends?month=2026-06&range=90",
+            {
+                headers: { cookie: cookie(ALICE) },
+            },
+        );
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain('data-fd-trends-range="90"');
+        expect(html).toContain("fd-trends-month");
+        expect(html).toMatch(
+            /href="\/trends\?month=2026-05(?:&amp;|&)range=90/,
+        );
     });
 });

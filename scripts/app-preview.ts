@@ -101,7 +101,8 @@ import { buildFlagContext, initFlags } from "../src/flags.js";
 import { evaluateViewerFlags } from "../src/viewer-flags.js";
 
 const OUT = "./tmp/app-preview";
-const PORT = 4787;
+// PREVIEW_PORT lets two checkouts shoot at once.
+const PORT = Number(process.env.PREVIEW_PORT ?? 4787);
 const H = "hh-1";
 const ME = {
     householdId: H,
@@ -1410,7 +1411,9 @@ if (process.argv.includes("--shots")) {
             // The new shell's two layouts: the phone nav at 390 wide, the
             // sidebar and top bar at the design's 1440. The dev gallery is
             // one long page — use a tall window so --shots capture every block.
-            const galleryFullPage = name.startsWith("dev-gallery-v2");
+            const galleryFullPage =
+                name.startsWith("dev-gallery-v2") ||
+                name.startsWith("trends-v2");
             const v2Phone = galleryFullPage ? "390,5400" : "390,844";
             const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
             await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();

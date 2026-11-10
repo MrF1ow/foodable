@@ -6,6 +6,8 @@ import { MACRO_ORDER, type MacroKey } from "../../../domain/geometry.js";
 import {
     trendsDayFromBucket,
     trendsView,
+    type MonthGrid,
+    type MonthGridCell,
     type TrendsRange,
     type TrendsView,
     type TrendsDay,
@@ -47,17 +49,77 @@ export type TrendsPageChrome = AppChromeBase & {
     subjectLabel?: string;
 };
 
+export type TrendsCalendarMonth = { year: number; month: number };
+
 export type TrendsPageData = {
     chrome: TrendsPageChrome;
     defaultRange: TrendsRange;
     today: string;
     views: Record<string, TrendsView>;
+    monthGrid: MonthGrid;
+    displayMonth: TrendsCalendarMonth;
+    memberQuery?: string;
     empty: boolean;
 };
 
-function monthOf(date: string): { year: number; month: number } {
+function monthOf(date: string): TrendsCalendarMonth {
     const [y, m] = date.split("-").map(Number);
     return { year: y!, month: m! };
+}
+
+export function parseTrendsMonthParam(
+    raw: string | undefined,
+    today: string,
+): TrendsCalendarMonth {
+    const fallback = monthOf(today);
+    const s = raw?.trim();
+    if (!s || !/^\d{4}-\d{2}$/.test(s)) return fallback;
+    const year = Number(s.slice(0, 4));
+    const month = Number(s.slice(5, 7));
+    if (month < 1 || month > 12) return fallback;
+    const dt = new Date(Date.UTC(year, month - 1, 1));
+    if (dt.getUTCFullYear() !== year || dt.getUTCMonth() + 1 !== month) {
+        return fallback;
+    }
+    // A month after the current one has nothing to show.
+    if (year * 12 + month > fallback.year * 12 + fallback.month) {
+        return fallback;
+    }
+    return { year, month };
+}
+
+export function parseTrendsRangeParam(raw: string | undefined): TrendsRange {
+    if (raw === "7" || raw === "30" || raw === "90" || raw === "365") {
+        return Number(raw) as TrendsRange;
+    }
+    return DEFAULT_TRENDS_RANGE;
+}
+
+export function canAdvanceTrendsMonth(
+    display: TrendsCalendarMonth,
+    today: string,
+): boolean {
+    const t = monthOf(today);
+    if (display.year < t.year) return true;
+    if (display.year > t.year) return false;
+    return display.month < t.month;
+}
+
+export function trendsMonthKey(year: number, month: number): string {
+    return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+export function trendsMonthHref(opts: {
+    year: number;
+    month: number;
+    range: TrendsRange;
+    member?: string;
+}): string {
+    const q = new URLSearchParams();
+    q.set("month", trendsMonthKey(opts.year, opts.month));
+    q.set("range", String(opts.range));
+    if (opts.member?.trim()) q.set("member", opts.member.trim());
+    return `/trends?${q.toString()}`;
 }
 
 export function buildTrendsViews(
@@ -66,8 +128,8 @@ export function buildTrendsViews(
     weights: readonly TrendsWeightInput[],
     today: string,
     weightUnit: WeightUnit,
-): Record<string, TrendsView> {
-    const month = monthOf(today);
+    displayMonth: TrendsCalendarMonth,
+): { views: Record<string, TrendsView>; monthGrid: MonthGrid } {
     const unit = weightUnit ?? "kg";
     const out: Record<string, TrendsView> = {};
     for (const range of TRENDS_RANGES) {
@@ -77,16 +139,18 @@ export function buildTrendsViews(
             weights,
             range,
             unit,
-            month,
+            displayMonth,
             today,
         );
     }
-    return out;
+    const monthGrid = out[String(DEFAULT_TRENDS_RANGE)]!.monthGrid;
+    return { views: out, monthGrid };
 }
 
 export async function loadTrendsPageData(
     subjectUserId: string,
     chrome: TrendsPageChrome,
+    query?: { month?: string; range?: string; member?: string },
 ): Promise<TrendsPageData> {
     const subjectProfile = await getProfile(subjectUserId);
     const tz =
@@ -111,15 +175,27 @@ export async function loadTrendsPageData(
         weight_g: e.weight_g,
     }));
 
-    const views = buildTrendsViews(days, forDate, weights, today, weightUnit);
+    const displayMonth = parseTrendsMonthParam(query?.month, today);
+    const defaultRange = parseTrendsRangeParam(query?.range);
+    const { views, monthGrid } = buildTrendsViews(
+        days,
+        forDate,
+        weights,
+        today,
+        weightUnit,
+        displayMonth,
+    );
     const year = views["365"]!;
     const empty = year.tiles.loggedDays === 0 && weights.length === 0;
 
     return {
         chrome,
-        defaultRange: DEFAULT_TRENDS_RANGE,
+        defaultRange,
         today,
         views,
+        monthGrid,
+        displayMonth,
+        memberQuery: query?.member?.trim() || undefined,
         empty,
     };
 }
@@ -366,8 +442,79 @@ function rangePanelBody(view: TrendsView): Html {
             `<p class="fd-trends-range-empty">No meals logged in this range.</p>`,
         );
     }
+    const left = raw(`${ringsMarkup(view)}${caloriesByDayMarkup(view)}`);
+    // Weight is its own column item so the desktop grid can place the month
+    // card (shared by every range) between Averages and Weight.
     return raw(
-        `${tilesMarkup(view)}${ringsMarkup(view)}${averagesMarkup(view)}${caloriesByDayMarkup(view)}${weightMarkup(view)}`,
+        `${tilesMarkup(view)}<div class="fd-trends-col fd-trends-col--left">${left}</div><div class="fd-trends-col fd-trends-col--right">${averagesMarkup(view)}</div><div class="fd-trends-col fd-trends-col--weight">${weightMarkup(view)}</div>`,
+    );
+}
+
+function trendsRangeSubtitle(range: TrendsRange): string {
+    if (range === 365) return "How the last year went";
+    return `How the last ${range} days went`;
+}
+
+const MONTH_WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"] as const;
+
+function monthCellClass(cell: MonthGridCell, today: string): string {
+    const classes = ["fd-trends-month__day"];
+    if (cell.status === "outside-month") {
+        classes.push("fd-trends-month__day--outside");
+    } else {
+        classes.push(`fd-trends-month__day--${cell.status}`);
+        if (cell.date === today) classes.push("fd-trends-month__day--today");
+    }
+    return classes.join(" ");
+}
+
+function monthTitle(year: number, month: number): string {
+    const d = new Date(Date.UTC(year, month - 1, 1));
+    return d.toLocaleDateString("en-US", {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+    });
+}
+
+function monthCardMarkup(data: TrendsPageData): Html {
+    const { monthGrid, defaultRange, today, memberQuery } = data;
+    const prevHref = trendsMonthHref({
+        year: monthGrid.prev.year,
+        month: monthGrid.prev.month,
+        range: defaultRange,
+        member: memberQuery,
+    });
+    const showNext = canAdvanceTrendsMonth(data.displayMonth, today);
+    const nextHref = showNext
+        ? trendsMonthHref({
+              year: monthGrid.next.year,
+              month: monthGrid.next.month,
+              range: defaultRange,
+              member: memberQuery,
+          })
+        : null;
+    const nextLink = nextHref
+        ? `<a class="fd-trends-month__nav fd-trends-month__nav--next" href="${esc(nextHref)}" aria-label="Next month"><span aria-hidden="true">›</span></a>`
+        : "";
+    const weekdays = MONTH_WEEKDAYS.map(
+        (d) => `<span class="fd-trends-month__wd">${d}</span>`,
+    ).join("");
+    const rows = monthGrid.weeks
+        .map((week) => {
+            const cells = week
+                .map((cell) => {
+                    const dom = cell.date.slice(8, 10).replace(/^0/, "");
+                    const inMonth = cell.status !== "outside-month";
+                    const label = inMonth ? dom : "";
+                    return `<span class="${monthCellClass(cell, today)}" data-date="${esc(cell.date)}">${esc(label)}</span>`;
+                })
+                .join("");
+            return `<div class="fd-trends-month__week">${cells}</div>`;
+        })
+        .join("");
+    return raw(
+        `<section class="fd-trends-section fd-trends-month" aria-label="Month"><div class="fd-trends-month__head"><h2 class="fd-trends-section__title fd-trends-month__title">${esc(monthTitle(monthGrid.year, monthGrid.month))}</h2><div class="fd-trends-month__navs"><a class="fd-trends-month__nav fd-trends-month__nav--prev" href="${esc(prevHref)}" aria-label="Previous month"><span aria-hidden="true">‹</span></a>${nextLink}</div></div><div class="fd-trends-month__weekdays">${weekdays}</div><div class="fd-trends-month__grid">${rows}</div><p class="fd-trends-month__legend fd-trends-legend"><span class="fd-trends-legend__item fd-trends-legend__item--month-on">On target</span><span class="fd-trends-legend__item fd-trends-legend__item--month-logged">Logged</span></p></section>`,
     );
 }
 
@@ -383,9 +530,15 @@ function rangePanel(
 }
 
 function rangeToggle(active: TrendsRange): Html {
+    const labels: Record<TrendsRange, string> = {
+        7: "7 days",
+        30: "30 days",
+        90: "90 days",
+        365: "1 year",
+    };
     const buttons = TRENDS_RANGES.map(
         (r) =>
-            `<button type="button" class="fd-seg-btn${r === active ? " fd-seg-btn--on" : ""}" data-fd-trends-range="${r}" aria-pressed="${r === active}">${r === 365 ? "Year" : `${r}d`}</button>`,
+            `<button type="button" class="fd-seg-btn${r === active ? " fd-seg-btn--on" : ""}" data-fd-trends-range="${r}" aria-pressed="${r === active}">${labels[r]}</button>`,
     ).join("");
     return raw(
         `<div class="fd-seg fd-trends-range" role="group" aria-label="Trends range">${buttons}</div>`,
@@ -404,11 +557,12 @@ export function renderTrendsBody(data: TrendsPageData): Html {
             range === data.defaultRange,
         ),
     ).join("");
+    const month = data.empty ? "" : monthCardMarkup(data);
     const body = data.empty
         ? `<p class="fd-trends-empty">Log meals to see trends here.</p>`
-        : panels;
+        : `<div class="fd-trends-body"><div class="fd-trends-panels">${panels}${month}</div></div>`;
     return raw(
-        `<div class="fd-trends-page" data-fd-trends-root><header class="fd-trends-header"><div class="fd-trends-header__top"><h1 class="fd-trends-title">Trends</h1>${subject}</div>${rangeToggle(data.defaultRange)}</header>${body}</div>`,
+        `<div class="fd-trends-page" data-fd-trends-root data-fd-trends-active="${data.defaultRange}"><header class="fd-trends-header"><div class="fd-trends-header__top"><h1 class="fd-trends-title">Trends</h1><p class="fd-trends-subtitle">${esc(trendsRangeSubtitle(data.defaultRange))}</p>${subject}</div>${rangeToggle(data.defaultRange)}</header>${body}</div>`,
     );
 }
 
@@ -423,6 +577,12 @@ export function renderTrendsV2Page(data: TrendsPageData): string {
 }
 
 /** Fixture builder for app-preview (no database). */
+export type TrendsPreviewOptions = {
+    month?: TrendsCalendarMonth;
+    range?: TrendsRange;
+    member?: string;
+};
+
 export function buildPreviewTrendsPageData(
     chrome: TrendsPageChrome,
     days: TrendsDay[],
@@ -430,20 +590,27 @@ export function buildPreviewTrendsPageData(
     weights: TrendsWeightInput[],
     today: string,
     weightUnit: "kg" | "lb" = "kg",
+    opts?: TrendsPreviewOptions,
 ): TrendsPageData {
-    const views = buildTrendsViews(
+    const displayMonth = opts?.month ?? monthOf(today);
+    const defaultRange = opts?.range ?? DEFAULT_TRENDS_RANGE;
+    const { views, monthGrid } = buildTrendsViews(
         days,
         goalsByDay,
         weights,
         today,
         weightUnit,
+        displayMonth,
     );
     const year = views["365"]!;
     return {
         chrome,
-        defaultRange: DEFAULT_TRENDS_RANGE,
+        defaultRange,
         today,
         views,
+        monthGrid,
+        displayMonth,
+        memberQuery: opts?.member,
         empty: year.tiles.loggedDays === 0 && weights.length === 0,
     };
 }

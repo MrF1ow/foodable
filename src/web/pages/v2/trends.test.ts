@@ -5,7 +5,10 @@ import type { TrendsDay } from "../../../domain/trends-view.js";
 import {
     buildPreviewTrendsPageData,
     buildTrendsViews,
+    canAdvanceTrendsMonth,
+    parseTrendsMonthParam,
     renderTrendsV2Page,
+    trendsMonthHref,
 } from "./trends.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 
@@ -49,12 +52,13 @@ function fixtureDays(today: string): TrendsDay[] {
 describe("buildTrendsViews", () => {
     test("precomputes all four ranges", () => {
         const today = "2026-08-15";
-        const views = buildTrendsViews(
+        const { views } = buildTrendsViews(
             fixtureDays(today),
             goalsResolver(baseGoals, []),
             [{ date: "2026-08-10", weight_g: 75_000 }],
             today,
             "kg",
+            { year: 2026, month: 8 },
         );
         expect(Object.keys(views).sort()).toEqual(["30", "365", "7", "90"]);
         expect(views["7"]!.range).toBe(7);
@@ -95,6 +99,11 @@ describe("renderTrendsV2Page", () => {
         const html = renderTrendsV2Page(data);
         expect(html).toContain("fd-trends-page");
         expect(html).toContain('data-fd-trends-range="30"');
+        // Only the toggle buttons carry data-fd-trends-range: on the page root
+        // the client's closest() would swallow every click (month links).
+        expect(html).not.toMatch(
+            /data-fd-trends-root[^>]*data-fd-trends-range/,
+        );
         expect(html).toContain("Near goal");
         expect(html).toContain('data-fd-trends-panel="7"');
         expect(html).toContain('data-fd-trends-panel="30"');
@@ -105,6 +114,7 @@ describe("renderTrendsV2Page", () => {
         expect(html).toContain("fd-trends-weight");
         expect(html).toContain("Logged");
         expect(html).toContain("No log");
+        expect(html).toContain("fd-trends-month");
     });
 
     test("member subject label is shown when set", () => {
@@ -173,5 +183,141 @@ describe("renderTrendsV2Page", () => {
         expect(data.empty).toBe(true);
         const html = renderTrendsV2Page(data);
         expect(html).toContain("fd-trends-empty");
+    });
+
+    test("month card grades days and links prev/next with member and range", () => {
+        const today = "2026-08-15";
+        const days = fixtureDays(today);
+        const onTarget = days.find((d) => d.date === "2026-07-10")!;
+        onTarget.calories = 2100;
+        onTarget.logged = true;
+        const loggedOff = days.find((d) => d.date === "2026-07-11")!;
+        loggedOff.calories = 2500;
+        loggedOff.logged = true;
+        const empty = days.find((d) => d.date === "2026-07-12")!;
+        empty.logged = false;
+        empty.calories = 0;
+
+        const data = buildPreviewTrendsPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            days,
+            goalsResolver(baseGoals, []),
+            [],
+            today,
+            "kg",
+            { month: { year: 2026, month: 7 }, range: 30, member: "sam-id" },
+        );
+        const html = renderTrendsV2Page(data);
+
+        expect(html).toMatch(
+            /fd-trends-month__day--on-target[^>]*data-date="2026-07-10"/,
+        );
+        expect(html).toMatch(
+            /fd-trends-month__day--logged[^>]*data-date="2026-07-11"/,
+        );
+        expect(html).toMatch(
+            /fd-trends-month__day--empty[^>]*data-date="2026-07-12"/,
+        );
+        expect(html).toContain(
+            'href="/trends?month=2026-06&amp;range=30&amp;member=sam-id"',
+        );
+        expect(html).toContain(
+            'href="/trends?month=2026-08&amp;range=30&amp;member=sam-id"',
+        );
+        expect(html).toContain("On target");
+        expect(html).toMatch(/fd-trends-month__legend[\s\S]*Logged/);
+    });
+
+    test("today is marked in the month card when it is in the displayed month", () => {
+        const today = "2026-08-15";
+        const data = buildPreviewTrendsPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            fixtureDays(today),
+            goalsResolver(baseGoals, []),
+            [],
+            today,
+            "kg",
+            { month: { year: 2026, month: 8 } },
+        );
+        const html = renderTrendsV2Page(data);
+        expect(html).toMatch(
+            /fd-trends-month__day--today[^>]*data-date="2026-08-15"/,
+        );
+    });
+
+    test("no next month link when display month is the current month", () => {
+        const today = "2026-08-15";
+        const data = buildPreviewTrendsPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            fixtureDays(today),
+            goalsResolver(baseGoals, []),
+            [],
+            today,
+            "kg",
+            { month: { year: 2026, month: 8 } },
+        );
+        const html = renderTrendsV2Page(data);
+        expect(html).not.toContain('href="/trends?month=2026-09');
+        expect(html).toContain('href="/trends?month=2026-07');
+    });
+
+    test("invalid month query falls back to the current month", () => {
+        expect(parseTrendsMonthParam(undefined, "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+        expect(parseTrendsMonthParam("2026-13", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+        expect(parseTrendsMonthParam("nope", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+        expect(parseTrendsMonthParam("2026-07", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 7,
+        });
+        // A future month falls back to the current one.
+        expect(parseTrendsMonthParam("2026-09", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+        expect(parseTrendsMonthParam("2027-01", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+    });
+
+    test("canAdvanceTrendsMonth blocks future months", () => {
+        expect(
+            canAdvanceTrendsMonth({ year: 2026, month: 8 }, "2026-08-15"),
+        ).toBe(false);
+        expect(
+            canAdvanceTrendsMonth({ year: 2026, month: 7 }, "2026-08-15"),
+        ).toBe(true);
+    });
+
+    test("trendsMonthHref preserves member and range", () => {
+        expect(
+            trendsMonthHref({
+                year: 2026,
+                month: 7,
+                range: 90,
+                member: "x",
+            }),
+        ).toBe("/trends?month=2026-07&range=90&member=x");
     });
 });

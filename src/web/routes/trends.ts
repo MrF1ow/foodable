@@ -16,6 +16,8 @@ trendsRoutes.get(
     async (c) => {
         const userId = c.get("userId");
         const member = c.req.query("member");
+        const month = c.req.query("month");
+        const range = c.req.query("range");
         const resolved = await resolveTrendsSubject(userId, member);
         if (!resolved.ok) {
             return c.html(resolved.html, resolved.status);
@@ -23,6 +25,7 @@ trendsRoutes.get(
         const data = await loadTrendsPageData(
             resolved.subject.userId,
             resolved.chrome,
+            { month, range, member },
         );
         return c.html(renderTrendsV2Page(data));
     },

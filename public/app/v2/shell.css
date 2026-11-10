@@ -392,6 +392,9 @@ body.fd-body .toast-region {
     }
     .fd-main.app-main {
         flex: none;
+        /* app.css caps .app-main at 760px for the old phone-first pages; the
+           desktop column fills the space beside the sidebar instead. */
+        max-inline-size: none;
         margin: 0;
         padding: 0;
     }

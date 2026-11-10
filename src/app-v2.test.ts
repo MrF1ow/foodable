@@ -144,8 +144,9 @@ describe("/app-v2.js", () => {
         const js = await getAppV2Js();
         expect(js).toContain("window.FoodableApp.onLoad(");
         expect(js).not.toContain("Turbo.start");
-        // +~1.8 KB amount Enter helpers, step-any stepping, listbox rows.
-        expect(js.length).toBeLessThan(67_000);
+        // +~1.8 KB amount Enter helpers, step-any stepping, listbox rows;
+        // +~0.5 KB Trends subtitle and month-link range sync.
+        expect(js.length).toBeLessThan(68_500);
     });
 });
 

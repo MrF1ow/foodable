@@ -1,4 +1,4 @@
-/* Trends page (phone layout). Month grid and desktop columns land in a later phase. */
+/* Trends page */
 
 .fd-trends-page {
     display: flex;
@@ -24,6 +24,12 @@
     font: 600 28px/34px var(--font-display);
     letter-spacing: -0.5px;
     color: var(--text-primary);
+}
+
+.fd-trends-subtitle {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-trends-subject {
@@ -93,13 +99,6 @@
     white-space: nowrap;
 }
 
-@media (min-width: 1024px) {
-    .fd-trends-page .fd-tiles {
-        display: flex;
-        flex-wrap: wrap;
-    }
-}
-
 .fd-trends-rings__list {
     display: flex;
     flex-direction: row;
@@ -139,6 +138,124 @@
 
 .fd-trends-panel[hidden] {
     display: none !important;
+}
+
+.fd-trends-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-trends-panels {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-trends-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-trends-month__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--fd-s-6);
+}
+
+.fd-trends-month__title {
+    flex: 1;
+}
+
+.fd-trends-month__navs {
+    display: flex;
+    gap: var(--fd-s-10);
+    flex-shrink: 0;
+}
+
+.fd-trends-month__nav {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+    font: 500 20px/1 var(--font-body);
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.fd-trends-month__nav:hover {
+    color: var(--text-primary);
+}
+
+.fd-trends-month__weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+    font: 500 11px/16px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-trends-month__grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fd-trends-month__week {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.fd-trends-month__day {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    justify-self: center;
+    width: 100%;
+    max-width: 2.25rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    font: 500 12px/16px var(--font-body);
+    color: var(--text-secondary);
+    background: transparent;
+}
+
+.fd-trends-month__day--outside {
+    visibility: hidden;
+}
+
+.fd-trends-month__day--logged {
+    background: var(--surface-track);
+    color: var(--macro-calories);
+}
+
+.fd-trends-month__day--on-target {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+.fd-trends-month__day--today {
+    box-shadow: inset 0 0 0 1.5px var(--text-primary);
+    color: var(--text-primary);
+}
+
+.fd-trends-month__legend {
+    margin-top: var(--fd-s-4);
+}
+
+.fd-trends-legend__item--month-on::before {
+    border-radius: 50%;
+    background: var(--accent-fill);
+}
+
+.fd-trends-legend__item--month-logged::before {
+    border-radius: 50%;
+    background: var(--macro-calories);
 }
 
 .fd-trends-ring__track {
@@ -349,4 +466,90 @@
     margin: 0;
     font: 400 14px/20px var(--font-body);
     color: var(--text-secondary);
+}
+
+/* Desktop: last, so it wins over the phone rules above. */
+@media (min-width: 1024px) {
+    .fd-trends-header {
+        flex-direction: row;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--fd-s-12);
+    }
+
+    .fd-trends-body {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: var(--fd-s-12);
+        align-items: start;
+    }
+
+    .fd-trends-panels {
+        display: contents;
+    }
+
+    .fd-trends-panel:not([hidden]) {
+        display: contents;
+    }
+
+    .fd-trends-page .fd-tiles {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--fd-s-6);
+    }
+
+    .fd-trends-col--left {
+        grid-column: 1;
+        display: flex;
+        flex-direction: column;
+        gap: var(--fd-s-12);
+        min-width: 0;
+    }
+
+    .fd-trends-col--right {
+        grid-column: 2;
+        display: flex;
+        flex-direction: column;
+        gap: var(--fd-s-12);
+        min-width: 0;
+    }
+
+    /* Right column, top to bottom: Averages, the month card, Weight (the
+       month card is shared by every range, so it sits outside the panels). */
+    .fd-trends-col--left {
+        grid-row: span 3;
+    }
+
+    /* The charts fill their card, as in the design. */
+    .fd-trends-bars {
+        height: 9rem;
+    }
+
+    .fd-trends-bar {
+        flex: 1 1 0;
+        min-width: 1px;
+        max-width: 24px;
+    }
+
+    .fd-trends-rings__list {
+        justify-content: space-between;
+    }
+
+    .fd-trends-month {
+        grid-column: 2;
+        order: 2;
+    }
+
+    .fd-trends-col--weight {
+        grid-column: 2;
+        order: 3;
+    }
+
+    .fd-trends-section {
+        padding: var(--fd-s-12);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--surface-raised);
+    }
 }
