@@ -129,6 +129,60 @@ describeDb(pgAvailable !== null, "food-cache db", (getCtx) => {
             expect(hit?.name).toBe("Cached Nutella");
         });
 
+        test("an outage during a refetch leaves the old row to refetch next time", async () => {
+            const qualityLegacy = {
+                ...legacy,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            };
+            await upsertFoodCacheRow({
+                source: "openfoodfacts",
+                source_id: barcode,
+                payload: qualityLegacy,
+                fetched_at: new Date().toISOString(),
+            });
+            let fetches = 0;
+            globalThis.fetch = (async () => {
+                fetches++;
+                throw new TypeError("network down");
+            }) as unknown as typeof fetch;
+            const first = await lookupBarcode(barcode);
+            globalThis.fetch = (async () => {
+                fetches++;
+                return Response.json({
+                    status: 1,
+                    product: {
+                        product_name: "Nutella",
+                        serving_size: "100 g",
+                        nutriments: {
+                            "energy-kcal_100g": 539,
+                            proteins_100g: 6.3,
+                            carbohydrates_100g: 57.5,
+                            fat_100g: 30.9,
+                            "saturated-fat_100g": 10.6,
+                        },
+                        nutrient_levels: { "saturated-fat": "high" },
+                    },
+                });
+            }) as unknown as typeof fetch;
+            const second = await lookupBarcode(barcode);
+            expect(first?.name).toBe(qualityLegacy.name);
+            expect(fetches).toBe(2);
+            expect(second?.saturated_fat_g).toBe(10.6);
+            expect(second?.nutrient_levels).toEqual({
+                "saturated-fat": "high",
+            });
+        });
+
         test("legacy quality cache without nutrient_levels stamps on 404 and refetches once", async () => {
             const qualityLegacy = {
                 ...legacy,

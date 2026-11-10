@@ -722,3 +722,35 @@ test("groceryListFoodIdsForSuggestions excludes usual product when plain is on l
     );
     expect(digest.suggestions).toHaveLength(0);
 });
+
+test("ranOutInWindow still sees zero after a decimal restock", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, "hh-1", "Fridge");
+    const milk = await findOrCreateManualFood(foods, "hh-1", "food", "Milk");
+    const move = (delta: number, reason: "purchase" | "eat", at: string) =>
+        applyMovement(fridge, stock, foods, {
+            householdId: "hh-1",
+            foodId: milk.id,
+            delta,
+            unit: "l",
+            reason,
+            locationId: loc.id,
+            now: new Date(at),
+        });
+    await move(1, "purchase", "2026-06-01T08:00:00Z");
+    await move(-1, "eat", "2026-06-02T08:00:00Z");
+    await move(1.1, "purchase", "2026-06-03T08:00:00Z");
+    await move(-0.2, "eat", "2026-06-04T08:00:00Z");
+    const ranOut = ranOutInWindow(
+        {
+            movements: await stock.listMovements("hh-1"),
+            fridgeItems: await fridge.listItems("hh-1"),
+            displayNameByFoodId: new Map([[milk.id, "Milk"]]),
+        },
+        { from: "2026-06-01", to: "2026-06-07" },
+        "UTC",
+    );
+    expect(ranOut.map((r) => r.reason)).toEqual(["eat"]);
+});

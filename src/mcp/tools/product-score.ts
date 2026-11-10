@@ -184,9 +184,16 @@ function servingNutritionFromOffHit(
 }
 
 function allergenTagsForFood(food: Food): string[] | null {
-    const tags = new Set<string>(food.offQuality?.allergensTags ?? []);
+    const offTags = food.offQuality?.allergensTags ?? [];
+    const tags = new Set<string>(offTags);
+    // A food created from Open Food Facts stores en:gluten as a wheat
+    // allergen. When OFF itself only says gluten, keep it a possible-wheat
+    // warning, as for the same barcode rated straight from OFF.
+    const wheatFromGluten =
+        offTags.includes("en:gluten") && !offTags.includes("en:wheat");
     for (const code of food.allergens) {
         if (code === "other") continue;
+        if (code === "wheat" && wheatFromGluten) continue;
         const tag = OFF_TAG_FOR_NAMED[code as NamedAllergen];
         if (tag) tags.add(tag);
     }
@@ -390,7 +397,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Rate Product",
             description:
-                "Score a packaged product for quality (Nutri-Score, NOVA, additives, environment) and list per-member allergen, trace, goal and dislike notices. Pass food_id for a household catalog product or barcode for a lookup (Open Food Facts cache only — does not add to the catalog). Optional user_id limits checks to one member.",
+                "Score a packaged product for quality (Nutri-Score, NOVA, additives, environment) and list per-member allergen, trace, goal and dislike notices. Pass food_id for a household catalog product or barcode for a lookup (read from Open Food Facts, cached; never adds it to the catalog). Optional user_id limits checks to one member.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,

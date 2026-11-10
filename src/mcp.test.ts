@@ -4526,6 +4526,69 @@ describe("household config tools", () => {
     }
 
     describe("rate_product", () => {
+        test("a gluten-only product warns the same in the catalog and by barcode", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "wheat",
+            });
+            const { findOrCreateFoodByBarcodeFromHit } =
+                await import("./domain/foods.js");
+            const hitFor = (barcode: string) => ({
+                name: "Wheat Crackers",
+                brand: "Test",
+                serving: "100 g",
+                serving_quantity: null,
+                serving_quantity_unit: null,
+                calories: 450,
+                protein_g: 10,
+                carbs_g: 70,
+                fat_g: 12,
+                fiber_g: 3,
+                sugar_g: 2,
+                saturated_fat_g: 1,
+                alcohol_g: null,
+                nutriscore_grade: "c",
+                nova_group: 3,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                allergens_tags: ["en:gluten"],
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "c",
+                    nova_group: 3,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: ["en:gluten"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            const inCatalog = "4000000000017";
+            const notInCatalog = "4000000000024";
+            await findOrCreateFoodByBarcodeFromHit(
+                db.foodsStore,
+                "hh-1",
+                inCatalog,
+                hitFor(inCatalog) as never,
+            );
+            db.barcodeFoods[notInCatalog] = hitFor(notInCatalog) as never;
+            await withRateProductFlag(true, async (call) => {
+                for (const barcode of [inCatalog, notInCatalog]) {
+                    const r = await call("rate_product", { barcode });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(
+                        out.checks[0]!.notices.map((n) => [n.code, n.severity]),
+                    ).toEqual([["food.product_gluten", "warn"]]);
+                }
+            });
+        });
+
         test("flag off hides tool and rejects calls", async () => {
             const server = new McpServer(
                 { name: "foodable-test", version: "0.0.0" },

@@ -264,7 +264,9 @@ function balanceAfterMovement(
         if (movement.foodId !== foodId || movement.unit !== unit) continue;
         if (movementIsAfter(movement, at)) later += movement.delta;
     }
-    return current - later;
+    // Stock is stored rounded but deltas are not, so 0.9 - (1.1 - 0.2)
+    // must still read as zero: round away the float residue.
+    return Math.round((current - later) * 1e6) / 1e6;
 }
 
 function foodDepletedAfterMovement(

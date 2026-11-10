@@ -452,7 +452,9 @@ export async function lookupBarcode(
     try {
         food = await fetchProductFromOFF(barcode);
     } catch (err) {
-        if (cached) return stampLegacyCacheNutrientLevels(barcode, cached);
+        // An outage is not an answer: serve the old row but leave it
+        // unstamped, so the next lookup tries Open Food Facts again.
+        if (cached) return cached;
         throw err;
     }
     if (food) await putCachedFood(SOURCE_OFF, barcode, food);
