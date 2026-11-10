@@ -7,6 +7,9 @@ import {
     expandInternalRule,
     parseRailwayRules,
     planFlagChanges,
+    resolveProjectId,
+    rewriteCommand,
+    scopeArgs,
     ruleIdForExpression,
     type RailwayFlag,
 } from "./flags-apply.js";
@@ -193,5 +196,74 @@ describe("ruleIdForExpression", () => {
             .digest("hex")
             .slice(0, 8);
         expect(ruleIdForExpression(expr)).toBe(expected);
+    });
+});
+
+describe("project scope", () => {
+    test("a project token gets no --scope on any command", () => {
+        const file = syncFile();
+        file.flags!["ui-v2"] = { default: true, rules: ["internal"] };
+        const railway = syncRailway().filter((f) => f.name !== "off-lookups");
+        const plan = planFlagChanges(file, railway, null);
+        expect(plan.commands.length).toBeGreaterThan(0);
+        for (const argv of plan.commands) {
+            expect(argv).not.toContain("--scope");
+        }
+        expect(plan.commands).toContainEqual([
+            "railway",
+            "flag",
+            "set",
+            "ui-v2",
+            "true",
+        ]);
+    });
+
+    test("resolveProjectId: explicit project wins, then the env, then token means none", () => {
+        expect(
+            resolveProjectId({
+                project: "p1",
+                envProject: "p2",
+                hasProjectToken: true,
+            }),
+        ).toBe("p1");
+        expect(
+            resolveProjectId({ envProject: "p2", hasProjectToken: true }),
+        ).toBe("p2");
+        expect(resolveProjectId({ hasProjectToken: true })).toBeNull();
+        expect(resolveProjectId({ hasProjectToken: false })).toBe(
+            DEFAULT_RAILWAY_PROJECT_ID,
+        );
+    });
+
+    test("scopeArgs", () => {
+        expect(scopeArgs(null)).toEqual([]);
+        expect(scopeArgs("p1")).toEqual(["--scope", "project:p1"]);
+    });
+});
+
+describe("rewriteCommand", () => {
+    test("sets a flag to the value the file already gives it", () => {
+        expect(rewriteCommand(syncFile(), "off-lookups", null)).toEqual([
+            "railway",
+            "flag",
+            "set",
+            "off-lookups",
+            "true",
+        ]);
+        expect(rewriteCommand(syncFile(), "off-lookups", "p1")).toEqual([
+            "railway",
+            "flag",
+            "set",
+            "off-lookups",
+            "true",
+            "--scope",
+            "project:p1",
+        ]);
+    });
+
+    test("refuses a flag the file does not name", () => {
+        expect(() => rewriteCommand(syncFile(), "nope", null)).toThrow(
+            /not in the rollout file/,
+        );
     });
 });

@@ -15,6 +15,11 @@ on:
     schedule:
         - cron: "0 6 * * *"
     workflow_dispatch:
+        inputs:
+            rewrite_flag:
+                description: "Also set this flag to the value flags/rollout.yml already gives it (proves the token can write; changes nothing)"
+                required: false
+                default: ""
 
 permissions:
     contents: read
@@ -115,9 +120,14 @@ jobs:
             - name: Apply rollout to Railway
               env:
                   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+                  REWRITE_FLAG: ${{ inputs.rewrite_flag }}
               run: |
                   set -euo pipefail
-                  bun run flags:apply
+                  if [ -n "${REWRITE_FLAG:-}" ]; then
+                      bun run flags:apply --rewrite "$REWRITE_FLAG"
+                  else
+                      bun run flags:apply
+                  fi
                   bun run flags:apply --check
 
     drift:

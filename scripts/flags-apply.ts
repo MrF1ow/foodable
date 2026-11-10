@@ -28,8 +28,13 @@ export type FlagChangePlan = {
     extraInRailway: string[];
 };
 
-function scopeArg(projectId: string): string {
-    return `project:${projectId}`;
+/**
+ * `--scope project:<id>` for a logged-in CLI. Under RAILWAY_TOKEN (a project
+ * token) the CLI takes the project from the token, and an explicit scope made
+ * writes fail with "Unauthorized", so the caller passes null and no scope.
+ */
+export function scopeArgs(projectId: string | null): string[] {
+    return projectId === null ? [] : ["--scope", `project:${projectId}`];
 }
 
 export function expandInternalRule(internal: unknown): string {
@@ -107,14 +112,14 @@ function flagType(name: string): "bool" | "number" {
 function defaultArgv(
     name: string,
     value: unknown,
-    projectId: string,
+    projectId: string | null,
     withType: boolean,
 ): string[] {
     const argv = ["railway", "flag", "set", name, String(value)];
     if (withType) {
         argv.push("--type", flagType(name));
     }
-    argv.push("--scope", scopeArg(projectId));
+    argv.push(...scopeArgs(projectId));
     return argv;
 }
 
@@ -133,7 +138,7 @@ function ruleMatches(desired: DesiredRule, actual: RailwayRule): boolean {
 export function planFlagChanges(
     file: RolloutFile,
     railwayState: RailwayFlag[],
-    projectId: string,
+    projectId: string | null,
 ): FlagChangePlan {
     const commands: string[][] = [];
     const fileFlags = file.flags ?? {};
@@ -167,8 +172,7 @@ export function planFlagChanges(
                     rule.when,
                     "--rule-id",
                     rule.ruleId,
-                    "--scope",
-                    scopeArg(projectId),
+                    ...scopeArgs(projectId),
                 ]);
             }
             continue;
@@ -198,8 +202,7 @@ export function planFlagChanges(
                     name,
                     "--rule-id",
                     actual.id,
-                    "--scope",
-                    scopeArg(projectId),
+                    ...scopeArgs(projectId),
                 ]);
             }
         }
@@ -223,8 +226,7 @@ export function planFlagChanges(
                 desired.when,
                 "--rule-id",
                 desired.ruleId,
-                "--scope",
-                scopeArg(projectId),
+                ...scopeArgs(projectId),
             ]);
         }
     }
@@ -248,16 +250,42 @@ export function parseRailwayListJson(text: string): RailwayFlag[] {
     return parsed as RailwayFlag[];
 }
 
-async function fetchRailwayState(projectId: string): Promise<RailwayFlag[]> {
+/**
+ * The project to scope commands to, or null to let a project token name it.
+ * An explicit --project or RAILWAY_PROJECT_ID always wins; otherwise a
+ * RAILWAY_TOKEN means no scope, and a logged-in CLI gets the default project.
+ */
+export function resolveProjectId(opts: {
+    project?: string;
+    envProject?: string;
+    hasProjectToken: boolean;
+}): string | null {
+    if (opts.project) return opts.project;
+    if (opts.envProject) return opts.envProject;
+    return opts.hasProjectToken ? null : DEFAULT_RAILWAY_PROJECT_ID;
+}
+
+/**
+ * `railway flag set` of one flag to the value the file already gives it: a
+ * real write that changes nothing, to prove the token can write.
+ */
+export function rewriteCommand(
+    file: RolloutFile,
+    name: string,
+    projectId: string | null,
+): string[] {
+    const entry = file.flags?.[name];
+    if (!entry || typeof entry !== "object") {
+        throw new Error(`--rewrite: flag "${name}" is not in the rollout file`);
+    }
+    return defaultArgv(name, entry.default, projectId, false);
+}
+
+async function fetchRailwayState(
+    projectId: string | null,
+): Promise<RailwayFlag[]> {
     const proc = Bun.spawn({
-        cmd: [
-            "railway",
-            "flag",
-            "list",
-            "--json",
-            "--scope",
-            scopeArg(projectId),
-        ],
+        cmd: ["railway", "flag", "list", "--json", ...scopeArgs(projectId)],
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -292,10 +320,12 @@ async function main(): Promise<void> {
     const dryRun = process.argv.includes("--dry-run");
     const check = process.argv.includes("--check");
     const rolloutPath = flag("--file") ?? DEFAULT_ROLLOUT_PATH;
-    const projectId =
-        flag("--project") ??
-        process.env.RAILWAY_PROJECT_ID ??
-        DEFAULT_RAILWAY_PROJECT_ID;
+    const projectId = resolveProjectId({
+        project: flag("--project"),
+        envProject: process.env.RAILWAY_PROJECT_ID,
+        hasProjectToken: Boolean(process.env.RAILWAY_TOKEN),
+    });
+    const rewrite = flag("--rewrite");
 
     const file = await loadRolloutFile(rolloutPath);
     const errors = validateRolloutFile(file);
@@ -308,6 +338,9 @@ async function main(): Promise<void> {
 
     const railway = await fetchRailwayState(projectId);
     const plan = planFlagChanges(file, railway, projectId);
+    if (rewrite !== undefined) {
+        plan.commands.push(rewriteCommand(file, rewrite, projectId));
+    }
     const hasWork = plan.commands.length > 0 || plan.extraInRailway.length > 0;
 
     if (!hasWork) {
