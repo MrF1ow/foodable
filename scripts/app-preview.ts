@@ -33,6 +33,10 @@ import {
     renderRecipesPage,
 } from "../src/web/pages/recipes.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
+import {
+    groupRecipeIngredientsByPlace,
+    renderRecipeDetailV2Page,
+} from "../src/web/pages/v2/recipes-page.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import {
     renderFoodsSettingsPage,
@@ -735,7 +739,73 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   members: [ME, SAM],
                   viewerId: "u1",
               } as never),
-        recipe: renderRecipeDetailPage(recipeView as never),
+        recipe: V2
+            ? renderRecipeDetailV2Page({
+                  chrome,
+                  recipe: recipeView.recipe,
+                  ingredients: recipeView.ingredients as never,
+                  ingredientGroups: groupRecipeIngredientsByPlace(
+                      recipeView.ingredients,
+                      [
+                          {
+                              id: "ri-eggs",
+                              householdId: H,
+                              locationId: "l1",
+                              kind: "food",
+                              displayName: "Eggs",
+                              quantity: { amount: 6, unit: "each" },
+                              foodId: "f-eggs",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 4),
+                          },
+                          {
+                              id: "ri-flour",
+                              householdId: H,
+                              locationId: "l2",
+                              kind: "food",
+                              displayName: "All-purpose flour",
+                              quantity: { amount: 1, unit: "kg" },
+                              foodId: "f2",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 30),
+                          },
+                          {
+                              id: "ri-sugar",
+                              householdId: H,
+                              locationId: "l2",
+                              kind: "food",
+                              displayName: "Sugar",
+                              quantity: { amount: 500, unit: "g" },
+                              foodId: "f3",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 90),
+                          },
+                      ],
+                      [
+                          {
+                              id: "l1",
+                              householdId: H,
+                              name: "Fridge",
+                              sortOrder: 0,
+                          },
+                          {
+                              id: "l2",
+                              householdId: H,
+                              name: "Pantry",
+                              sortOrder: 1,
+                          },
+                      ],
+                      new Map(
+                          ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
+                              id,
+                              { id, genericFoodId: null },
+                          ]),
+                      ),
+                  ),
+                  macrosPerPortion: MACROS as never,
+                  gapReasons: [],
+                  members: recipeView.members,
+                  viewerId: recipeView.viewerId,
+                  portionCount: recipeView.portionCount,
+              })
+            : renderRecipeDetailPage(recipeView as never),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,
             openModalId: "recipe-add-ingredient-r1",

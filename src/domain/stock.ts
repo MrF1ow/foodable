@@ -303,6 +303,22 @@ function expirySortKey(item: FridgeItem): number {
     return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY;
 }
 
+export type FamilyFoodRow = Pick<Food, "id" | "genericFoodId">;
+
+/** Same family match {@link decrementFrom} uses when choosing fridge rows to deduct. */
+export function fridgeItemMatchesFood(
+    itemFoodId: string | null | undefined,
+    needFoodId: string,
+    familyFoodMap: ReadonlyMap<string, FamilyFoodRow>,
+): boolean {
+    if (!itemFoodId) return false;
+    const needRow = familyFoodMap.get(needFoodId);
+    const needFamily = needRow ? familyOf(needRow) : needFoodId;
+    const row = familyFoodMap.get(itemFoodId);
+    if (!row) return itemFoodId === needFoodId;
+    return familyOf(row) === needFamily;
+}
+
 export async function lastUsedLocationId(
     fridge: FridgeStore,
     householdId: string,
@@ -458,16 +474,16 @@ async function decrementFrom(
         gramsPerMl: needFood.gramsPerMl ?? null,
     };
     let useSingleMovementForm = true;
-    const needFamily = familyOf(needFood);
     const pool = (
         input.fridgeItemId
             ? items.filter((item) => item.id === input.fridgeItemId)
-            : items.filter((item) => {
-                  if (!item.foodId) return false;
-                  const row = familyFoodMap.get(item.foodId);
-                  if (!row) return item.foodId === input.foodId;
-                  return familyOf(row) === needFamily;
-              })
+            : items.filter((item) =>
+                  fridgeItemMatchesFood(
+                      item.foodId,
+                      input.foodId,
+                      familyFoodMap,
+                  ),
+              )
     ).slice();
     if (input.fridgeItemId) {
         const target = pool[0];

@@ -22,7 +22,33 @@ async function shortHash(text: string): Promise<string> {
         .slice(0, 12);
 }
 
+function customPropertiesDefined(css: string): Set<string> {
+    const names = new Set<string>();
+    for (const m of css.matchAll(/--([a-zA-Z0-9-]+)\s*:/g)) {
+        names.add(`--${m[1]}`);
+    }
+    return names;
+}
+
+function undefinedVarRefs(css: string): string[] {
+    const defined = customPropertiesDefined(css);
+    const missing = new Set<string>();
+    for (const m of css.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)(\s*,|\s*\))/g)) {
+        const name = m[1];
+        const tail = m[2];
+        if (!name || !tail) continue;
+        if (tail.trim().startsWith(",")) continue;
+        if (!defined.has(name)) missing.add(name);
+    }
+    return [...missing].sort();
+}
+
 describe("/app-v2.css", () => {
+    test("every var() without a fallback references a property defined in the bundle", async () => {
+        const css = await getAppV2Css();
+        expect(undefinedVarRefs(css)).toEqual([]);
+    });
+
     test("assembles tokens first, then the shell partial, with no unresolved include", async () => {
         const css = await getAppV2Css();
         expect(css).not.toContain("/*@include");

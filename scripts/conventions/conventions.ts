@@ -291,6 +291,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/log-sheet.test.ts": "web",
     "src/web/pages/v2/recipes-list.ts": "web",
     "src/web/pages/v2/recipes-list.test.ts": "web",
+    "src/web/pages/v2/recipes-page.ts": "web",
+    "src/web/pages/v2/recipes-page.test.ts": "web",
     "public/app/v2/recipes.css": "web",
     "src/web/client/v2/log-sheet.js": "web",
     "src/web/client/v2/log-sheet.test.ts": "web",

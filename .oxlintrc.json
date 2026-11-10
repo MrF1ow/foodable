@@ -103,8 +103,12 @@
                                 "src/db/grocery",
                                 "src/db/household",
                                 "src/db/notice-dismissals",
+                                "src/db/nutrition",
                                 "src/db/profiles",
-                                "src/db/recipes"
+                                "src/db/recipes",
+                                "src/db/rules",
+                                "src/db/settings",
+                                "src/db/stock"
                             ]
                         }
                     }

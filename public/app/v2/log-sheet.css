@@ -217,7 +217,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--fd-s-8);
+    gap: var(--fd-s-7);
     width: 100%;
     max-width: 88px;
     margin: 0;
@@ -264,7 +264,7 @@
     display: flex;
     align-items: baseline;
     justify-content: center;
-    gap: var(--fd-s-8);
+    gap: var(--fd-s-7);
 }
 
 .fd-log-kcal-input {

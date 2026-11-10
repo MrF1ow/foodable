@@ -83,6 +83,7 @@ import {
 } from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import {
+    gapFromNotice,
     getRecipeView,
     listRecipes,
     listRecipesFiltered,
@@ -97,6 +98,10 @@ import {
     parseV2RecipeListFilter,
     renderRecipesListV2Page,
 } from "./pages/v2/recipes-list.js";
+import {
+    groupRecipeIngredientsByPlace,
+    renderRecipeDetailV2Page,
+} from "./pages/v2/recipes-page.js";
 import { orderCards } from "../domain/layout.js";
 import { validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
@@ -1246,14 +1251,57 @@ export async function renderRecipeDetailRoute(
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    if (chrome.flags.uiV2) {
+        const fridge = await listFridge(liveFridgeStore(), householdId);
+        const foodsById = new Map(allFoods.map((f) => [f.id, f]));
+        const familyIds = new Set<string>(catalog.keys());
+        for (const item of fridge.items) {
+            if (item.foodId) familyIds.add(item.foodId);
+        }
+        const familyFoodMap = new Map(
+            [...familyIds]
+                .map((id) => foodsById.get(id))
+                .filter((f): f is NonNullable<typeof f> => f != null)
+                .map((f) => [f.id, f]),
+        );
+        const ingredientGroups = groupRecipeIngredientsByPlace(
+            ingredientRows,
+            fridge.items,
+            fridge.locations,
+            familyFoodMap,
+        );
+        return {
+            status: 200,
+            html: renderRecipeDetailV2Page({
+                chrome,
+                recipe: view,
+                ingredients: ingredientRows,
+                ingredientGroups,
+                macrosPerPortion: macrosPerPortion ?? macros,
+                gapReasons: [
+                    ...new Set(
+                        notices.map((notice) => gapFromNotice(notice).message),
+                    ),
+                ],
+                members: members.map((member) => ({
+                    userId: member.userId,
+                    displayName: member.displayName,
+                })),
+                viewerId: viewerUserId,
+                portionCount: view.portionCount,
+                error: opts.error,
+            }),
+        };
+    }
     return {
         status: 200,
         html: renderRecipeDetailPage({
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                noticeResult,
-            ),
+            chrome,
             foodDuplicateNotices,
             recipe: view,
             notices,

@@ -49,6 +49,6 @@
         --fd-sheet-shadow,
         0 8px 32px color-mix(in srgb, var(--text-primary) 12%, transparent)
     );
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--line);
     border-radius: var(--radius-sheet);
 }
