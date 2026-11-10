@@ -80,6 +80,10 @@ import {
     buildPreviewKitchenFridgeView,
     renderKitchenFridgeV2Page,
 } from "../src/web/pages/v2/kitchen-fridge.js";
+import {
+    buildPreviewKitchenGroceriesView,
+    renderKitchenGroceriesV2Page,
+} from "../src/web/pages/v2/kitchen-groceries.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -303,7 +307,7 @@ function fridgeView(chrome: unknown) {
 function restockLine() {
     const today = utcTodayFromDate();
     const row = {
-        id: "g4",
+        id: "g-restock",
         householdId: H,
         storeId: "s1",
         sectionId: "sec2",
@@ -819,7 +823,118 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   ),
               }
             : {}),
-        grocery: renderGroceryPage(groceryView(chrome) as never),
+        grocery: V2
+            ? renderKitchenGroceriesV2Page(
+                  buildPreviewKitchenGroceriesView(chrome as never, {
+                      ...((): Partial<
+                          import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
+                      > => {
+                          const legacy = groceryView(chrome) as never as {
+                              stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                              locations: { id: string; name: string }[];
+                          };
+                          const checked = legacy.stores.flatMap((s) =>
+                              s.sections.flatMap((sec) =>
+                                  sec.lines.filter((row) => row.checked),
+                              ),
+                          );
+                          const open = legacy.stores.flatMap((s) =>
+                              s.sections.flatMap((sec) =>
+                                  sec.lines.filter((row) => !row.checked),
+                              ),
+                          );
+                          return {
+                              stores: legacy.stores.map((store) => ({
+                                  ...store,
+                                  sections: store.sections.map((section) => ({
+                                      ...section,
+                                      lines: section.lines,
+                                  })),
+                              })),
+                              checkedLines: checked,
+                              locations: legacy.locations,
+                              openLineCount: open.length,
+                              lineMeta: new Map(
+                                  legacy.stores.flatMap((store) =>
+                                      store.sections.flatMap((section) =>
+                                          section.lines.map((row) => [
+                                              row.id,
+                                              {
+                                                  plainFoodName:
+                                                      row.usualProductName
+                                                          ? "Eggs"
+                                                          : null,
+                                                  isUsual:
+                                                      !!row.usualProductName,
+                                                  allergenWarning: null,
+                                                  storeName: store.name,
+                                                  sectionName: section.name,
+                                              },
+                                          ]),
+                                      ),
+                                  ),
+                              ),
+                          };
+                      })(),
+                  }),
+              )
+            : renderGroceryPage(groceryView(chrome) as never),
+        ...(V2
+            ? {
+                  "grocery-put-away": renderKitchenGroceriesV2Page(
+                      buildPreviewKitchenGroceriesView(chrome as never, {
+                          ...((): Partial<
+                              import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
+                          > => {
+                              const legacy = groceryView(chrome) as never as {
+                                  stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                                  locations: { id: string; name: string }[];
+                              };
+                              const checked = legacy.stores
+                                  .flatMap((s) =>
+                                      s.sections.flatMap((sec) => sec.lines),
+                                  )
+                                  .filter((row) => row.checked);
+                              return {
+                                  stores: legacy.stores.map((store) => ({
+                                      ...store,
+                                      sections: store.sections.map((s) => ({
+                                          ...s,
+                                          lines: [],
+                                      })),
+                                  })),
+                                  checkedLines: checked.length
+                                      ? checked
+                                      : [
+                                            {
+                                                id: "g2",
+                                                householdId: H,
+                                                storeId: "s1",
+                                                sectionId: "sec1",
+                                                kind: "food" as const,
+                                                displayName: "Spinach",
+                                                quantity: {
+                                                    amount: 300,
+                                                    unit: "g",
+                                                },
+                                                foodId: "f-g2",
+                                                checked: true,
+                                                source: "manual" as const,
+                                                sourceFridgeItemId: null,
+                                                note: null,
+                                                alreadyHave: null,
+                                                lastLocationId: "l1",
+                                            },
+                                        ],
+                                  locations: legacy.locations,
+                                  openLineCount: 0,
+                                  openPutAway: true,
+                              };
+                          })(),
+                      }),
+                  ),
+              }
+            : {}),
         "grocery-allergen-modal": renderGroceryPage({
             ...(groceryView(chrome) as object),
             allergenNotices: [
@@ -1500,6 +1615,7 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
         `grocery-did-you-mean-${theme}`,
+        ...(V2 ? [`grocery-put-away-${theme}`] : []),
         `fridge-did-you-mean-${theme}`,
         `recipe-did-you-mean-${theme}`,
     );

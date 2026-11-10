@@ -131,6 +131,18 @@
                                 "src/db/profiles",
                                 "src/db/restock",
                                 "src/db/stock"
+                            ],
+                            "src/web/routes/grocery.test.ts": [
+                                "src/db/fridge",
+                                "src/db/foods",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/restock",
+                                "src/db/settings",
+                                "src/db/rules",
+                                "src/db/stock"
                             ]
                         }
                     }

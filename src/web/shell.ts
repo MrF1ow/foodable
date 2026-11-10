@@ -65,6 +65,8 @@ export type AppChrome = ViewerChrome & {
      *  `active` (grocery → groceries, anything else → fridge); the usual
      *  products pages set "usuals". The old shell ignores it. */
     v2Kitchen?: V2KitchenTab;
+    /** New shell only: open grocery line count for the Groceries kitchen tab. */
+    v2KitchenGroceriesCount?: number;
     /** New shell only: profile timezone for the log sheet defaults. */
     v2Timezone?: string;
     /** New shell only: log sheet open state after validation errors. */

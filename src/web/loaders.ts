@@ -78,6 +78,7 @@ import type { Notice } from "../domain/notices.js";
 import { defaultFreezeExpiry, listFridge } from "../domain/fridge.js";
 import {
     allergenNotices,
+    groceryAllergenWarning,
     listGrocery,
     matchGroceryAllergens,
 } from "../domain/grocery.js";
@@ -102,6 +103,14 @@ import {
     renderKitchenFridgeV2Page,
     type KitchenFridgeFoodMeta,
 } from "./pages/v2/kitchen-fridge.js";
+import {
+    groceryOpenLineCount,
+    addStoreIdFromModal,
+    renderKitchenGroceriesV2Page,
+    type KitchenGroceriesLineMeta,
+    type PutAwayDraft,
+} from "./pages/v2/kitchen-groceries.js";
+import type { GroceryLineView } from "./pages/grocery.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
 import {
@@ -442,12 +451,16 @@ export async function renderFridgeInventoryPage(
     if (flags.uiV2) {
         const knownIds = new Set(snapshot.items.map((row) => row.id));
         const itemId = openFridgeItemId(openModalId, opts.openItemId, knownIds);
+        const chromeWithCount = await chromeWithKitchenGroceriesCount(
+            chrome,
+            householdId,
+        );
         return {
             status: 200,
             html: renderKitchenFridgeV2Page({
                 ...snapshot,
                 today,
-                chrome,
+                chrome: chromeWithCount,
                 error,
                 openItemId: itemId,
                 openAdd: openFridgeAddSheet(openModalId, opts.openAdd),
@@ -483,6 +496,63 @@ export async function renderFridgeInventoryPage(
     };
 }
 
+async function chromeWithKitchenGroceriesCount<
+    T extends import("./attention.js").AppChromeBase,
+>(chrome: T, householdId: string): Promise<T> {
+    if (!chrome.flags.uiV2) return chrome;
+    const lines = await liveGroceryStore().listLines(householdId);
+    return {
+        ...chrome,
+        v2KitchenGroceriesCount: groceryOpenLineCount(lines),
+    };
+}
+
+function kitchenGroceryLineMeta(
+    line: GroceryLineView,
+    ctx: {
+        allFoods: Food[];
+        catalog: Awaited<ReturnType<typeof effectiveFoodsByIds>>;
+        memberAllergens: Awaited<ReturnType<typeof groceryAllergenMembers>>;
+        storeName: string;
+        sectionName: string;
+    },
+): KitchenGroceriesLineMeta {
+    const foodRow = line.foodId
+        ? ctx.allFoods.find((row) => row.id === line.foodId)
+        : null;
+    const eff = line.foodId ? ctx.catalog.get(line.foodId) : null;
+    const genericFood = foodRow?.genericFoodId
+        ? ctx.allFoods.find((row) => row.id === foodRow.genericFoodId)
+        : foodRow;
+    const usualProductId = genericFood?.usualProductId ?? null;
+    const isUsual = !!(
+        usualProductId &&
+        (line.foodId === usualProductId || eff?.product?.id === usualProductId)
+    );
+    let plainFoodName: string | null = null;
+    if (genericFood && foodRow?.genericFoodId) {
+        plainFoodName = genericFood.name;
+    } else if (
+        genericFood &&
+        usualProductId &&
+        line.foodId === genericFood.id
+    ) {
+        plainFoodName = genericFood.name;
+    }
+    const warning = groceryAllergenWarning(
+        line.displayName,
+        ctx.memberAllergens,
+        eff?.allergens ?? null,
+    );
+    return {
+        plainFoodName,
+        isUsual,
+        allergenWarning: warning?.text ?? null,
+        storeName: ctx.storeName,
+        sectionName: ctx.sectionName,
+    };
+}
+
 export async function renderGroceryListPage(
     viewerUserId: string,
     opts: {
@@ -492,6 +562,10 @@ export async function renderGroceryListPage(
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
         openModalId?: string;
         linkProductId?: string;
+        openLineId?: string;
+        openPutAway?: boolean;
+        putAwayDraft?: PutAwayDraft;
+        storeFilter?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -653,14 +727,154 @@ export async function renderGroceryListPage(
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    const locations = fridge.locations.map((loc) => ({
+        id: loc.id,
+        name: loc.name,
+    }));
+    if (chrome.flags.uiV2) {
+        const storeIds = new Set(stores.map((row) => row.id));
+        const sectionNameById = new Map(
+            stores.flatMap((store) =>
+                store.sections.map((section) => [section.id, section.name]),
+            ),
+        );
+        const storeNameById = new Map(
+            stores.map((store) => [store.id, store.name]),
+        );
+        const metaCtx = {
+            allFoods,
+            catalog,
+            memberAllergens,
+        };
+        const lineMeta = new Map<string, KitchenGroceriesLineMeta>();
+        const enrich = (line: GroceryLineView): GroceryLineView => {
+            const name = kitchenGroceryLineMeta(line, {
+                ...metaCtx,
+                storeName: storeNameById.get(line.storeId) ?? "No store",
+                sectionName: sectionNameById.get(line.sectionId) ?? "Other",
+            });
+            lineMeta.set(line.id, name);
+            return line;
+        };
+        for (const store of stores) {
+            for (const section of store.sections) {
+                section.lines = section.lines.map(
+                    enrich,
+                ) as typeof section.lines;
+            }
+        }
+        const orphanRaw = snapshot.lines.filter(
+            (line) => !storeIds.has(line.storeId),
+        );
+        const noStoreLines: GroceryLineView[] = orphanRaw.map((line) => {
+            const effective = line.foodId ? catalog.get(line.foodId) : null;
+            const products = line.foodId
+                ? (productsByPlain.get(line.foodId) ?? [])
+                : [];
+            const plain = line.foodId
+                ? allFoods.find((row) => row.id === line.foodId)
+                : null;
+            const usualId = plain?.usualProductId ?? null;
+            return enrich({
+                ...line,
+                notices: restockByLine.get(line.id) ?? [],
+                alreadyHave: alreadyHaveTag(line, fridge.items, catalog),
+                lastLocationId:
+                    fridge.items
+                        .filter(
+                            (item) =>
+                                item.foodId && item.foodId === line.foodId,
+                        )
+                        .at(-1)?.locationId ??
+                    fridge.locations[0]?.id ??
+                    null,
+                usualProductName: effective?.product?.name ?? null,
+                usualPickerHref: null,
+                putAwayProducts: null,
+                putAwayProductId: usualId ?? plain?.id ?? null,
+            });
+        });
+        const checkedLines: GroceryLineView[] = snapshot.lines
+            .filter((line) => line.checked)
+            .map((line) => {
+                const inStore = stores
+                    .flatMap((s) => s.sections)
+                    .flatMap((s) => s.lines)
+                    .find((row) => row.id === line.id);
+                if (inStore) return inStore;
+                return (
+                    noStoreLines.find((row) => row.id === line.id) ??
+                    enrich({
+                        ...line,
+                        notices: restockByLine.get(line.id) ?? [],
+                        alreadyHave: alreadyHaveTag(
+                            line,
+                            fridge.items,
+                            catalog,
+                        ),
+                        lastLocationId:
+                            fridge.items
+                                .filter(
+                                    (item) =>
+                                        item.foodId &&
+                                        item.foodId === line.foodId,
+                                )
+                                .at(-1)?.locationId ??
+                            fridge.locations[0]?.id ??
+                            null,
+                        usualProductName: line.foodId
+                            ? (catalog.get(line.foodId)?.product?.name ?? null)
+                            : null,
+                        usualPickerHref: null,
+                        putAwayProducts: null,
+                        putAwayProductId: null,
+                    })
+                );
+            });
+        const selectedStoreId =
+            opts.storeFilter &&
+            stores.some((store) => store.id === opts.storeFilter)
+                ? opts.storeFilter
+                : null;
+        const chromeWithCount = await chromeWithKitchenGroceriesCount(
+            chrome,
+            householdId,
+        );
+        const addStoreId = addStoreIdFromModal(opts.openModalId);
+        return {
+            status: 200,
+            html: renderKitchenGroceriesV2Page({
+                chrome: chromeWithCount,
+                stores,
+                noStoreLines,
+                checkedLines,
+                locations,
+                lineMeta,
+                openLineCount: groceryOpenLineCount(snapshot.lines),
+                selectedStoreId,
+                error: opts.error,
+                unknownAllergen:
+                    unknownAllergen && !opts.allergenNotices?.length,
+                openLineId: opts.openLineId,
+                openPutAway: opts.openPutAway,
+                putAwayDraft: opts.putAwayDraft,
+                openAdd: addStoreId != null,
+                addStoreId: addStoreId ?? selectedStoreId,
+                allergenNotices: opts.allergenNotices,
+                allergenRetry: opts.allergenRetry,
+                didYouMean: opts.didYouMean,
+            }),
+        };
+    }
     return {
         status: 200,
         html: renderGroceryPage({
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                noticeResult,
-            ),
+            chrome,
             foodDuplicateNotices,
             stores,
             canManage: canManageHousehold(gate.viewer),
@@ -670,10 +884,7 @@ export async function renderGroceryListPage(
             didYouMean: opts.didYouMean,
             unknownAllergen: unknownAllergen && !opts.allergenNotices?.length,
             openModalId: opts.openModalId,
-            locations: fridge.locations.map((loc) => ({
-                id: loc.id,
-                name: loc.name,
-            })),
+            locations,
             linkProductPrompt,
         }),
     };
@@ -1076,14 +1287,19 @@ export async function renderUsualProductsListPage(
         };
     }
     const noticeResult = await loadHouseholdNotices(householdId);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    const chromeWithCount = await chromeWithKitchenGroceriesCount(
+        chrome,
+        householdId,
+    );
     return {
         status: 200,
         html: renderUsualProductsListHtml({
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                noticeResult,
-            ),
+            chrome: chromeWithCount,
             rows,
             addable,
             from: opts.from,

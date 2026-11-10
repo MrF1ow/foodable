@@ -46,8 +46,67 @@ function initReveals(root) {
     });
 }
 
+function formatPutDateLabel(value) {
+    if (!value) return "No date";
+    const d = new Date(`${value}T12:00:00Z`);
+    return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+    });
+}
+
+function initPutAwayDates(root) {
+    root.querySelectorAll("[data-fd-put-date]").forEach((wrap) => {
+        if (wrap.dataset.fdPutDateInit === "1") return;
+        wrap.dataset.fdPutDateInit = "1";
+        const input = wrap.querySelector(".fd-kitchen-put-date__input");
+        const text = wrap.querySelector("[data-fd-put-date-text]");
+        const btn = wrap.querySelector("[data-fd-put-date-btn]");
+        if (!input || !text) return;
+        const sync = () => {
+            text.textContent = formatPutDateLabel(input.value);
+        };
+        input.addEventListener("change", sync);
+        if (btn) {
+            btn.addEventListener("click", (e) => {
+                if (e.target === input) return;
+                e.preventDefault();
+                input.showPicker?.();
+                input.click();
+            });
+        }
+    });
+}
+
+function initGroceryRows(root) {
+    root.querySelectorAll("[data-fd-grocery-row]").forEach((row) => {
+        if (row.dataset.fdGroceryRowInit === "1") return;
+        row.dataset.fdGroceryRowInit = "1";
+        const sheetId = row.getAttribute("data-sheet-id");
+        if (!sheetId) return;
+        const open = () => openSheet(sheetId);
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
+            open();
+        });
+        row.addEventListener("keydown", (e) => {
+            if (e.target !== row) return;
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                open();
+            }
+        });
+    });
+}
+
 window.FoodableApp.onLoad((root) => {
-    if (!root.querySelector(".fd-kitchen-fridge-page")) return;
-    initFridgeRows(root);
-    initReveals(root);
+    if (root.querySelector(".fd-kitchen-fridge-page")) {
+        initFridgeRows(root);
+        initReveals(root);
+    }
+    if (root.querySelector(".fd-kitchen-groceries-page")) {
+        initGroceryRows(root);
+        initPutAwayDates(root);
+    }
 });

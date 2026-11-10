@@ -147,8 +147,9 @@ describe("/app-v2.js", () => {
         // +~1.8 KB amount Enter helpers, step-any stepping, listbox rows;
         // +~0.5 KB Trends subtitle and month-link range sync;
         // +~7 KB Today week swipe, edit sheet and live macro tiles;
-        // +~1.5 KB Kitchen fridge rows and the Freeze date panel.
-        expect(js.length).toBeLessThan(79_000);
+        // +~1.5 KB Kitchen fridge rows and the Freeze date panel;
+        // +~1.2 KB Kitchen groceries put-away date chips.
+        expect(js.length).toBeLessThan(81_000);
     });
 });
 

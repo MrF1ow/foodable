@@ -86,9 +86,9 @@ export const FD_TABS: readonly FdTab[] = [
     },
 ];
 
-/** The Kitchen text tabs (design: Kitchen tabs). The groceries count in the
- *  design ("Groceries · 8") is not shown: the open-line count is not in the
- *  chrome and this shell adds no query for it. */
+/** The Kitchen text tabs (design: Kitchen tabs). Open grocery line count comes
+ *  from `chrome.v2KitchenGroceriesCount` (a cheap listLines count on Kitchen
+ *  tab pages). */
 export const FD_KITCHEN_TABS: readonly {
     id: V2KitchenTab;
     label: string;
@@ -114,7 +114,11 @@ function sidebarKitchenSubs(chrome: AppChrome): string {
     const current = kitchenTabFor(chrome);
     return FD_KITCHEN_TABS.map((t) => {
         const on = t.id === current ? ' aria-current="page"' : "";
-        return `<a class="fd-sidesub" href="${escapeHtml(t.href)}"${on}>${SIDEBAR_KITCHEN_LABELS[t.id]}</a>`;
+        const label =
+            t.id === "groceries" && chrome.v2KitchenGroceriesCount != null
+                ? `${SIDEBAR_KITCHEN_LABELS[t.id]} · ${chrome.v2KitchenGroceriesCount}`
+                : SIDEBAR_KITCHEN_LABELS[t.id];
+        return `<a class="fd-sidesub" href="${escapeHtml(t.href)}"${on}>${escapeHtml(label)}</a>`;
     }).join("");
 }
 
@@ -155,7 +159,11 @@ function kitchenTabs(chrome: AppChrome): string {
     const current = kitchenTabFor(chrome);
     const links = FD_KITCHEN_TABS.map((t) => {
         const on = t.id === current ? ' aria-current="page"' : "";
-        return `<a class="fd-kitchen-tab" href="${escapeHtml(t.href)}"${on}>${t.label}</a>`;
+        const label =
+            t.id === "groceries" && chrome.v2KitchenGroceriesCount != null
+                ? `${t.label} · ${chrome.v2KitchenGroceriesCount}`
+                : t.label;
+        return `<a class="fd-kitchen-tab" href="${escapeHtml(t.href)}"${on}>${escapeHtml(label)}</a>`;
     }).join("");
     return `<nav class="fd-kitchen-tabs" aria-label="Kitchen sections">${links}</nav>`;
 }

@@ -403,6 +403,34 @@ describe("flag on: the new shell", () => {
         const kitchenNav = (html: string) =>
             between(html, /<nav class="fd-kitchen-tabs"/, "</nav>");
 
+        test("Groceries tab shows the open-line count when chrome carries it", () => {
+            const nav = between(
+                v2Html({
+                    active: "grocery",
+                    v2Kitchen: "groceries",
+                    v2KitchenGroceriesCount: 8,
+                    body: "<h1>Groceries</h1>",
+                }),
+                /<nav class="fd-kitchen-tabs"/,
+                "</nav>",
+            );
+            expect(nav).toContain("Groceries · 8");
+        });
+
+        test("Fridge tab shows the groceries count from chrome", () => {
+            const nav = between(
+                v2Html({
+                    active: "fridge",
+                    v2Kitchen: "fridge",
+                    v2KitchenGroceriesCount: 4,
+                    body: "<h1>Fridge</h1>",
+                }),
+                /<nav class="fd-kitchen-tabs"/,
+                "</nav>",
+            );
+            expect(nav).toContain("Groceries · 4");
+        });
+
         test("Fridge, Groceries, Usuals as links; the current one is marked", () => {
             const cases: [Partial<AppChrome>, string][] = [
                 [{ active: "fridge" }, "/kitchen/fridge"],
