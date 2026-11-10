@@ -45,6 +45,16 @@ const EXPECTED: Record<string, string> = {
         "ON public.recipe_ingredients USING btree (household_id, recipe_id, sort_order)",
     foods_household_idx:
         "ON public.foods USING btree (household_id, kind, normalized_name) WHERE (archived_at IS NULL)",
+    grocery_sections_household_id_idx:
+        "ON public.grocery_sections USING btree (household_id)",
+    store_rules_household_id_idx:
+        "ON public.store_rules USING btree (household_id)",
+    meal_items_household_id_idx:
+        "ON public.meal_items USING btree (household_id)",
+    household_members_user_id_idx:
+        "ON public.household_members USING btree (user_id)",
+    nutrition_goal_days_user_id_idx:
+        "ON public.nutrition_goal_days USING btree (user_id, date)",
 };
 
 async function planOf(
@@ -322,5 +332,91 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
              limit 1`,
         );
         expectIndexOnTable(plan, "foods_household_idx", "public.foods");
+    });
+
+    test("grocery sections for a household read the household index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select id, household_id, store_id, name, sort_order, hidden, is_other
+             from public.grocery_sections
+             where household_id = '${bench.householdId}'
+             order by sort_order asc, name asc`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "grocery_sections_household_id_idx",
+            "public.grocery_sections",
+        );
+    });
+
+    test("store rules for a household read the household index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select id, household_id, store_id, body, sort_order
+             from public.store_rules
+             where household_id = '${bench.householdId}'
+             order by sort_order asc`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "store_rules_household_id_idx",
+            "public.store_rules",
+        );
+    });
+
+    test("meal items scoped to a household read the household index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select id, meal_id, user_id, household_id, label, sort_order
+             from public.meal_items
+             where household_id = '${bench.householdId}'
+             order by sort_order asc
+             limit 100`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "meal_items_household_id_idx",
+            "public.meal_items",
+        );
+    });
+
+    test("membership lookup by user reads the user index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select household_id, user_id, role, display_name
+             from public.household_members
+             where user_id = '${bench.userId}'`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "household_members_user_id_idx",
+            "public.household_members",
+        );
+    });
+
+    test("per-day goal overrides read the user and date index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select *
+             from public.nutrition_goal_days
+             where user_id = '${bench.userId}'
+               and date between current_date - 365 and current_date
+             order by date`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "nutrition_goal_days_user_id_idx",
+            "public.nutrition_goal_days",
+        );
     });
 });

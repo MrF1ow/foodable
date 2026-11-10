@@ -83,6 +83,18 @@ async function seedDecoyHousehold(sql: SQL, creatorId: string): Promise<void> {
         `'${storeId}'::uuid, '${sectionId}'::uuid`,
     );
     await sql`
+        insert into public.grocery_sections (
+            household_id, store_id, name, sort_order, hidden, is_other
+        )
+        select ${householdId}, ${storeId}, 'sec' || g, g, false, false
+        from generate_series(1, 400) g
+    `;
+    await sql`
+        insert into public.store_rules (household_id, store_id, body, sort_order)
+        select ${householdId}, ${storeId}, 'rule' || g, g
+        from generate_series(1, 400) g
+    `;
+    await sql`
         insert into public.recipes (household_id, creator_id, name, yield_portions, source_url)
         select ${householdId}, ${creatorId}, 'recipe' || g, 2, 'https://bench.example/r/' || g
         from generate_series(1, 900) g
@@ -133,6 +145,36 @@ export async function seedHouseholdReadsBench(
         3000,
         `'${storeId}'::uuid, '${sectionId}'::uuid`,
     );
+    await sql`
+        insert into public.grocery_sections (
+            household_id, store_id, name, sort_order, hidden, is_other
+        )
+        select ${target.householdId}, ${storeId}, 'tsec' || g, g, false, false
+        from generate_series(1, 500) g
+    `;
+    await sql`
+        insert into public.store_rules (household_id, store_id, body, sort_order)
+        select ${target.householdId}, ${storeId}, 'trule' || g, g
+        from generate_series(1, 500) g
+    `;
+
+    const [meal] = await sql`
+        insert into public.meals (user_id, description, meal_type, logged_at, idempotency_key)
+        values (${target.userId}, 'bench meal', 'lunch', now(), ${"bench:meal:household-items"})
+        returning id
+    `;
+    await sql`
+        insert into public.meal_items (
+            meal_id, user_id, household_id, label, sort_order
+        )
+        select ${meal.id}, ${target.userId}, ${target.householdId}, 'item' || g, g
+        from generate_series(1, 2500) g
+    `;
+    await sql`
+        insert into public.nutrition_goal_days (household_id, user_id, date, daily_calories)
+        select ${target.householdId}, ${target.userId}, (current_date - g), 2000
+        from generate_series(0, 800) g
+    `;
 
     const [recipe] = await sql`
         insert into public.recipes (household_id, creator_id, name, yield_portions)
