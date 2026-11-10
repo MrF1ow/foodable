@@ -40,6 +40,8 @@ import {
 import { FD_LOG_HREF } from "../../shell-v2.js";
 import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
+import { renderTodayEditSheets } from "./today-edit-sheet.js";
+import { todayEditSheetId } from "../../../domain/today-edit.js";
 
 export type TodayPageChrome = AppChromeBase & {
     subjectLabel?: string;
@@ -52,6 +54,8 @@ export type TodayPageData = {
     memberQuery?: string;
     logSheet?: Omit<RenderLogSheetsOpts, "timezone">;
     error?: string;
+    openEditMealId?: string;
+    editError?: string;
 };
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -205,7 +209,7 @@ function weekStripMarkup(data: TodayPageData): Html {
         })
         .join("");
     return raw(
-        `<nav class="fd-today-week" aria-label="Week"><a class="fd-today-week__chev fd-today-week__chev--prev" href="${esc(prev)}" aria-label="Previous week">${iconChevronRight()}</a><div class="fd-today-week__grid"><div class="fd-today-week__labels">${labels}</div><div class="fd-today-week__days">${days}</div></div><a class="fd-today-week__chev fd-today-week__chev--next" href="${esc(next)}" aria-label="Next week">${iconChevronRight()}</a></nav>`,
+        `<nav class="fd-today-week" aria-label="Week" data-fd-week-strip data-fd-week-prev="${esc(prev)}" data-fd-week-next="${esc(next)}"><a class="fd-today-week__chev fd-today-week__chev--prev" href="${esc(prev)}" aria-label="Previous week">${iconChevronRight()}</a><div class="fd-today-week__grid"><div class="fd-today-week__labels">${labels}</div><div class="fd-today-week__days">${days}</div></div><a class="fd-today-week__chev fd-today-week__chev--next" href="${esc(next)}" aria-label="Next week">${iconChevronRight()}</a></nav>`,
     );
 }
 
@@ -329,7 +333,13 @@ function rowMacros(row: MealRow): Macros {
     };
 }
 
-function mealRowMarkup(row: MealRow): Html {
+function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
+    const readOnly = isReadOnlyPeer(data);
+    const sheetId = todayEditSheetId(row.mealId);
+    const returnTo = todayHref({
+        date: data.view.date,
+        member: data.memberQuery,
+    });
     const rowHtml = String(
         foodRow({
             id: row.mealId,
@@ -339,10 +349,31 @@ function mealRowMarkup(row: MealRow): Html {
             subtitle: row.subtitle ?? undefined,
             macros: rowMacros(row),
             trailing: fmtKcal(row.calories),
+            swipe: readOnly
+                ? undefined
+                : {
+                      trail: {
+                          label: "Delete",
+                          form: {
+                              action: `/meals/${row.mealId}/delete`,
+                              fields: {
+                                  return_to: returnTo,
+                                  date: data.view.date,
+                              },
+                          },
+                      },
+                      sheetId,
+                  },
         }),
     );
+    const attrs = readOnly
+        ? ""
+        : ` data-fd-meal-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
-        rowHtml.replace("<li ", `<li data-fd-meal-id="${esc(row.mealId)}" `),
+        rowHtml.replace(
+            "<li ",
+            `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
+        ),
     );
 }
 
@@ -408,7 +439,7 @@ function mealsMarkup(data: TodayPageData): Html {
         const list =
             rows.length > 0
                 ? rowList(
-                      rows.map((r) => mealRowMarkup(r)),
+                      rows.map((r) => mealRowMarkup(r, data)),
                       {
                           label: MEAL_SECTION_LABEL[mealType],
                       },
@@ -424,8 +455,21 @@ function mealsMarkup(data: TodayPageData): Html {
 export function renderTodayBody(data: TodayPageData): Html {
     const { view } = data;
     const banner = data.error ? String(settingsErrorBanner(data.error)) : "";
+    const sheets =
+        isReadOnlyPeer(data) || view.editMeals.length === 0
+            ? ""
+            : renderTodayEditSheets(view.editMeals, {
+                  day: view.date,
+                  tz: view.timezone,
+                  memberQuery: data.memberQuery,
+                  openMealId: data.openEditMealId,
+                  errorByMealId:
+                      data.openEditMealId && data.editError
+                          ? { [data.openEditMealId]: data.editError }
+                          : undefined,
+              });
     return raw(
-        `<div class="fd-today-page">${banner}${headerMarkup(data)}${weekStripMarkup(data)}<section class="fd-today-summary" aria-label="Day summary">${gaugeMarkup(view)}${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</section><div class="fd-today-meals">${mealsMarkup(data)}</div></div>`,
+        `<div class="fd-today-page">${banner}${headerMarkup(data)}${weekStripMarkup(data)}<section class="fd-today-summary" aria-label="Day summary">${gaugeMarkup(view)}${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</section><div class="fd-today-meals">${mealsMarkup(data)}</div>${sheets}</div>`,
     );
 }
 
@@ -659,6 +703,7 @@ export function buildPreviewTodayView(today: string): TodayView {
         alcoholTrackingEnabled: true,
         totals: todayDayTotals(meals, waterMl),
         goals: PREVIEW_GOALS,
+        editMeals: meals,
         meals: mealRows(meals),
         week,
         streak: 4,

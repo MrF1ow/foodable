@@ -607,6 +607,31 @@ export function snapshotToMealItemWrite(
     };
 }
 
+export async function getMealById(
+    userId: string,
+    id: string,
+): Promise<Meal | null> {
+    const meal = await run(async (tx) => {
+        try {
+            return await maybeOne<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where id = ${id}
+                      and user_id = ${userId}
+                `,
+                "get meal",
+            );
+        } catch (err) {
+            throw nutritionFailed("get meal", err);
+        }
+    });
+    if (!meal) return null;
+    const [withItems] = await attachMealItems(userId, [meal]);
+    return withItems ?? null;
+}
+
 export async function getMealsByDate(
     userId: string,
     date: string,

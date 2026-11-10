@@ -39,6 +39,13 @@ export const TOASTS = {
     },
 
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },
+    "nutrition.meal.updated": { kind: "success", text: "Meal updated" },
+    "nutrition.meal.deleted": { kind: "success", text: "Meal deleted" },
+    "nutrition.meal.undo.restored": {
+        kind: "success",
+        text: "Meal restored",
+    },
+    "nutrition.meal.undo.noop": { kind: "info", text: "Meal already restored" },
     "nutrition.water.logged": { kind: "success", text: "Water logged" },
     "nutrition.weight.logged": { kind: "success", text: "Weight logged" },
     "nutrition.layout.saved": {

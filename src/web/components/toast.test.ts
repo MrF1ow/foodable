@@ -44,6 +44,21 @@ describe("toast flash codec", () => {
         expect(decodeToastFlash("e30")).toBeNull();
     });
 
+    test("unknown toast action path is stripped", () => {
+        const key = "nutrition.meal.deleted" satisfies ToastKey;
+        const json = Buffer.from(
+            JSON.stringify({
+                k: key,
+                a: {
+                    label: "Undo",
+                    action: "/evil",
+                },
+            }),
+            "utf8",
+        ).toString("base64url");
+        expect(decodeToastFlash(json)).toEqual({ key });
+    });
+
     test("formatToastText leaves param values as plain text", () => {
         const raw = '<b>&"';
         expect(formatToastText("recipes.added-to-grocery", { count: 2 })).toBe(

@@ -246,6 +246,11 @@ async function memberGate(viewerUserId: string): Promise<MemberGate> {
     return { status: 200, viewer };
 }
 
+export type V2TodayRenderOpts = {
+    openEditMealId?: string;
+    editError?: string;
+};
+
 export async function renderDashboardPage(
     viewerUserId: string,
     requestedMember: string | undefined,
@@ -256,6 +261,7 @@ export async function renderDashboardPage(
         "timezone"
     >,
     requestedDate?: string,
+    v2Today?: V2TodayRenderOpts,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -324,6 +330,8 @@ export async function renderDashboardPage(
                 memberQuery: viewMemberId,
                 logSheet: mergedLogSheet,
                 error,
+                openEditMealId: v2Today?.openEditMealId,
+                editError: v2Today?.editError,
             }),
         };
     }

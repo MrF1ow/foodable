@@ -118,6 +118,10 @@
                                 "src/db/household",
                                 "src/db/nutrition",
                                 "src/db/profiles"
+                            ],
+                            "src/web/routes/today-meals.test.ts": [
+                                "src/db/household",
+                                "src/db/nutrition"
                             ]
                         }
                     }

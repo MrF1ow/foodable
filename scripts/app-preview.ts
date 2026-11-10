@@ -645,6 +645,12 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   "weight-trends",
               ],
           } as never);
+    const nutritionEditSheet = V2
+        ? renderTodayV2Page({
+              ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+              openEditMealId: "m3",
+          })
+        : "";
     const nutritionPeer = await renderNutritionPage({
         access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
         members: [ME, SAM],
@@ -751,6 +757,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     };
     return {
         nutrition,
+        ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
         "nutrition-peer": nutritionPeer,
         fridge: renderFridgePage(fridgeView(chrome) as never),
         grocery: renderGroceryPage(groceryView(chrome) as never),

@@ -1,3 +1,4 @@
+import type { Meal } from "../db/nutrition.js";
 import type { HouseholdMember } from "../household.js";
 import {
     getGoalsForRange,
@@ -65,6 +66,8 @@ export type TodayView = {
     alcoholTrackingEnabled: boolean;
     totals: TodayDayTotals;
     goals: NutritionGoals | null;
+    /** Full meal rows for the selected day (edit sheets). */
+    editMeals: Meal[];
     meals: MealTypeGroup[];
     week: WeekStripLayout & { dots: WeekDot[] };
     streak: number;
@@ -216,6 +219,7 @@ export async function loadToday(
     const waterMl = sumWaterForDate(weekWater, targetDate, tz);
     const totals = todayDayTotals(dayMeals, waterMl);
     const meals = mealRows(dayMeals);
+    const editMeals = dayMeals;
     const goals = weekGoals.forDate(targetDate);
 
     const weekBuckets = buildDailyBuckets(
@@ -252,6 +256,7 @@ export async function loadToday(
         alcoholTrackingEnabled: profile?.alcohol_tracking_enabled === true,
         totals,
         goals,
+        editMeals,
         meals,
         week,
         streak,

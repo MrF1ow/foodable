@@ -27,8 +27,10 @@ import {
     NUTRITION_LOG_WEIGHT_MODAL_ID,
 } from "../pages/nutrition.js";
 import { redirectWithToast } from "../components/toast.js";
+import { todayMealsRoutes } from "./today-meals.js";
 
 export const nutritionRoutes = new Hono();
+nutritionRoutes.route("/", todayMealsRoutes);
 
 function nutritionReturnPath(member: string | undefined): string {
     if (member?.trim()) {

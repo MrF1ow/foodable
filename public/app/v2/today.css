@@ -425,3 +425,45 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
         max-width: 520px;
     }
 }
+
+.fd-today-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-today-edit-item__label {
+    margin: 0 0 var(--fd-s-4);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-today-edit-field__label {
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-edit-error {
+    margin: 0;
+    color: var(--text-secondary);
+    font: 400 14px/20px var(--font-body);
+}
+
+.fd-today-edit-macros {
+    margin-top: var(--fd-s-4);
+}
+
+[data-fd-meal-row] {
+    cursor: pointer;
+}
+
+[data-fd-meal-row]:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
