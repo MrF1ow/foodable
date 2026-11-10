@@ -393,9 +393,9 @@ function coveredSeries(
     };
 }
 
-function longestStreak(
-    buckets: DailyBucket[],
-    predicate: (b: DailyBucket) => boolean,
+export function longestStreak<T>(
+    buckets: T[],
+    predicate: (b: T) => boolean,
 ): number {
     let best = 0;
     let cur = 0;
@@ -410,9 +410,9 @@ function longestStreak(
     return best;
 }
 
-function currentStreak(
-    buckets: DailyBucket[],
-    predicate: (b: DailyBucket) => boolean,
+export function currentStreak<T>(
+    buckets: T[],
+    predicate: (b: T) => boolean,
 ): number {
     let count = 0;
     for (let i = buckets.length - 1; i >= 0; i--) {
@@ -422,7 +422,7 @@ function currentStreak(
     return count;
 }
 
-function nonEmpty(b: DailyBucket): boolean {
+export function nonEmpty(b: DailyBucket): boolean {
     return b.meals.length > 0 || b.waterMl > 0;
 }
 
