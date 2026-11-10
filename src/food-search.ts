@@ -76,7 +76,7 @@ export async function searchFoodsByName(
     const remember = hooks.remember ?? rememberOffHit;
 
     const cacheHits = await searchCache(trimmed);
-    const online = foodLookupsOnline(hooks);
+    const online = await foodLookupsOnline(hooks);
     if (!online) {
         if (hooks.notice) {
             hooks.notice.message = ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;

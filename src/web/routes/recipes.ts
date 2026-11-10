@@ -101,7 +101,7 @@ async function recipeImportDeps(householdId: string) {
     return {
         recipes: liveRecipesStore(),
         foods: liveFoodsStore(),
-        fetcher: recipeImportFetcher({ householdId }),
+        fetcher: await recipeImportFetcher({ householdId }),
         memory: recipeFetchMemory(),
         transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
         readers: config.preferences.socialReaders,
@@ -300,7 +300,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         importUrl.trim() !== "" &&
         linkImportPaused({
             text,
-            readerEnabled: recipeLinkReaderEnabled(member.householdId),
+            readerEnabled: await recipeLinkReaderEnabled(member.householdId),
         })
     ) {
         const importLinkValidated = validateRecipeLink(importUrl);

@@ -48,7 +48,7 @@ test("restockHouseholdsFromRows logs and skips malformed row", () => {
     expect(logs[0]).not.toMatch(/Eggs|Milk/i);
 });
 
-test("filterRestockRunnerHouseholds skips only households with restock-runner off", () => {
+test("filterRestockRunnerHouseholds skips only households with restock-runner off", async () => {
     const hhOn = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const hhOff = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     const flags = createMemoryFlags({
@@ -64,7 +64,7 @@ test("filterRestockRunnerHouseholds skips only households with restock-runner of
         },
     };
     const logs: string[] = [];
-    const filtered = filterRestockRunnerHouseholds(
+    const filtered = await filterRestockRunnerHouseholds(
         [
             { id: hhOn, preferences: prefs },
             { id: hhOff, preferences: prefs },

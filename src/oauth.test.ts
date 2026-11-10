@@ -422,21 +422,60 @@ test("invite policy: an account created between the checks gets the plain answer
     ).rejects.toThrow(MESSAGES.invalidCredentials);
 });
 
-test("closed policy: a code from a new email says sign-up is closed", async () => {
-    await expect(
-        resolveApproveUser(
-            inviteArgs({ signupPolicy: "closed", inviteCode: "x" }),
-        ),
-    ).rejects.toThrow(MESSAGES.inviteClosed);
-    await expect(
-        resolveApproveUser(
-            inviteArgs({
-                signupPolicy: "closed",
-                inviteCode: "x",
-                accountExists: async () => true,
-            }),
-        ),
-    ).rejects.toThrow(MESSAGES.invalidCredentials);
+test("closed policy: known and unknown emails get the same answer, with no lookup, whatever the invite field holds", async () => {
+    for (const inviteCode of [undefined, "", "   ", "x", "junk-code"]) {
+        for (const known of [false, true]) {
+            let lookups = 0;
+            let peeks = 0;
+            await expect(
+                resolveApproveUser(
+                    inviteArgs({
+                        signupPolicy: "closed",
+                        inviteCode,
+                        accountExists: async () => {
+                            lookups += 1;
+                            return known;
+                        },
+                        peekInvite: async () => {
+                            peeks += 1;
+                            return { valid: true };
+                        },
+                    }),
+                ),
+            ).rejects.toThrow(MESSAGES.invalidCredentials);
+            expect(lookups).toBe(0);
+            expect(peeks).toBe(0);
+        }
+    }
+});
+
+test("closed by default: with FOODABLE_SIGNUP_POLICY unset, a junk invite code reveals nothing", async () => {
+    const { resetSignupPolicyCache } = await import("./domain/signup.js");
+    const saved = process.env.FOODABLE_SIGNUP_POLICY;
+    delete process.env.FOODABLE_SIGNUP_POLICY;
+    resetSignupPolicyCache();
+    try {
+        let lookups = 0;
+        for (const known of [false, true]) {
+            await expect(
+                resolveApproveUser(
+                    inviteArgs({
+                        signupPolicy: undefined,
+                        inviteCode: "junk",
+                        accountExists: async () => {
+                            lookups += 1;
+                            return known;
+                        },
+                    }),
+                ),
+            ).rejects.toThrow(MESSAGES.invalidCredentials);
+        }
+        expect(lookups).toBe(0);
+    } finally {
+        if (saved === undefined) delete process.env.FOODABLE_SIGNUP_POLICY;
+        else process.env.FOODABLE_SIGNUP_POLICY = saved;
+        resetSignupPolicyCache();
+    }
 });
 
 test("open policy allows a second sign-up", async () => {

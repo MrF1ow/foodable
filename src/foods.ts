@@ -20,13 +20,8 @@ import {
     type OffProductQuality,
 } from "./domain/off-quality.js";
 import { filterOffNutrientLevels } from "./domain/off-nutrient-levels.js";
-import {
-    buildBackgroundFlagContext,
-    buildFlagContext,
-    isEnabled,
-    type FlagContext,
-    type FlagName,
-} from "./flags.js";
+import { buildBackgroundFlagContext, buildFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 
 const OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
 // v2 /api/v2/search is filter-only (no full-text). Name search still needs the
@@ -42,14 +37,16 @@ export const ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE =
 
 export type FoodLookupOptions = {
     householdId?: string;
-    isEnabled?: (flag: FlagName, ctx: FlagContext) => boolean;
+    isEnabled?: FlagCheck;
     notice?: { message: string | null };
 };
 
 export type FoodLookupHooks = FoodLookupOptions;
 
-export function foodLookupsOnline(hooks: FoodLookupOptions): boolean {
-    const check = hooks.isEnabled ?? isEnabled;
+export async function foodLookupsOnline(
+    hooks: FoodLookupOptions,
+): Promise<boolean> {
+    const check = hooks.isEnabled ?? killSwitchOn;
     const ctx =
         hooks.householdId !== undefined
             ? buildBackgroundFlagContext(hooks.householdId)
@@ -472,7 +469,7 @@ export async function lookupBarcode(
     barcode: string,
     hooks: FoodLookupHooks = {},
 ): Promise<FoodResult | null> {
-    const online = foodLookupsOnline(hooks);
+    const online = await foodLookupsOnline(hooks);
     const cached = await getCachedFood(SOURCE_OFF, barcode, OFF_TTL_MS);
     if (!online) {
         if (hooks.notice) {

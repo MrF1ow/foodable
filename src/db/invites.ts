@@ -109,10 +109,20 @@ export async function createHouseholdInvite(
     });
 }
 
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Whether `id` can name an invite: anything else would fail the uuid cast. */
+export function isInviteId(id: string): boolean {
+    return UUID_RE.test(id);
+}
+
 export async function revokeHouseholdInvite(
     householdId: string,
     inviteId: string,
 ): Promise<boolean> {
+    // A malformed id names no invite; sending it would fail the uuid cast.
+    if (!isInviteId(inviteId)) return false;
     return run(async (tx) => {
         const data = await maybeOne<{ id: string }>(
             tx,

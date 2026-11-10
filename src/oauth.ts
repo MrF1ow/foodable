@@ -233,8 +233,10 @@ async function registerAfterFailedSignIn(
         return new Error(args.messages.invalidCredentials);
     };
     const inviteCode = args.inviteCode?.trim() ?? "";
-    // Closed and no code: the answer is the same either way, so skip the lookup.
-    if (policy === "closed" && !inviteCode) throw invalidCredentials();
+    // Closed: nobody can register, so every failed sign-in gets the same
+    // answer whatever the invite field holds, and no account lookup runs; a
+    // different answer for unknown emails would tell who has an account.
+    if (policy === "closed") throw invalidCredentials();
     let exists: boolean;
     try {
         exists = await (args.accountExists ?? authAccountExists)(args.email);
@@ -245,7 +247,6 @@ async function registerAfterFailedSignIn(
         throw new Error(args.messages.signInUnavailable);
     }
     if (exists) throw invalidCredentials();
-    if (policy === "closed") throw new Error(args.messages.inviteClosed);
     const invite =
         policy === "invite" && inviteCode
             ? await (args.peekInvite ?? peekInviteCode)(inviteCode)

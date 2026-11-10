@@ -116,6 +116,7 @@ import { gatedRoute } from "../gated.js";
 import {
     createHouseholdInvite,
     listHouseholdInvites,
+    isInviteId,
     revokeHouseholdInvite,
 } from "../../db/invites.js";
 import { renderHouseholdInvitesPage } from "../pages/v2/settings-household-invites.js";
@@ -1392,7 +1393,7 @@ householdRoutes.post(
         const body = await c.req.parseBody();
         const backHref = invitesBackHref(c, formText(body, "from"));
         const inviteId = formText(body, "invite_id");
-        if (!inviteId) {
+        if (!inviteId || !isInviteId(inviteId)) {
             return c.text("Bad Request", 400);
         }
         await revokeHouseholdInvite(member.householdId, inviteId);

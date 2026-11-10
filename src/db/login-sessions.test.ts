@@ -1,3 +1,4 @@
+import { SQL } from "bun";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { describeDb } from "./testing/pg.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -106,6 +107,40 @@ describeDb(pgAvailable !== null, "login sessions db", (getCtx) => {
             ),
         );
         expect(await countSiteSessions()).toBeLessThanOrEqual(cap);
+    });
+
+    test("putSiteSessionWithCap holds the cap across many connections", async () => {
+        const { pg, sql } = getCtx();
+        const cap = 8;
+        const n = 40;
+        const payload = {
+            purpose: "site" as const,
+            state: "site",
+            redirectUri: "/",
+            clientId: "site",
+        };
+        const pool = new SQL(pg.url, { prepare: false, max: 8 });
+        try {
+            for (let round = 0; round < 5; round++) {
+                await sql`delete from public.oauth_login_sessions`;
+                setSqlForTests(pool);
+                await Promise.all(
+                    Array.from({ length: n }, (_, i) =>
+                        putSiteSessionWithCap(
+                            `pool-${round}-${i}`,
+                            payload,
+                            TTL_MS,
+                            cap,
+                        ),
+                    ),
+                );
+                setSqlForTests(sql);
+                expect(await countSiteSessions()).toBe(cap);
+            }
+        } finally {
+            setSqlForTests(sql);
+            await pool.close();
+        }
     });
 
     test("sweepExpired deletes expired rows", async () => {

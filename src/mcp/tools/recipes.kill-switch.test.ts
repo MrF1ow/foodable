@@ -21,7 +21,7 @@ test("recipe-link-reader off skips URL import so social reader status stays clea
     const householdId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const flags = createMemoryFlags({ "recipe-link-reader": false });
     expect(
-        recipeLinkReaderEnabled(householdId, flags.isEnabled.bind(flags)),
+        await recipeLinkReaderEnabled(householdId, flags.isEnabled.bind(flags)),
     ).toBe(false);
 
     const readerStatus = createMemorySocialReaderStatusStore();

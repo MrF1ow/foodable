@@ -25,6 +25,7 @@ import {
 } from "./domain/flag-pins.js";
 import {
     FLAGS,
+    getFlags,
     hasEpoch,
     type FlagContext,
     type FlagEvaluation,
@@ -409,6 +410,38 @@ export function getFlagPins(): FlagPinRuntime {
 
 export function setFlagPinsForTests(next: FlagPinRuntime | null): void {
     runtime = next;
+}
+
+/**
+ * A gate's check: sync or async, so tests can still pass a plain reader's
+ * `isEnabled`. Production gates default to `killSwitchOn`.
+ */
+export type FlagCheck = (
+    flag: FlagName,
+    ctx: FlagContext,
+) => boolean | Promise<boolean>;
+
+/**
+ * Whether a flag is on for this context, asked the way a gate in request or
+ * background code should ask it: through the pin runtime. For a kill switch
+ * that means a Railway outage (stale, not ready, error) keeps the subject's
+ * last-known value instead of falling back to on; a subject with no
+ * last-known value still gets the registry fallback. Kill switches are never
+ * pinned. Readers other than Railway are answered directly, with no query.
+ */
+export async function killSwitchOn(
+    flag: FlagName,
+    ctx: FlagContext,
+    reader: FlagReader = getFlags(),
+    runtime: FlagPinRuntime | null = null,
+): Promise<boolean> {
+    if (!hasEpoch(reader)) return reader.isEnabled(flag, ctx);
+    const [evaluation] = await (runtime ?? getFlagPins()).evaluateAll(
+        ctx,
+        reader,
+        [flag],
+    );
+    return evaluation ? evaluation.value : reader.isEnabled(flag, ctx);
 }
 
 export function clearPins(subject: FlagSubject): Promise<void> {

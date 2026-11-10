@@ -11,12 +11,8 @@ import {
     recipeSource,
     validateRecipeLink,
 } from "./domain/recipe-link.js";
-import {
-    buildBackgroundFlagContext,
-    isEnabled as defaultIsEnabled,
-    type FlagContext,
-    type FlagName,
-} from "./flags.js";
+import { buildBackgroundFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 
 export const RECIPE_LINK_READER_PAUSED_WEB_MESSAGE =
     "Recipe link reading is paused. Paste the recipe instead.";
@@ -24,11 +20,11 @@ export const RECIPE_LINK_READER_PAUSED_WEB_MESSAGE =
 export const RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE =
     "Recipe link reading is paused. Ask the user to paste the recipe text and call import_recipe_from_url again with the text parameter.";
 
-export function recipeLinkReaderEnabled(
+export async function recipeLinkReaderEnabled(
     householdId: string,
-    enabled: typeof defaultIsEnabled = defaultIsEnabled,
-): boolean {
-    return enabled(
+    enabled: FlagCheck = killSwitchOn,
+): Promise<boolean> {
+    return await enabled(
         "recipe-link-reader",
         buildBackgroundFlagContext(householdId),
     );
@@ -90,7 +86,7 @@ let disabledSingleton: SafeFetcher | null = null;
 
 export type RecipeImportFetcherOptions = {
     householdId?: string;
-    isEnabled?: (flag: FlagName, ctx: FlagContext) => boolean;
+    isEnabled?: FlagCheck;
 };
 
 function createDisabledRecipeImportFetcher(): SafeFetcher {
@@ -112,20 +108,21 @@ function disabledRecipeImportFetcher(): SafeFetcher {
     return disabledSingleton;
 }
 
-function readerEnabledForHousehold(
+async function readerEnabledForHousehold(
     opts: RecipeImportFetcherOptions | undefined,
-): boolean {
+): Promise<boolean> {
     if (!opts?.householdId) return true;
-    const ctx = buildBackgroundFlagContext(opts.householdId);
-    const enabled = opts.isEnabled ?? defaultIsEnabled;
-    return enabled("recipe-link-reader", ctx);
+    return recipeLinkReaderEnabled(
+        opts.householdId,
+        opts.isEnabled ?? killSwitchOn,
+    );
 }
 
 /** One process-wide fetcher so robots.txt cache persists across imports. */
-export function recipeImportFetcher(
+export async function recipeImportFetcher(
     opts?: RecipeImportFetcherOptions,
-): SafeFetcher {
-    if (opts && !readerEnabledForHousehold(opts)) {
+): Promise<SafeFetcher> {
+    if (opts && !(await readerEnabledForHousehold(opts))) {
         return disabledRecipeImportFetcher();
     }
     if (!singleton) {

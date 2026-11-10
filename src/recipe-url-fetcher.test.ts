@@ -27,7 +27,7 @@ test("recipeImportFetcher with recipe-link-reader off makes no fetch calls", asy
     }) as typeof fetch;
 
     try {
-        const fetcher = recipeImportFetcher({
+        const fetcher = await recipeImportFetcher({
             householdId,
             isEnabled: flags.isEnabled.bind(flags),
         });
@@ -56,7 +56,12 @@ test("callers with recipe-link-reader off use paused outcome without recording T
     const readerStatus = createMemorySocialReaderStatusStore();
     const url = "https://www.tiktok.com/@chef/video/1234567890";
 
-    if (!recipeLinkReaderEnabled(householdId, flags.isEnabled.bind(flags))) {
+    if (
+        !(await recipeLinkReaderEnabled(
+            householdId,
+            flags.isEnabled.bind(flags),
+        ))
+    ) {
         const paused = buildRecipeLinkReaderPausedOutcome(url);
         expect(paused.status).toBe("paste_needed");
         expect(paused.readerFailure).toBeNull();
@@ -65,7 +70,7 @@ test("callers with recipe-link-reader off use paused outcome without recording T
             {
                 recipes: createMemoryRecipesStore(),
                 foods: createMemoryFoodsStore(),
-                fetcher: recipeImportFetcher({
+                fetcher: await recipeImportFetcher({
                     householdId,
                     isEnabled: flags.isEnabled.bind(flags),
                 }),

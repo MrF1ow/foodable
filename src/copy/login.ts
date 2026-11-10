@@ -40,7 +40,6 @@ export interface LoginErrors {
     /** Invite-policy deploy: wrong, expired, or reused code. */
     invalidInvite: string;
     /** Invite codes are ignored when sign-up is closed. */
-    inviteClosed: string;
 }
 
 export const LOGIN: LoginDoc = {
@@ -70,5 +69,4 @@ export const LOGIN_ERRORS: LoginErrors = {
     signInUnavailable: "Couldn't sign in right now. Try again in a minute.",
     inviteRequired: "An invite code is needed to create an account.",
     invalidInvite: "That invite code is invalid, expired, or already used.",
-    inviteClosed: "Sign-up is closed. Ask the household owner for a login.",
 };

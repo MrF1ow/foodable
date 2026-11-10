@@ -1,9 +1,5 @@
-import {
-    buildBackgroundFlagContext,
-    isEnabled as defaultIsEnabled,
-    type FlagContext,
-    type FlagName,
-} from "./flags.js";
+import { buildBackgroundFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 import { runAsSystem, withActor } from "./db/actor.js";
 import { liveFoodsStore } from "./db/foods.js";
 import { liveFridgeStore } from "./db/fridge.js";
@@ -22,22 +18,19 @@ import {
 } from "./household.js";
 import { runRestockCheck, startRestockRuns } from "./domain/restock.js";
 
-export type RestockRunnerIsEnabled = (
-    flag: FlagName,
-    ctx: FlagContext,
-) => boolean;
+export type RestockRunnerIsEnabled = FlagCheck;
 
-export function filterRestockRunnerHouseholds<
+export async function filterRestockRunnerHouseholds<
     T extends { id: string; preferences: HouseholdPreferences },
 >(
     households: T[],
     log: (msg: string) => void,
-    isEnabled: RestockRunnerIsEnabled = defaultIsEnabled,
-): T[] {
+    isEnabled: RestockRunnerIsEnabled = killSwitchOn,
+): Promise<T[]> {
     const out: T[] = [];
     for (const household of households) {
         const ctx = buildBackgroundFlagContext(household.id);
-        if (!isEnabled("restock-runner", ctx)) {
+        if (!(await isEnabled("restock-runner", ctx))) {
             log(
                 `[restock] household=${household.id.slice(0, 8)} skipped: restock runner disabled`,
             );

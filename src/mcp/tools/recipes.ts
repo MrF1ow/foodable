@@ -52,7 +52,6 @@ import {
     importRecipeFromUrl,
     importRecipeFromUrlAnalyticsOutcome,
 } from "../../domain/recipe-import.js";
-import { isEnabled } from "../../flags.js";
 import {
     buildRecipeLinkReaderPausedOutcome,
     RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
@@ -1719,9 +1718,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const household = await getHouseholdConfig(
                         actor.householdId,
                     );
-                    const readerEnabled = recipeLinkReaderEnabled(
+                    const readerEnabled = await recipeLinkReaderEnabled(
                         actor.householdId,
-                        isEnabled,
                     );
                     const paused = linkImportPaused({
                         text: args.text,
@@ -1733,7 +1731,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                   {
                                       recipes: liveRecipesStore(),
                                       foods: liveFoodsStore(),
-                                      fetcher: recipeImportFetcher({
+                                      fetcher: await recipeImportFetcher({
                                           householdId: actor.householdId,
                                       }),
                                       memory: recipeFetchMemory(),

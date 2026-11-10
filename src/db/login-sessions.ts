@@ -110,7 +110,16 @@ export async function evictOldestSiteSession(): Promise<void> {
     });
 }
 
-/** Insert a site login row and trim live site rows to at most `cap` in one transaction. */
+// Serializes putSiteSessionWithCap across connections. A constant key of its
+// own: creating a household uses 7314001, and rate limits hash theirs.
+const SITE_SESSION_CAP_LOCK = 7314002;
+
+/**
+ * Insert a site login row and trim live site rows to at most `cap` in one
+ * transaction. The transaction advisory lock makes concurrent calls take
+ * turns; without it two connections each insert, each count the other's row
+ * as not yet visible, and the cap is exceeded.
+ */
 export async function putSiteSessionWithCap(
     id: string,
     payload: unknown,
@@ -120,6 +129,7 @@ export async function putSiteSessionWithCap(
     const json = JSON.stringify(payload);
     const ttlSeconds = ttlMs / 1000;
     await run(async (tx) => {
+        await tx`select pg_advisory_xact_lock(${SITE_SESSION_CAP_LOCK})`;
         await tx`
             insert into public.oauth_login_sessions (id, payload, expires_at)
             values (

@@ -51,6 +51,19 @@ describeDb(pgAvailable !== null, "household invites", (getCtx) => {
         expect(await listHouseholdInvites(householdId)).toHaveLength(0);
     });
 
+    test("revoking with a malformed id is a no-op, not a uuid cast error", async () => {
+        const { invite } = await createHouseholdInvite(householdId, ownerId);
+        for (const bad of [
+            "notauuid",
+            "",
+            "1; drop table x",
+            `${invite.id}x`,
+        ]) {
+            expect(await revokeHouseholdInvite(householdId, bad)).toBe(false);
+        }
+        expect(await listHouseholdInvites(householdId)).toHaveLength(1);
+    });
+
     async function counts(): Promise<{
         users: number;
         members: number;
