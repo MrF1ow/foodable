@@ -1,6 +1,9 @@
 import { Hono, type Context } from "hono";
 
-import { renderHouseholdSettingsRoute } from "../loaders.js";
+import {
+    renderHouseholdMemberRoute,
+    renderHouseholdSettingsRoute,
+} from "../loaders.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -154,6 +157,18 @@ householdRoutes.get("/settings/household", requireSiteUser, async (c) => {
     });
     return c.html(page.html, page.status);
 });
+
+householdRoutes.get(
+    "/settings/household/members/:userId",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderHouseholdMemberRoute(
+            c.get("userId"),
+            c.req.param("userId"),
+        );
+        return c.html(page.html, page.status);
+    },
+);
 
 householdRoutes.post(
     "/settings/household/fetch-refusals/clear",
@@ -1232,13 +1247,29 @@ householdRoutes.post(
                     : err instanceof Error
                       ? err.message
                       : "Could not keep foods separate.";
+            const uiV2 = (await viewerFlagsFor(member)).uiV2;
+            if (uiV2) {
+                const page = await renderHouseholdSettingsRoute(userId, {
+                    error: message,
+                });
+                return c.html(
+                    page.html,
+                    page.status === 200 ? 400 : page.status,
+                );
+            }
             const page = await renderPossibleDuplicatesRoute(userId, {
                 error: message,
             });
             return c.html(page.html, page.status === 200 ? 400 : page.status);
         }
         // toast: none
-        return c.redirect("/settings/household/possible-duplicates", 303);
+        const uiV2 = (await viewerFlagsFor(member)).uiV2;
+        return c.redirect(
+            uiV2
+                ? "/settings/household"
+                : "/settings/household/possible-duplicates",
+            303,
+        );
     },
 );
 
@@ -1291,6 +1322,18 @@ householdRoutes.post(
                     : err instanceof Error
                       ? err.message
                       : "Could not merge foods.";
+            const uiV2 = (await viewerFlagsFor(member)).uiV2;
+            if (uiV2) {
+                const page = await renderHouseholdSettingsRoute(userId, {
+                    error: message,
+                    openModalId: DUP_MERGE_MODAL_ID,
+                    mergePost,
+                });
+                return c.html(
+                    page.html,
+                    page.status === 200 ? 400 : page.status,
+                );
+            }
             const page = await renderPossibleDuplicatesRoute(userId, {
                 error: message,
                 openModalId: DUP_MERGE_MODAL_ID,
@@ -1299,7 +1342,13 @@ householdRoutes.post(
             return c.html(page.html, page.status === 200 ? 400 : page.status);
         }
         // toast: none
-        return c.redirect("/settings/household/possible-duplicates", 303);
+        const uiV2 = (await viewerFlagsFor(member)).uiV2;
+        return c.redirect(
+            uiV2
+                ? "/settings/household"
+                : "/settings/household/possible-duplicates",
+            303,
+        );
     },
 );
 

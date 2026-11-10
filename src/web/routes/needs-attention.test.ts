@@ -514,6 +514,64 @@ describe("needs-attention routes", () => {
         ).toBe(true);
     });
 
+    test("POST undo with return_to=/settings/household redirects there", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+            }).toString(),
+        });
+        const rows = await db.dismissalsStore.listForHousehold(HH);
+        const row = rows.find((d) => d.subjectId === yogurt.id);
+        expect(row).toBeTruthy();
+        const undo = await app().request("http://x/needs-attention/undo", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                dismissal_id: row!.id,
+                return_to: "/settings/household",
+            }).toString(),
+        });
+        expect(undo.status).toBe(303);
+        expect(undo.headers.get("location")).toBe("/settings/household");
+    });
+
+    test("POST undo rejects open-redirect return_to", async () => {
+        const row = await db.dismissalsStore.insert({
+            householdId: HH,
+            code: "fridge.expiring",
+            subjectKind: "fridge_item",
+            subjectId: crypto.randomUUID(),
+            relatedKey: "",
+            dismissedBy: ALICE,
+        });
+        const undo = await app().request("http://x/needs-attention/undo", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                dismissal_id: row.id,
+                return_to: "//evil.example",
+            }).toString(),
+        });
+        expect(undo.status).toBe(303);
+        expect(undo.headers.get("location")).toBe(
+            "/needs-attention?show=dismissed",
+        );
+    });
+
     test("POST undo with another household dismissal id is rejected", async () => {
         const foreign = await db.dismissalsStore.insert({
             householdId: HH_OTHER,

@@ -38,6 +38,11 @@ import { createMemorySocialReaderStatusStore } from "../../domain/social-readers
 import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "../../flags.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -1608,6 +1613,156 @@ describe("social reader settings", () => {
                 },
                 body: "reader=tiktok&enabled=1&confirm=1",
             },
+        );
+        expect(r.status).toBe(403);
+    });
+});
+
+const BOB = "22222222-2222-4222-8222-222222222222";
+const OUTSIDER = "99999999-9999-4999-8999-999999999999";
+
+describe("household members page ui-v2", () => {
+    afterAll(() => {
+        resetFlagsForTests();
+    });
+
+    beforeEach(() => {
+        resetFlagsForTests();
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: BOB,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+    });
+
+    test("GET /settings/household renders v2 when ui-v2 is on", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request("http://x/settings/household", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain('data-fd-settings-page="household"');
+        expect(html).not.toContain("<h1>Household</h1>");
+        expect(html).toContain('action="/settings/household/name"');
+    });
+
+    test("GET /settings/household stays legacy when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request("http://x/settings/household", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await r.text();
+        expect(html).toContain("<h1>Household</h1>");
+        expect(html).not.toContain('data-fd-settings-page="household"');
+    });
+
+    test("member GET /settings/household is read-only under ui-v2", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request("http://x/settings/household", {
+            headers: { cookie: cookieFor(BOB) },
+        });
+        const html = await r.text();
+        expect(html).not.toContain('action="/settings/household/name"');
+        expect(html).not.toContain('commandfor="household-add-member"');
+    });
+
+    test("member POST to manager-only name change is refused", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request("http://x/settings/household/name", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(BOB),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "name=Nope",
+        });
+        expect(r.status).toBe(403);
+    });
+
+    test("GET member page shows Today link for a peer", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request(
+            `http://x/settings/household/members/${BOB}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(r.status).toBe(200);
+        const html = await r.text();
+        expect(html).toContain(`href="/?member=${BOB}"`);
+    });
+
+    test("member page 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request(
+            `http://x/settings/household/members/${BOB}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(r.status).toBe(404);
+    });
+
+    test("any member id is not found when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: BOB,
+                role: "member",
+                displayName: "Bob",
+            },
+            {
+                householdId: "hh-other",
+                userId: OUTSIDER,
+                role: "member",
+                displayName: "Outsider",
+            },
+        ];
+        const r = await app().request(
+            `http://x/settings/household/members/${OUTSIDER}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(r.status).toBe(404);
+    });
+
+    test("another household member id is forbidden under ui-v2", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: BOB,
+                role: "member",
+                displayName: "Bob",
+            },
+            {
+                householdId: "hh-other",
+                userId: OUTSIDER,
+                role: "member",
+                displayName: "Outsider",
+            },
+        ];
+        const r = await app().request(
+            `http://x/settings/household/members/${OUTSIDER}`,
+            { headers: { cookie: cookieFor(ALICE) } },
         );
         expect(r.status).toBe(403);
     });

@@ -244,6 +244,145 @@
     color: var(--text-secondary);
 }
 
+.fd-settings-household {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-settings-household-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--fd-s-6);
+    margin-bottom: var(--fd-s-6);
+}
+
+.fd-settings-household-name {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.fd-settings-household-empty,
+.fd-settings-muted {
+    margin: 0;
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+}
+
+.fd-settings-btn {
+    padding: var(--fd-s-6) var(--fd-s-12);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.fd-settings-btn--primary {
+    border-color: transparent;
+    background: var(--accent-fill);
+    color: var(--accent-on);
+    font-weight: 600;
+}
+
+.fd-settings-btn--sm {
+    padding: var(--fd-s-6) var(--fd-s-10);
+    font-size: 0.8125rem;
+}
+
+.fd-settings-btn--danger {
+    border-color: var(--status-over);
+    background: transparent;
+    color: var(--status-over);
+    font-weight: 600;
+}
+
+.fd-row__body--with-trailing {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+}
+
+.fd-row--settings-member .fd-row__link {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-row--settings-member .fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-row__trailing {
+    flex: 0 0 auto;
+}
+
+.fd-row__actions--wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--fd-s-6);
+    justify-content: flex-end;
+}
+
+.fd-settings-token {
+    margin: var(--fd-s-6) 0 0;
+    font-size: 0.875rem;
+    word-break: break-all;
+}
+
+.fd-settings-member-dl {
+    margin: 0;
+    padding: var(--fd-s-12);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+}
+
+.fd-settings-member-dl__row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    padding: var(--fd-s-6) 0;
+}
+
+.fd-settings-member-dl__row + .fd-settings-member-dl__row {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-member-dl dt {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.fd-settings-member-dl dd {
+    margin: 0;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.fd-settings-member-today {
+    margin: var(--fd-s-12) 0 0;
+}
+
+.fd-settings-link {
+    color: var(--accent-text);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.fd-settings-form--inline {
+    margin-top: var(--fd-s-6);
+}
+
 /* Hide the side menu on phone subpages (home shows the full menu). */
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-aside

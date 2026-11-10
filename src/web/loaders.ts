@@ -98,6 +98,8 @@ import {
     parseV2RecipeListFilter,
     renderRecipesListV2Page,
 } from "./pages/v2/recipes-list.js";
+import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
+import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
 import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
@@ -957,6 +959,12 @@ export async function renderHouseholdSettingsRoute(
         issuedToken?: string;
         openModalId?: string;
         refusalsAfter?: string | null;
+        mergePost?: {
+            foodA: string;
+            foodB: string;
+            keepId: string;
+            picks: Partial<Record<MergePairPickField, string>>;
+        };
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -964,6 +972,8 @@ export async function renderHouseholdSettingsRoute(
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
     const refusalsAfter = parseRefusalCursor(opts.refusalsAfter);
+    const store = liveFoodsStore();
+    const refCounts = await store.countFoodRefs(householdId);
     const [config, members, location, stores, socialReaderStatus] =
         await Promise.all([
             getHouseholdConfig(householdId),
@@ -1003,15 +1013,47 @@ export async function renderHouseholdSettingsRoute(
               )}`
             : null;
 
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId, {
+        refCounts,
+    });
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    if (chrome.flags.uiV2) {
+        return {
+            status: 200,
+            html: renderSettingsHouseholdV2Page({
+                chrome,
+                householdName: config.name,
+                members,
+                stores: storeViews.map((row) => ({
+                    id: row.id,
+                    householdId: row.householdId,
+                    name: row.name,
+                    sortOrder: row.sortOrder,
+                })),
+                isOwner: gate.viewer.role === "owner",
+                canManage: canManageHousehold(gate.viewer),
+                viewerUserId: gate.viewer.userId,
+                error: opts.error,
+                issuedToken: opts.issuedToken,
+                openModalId: opts.openModalId,
+                socialReaders: config.preferences.socialReaders,
+                socialReaderStatus,
+                timezone: profile?.timezone ?? "UTC",
+                noticeResult,
+                duplicatePairs: noticeResult.possibleDuplicatePairs,
+                refCounts,
+                mergePost: opts.mergePost,
+            }),
+        };
+    }
     return {
         status: 200,
         html: renderHouseholdSettingsPage({
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                noticeResult,
-            ),
+            chrome,
             householdName: config.name,
             location: location ?? "",
             members,
@@ -1031,6 +1073,51 @@ export async function renderHouseholdSettingsRoute(
             fetchRefusals,
             fetchRefusalsShowMore,
             fetchRefusalsPaged: refusalsAfter != null,
+        }),
+    };
+}
+
+export async function renderHouseholdMemberRoute(
+    viewerUserId: string,
+    memberUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const flags = await viewerFlagsFor(gate.viewer);
+    if (!flags.uiV2) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Page not found.")),
+        };
+    }
+    const target = await getHouseholdMembership(memberUserId);
+    if (target == null || target.householdId !== gate.viewer.householdId) {
+        return { status: 403, html: forbiddenDashboardHtml() };
+    }
+    const access = dashboardAccess(gate.viewer, target);
+    if (!access.ok) {
+        return { status: 403, html: forbiddenDashboardHtml() };
+    }
+    const noticeResult = await loadHouseholdNotices(gate.viewer.householdId);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    const todayHref =
+        access.subject.userId === gate.viewer.userId
+            ? "/"
+            : `/?member=${encodeURIComponent(access.subject.userId)}`;
+    return {
+        status: 200,
+        html: renderSettingsMemberV2Page({
+            chrome,
+            member: target,
+            viewer: gate.viewer,
+            todayHref,
+            error: opts.error,
         }),
     };
 }

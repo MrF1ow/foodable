@@ -264,7 +264,7 @@ ${extra}
 }
 
 /** One manage, make-owner, and remove dialog for every member. */
-const HOUSEHOLD_MANAGE_ID = "household-manage";
+export const HOUSEHOLD_MANAGE_ID = "household-manage";
 const HOUSEHOLD_REMOVE_ID = "household-remove";
 const HOUSEHOLD_MAKE_OWNER_ID = "household-make-owner";
 const MANAGE_PREFIX = "household-manage-";
@@ -396,7 +396,7 @@ ${modalTrigger({
 })}`;
 }
 
-function manageFill(member: HouseholdMember): ModalFill {
+export function manageFill(member: HouseholdMember): ModalFill {
     return {
         action: `/settings/household/members/${member.userId}/role`,
         title: `Manage ${member.displayName}`,
@@ -416,7 +416,7 @@ function memberActionsTemplateId(userId: string): string {
     return `household-member-actions-${userId}`;
 }
 
-function memberActionsTemplate(member: HouseholdMember): string {
+export function memberActionsTemplate(member: HouseholdMember): string {
     return `<template id="${escapeHtml(memberActionsTemplateId(member.userId))}">${memberActionButtons(member)}</template>`;
 }
 
@@ -657,6 +657,41 @@ ${editTrigger}
 <ul class="person-rule-list muted">${rules}</ul>
 </section>`;
     return { card, modals: rulesModal };
+}
+
+/** Owner/admin dialogs for the v2 household settings page (add member, stores, role). */
+export function renderHouseholdV2OwnerModals(
+    view: HouseholdSettingsView,
+): string {
+    const settingsView: HouseholdSettingsView = {
+        ...view,
+        socialReaders: view.socialReaders ?? { ...DEFAULT_SOCIAL_READERS },
+    };
+    return [
+        view.canManage ? addMemberModal(view) : "",
+        view.canManage
+            ? modal({
+                  id: HOUSEHOLD_ADD_STORE_MODAL_ID,
+                  title: "Add store",
+                  openOnLoad: modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID),
+                  body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/stores" class="add-store">
+${field({ id: "store_name", label: "Grocery store", control: `<input id="store_name" name="name" required maxlength="80" autocomplete="off" />` })}
+<button type="submit" class="btn-primary">Add store</button>
+</form>`,
+              })
+            : "",
+        sharedMemberDialogs(view),
+        socialReaderEnableModal(
+            "tiktok",
+            HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
+            settingsView,
+        ),
+        socialReaderEnableModal(
+            "facebook",
+            HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
+            settingsView,
+        ),
+    ].join("");
 }
 
 export function renderHouseholdSettingsPage(

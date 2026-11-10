@@ -75,6 +75,8 @@ import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
+import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -926,6 +928,53 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       chrome,
                       storedTheme: null,
                   }),
+                  "settings-household-v2": (() => {
+                      const dupPairs = possibleDuplicates(
+                          catalog.filter(
+                              (f) => !f.archivedAt && !f.genericFoodId,
+                          ),
+                          new Map(),
+                          new Set(),
+                          new Set(),
+                      );
+                      return renderSettingsHouseholdV2Page({
+                          chrome,
+                          householdName: "The Flow household",
+                          members: [ME, SAM] as never,
+                          stores: PREVIEW_STORES,
+                          isOwner: true,
+                          canManage: true,
+                          viewerUserId: ME.userId,
+                          socialReaders:
+                              EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+                          timezone: "America/Los_Angeles",
+                          noticeResult: {
+                              notices: previewNotices(),
+                              dismissals: [],
+                              subjectNames: new Map(),
+                              subjectTimes: new Map(),
+                              noticeFoods: new Map(),
+                              catalogFoods: catalog,
+                              aliasMap: new Map(),
+                              barcodedIds: new Set(),
+                              possibleDuplicatePairs: dupPairs,
+                              recipesListPrefetch: {
+                                  recipes: [],
+                                  allIngredients: [],
+                                  fridgeItems: [],
+                                  foodsById: new Map(),
+                              },
+                          },
+                          duplicatePairs: dupPairs,
+                          refCounts: new Map(),
+                      } as never);
+                  })(),
+                  "settings-household-v2-member": renderSettingsMemberV2Page({
+                      chrome,
+                      member: SAM as never,
+                      viewer: ME as never,
+                      todayHref: `/?member=${SAM.userId}`,
+                  }),
               }
             : {}),
         household: renderHouseholdSettingsPage({
@@ -1448,6 +1497,8 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings" ||
                 shotBase === "settings-account" ||
                 shotBase === "settings-display" ||
+                shotBase === "settings-household-v2" ||
+                shotBase === "settings-household-v2-member" ||
                 shotBase === "help";
             const v2Phone = galleryFullPage ? "390,5400" : "390,844";
             const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
