@@ -1,10 +1,15 @@
-import type { Recipe, RecipeFilterFlags } from "../../../domain/recipes.js";
-import { recipeTimeLabel } from "../../../domain/recipes.js";
+import {
+    recipeTimeLabel,
+    type Recipe,
+    type RecipeFilterFlags,
+    type RecipeMacros,
+} from "../../../domain/recipes.js";
+import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 import type { RecipeSourceKind } from "../../../domain/recipe-import.js";
 import type { AppChromeBase } from "../../attention.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { chipLink, chipNav } from "../../components/v2/chips.js";
-import { esc } from "../../components/v2/html.js";
+import { esc, srOnly } from "../../components/v2/html.js";
 import { renderAppShell } from "../../shell.js";
 
 export type V2RecipeListFilter = "" | "cookable" | "protein" | "quick";
@@ -12,6 +17,8 @@ export type V2RecipeListFilter = "" | "cookable" | "protein" | "quick";
 export type V2RecipeCard = {
     recipe: Recipe;
     flags: RecipeFilterFlags;
+    macrosPerPortion: RecipeMacros;
+    missingNames: string[];
 };
 
 export type RecipesListV2View = {
@@ -19,6 +26,7 @@ export type RecipesListV2View = {
     query: string;
     filter: V2RecipeListFilter;
     cards: V2RecipeCard[];
+    cookableCount?: number;
     totalCount: number;
     importError?: string;
     importPasteStep?: boolean;
@@ -61,38 +69,76 @@ function filterChip(
     label: string,
     value: V2RecipeListFilter,
     view: RecipesListV2View,
+    count?: number,
 ): ReturnType<typeof chipLink> {
     return chipLink({
         label,
         href: recipesListV2Href({ q: view.query, filter: value }),
         selected: view.filter === value,
+        count: count != null && count > 0 ? count : undefined,
     });
 }
 
-function stockLabel(flags: RecipeFilterFlags): string {
+function servingsLabel(portions: number): string {
+    return portions === 1 ? "1 serving" : `${portions} servings`;
+}
+
+function stockLabel(flags: RecipeFilterFlags, missingNames: string[]): string {
     if (!flags.hasIngredients) return "No ingredients yet";
-    return flags.missingCount === 0
-        ? "You have everything"
-        : `Missing ${flags.missingCount}`;
+    if (flags.missingCount === 0) return "You have everything";
+    const names =
+        missingNames.length > 0
+            ? ` · ${missingNames.slice(0, 4).join(", ")}`
+            : "";
+    return `Missing ${flags.missingCount}${names}`;
+}
+
+function listMacroLine(macros: RecipeMacros): string {
+    const one = (
+        key: "protein" | "carbs" | "fat",
+        letter: string,
+        name: string,
+        value: number | null,
+    ) => {
+        if (value == null) return "";
+        return `<span class="fd-macro fd-macro--${key}"><span aria-hidden="true">${letter} </span>${srOnly(`${name} `)}${esc(formatLogMacroGrams(value))}</span>`;
+    };
+    const parts = [
+        one("protein", "P", "Protein", macros.protein_g),
+        one("carbs", "C", "Carbs", macros.carbs_g),
+        one("fat", "F", "Fat", macros.fat_g),
+    ].filter(Boolean);
+    return parts.length > 0
+        ? `<span class="fd-macros">${parts.join("")}</span>`
+        : "";
 }
 
 function recipeCard(card: V2RecipeCard): string {
-    const { recipe, flags } = card;
+    const { recipe, flags, macrosPerPortion, missingNames } = card;
     const minutes = recipeTimeLabel(recipe);
-    const stock = stockLabel(flags);
+    const metaParts = [servingsLabel(recipe.yieldPortions)];
+    if (minutes) metaParts.push(minutes);
+    const macroHtml = listMacroLine(macrosPerPortion);
+    const metaRow = macroHtml
+        ? `${esc(metaParts.join(" · "))}<span class="fd-recipes-card__meta-sep" aria-hidden="true"> · </span>${macroHtml}`
+        : esc(metaParts.join(" · "));
+    const stock = stockLabel(flags, missingNames);
     const stockClass = !flags.hasIngredients
         ? "fd-recipes-card__stock--empty"
         : flags.missingCount === 0
           ? "fd-recipes-card__stock--ok"
           : "fd-recipes-card__stock--miss";
-    const stockHtml = stock
-        ? `<span class="fd-recipes-card__stock ${stockClass}">${esc(stock)}</span>`
-        : "";
-    return `<a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span>${
-        minutes
-            ? `<span class="fd-recipes-card__meta">${esc(minutes)}</span>`
+    const dot =
+        flags.hasIngredients && flags.missingCount === 0
+            ? `<span class="fd-recipes-card__dot" aria-hidden="true"></span>`
+            : flags.hasIngredients && flags.missingCount > 0
+              ? `<span class="fd-recipes-card__dot fd-recipes-card__dot--warn" aria-hidden="true"></span>`
+              : "";
+    return `<li class="fd-row fd-row--recipe"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${
+        stock
+            ? `<span class="fd-recipes-card__stock ${stockClass}">${dot}<span class="fd-recipes-card__stock-text">${esc(stock)}</span></span>`
             : ""
-    }${stockHtml}</a>`;
+    }</a></li>`;
 }
 
 function importPasteBlock(view: RecipesListV2View): string {
@@ -171,7 +217,7 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
             : "";
     const chips = chipNav(
         [
-            filterChip("Cookable now", "cookable", view),
+            filterChip("Cookable now", "cookable", view, view.cookableCount),
             filterChip("High protein", "protein", view),
             chipLink({
                 label: "Under 30 min",
@@ -193,7 +239,10 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
             : "";
     const grid =
         view.cards.length > 0
-            ? `<div class="fd-recipes-grid">${view.cards.map((card) => recipeCard(card)).join("")}</div>`
+            ? `<section class="fd-recipes-all" aria-labelledby="fd-recipes-all-heading">
+<div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-all-heading">All recipes</h2></div>
+<ul class="fd-list fd-recipes-list">${view.cards.map((card) => recipeCard(card)).join("")}</ul>
+</section>`
             : "";
     const importLinkBlock = `<details class="fd-recipes-import-link">
 <summary class="fd-recipes-import-link__summary">Import a link</summary>
@@ -202,9 +251,14 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 <button type="submit" class="fd-recipes-import-submit">Import</button>
 </form>
 </details>`;
+    const savedLabel =
+        view.totalCount === 1 ? "1 saved" : `${view.totalCount} saved`;
     return `<div class="fd-recipes-page">
 <header class="fd-recipes-header">
+<div class="fd-recipes-header__top">
 <h1 class="fd-recipes-title">Recipes</h1>
+<p class="fd-recipes-subtitle">${esc(savedLabel)}</p>
+</div>
 </header>
 ${importDuplicate}
 ${importErr}
@@ -212,7 +266,7 @@ ${importPasteBlock(view)}
 <form class="fd-recipes-search-form" id="fd-recipes-search-form" method="get" action="/recipes" data-fd-recipes-search>
 <div class="fd-recipes-search-field">
 ${fdIcon("search")}
-<input class="fd-recipes-search-input" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search recipes or paste a link" value="${q}" aria-label="Search recipes or paste a recipe link" />
+<input class="fd-recipes-search-input" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search or paste a link" value="${q}" aria-label="Search or paste a recipe link" />
 </div>
 ${filterHidden}
 <button type="submit" class="fd-sr">Search</button>

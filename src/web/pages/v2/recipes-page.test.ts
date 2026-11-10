@@ -199,6 +199,8 @@ describe("renderRecipeDetailBody", () => {
         expect(html).toContain('name="meal_type"');
         expect(html).toContain('name="deduct_stock"');
         expect(html).toContain('name="log_meals"');
+        expect(html).toContain("fd-recipe-macro-tiles");
+        expect(html).toContain("fd-dot--protein");
     });
 
     test("incomplete macros show missing-factor copy", () => {

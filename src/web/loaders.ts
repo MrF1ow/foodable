@@ -1689,7 +1689,24 @@ export async function renderRecipesListPage(
         const cards = rows.map((row, index) => ({
             recipe: row.recipe,
             flags: flags[index]!,
+            macrosPerPortion: row.macrosPerPortion,
+            missingNames: row.ingredients
+                .filter((ingredient) => {
+                    const tag = alreadyHaveTag(
+                        {
+                            quantity: ingredient.quantity,
+                            foodId: ingredient.foodId,
+                        },
+                        stock,
+                        foodsById,
+                    );
+                    return tag?.cover !== "full";
+                })
+                .map((ingredient) => ingredient.displayName),
         }));
+        const cookableCount = cards.filter(
+            (card) => card.flags.cookable,
+        ).length;
         const filtered = applyV2RecipeListFilters(cards, v2Query, v2Filter);
         return {
             status: 200,
@@ -1698,6 +1715,7 @@ export async function renderRecipesListPage(
                 query: v2Query,
                 filter: v2Filter,
                 cards: filtered,
+                cookableCount,
                 totalCount: recipes.length,
                 importError: opts.importError,
                 importPasteStep: opts.importPasteStep,

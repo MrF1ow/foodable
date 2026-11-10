@@ -533,6 +533,19 @@ const RECIPE = {
     updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+const RECIPE_LIST_MACROS = {
+    calories: 320,
+    protein_g: 48,
+    carbs_g: 62,
+    fat_g: 22,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    incomplete: false,
+    incompleteReasons: [] as string[],
+    gaps: [],
+};
+
 const RECIPE_TWO = {
     id: "r2",
     householdId: H,
@@ -1113,6 +1126,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   query: "",
                   filter: "",
                   totalCount: 2,
+                  cookableCount: 1,
                   cards: [
                       {
                           recipe: RECIPE,
@@ -1123,6 +1137,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                               missingCount: 0,
                               hasIngredients: true,
                           },
+                          macrosPerPortion: RECIPE_LIST_MACROS,
+                          missingNames: [],
                       },
                       {
                           recipe: RECIPE_TWO,
@@ -1133,6 +1149,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                               missingCount: 2,
                               hasIngredients: true,
                           },
+                          macrosPerPortion: RECIPE_LIST_MACROS,
+                          missingNames: ["Avocado", "Lime"],
                       },
                   ],
               })
@@ -1846,7 +1864,9 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings-goals" ||
                 shotBase === "settings-saved" ||
                 shotBase === "settings-export" ||
-                shotBase === "help";
+                shotBase === "help" ||
+                shotBase === "recipes" ||
+                shotBase === "recipe";
             const v2Phone = galleryFullPage ? "390,5400" : "390,844";
             const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
             await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();

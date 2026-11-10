@@ -30,6 +30,19 @@ const chrome = {
     flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
 };
 
+const MACROS = {
+    calories: 640,
+    protein_g: 48,
+    carbs_g: 62,
+    fat_g: 22,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    incomplete: false,
+    incompleteReasons: [],
+    gaps: [],
+};
+
 describe("recipes list v2 page", () => {
     test("chips link with filter query params", () => {
         const html = renderRecipesListBody({
@@ -63,6 +76,8 @@ describe("recipes list v2 page", () => {
                         missingCount: 0,
                         hasIngredients: true,
                     },
+                    macrosPerPortion: MACROS,
+                    missingNames: [],
                 },
                 {
                     recipe: { ...RECIPE, id: "r2", name: "Stew" },
@@ -70,15 +85,32 @@ describe("recipes list v2 page", () => {
                         cookable: false,
                         highProtein: false,
                         quick: false,
-                        missingCount: 3,
+                        missingCount: 2,
                         hasIngredients: true,
                     },
+                    macrosPerPortion: MACROS,
+                    missingNames: ["Avocado", "Lime"],
                 },
             ],
         });
         expect(html).toContain("You have everything");
-        expect(html).toContain("Missing 3");
+        expect(html).toContain("Missing 2 · Avocado, Lime");
+        expect(html).toContain("fd-macro--protein");
         expect(html).toContain('href="/recipes/r1"');
+        expect(html).toContain('class="fd-list fd-recipes-list"');
+    });
+
+    test("cookable chip shows count when provided", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            cards: [],
+            totalCount: 0,
+            cookableCount: 5,
+        });
+        expect(html).toContain('fd-chip__count">5</span>');
+        expect(html).toContain("Cookable now");
     });
 
     test("empty states for no recipes and no matches", () => {
@@ -132,6 +164,8 @@ describe("recipes list v2 page", () => {
                         missingCount: 0,
                         hasIngredients: false,
                     },
+                    macrosPerPortion: MACROS,
+                    missingNames: [],
                 },
             ],
         });
@@ -197,6 +231,8 @@ describe("recipes list v2 page", () => {
                     missingCount: 0,
                     hasIngredients: true,
                 },
+                macrosPerPortion: MACROS,
+                missingNames: [],
             },
             {
                 recipe: { ...RECIPE, id: "r2", name: "Oatmeal" },
@@ -207,6 +243,8 @@ describe("recipes list v2 page", () => {
                     missingCount: 1,
                     hasIngredients: true,
                 },
+                macrosPerPortion: MACROS,
+                missingNames: ["Milk"],
             },
         ];
         expect(
