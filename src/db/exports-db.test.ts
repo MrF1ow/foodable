@@ -7,6 +7,8 @@ import {
 import { describeDb } from "./testing/pg.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
+import { withActor } from "./actor.js";
+import { seedHousehold } from "./testing/fixtures.js";
 
 const pgAvailable = await findPgBin();
 
@@ -92,5 +94,47 @@ describeDb(pgAvailable !== null, "export archives db", (getCtx) => {
             select count(*)::int as n from export_archives
         `;
         expect(n).toBe(0);
+    });
+
+    test("the household token writes a member's archive, and only a member's", async () => {
+        const { sql } = getCtx();
+        const { userId: memberId, householdId } = await seedHousehold(sql);
+        const store = liveExportArchiveStore();
+        const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06]);
+        await withActor({ kind: "household", householdId }, () =>
+            store.put(memberId, zip, 3600),
+        );
+        const [row] = await sql`
+            select archive from public.export_archives where user_id = ${memberId}
+        `;
+        expect(new Uint8Array(row.archive)).toEqual(zip);
+        // userId (seeded above) belongs to no household.
+        await expect(
+            withActor({ kind: "household", householdId }, () =>
+                store.put(userId, zip, 3600),
+            ),
+        ).rejects.toThrow("not a household member");
+    });
+
+    test("a user writes their own archive under row level security", async () => {
+        const { sql } = getCtx();
+        const { userId: memberId, householdId } = await seedHousehold(sql);
+        const store = liveExportArchiveStore();
+        const zip = new Uint8Array([0x50, 0x4b]);
+        await withActor({ kind: "user", userId: memberId, householdId }, () =>
+            store.put(memberId, zip, 3600),
+        );
+        expect(
+            await withActor(
+                { kind: "user", userId: memberId, householdId },
+                () => store.read(memberId),
+            ),
+        ).toEqual(zip);
+        // Another user's archive is out of reach.
+        await expect(
+            withActor({ kind: "user", userId: memberId, householdId }, () =>
+                store.put(userId, zip, 3600),
+            ),
+        ).rejects.toThrow("row-level security");
     });
 });

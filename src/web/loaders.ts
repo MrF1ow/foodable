@@ -1,3 +1,4 @@
+import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
     dashboardAccess,
@@ -24,6 +25,12 @@ import {
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
+import { authUserCount } from "../db/users.js";
+import {
+    canSignUp,
+    getSignupPolicy,
+    signupPolicyForRoutes,
+} from "../domain/signup.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveGroceryStore } from "../db/grocery.js";
@@ -160,9 +167,22 @@ type MemberGate =
     | { status: 200; html: string; create: true };
 
 async function memberGate(viewerUserId: string): Promise<MemberGate> {
-    const viewer = await getHouseholdMembership(viewerUserId);
+    const stashed = peekSiteMembership();
+    // Reuse the middleware's lookup only for the same user and only when it
+    // found a membership: a request can create a household after the lookup.
+    const viewer =
+        stashed && stashed.userId === viewerUserId
+            ? stashed
+            : await getHouseholdMembership(viewerUserId);
     if (viewer == null) {
-        if (!(await householdExists())) {
+        const policy = signupPolicyForRoutes(getSignupPolicy());
+        const createHousehold = canSignUp(policy, {
+            userCount: await authUserCount(),
+            householdExists: await householdExists(),
+            mode: "create-household",
+            callerHasHousehold: false,
+        });
+        if (createHousehold.ok) {
             return {
                 status: 200,
                 html: createHouseholdFormHtml(),

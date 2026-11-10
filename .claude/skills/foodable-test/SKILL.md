@@ -1,7 +1,7 @@
 ---
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
-updated: "e0daf9bbf0a3059eb658d12697a11f0399fabfaf"
+updated: "22ecbd410bf71501c2f0ec637fca462f482f888d"
 watches:
     - package.json#scripts
     - docker-compose.yml
@@ -53,9 +53,11 @@ for i in $(seq 40); do curl -sf "http://127.0.0.1:$APP_PORT/health" >/dev/null &
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:$APP_PORT/"   # 200 = login page
 ```
 
-The server binds `0.0.0.0`, so while it runs the stack is reachable from the LAN: keep runs short and stop it when done. If the health check never answers, read the server.log inside your STACK dir. Open the app at `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database becomes the owner (`docs/self-hosting.md`, "First-user flow").
+For row level security, set a throwaway `foodable_app` password via `psql` and add `DATABASE_APP_URL` (that URL as `foodable_app:<pw>`).
 
-Why `bun --no-env-file src/index.ts` and not `bun run dev`: `dev` runs `gen:all` first (rewrites tracked generated files) and `--watch`, and its inner `bun` loads `.env`. Run `bun run gen:all` yourself only when you changed login copy or tokens. `bun run start` is the same server but loads `.env`.
+The server binds `0.0.0.0` (reachable from the LAN): keep runs short. If the health check never answers, read `$STACK/server.log`. Open the app at `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database becomes the owner (`docs/self-hosting.md`, "First-user flow").
+
+Not `bun run dev`: it runs `gen:all` (rewrites tracked files) and `--watch`, and its inner `bun` loads `.env`, as does `bun run start`. Run `gen:all` only after changing login copy or tokens.
 
 Stop everything:
 
@@ -68,16 +70,17 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`. Needs nothing.
-- **SQL, db adapters:** `bun --no-env-file test <file>` for tests wrapped in `describeDb`. Each file starts its own temp Postgres, so no `db:dev`. Needs `initdb` (PATH or `PG_BIN`); without it the db tests skip silently.
+- **SQL, db adapters:** `bun --no-env-file test <file>` for tests wrapped in `describeDb`. Each file starts its own temp Postgres, so no `db:dev`. Needs `initdb` (PATH or `PG_BIN`); without it the db tests skip silently. Adapters run as `foodable_app`, by default as the household owner (`src/db/testing/pg.ts`).
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. About 45 s, PASS/FAIL per check. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223: one run at a time (a "harness crashed" FAIL usually means another run holds them; wait until `ss -ltn` shows both free). No database.
 - **App look:** `bun run preview:app --shots`. About 90 s, PNGs in tmp/app-preview. Without `--shots` it serves :4787. `FOODABLE_FLAGS=ui-v2:all` shows the new shell. Needs Chromium; fixture data.
 - **Chat widgets:** `bun run harness` serves :8787 (`HARNESS_PORT` overrides) until killed, so background it. `bun --no-env-file test src/widgets.test.ts` guards assembly.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`. Only when the user asks; see below.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` uses a production copy over `railway ssh`: only when the user asks.
+- **Flag rollout:** `bun run flags:apply --dry-run` only (never apply without review; mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes).
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no fallback to `.env`'s `DATABASE_URL`). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members, and a fresh `db:dev` database has none: sign up the owner, create the household, add a second member in Household › Members (`docs/self-hosting.md`, "First-user flow"), then sign Grok in. That setup is manual, so run `e2e:agent` only when the user asks. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no fallback to `.env`'s `DATABASE_URL`). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Household › Members, then sign Grok in. That setup is manual, so run `e2e:agent` only when the user asks. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
 ## Never touch
 

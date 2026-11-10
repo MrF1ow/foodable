@@ -142,6 +142,10 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^scripts\/conventions\/skills\.test\.ts$/,
         },
         {
+            when: /^flags\/rollout\.yml$/,
+            tests: /^src\/flags-rollout\.test\.ts$/,
+        },
+        {
             when: /^docs\/fetcher\.md$/,
             tests: /^src\/fetch-safe\.test\.ts$/,
         },
@@ -161,6 +165,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         {
             when: /^src\/web\/.+\.ts$/,
             tests: /^src\/web\/(components\/field|turbo-forms)\.test\.ts$/,
+            incidental: true,
+        },
+        // actor-allowlist.test.ts scans src/**/*.ts for runAsSystem callers.
+        {
+            when: /^src\/.+\.ts$/,
+            tests: /^src\/db\/actor-allowlist\.test\.ts$/,
             incidental: true,
         },
         // notices.test.ts globs src/**/*.ts for hand-built allergen and expiry markup.

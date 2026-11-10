@@ -712,6 +712,11 @@ export function renderHouseholdSettingsPage(
             )}</li>`;
         })
         .join("");
+    // Invite codes are a ui-v2 page, for the owner only.
+    const invitesLink =
+        view.isOwner && view.chrome.flags?.uiV2 === true
+            ? `<div class="row-actions"><a class="household-invites-link" href="/settings/household/invites">Invite codes</a></div>`
+            : "";
     const rotateToken = view.isOwner
         ? `<div class="row-actions">${modalTrigger({
               target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
@@ -869,7 +874,7 @@ ${fetchRefusalListBlock(settingsView, settingsView.timezone!)}
         })}
         ${panel({
             title: "Members",
-            body: `<ul class="household-members list">${members}</ul>`,
+            body: `<ul class="household-members list">${members}</ul>${invitesLink}`,
         })}
         ${panel({
             title: "Grocery stores",

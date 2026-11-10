@@ -1,11 +1,130 @@
-import { createSafeFetcher, type SafeFetcher } from "./fetch-safe.js";
+import {
+    createSafeFetcher,
+    type FetchOutcome,
+    type SafeFetcher,
+} from "./fetch-safe.js";
 import { recipeFetchMemory as recipeFetchMemoryFromDb } from "./db/fetch-memory.js";
 import type { FetchMemoryStore } from "./domain/fetch-memory.js";
+import type { RecipeImportOutcome } from "./domain/recipe-import.js";
+import {
+    cleanRecipeLink,
+    recipeSource,
+    validateRecipeLink,
+} from "./domain/recipe-link.js";
+import { buildBackgroundFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 
+export const RECIPE_LINK_READER_PAUSED_WEB_MESSAGE =
+    "Recipe link reading is paused. Paste the recipe instead.";
+
+export const RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE =
+    "Recipe link reading is paused. Ask the user to paste the recipe text and call import_recipe_from_url again with the text parameter.";
+
+export async function recipeLinkReaderEnabled(
+    householdId: string,
+    enabled: FlagCheck = killSwitchOn,
+): Promise<boolean> {
+    return await enabled(
+        "recipe-link-reader",
+        buildBackgroundFlagContext(householdId),
+    );
+}
+
+/**
+ * A link import is paused only when there is no pasted text to import
+ * instead: pasted text never reaches the network, so it still works while
+ * the reader is switched off.
+ */
+export function linkImportPaused(args: {
+    text?: string | null;
+    readerEnabled: boolean;
+}): boolean {
+    return !args.readerEnabled && (args.text ?? "").trim() === "";
+}
+
+export function buildRecipeLinkReaderPausedOutcome(
+    url: string,
+): RecipeImportOutcome {
+    const validated = validateRecipeLink(url);
+    if (!validated.ok) {
+        return {
+            status: "paste_needed",
+            recipeId: null,
+            recipeName: null,
+            verification: null,
+            problems: [],
+            source: null,
+            unresolvedLines: [],
+            readerFailure: null,
+            fromMemory: false,
+            rememberedUntil: null,
+        };
+    }
+    const cleaned = cleanRecipeLink(validated.url);
+    const info = recipeSource(validated.url);
+    return {
+        status: "paste_needed",
+        recipeId: null,
+        recipeName: null,
+        verification: null,
+        problems: [],
+        source: {
+            kind: info.kind,
+            url: cleaned,
+            label: info.label,
+        },
+        unresolvedLines: [],
+        readerFailure: null,
+        fromMemory: false,
+        rememberedUntil: null,
+    };
+}
+
+// Per instance by design: stateless fetcher handles; one per process avoids reallocating clients.
 let singleton: SafeFetcher | null = null;
+let disabledSingleton: SafeFetcher | null = null;
+
+export type RecipeImportFetcherOptions = {
+    householdId?: string;
+    isEnabled?: FlagCheck;
+};
+
+function createDisabledRecipeImportFetcher(): SafeFetcher {
+    return {
+        robotsAllows: async () => false,
+        fetchPage: async (): Promise<FetchOutcome> => ({
+            ok: false,
+            reason: "network_error",
+            status: null,
+            detail: "recipe link reader disabled",
+        }),
+    };
+}
+
+function disabledRecipeImportFetcher(): SafeFetcher {
+    if (!disabledSingleton) {
+        disabledSingleton = createDisabledRecipeImportFetcher();
+    }
+    return disabledSingleton;
+}
+
+async function readerEnabledForHousehold(
+    opts: RecipeImportFetcherOptions | undefined,
+): Promise<boolean> {
+    if (!opts?.householdId) return true;
+    return recipeLinkReaderEnabled(
+        opts.householdId,
+        opts.isEnabled ?? killSwitchOn,
+    );
+}
 
 /** One process-wide fetcher so robots.txt cache persists across imports. */
-export function recipeImportFetcher(): SafeFetcher {
+export async function recipeImportFetcher(
+    opts?: RecipeImportFetcherOptions,
+): Promise<SafeFetcher> {
+    if (opts && !(await readerEnabledForHousehold(opts))) {
+        return disabledRecipeImportFetcher();
+    }
     if (!singleton) {
         singleton = createSafeFetcher();
     }

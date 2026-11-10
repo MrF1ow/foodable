@@ -274,7 +274,7 @@ async function productCheckForHouseholdFood(
     if (!normalized) return base;
 
     try {
-        const hit = await lookupBarcode(normalized);
+        const hit = await lookupBarcode(normalized, { householdId });
         if (hit == null) return base;
         const fromHit = productCheckFromHit(hit, food.id);
         return {
@@ -693,7 +693,9 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                         }
                     }
 
-                    const hit = await lookupBarcode(normalized);
+                    const hit = await lookupBarcode(normalized, {
+                        householdId,
+                    });
                     if (hit == null) {
                         const out: RateProductOutput = {
                             found: false,

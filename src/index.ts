@@ -4,6 +4,10 @@ import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { createOAuthRouter } from "./oauth.js";
 import {
+    startLoginSessionCleanup,
+    useLiveLoginSessionStore,
+} from "./oauth-login-sessions.js";
+import {
     authenticateBearer,
     rateLimit,
     banRepeatAuthFailures,
@@ -51,9 +55,16 @@ import { settingsRoutes } from "./web/routes/settings.js";
 import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
+import { runAsSystem } from "./db/actor.js";
+import {
+    createPostgresRateLimitStore,
+    setRateLimitStore,
+    startRateLimitSweep,
+} from "./rate-limit.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
 import { initFlags } from "./flags.js";
+import { getSignupPolicy } from "./domain/signup.js";
 import { legacyRedirects } from "./web/legacy-redirects.js";
 
 const app = new Hono();
@@ -221,6 +232,7 @@ app.use(
 // Registered after CORS so the refusal still carries Allow-Origin (a browser
 // client sees the 503 rather than an opaque CORS error) and is still access
 // logged. OPTIONS preflights never reach it: cors() answers those itself.
+// Per instance by design: graceful-shutdown gate for this process only.
 let shuttingDown = false;
 
 // Exported for src/index.test.ts. The gate's entire value is WHERE it sits — it
@@ -479,20 +491,34 @@ if (import.meta.main) {
     // Load feature flags before widgets; bounded by initFlags timeout and never
     // fails boot.
     await initFlags();
+    getSignupPolicy();
 
     // Assemble every MCP Apps widget from its source partials up front, so a
     // broken @include/partial fails fast at boot rather than on a client's
     // first tool call.
     await warmWidgets();
 
-    // Periodically delete expired meal-export files from the storage bucket.
-    startExportCleanup();
-    startFlagPinSweep();
-    startUnverifiedRecipeCleanup(
-        () => listHouseholdsForRecipeSweep(),
-        liveRecipesStore(),
+    useLiveLoginSessionStore();
+    setRateLimitStore(createPostgresRateLimitStore());
+
+    // Background jobs act for no member. A timer keeps the async context it
+    // was started in, so each job's ticks run as the system actor named here.
+    // The flag pin sweep and the restock runner name their own actors.
+    void runAsSystem("export sweep", async () => startExportCleanup());
+    void runAsSystem("login session sweep", async () =>
+        startLoginSessionCleanup(),
     );
-    startFetchMemorySweep(recipeFetchMemory());
+    void runAsSystem("rate limit sweep", async () => startRateLimitSweep());
+    startFlagPinSweep();
+    void runAsSystem("unverified recipe sweep", async () =>
+        startUnverifiedRecipeCleanup(
+            () => listHouseholdsForRecipeSweep(),
+            liveRecipesStore(),
+        ),
+    );
+    void runAsSystem("fetch memory sweep", async () =>
+        startFetchMemorySweep(recipeFetchMemory()),
+    );
     bootRestockRuns();
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));

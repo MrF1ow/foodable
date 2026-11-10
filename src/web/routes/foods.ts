@@ -13,7 +13,9 @@ foodsRoutes.get("/api/foods/search", requireMember, async (c) => {
     const member = siteMember(c);
     let offHits: FoodResult[] = [];
     try {
-        offHits = await searchFoodsByName(query);
+        offHits = await searchFoodsByName(query, [], {
+            householdId: member.householdId,
+        });
     } catch {
         offHits = [];
     }

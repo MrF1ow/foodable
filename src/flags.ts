@@ -18,8 +18,9 @@ type FlagDef = {
     removeWhen: string;
 };
 
-// Kill switches are global (no per-subject rules in Railway) until STG-13: their
-// last-known value (src/flag-pins.ts, flag_snapshot) is one value per flag.
+// Kill switches remember last-known values per subject in flag_snapshot: a
+// household-unit flag keys by household id, a user-unit flag by user id, and
+// a caller with no subject uses the global row (see src/flag-pins.ts).
 export const FLAGS = {
     "ui-v2": {
         type: "bool",
@@ -590,12 +591,15 @@ export function flagsBootLine(args: {
     return "[flags] source=fallback (no RAILWAY_TOKEN): temporary flags off, kill switches on";
 }
 
+// Per instance by design: cached FlagReader from initFlags(); each instance loads its own Railway or env snapshot at boot.
 let activeReader: FlagReader | null = null;
 let initCompleted = false;
 let initInFlight: Promise<FlagReader> | null = null;
+// Per instance by design: test hook only.
 let testReaderOverride: FlagReader | null = null;
 // Bumped by resetFlagsForTests so an init still running from before a reset
 // cannot publish its reader (or mark it ready) over the newer state.
+// Per instance by design: invalidates in-flight initFlags() after resetFlagsForTests().
 let initGeneration = 0;
 
 function stripTokenFromMessage(message: string, token?: string): string {

@@ -1441,6 +1441,7 @@ export async function sweepUnverifiedRecipes(opts: {
 
 const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Per instance by design: overlap guard; unverified recipe deletes run in Postgres.
 let sweepRunning = false;
 
 export function startUnverifiedRecipeCleanup(
@@ -1464,6 +1465,7 @@ export function startUnverifiedRecipeCleanup(
     }, SWEEP_INTERVAL_MS);
 }
 
+// Per instance by design: overlap guard; fetch-memory expiry deletes are safe concurrently in Postgres.
 let fetchMemorySweepRunning = false;
 
 /** Daily sweep of expired fetch memory rows (refusals and 404 dead links). */

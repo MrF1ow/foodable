@@ -14,6 +14,8 @@ import {
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
 import { liveAuthStore } from "./users.js";
 import { getProfile, type Profile } from "./profiles.js";
+import { deleteAllUserData } from "./nutrition.js";
+import { runAsSystem } from "./actor.js";
 import { maybeOne, rows, run } from "./sql.js";
 
 export type HouseholdMembership = {
@@ -63,7 +65,17 @@ export async function getHouseholdMembership(
     });
 }
 
+// Whether the deploy has a household at all, for the first-user gate. Asked
+// by a signed-in user who may belong to none, and row level security shows
+// such a user no household, so it asks as the system. It returns only yes or
+// no.
 export async function householdExists(): Promise<boolean> {
+    return runAsSystem("whether the deploy has a household", () =>
+        householdExistsInTx(),
+    );
+}
+
+async function householdExistsInTx(): Promise<boolean> {
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ id: string }>(
@@ -83,10 +95,31 @@ export async function householdExists(): Promise<boolean> {
     });
 }
 
+// The security definer functions below take a household id and act on it as
+// their owner, so foodable_app may not call them: each runs as the system,
+// and every caller checks first that the person may do it (the sign-up policy
+// for a new household, the owner or a manager for members, roles, ownership
+// and the bot token, the member themselves for their display name).
+
+// `allowAdditional` comes from the deploy's sign-up policy (open only), never
+// from the request.
 export async function createHouseholdForCaller(
     userId: string,
     name: string,
     displayName: string,
+    opts?: { allowAdditional?: boolean },
+): Promise<string> {
+    const allowAdditional = opts?.allowAdditional === true;
+    return runAsSystem("creating a household after the sign-up check", () =>
+        createHouseholdInTx(userId, name, displayName, allowAdditional),
+    );
+}
+
+async function createHouseholdInTx(
+    userId: string,
+    name: string,
+    displayName: string,
+    allowAdditional: boolean,
 ): Promise<string> {
     return run(async (tx) => {
         try {
@@ -96,7 +129,8 @@ export async function createHouseholdForCaller(
                     select public.create_household(
                         p_user_id => ${userId}::uuid,
                         p_name => ${name},
-                        p_display_name => ${displayName}
+                        p_display_name => ${displayName},
+                        p_allow_additional => ${allowAdditional}
                     ) as id
                 `,
                 "create household",
@@ -107,7 +141,11 @@ export async function createHouseholdForCaller(
             return data.id;
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            if (message.toLowerCase().includes("household already exists")) {
+            const lower = message.toLowerCase();
+            if (
+                lower.includes("household already exists") ||
+                lower.includes("already in a household")
+            ) {
                 throw new HouseholdAlreadyExistsError();
             }
             throw new Error(message);
@@ -179,12 +217,19 @@ function friendlyMemberError(message: string): string {
     return message;
 }
 
+// Creating a member's login, and removing it again when adding them fails,
+// writes another user's users row. Row level security keeps that row out of
+// the acting owner's reach, so it runs as the system; the routes and tools
+// that get here already checked the caller manages the household.
 function liveAuthAdmin(): AuthUserAdmin {
     const store = liveAuthStore();
     return {
         async createUser({ email, password }) {
             try {
-                const userId = await signUp(store, email, password);
+                const userId = await runAsSystem(
+                    "creating a household member's login",
+                    () => signUp(store, email, password),
+                );
                 return { ok: true, userId };
             } catch (err) {
                 const message =
@@ -207,7 +252,10 @@ function liveAuthAdmin(): AuthUserAdmin {
             }
         },
         async deleteUser(userId) {
-            const deleted = await store.deleteUser(userId);
+            const deleted = await runAsSystem(
+                "removing a household member's login after adding them failed",
+                () => store.deleteUser(userId),
+            );
             if (!deleted) {
                 throw new Error("User not found");
             }
@@ -219,19 +267,23 @@ function liveAddMemberRpc(): AddMemberRpc {
     return {
         async insertMember({ householdId, userId, displayName }) {
             try {
-                const data = await run(async (tx) => {
-                    return await maybeOne<{ id: string }>(
-                        tx,
-                        tx`
+                const data = await runAsSystem(
+                    "adding a household member after the manager check",
+                    () =>
+                        run(async (tx) => {
+                            return await maybeOne<{ id: string }>(
+                                tx,
+                                tx`
                             select public.add_household_member(
                                 p_household_id => ${householdId}::uuid,
                                 p_auth_user_id => ${userId}::uuid,
                                 p_display_name => ${displayName}
                             ) as id
                         `,
-                        "add household member",
-                    );
-                });
+                                "add household member",
+                            );
+                        }),
+                );
                 if (typeof data?.id !== "string" || data.id.length === 0) {
                     return {
                         ok: false,
@@ -392,6 +444,17 @@ export async function rotateHouseholdMcpToken(args: {
     tokenHashHex: string;
     issuedBy: string | null;
 }): Promise<string> {
+    return runAsSystem(
+        "rotating the household token after the owner check",
+        () => rotateHouseholdMcpTokenInTx(args),
+    );
+}
+
+async function rotateHouseholdMcpTokenInTx(args: {
+    householdId: string;
+    tokenHashHex: string;
+    issuedBy: string | null;
+}): Promise<string> {
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ issued_at: string }>(
@@ -431,19 +494,22 @@ export async function updateMemberDisplayName(
     userId: string,
     displayName: string,
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            await tx`
+    return runAsSystem("a member renaming themselves", () =>
+        run(async (tx) => {
+            try {
+                await tx`
                 update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
                 set display_name = ${displayName}
                 where household_id = ${householdId}
                   and user_id = ${userId}
             `;
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`Failed to update display name: ${message}`);
-        }
-    });
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed to update display name: ${message}`);
+            }
+        }),
+    );
 }
 
 // Hands the owner role to another member in one transaction. The database
@@ -454,20 +520,23 @@ export async function transferHouseholdOwnership(
     fromUserId: string,
     toUserId: string,
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            await tx`
+    return runAsSystem("an owner handing over ownership", () =>
+        run(async (tx) => {
+            try {
+                await tx`
                 select public.transfer_household_ownership(
                     p_household_id => ${householdId}::uuid,
                     p_from_user_id => ${fromUserId}::uuid,
                     p_to_user_id => ${toUserId}::uuid
                 )
             `;
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`Failed to transfer ownership: ${message}`);
-        }
-    });
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed to transfer ownership: ${message}`);
+            }
+        }),
+    );
 }
 
 // Moves a member between admin and member. The owner row is excluded in the
@@ -478,11 +547,12 @@ export async function setHouseholdMemberRole(
     userId: string,
     role: "admin" | "member",
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            const updated = await rows<{ user_id: string }>(
-                tx,
-                tx`
+    return runAsSystem("an owner changing a member's role", () =>
+        run(async (tx) => {
+            try {
+                const updated = await rows<{ user_id: string }>(
+                    tx,
+                    tx`
                     update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
                     set role = ${role}
                     where household_id = ${householdId}
@@ -490,16 +560,54 @@ export async function setHouseholdMemberRole(
                       and role <> 'owner'
                     returning user_id
                 `,
+                );
+                if (updated.length === 0) {
+                    throw new Error(
+                        "That person is not a member you can change.",
+                    );
+                }
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                if (message === "That person is not a member you can change.") {
+                    throw err;
+                }
+                throw new Error(`Failed to change role: ${message}`);
+            }
+        }),
+    );
+}
+
+/**
+ * An owner removing a member: the member's login and their own data go (as
+ * deleteAllUserData does for one's own account), the household's shared data
+ * stays. Row level security keeps another user's rows out of the owner's
+ * reach, so this runs as the system, in one transaction that first checks
+ * the user is a member of `householdId` and not its owner.
+ */
+export async function removeHouseholdMemberAccount(
+    householdId: string,
+    userId: string,
+): Promise<void> {
+    await runAsSystem("an owner removing a household member", () =>
+        run(async (tx) => {
+            const member = await maybeOne<{ role: string }>(
+                tx,
+                tx`
+                    select role
+                    from public.household_members
+                    where household_id = ${householdId}
+                      and user_id = ${userId}
+                    for update
+                `,
+                "load household member",
             );
-            if (updated.length === 0) {
-                throw new Error("That person is not a member you can change.");
+            if (!member || member.role === "owner") {
+                throw new Error(
+                    "Only a member other than the owner can be removed.",
+                );
             }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (message === "That person is not a member you can change.") {
-                throw err;
-            }
-            throw new Error(`Failed to change role: ${message}`);
-        }
-    });
+            await deleteAllUserData(userId);
+        }),
+    );
 }

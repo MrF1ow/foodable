@@ -695,5 +695,141 @@ begin
         raise exception 'weight_log_user_logged_idx missing';
     end if;
 
+    if not exists (select 1 from pg_roles where rolname = 'foodable_app') then
+        raise exception 'foodable_app role missing';
+    end if;
+
+    if exists (
+        select 1
+        from pg_roles
+        where rolname = 'foodable_app'
+          and (rolsuper or rolbypassrls)
+    ) then
+        raise exception 'foodable_app must not be superuser or bypass RLS';
+    end if;
+
+    if exists (
+        select 1
+        from pg_auth_members m
+        join pg_roles member on member.oid = m.member
+        join pg_roles granted on granted.oid = m.roleid
+        where member.rolname = 'foodable_app'
+          and granted.rolbypassrls
+    ) then
+        raise exception 'foodable_app is a member of a bypassrls role';
+    end if;
+
+    if not has_table_privilege(
+        'foodable_app', 'public.profiles', 'SELECT, INSERT, UPDATE, DELETE'
+    ) then
+        raise exception 'foodable_app missing DML on profiles';
+    end if;
+
+    if exists (
+        select 1
+        from pg_namespace n
+        where n.nspname = 'foodable_migrations'
+          and has_schema_privilege('foodable_app', n.oid, 'USAGE')
+    ) then
+        raise exception 'foodable_app must not use foodable_migrations schema';
+    end if;
+
+    -- Security definer functions take a household id and act as their owner:
+    -- the app calls them as the system, never as foodable_app.
+    if exists (
+        select 1
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.prosecdef
+          and has_function_privilege('foodable_app', p.oid, 'execute')
+    ) then
+        raise exception 'foodable_app can execute a security definer function: %', (
+            select string_agg(p.proname, ', ')
+            from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public'
+              and p.prosecdef
+              and has_function_privilege('foodable_app', p.oid, 'execute')
+        );
+    end if;
+
+    if exists (
+        select 1
+        from pg_policies
+        where schemaname = 'public'
+          and tablename = 'household_members'
+          and 'foodable_app' = any (roles)
+          and cmd <> 'SELECT'
+    ) then
+        raise exception 'foodable_app may only read household_members';
+    end if;
+
+    -- Every table with a household_id gives foodable_app a policy, except the
+    -- system-only ones named here on purpose. A listed table that gains a
+    -- policy must leave the list.
+    declare
+        missing text;
+        stale text;
+        exempt text[] := array[
+            'flag_assignments',
+            'household_mcp_tokens'
+        ];
+    begin
+        select string_agg(c.relname, ', ' order by c.relname) into missing
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_attribute a
+          on a.attrelid = c.oid and a.attname = 'household_id' and not a.attisdropped
+        where n.nspname = 'public'
+          and c.relkind in ('r', 'p')
+          and c.relname <> all (exempt)
+          and not exists (
+              select 1 from pg_policies p
+              where p.schemaname = 'public'
+                and p.tablename = c.relname
+                and 'foodable_app' = any (p.roles)
+          );
+        if missing is not null then
+            raise exception 'tables with household_id but no foodable_app policy: %', missing;
+        end if;
+
+        select string_agg(p.tablename, ', ' order by p.tablename) into stale
+        from (
+            select distinct tablename from pg_policies
+            where schemaname = 'public' and 'foodable_app' = any (roles)
+        ) p
+        where p.tablename = any (exempt);
+        if stale is not null then
+            raise exception 'exempt from the household policy check but has a foodable_app policy: %', stale;
+        end if;
+    end;
+
+    -- A person's own data: foodable_app reaches it through policies on the
+    -- user and the household's members, never without one.
+    declare
+        missing text;
+    begin
+        select string_agg(t, ', ' order by t) into missing
+        from unnest(array[
+            'meal_items',
+            'meals',
+            'nutrition_goal_days',
+            'nutrition_goals',
+            'profiles',
+            'water_log',
+            'weight_log'
+        ]) as t
+        where not exists (
+            select 1 from pg_policies p
+            where p.schemaname = 'public'
+              and p.tablename = t
+              and 'foodable_app' = any (p.roles)
+        );
+        if missing is not null then
+            raise exception 'personal tables with no foodable_app policy: %', missing;
+        end if;
+    end;
+
 end;
 $$;

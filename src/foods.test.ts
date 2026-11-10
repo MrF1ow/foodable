@@ -5,8 +5,15 @@ import {
     fetchProductsByNameFromOFF,
     formatFoodResult,
     isBarcodeCacheServable,
+    lookupBarcode,
+    ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE,
     type FoodResult,
 } from "./foods.js";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "./flags.js";
 
 const realFetch = globalThis.fetch;
 
@@ -651,6 +658,60 @@ describe("formatFoodResult", () => {
         expect(text).toContain("Coconut Milk\n");
         expect(text).not.toContain("()");
         expect(text).toContain("Calories: n/a");
+    });
+});
+
+describe("lookupBarcode off-lookups", () => {
+    test("makes zero fetch calls when isEnabled returns false", async () => {
+        let fetched = false;
+        mockFetch(() => {
+            fetched = true;
+            return jsonResponse({ status: 0 });
+        });
+        const notice = { message: null as string | null };
+        const hit = await lookupBarcode("737628064502", {
+            householdId: "hh-test",
+            isEnabled: () => false,
+            notice,
+        });
+        expect(fetched).toBe(false);
+        expect(hit).toBeNull();
+        expect(notice.message).toBe(ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE);
+    });
+
+    test("default isEnabled respects off-lookups flag via householdId", async () => {
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+        try {
+            let fetched = false;
+            mockFetch(() => {
+                fetched = true;
+                return jsonResponse({ status: 0 });
+            });
+            await lookupBarcode("737628064502", { householdId: "hh-flags" });
+            expect(fetched).toBe(false);
+        } finally {
+            resetFlagsForTests();
+        }
+    });
+});
+
+describe("fridgeBarcodeLookup kill switch", () => {
+    test("makes zero fetch calls when off-lookups is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+        try {
+            let fetched = false;
+            mockFetch(() => {
+                fetched = true;
+                return jsonResponse({ status: 0 });
+            });
+            const { fridgeBarcodeLookup } =
+                await import("./web/routes/fridge.js");
+            const hit = await fridgeBarcodeLookup("737628064502", "hh-web");
+            expect(fetched).toBe(false);
+            expect(hit).toBeNull();
+        } finally {
+            resetFlagsForTests();
+        }
     });
 });
 

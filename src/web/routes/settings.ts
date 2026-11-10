@@ -25,10 +25,18 @@ import {
 } from "../../household.js";
 import {
     createHouseholdForCaller,
+    getHouseholdMembership,
     getHouseholdConfig,
+    householdExists,
     updateHouseholdConfig,
     updateMemberDisplayName,
 } from "../../db/household.js";
+import { authUserCount } from "../../db/users.js";
+import {
+    canSignUp,
+    getSignupPolicy,
+    signupPolicyForRoutes,
+} from "../../domain/signup.js";
 import { upsertProfile } from "../../db/profiles.js";
 import { validateTz } from "../../domain/tz.js";
 import { redirectWithToast } from "../components/toast.js";
@@ -198,8 +206,20 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
             400,
         );
     }
+    const policy = signupPolicyForRoutes(getSignupPolicy());
+    const createHousehold = canSignUp(policy, {
+        userCount: await authUserCount(),
+        householdExists: await householdExists(),
+        mode: "create-household",
+        callerHasHousehold: (await getHouseholdMembership(userId)) != null,
+    });
+    if (!createHousehold.ok) {
+        return c.html(forbiddenDashboardHtml(), 403);
+    }
     try {
-        await createHouseholdForCaller(userId, name, displayName);
+        await createHouseholdForCaller(userId, name, displayName, {
+            allowAdditional: policy === "open",
+        });
     } catch (err) {
         if (err instanceof HouseholdAlreadyExistsError) {
             return c.html(forbiddenDashboardHtml(), 403);

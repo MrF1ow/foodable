@@ -1,4 +1,5 @@
-import { run } from "./sql.js";
+import { currentActor, runAsSystem } from "./actor.js";
+import { maybeOne, run, type Tx } from "./sql.js";
 
 export interface ExportArchiveStore {
     put(userId: string, archive: Uint8Array, ttlSeconds: number): Promise<void>;
@@ -20,7 +21,7 @@ export function liveExportArchiveStore(): ExportArchiveStore {
             const expiresAt = new Date(
                 Date.now() + ttlSeconds * 1000,
             ).toISOString();
-            await run(async (tx) => {
+            const upsert = async (tx: Tx) => {
                 await tx`
                     insert into export_archives (user_id, archive, expires_at)
                     values (${userId}, ${archive}, ${expiresAt}::timestamptz)
@@ -29,7 +30,35 @@ export function liveExportArchiveStore(): ExportArchiveStore {
                         created_at = now(),
                         expires_at = excluded.expires_at
                 `;
-            });
+            };
+            const actor = currentActor();
+            if (actor?.kind !== "household") {
+                await run(upsert);
+                return;
+            }
+            // The household bot token exports a member's data, but an archive
+            // row belongs to its user and row level security lets only that
+            // user write it. Write it as the system, for a member of the
+            // token's household only.
+            const householdId = actor.householdId;
+            await runAsSystem("the household token exporting a member", () =>
+                run(async (tx) => {
+                    const member = await maybeOne(
+                        tx,
+                        tx`
+                            select 1 as ok
+                            from public.household_members
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                        `,
+                        "load household member",
+                    );
+                    if (!member) {
+                        throw new Error("not a household member");
+                    }
+                    await upsert(tx);
+                }),
+            );
         },
 
         async read(userId) {

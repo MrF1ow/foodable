@@ -70,11 +70,42 @@ afterEach(() => {
 });
 
 describe("gated route harness on composed app", () => {
-    test("finds no gated routes until UI-3 mounts them", async () => {
+    test("gated invite routes redirect when ui-v2 is off", async () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
-        expect(routes).toEqual([]);
+        expect(routes.map((r) => r.path).sort()).toEqual([
+            "/settings/household/invites",
+            "/settings/household/invites",
+            "/settings/household/invites/revoke",
+        ]);
+    });
+});
+
+describe("invite revoke", () => {
+    test("a malformed invite id is a 400, not a uuid cast error", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const errors: unknown[] = [];
+        const realError = console.error;
+        console.error = (...args: unknown[]) => void errors.push(args);
+        try {
+            const res = await app.request(
+                "/settings/household/invites/revoke",
+                {
+                    method: "POST",
+                    headers: {
+                        cookie: sessionCookie(ALICE),
+                        "content-type": "application/x-www-form-urlencoded",
+                        origin: "http://localhost",
+                    },
+                    body: "invite_id=notauuid",
+                },
+            );
+            expect(res.status).toBe(400);
+        } finally {
+            console.error = realError;
+        }
+        expect(errors).toEqual([]);
     });
 });
 

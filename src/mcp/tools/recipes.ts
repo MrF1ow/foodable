@@ -53,8 +53,12 @@ import {
     importRecipeFromUrlAnalyticsOutcome,
 } from "../../domain/recipe-import.js";
 import {
+    buildRecipeLinkReaderPausedOutcome,
+    RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
     recipeFetchMemory,
     recipeImportFetcher,
+    linkImportPaused,
+    recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
@@ -151,6 +155,31 @@ export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
 });
+
+export function importRecipeFromUrlPausedStructuredContent(url: string) {
+    const outcome = buildRecipeLinkReaderPausedOutcome(url);
+    const payload = {
+        status: outcome.status,
+        recipe_id: outcome.recipeId,
+        recipe_name: outcome.recipeName,
+        verification: outcome.verification,
+        problems: wireProblems(outcome.problems),
+        source: outcome.source
+            ? {
+                  kind: outcome.source.kind,
+                  url: outcome.source.url,
+                  label: outcome.source.label,
+              }
+            : null,
+        unresolved_lines: outcome.unresolvedLines,
+        reader_failure: outcome.readerFailure,
+        message: RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
+        from_memory: outcome.fromMemory,
+        remembered_until: outcome.rememberedUntil,
+    };
+    IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
+    return payload;
+}
 
 const RECIPE_IMPORT_STATUS = z.enum([
     "imported",
@@ -731,7 +760,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         amount: args.amount,
                                         unit: args.unit,
                                     },
-                                    { lookup: lookupBarcode },
+                                    {
+                                        lookup: (barcode) =>
+                                            lookupBarcode(barcode, {
+                                                householdId,
+                                            }),
+                                    },
                                 )
                               : await addRecipeManualIngredient(store, foods, {
                                     householdId,
@@ -1465,7 +1499,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 onSimilar,
                             },
                             {
-                                lookup: lookupBarcode,
+                                lookup: (barcode) =>
+                                    lookupBarcode(barcode, {
+                                        householdId: actor.householdId,
+                                    }),
                                 transaction: (fn) => run(async () => fn()),
                             },
                         );
@@ -1681,46 +1718,63 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const household = await getHouseholdConfig(
                         actor.householdId,
                     );
-                    const outcome = await importRecipeFromUrl(
-                        {
-                            recipes: liveRecipesStore(),
-                            foods: liveFoodsStore(),
-                            fetcher: recipeImportFetcher(),
-                            memory: recipeFetchMemory(),
-                            transaction: (fn) => run(async () => fn()),
-                            readers: household.preferences.socialReaders,
-                            readerStatus: liveSocialReaderStatusStore(),
-                        },
-                        {
-                            householdId: actor.householdId,
-                            creatorId: actor.userId,
-                            url: args.url,
-                            text: args.text,
-                            credit: args.credit,
-                            textOrigin: "pasted",
-                            retry: args.retry === true,
-                        },
+                    const readerEnabled = await recipeLinkReaderEnabled(
+                        actor.householdId,
                     );
-                    const payload = {
-                        status: outcome.status,
-                        recipe_id: outcome.recipeId,
-                        recipe_name: outcome.recipeName,
-                        verification: outcome.verification,
-                        problems: wireProblems(outcome.problems),
-                        source: outcome.source
-                            ? {
-                                  kind: outcome.source.kind,
-                                  url: outcome.source.url,
-                                  label: outcome.source.label,
-                              }
-                            : null,
-                        unresolved_lines: outcome.unresolvedLines,
-                        reader_failure: outcome.readerFailure,
-                        message: importOutcomeMessage(outcome),
-                        from_memory: outcome.fromMemory,
-                        remembered_until: outcome.rememberedUntil,
-                    };
-                    IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
+                    const paused = linkImportPaused({
+                        text: args.text,
+                        readerEnabled,
+                    });
+                    const payload = !paused
+                        ? await (async () => {
+                              const outcome = await importRecipeFromUrl(
+                                  {
+                                      recipes: liveRecipesStore(),
+                                      foods: liveFoodsStore(),
+                                      fetcher: await recipeImportFetcher({
+                                          householdId: actor.householdId,
+                                      }),
+                                      memory: recipeFetchMemory(),
+                                      transaction: (fn) =>
+                                          run(async () => fn()),
+                                      readers:
+                                          household.preferences.socialReaders,
+                                      readerStatus:
+                                          liveSocialReaderStatusStore(),
+                                  },
+                                  {
+                                      householdId: actor.householdId,
+                                      creatorId: actor.userId,
+                                      url: args.url,
+                                      text: args.text,
+                                      credit: args.credit,
+                                      textOrigin: "pasted",
+                                      retry: args.retry === true,
+                                  },
+                              );
+                              const built = {
+                                  status: outcome.status,
+                                  recipe_id: outcome.recipeId,
+                                  recipe_name: outcome.recipeName,
+                                  verification: outcome.verification,
+                                  problems: wireProblems(outcome.problems),
+                                  source: outcome.source
+                                      ? {
+                                            kind: outcome.source.kind,
+                                            url: outcome.source.url,
+                                            label: outcome.source.label,
+                                        }
+                                      : null,
+                                  unresolved_lines: outcome.unresolvedLines,
+                                  reader_failure: outcome.readerFailure,
+                                  message: importOutcomeMessage(outcome),
+                                  from_memory: outcome.fromMemory,
+                                  remembered_until: outcome.rememberedUntil,
+                              };
+                              IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(built);
+                              return built;
+                          })()
+                        : importRecipeFromUrlPausedStructuredContent(args.url);
                     return {
                         content: [
                             {

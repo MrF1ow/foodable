@@ -85,6 +85,7 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
     "component-gallery": "component-gallery.html",
 };
 
+// Per instance by design: assembled widget HTML keyed by template; identical bytes on every instance for the same build.
 const cache = new Map<string, string>();
 
 async function readSrc(
@@ -172,6 +173,7 @@ export async function getWidgetHtml(key: string): Promise<string> {
 // @include markers resolve against public/widgets/src/ exactly like a
 // template's. Cached like a widget and warmed at boot.
 export const APP_CSS_SOURCE = "./public/app/app.css";
+// Per instance by design: /app.css bytes and content hash; same on every instance after warmWidgets.
 let appCss: string | undefined;
 let appCssHash: string | undefined;
 
@@ -234,6 +236,7 @@ export const APP_JS_SOURCES = [
     "./src/web/client/sw-register.js",
 ] as const;
 const TURBO_ENTRY = "./src/web/client/turbo-entry.ts";
+// Per instance by design: /app.js bundle and hash; built once per process at boot.
 let turboBundle: string | undefined;
 let appJs: string | undefined;
 let appJsHash: string | undefined;
@@ -301,6 +304,7 @@ export async function getAppJs(): Promise<string> {
 // APP_JS_SOURCES. There is no Turbo bundle here: /app.js already has it.
 export const APP_V2_CSS_DIR = "./public/app/v2";
 export const APP_V2_CSS_SOURCE = `${APP_V2_CSS_DIR}/app-v2.css`;
+// Per instance by design: /app-v2.css bytes and hash; warmed at boot.
 let appV2Css: string | undefined;
 let appV2CssHash: string | undefined;
 
@@ -323,6 +327,7 @@ export async function getAppV2Css(): Promise<string> {
 }
 
 export const APP_V2_JS_SOURCES = ["./src/web/client/v2/shell.js"] as const;
+// Per instance by design: /app-v2.js bytes and hash; warmed at boot.
 let appV2Js: string | undefined;
 let appV2JsHash: string | undefined;
 
@@ -353,6 +358,7 @@ export type WidgetViewerChrome = {
 // embedded card matches the page while the same widget served over MCP keeps
 // its neutral look. Assembled like app.css, cached and warmed at boot.
 export const EMBED_CSS_SOURCE = "./public/app/embed.css";
+// Per instance by design: embed skin CSS for dashboard widget iframes; warmed at boot.
 let embedCss: string | undefined;
 
 export async function getEmbedCss(): Promise<string> {
@@ -403,6 +409,7 @@ export function embedWidgetDocument(html: string, skin: string): string {
     return seeded.replace("</head>", () => `<style>${skin}</style></head>`);
 }
 
+// Per instance by design: dashboard embed documents keyed by widget; warmed at boot, no cross-instance sharing needed.
 const embedWidgetCache = new Map<string, { html: string; hash: string }>();
 
 export async function getEmbedWidgetHtml(

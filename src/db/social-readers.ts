@@ -6,6 +6,7 @@ import type {
 import { createMemorySocialReaderStatusStore } from "../domain/social-readers.js";
 import { rows, run } from "./sql.js";
 
+// Per instance by design: lazy Postgres adapter handle; no cached reader status in memory.
 let liveStore: SocialReaderStatusStore | null = null;
 
 export function liveSocialReaderStatusStore(): SocialReaderStatusStore {

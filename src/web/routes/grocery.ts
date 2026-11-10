@@ -140,6 +140,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     const hit = await fridgeBarcodeLookup(
                         normalizeBarcode(formText(body, "barcode")) ??
                             formText(body, "barcode"),
+                        member.householdId,
                     );
                     previewName = hit?.name ?? previewName;
                 } catch {
@@ -183,7 +184,8 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     foods,
                     member.householdId,
                     formText(body, "barcode"),
-                    fridgeBarcodeLookup,
+                    (barcode) =>
+                        fridgeBarcodeLookup(barcode, member.householdId),
                 );
                 await addGroceryFoodById(grocery, settings, foods, {
                     householdId: member.householdId,

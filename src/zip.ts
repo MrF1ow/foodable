@@ -41,6 +41,7 @@ const FLAG_UTF8 = 0x0800;
 
 const encoder = new TextEncoder();
 
+// Per instance by design: lazy CRC-32 lookup table; deterministic and identical on every instance.
 let crcTable: Uint32Array | undefined;
 
 /**

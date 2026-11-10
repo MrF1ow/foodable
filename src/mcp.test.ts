@@ -353,6 +353,14 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    // Off by default so no test reaches Open Food Facts or depends on
+    // OFF_USER_AGENT; the kill-switch tests turn it on (with fetch stubbed or
+    // the switch off) to exercise the real lookup's gate.
+    realBarcodeLookup: false,
+    lookupBarcodeCalls: [] as {
+        barcode: string;
+        options?: actualFoods.FoodLookupHooks;
+    }[],
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
@@ -670,6 +678,24 @@ mock.module("./db/household.js", () => ({
                     : member,
         );
     },
+    // The real one checks membership as the system, then runs
+    // deleteAllUserData, whose stub above records the wipe.
+    removeHouseholdMemberAccount: async (
+        householdId: string,
+        userId: string,
+    ) => {
+        const member = db.members.find(
+            (m) => m.householdId === householdId && m.userId === userId,
+        );
+        if (!member || member.role === "owner") {
+            throw new Error(
+                "Only a member other than the owner can be removed.",
+            );
+        }
+        db.accountWipes += 1;
+        db.wipedUsers.push(userId);
+        db.members = db.members.filter((m) => m.userId !== userId);
+    },
     rotateHouseholdMcpToken: async (args: {
         householdId: string;
         tokenHashHex: string;
@@ -743,7 +769,17 @@ mock.module("./db/social-readers.js", () => ({
 
 mock.module("./foods.js", () => ({
     ...actualFoods,
-    lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
+    lookupBarcode: async (
+        barcode: string,
+        options?: actualFoods.FoodLookupHooks,
+    ) => {
+        db.lookupBarcodeCalls.push({ barcode, options });
+        if (Object.hasOwn(db.barcodeFoods, barcode)) {
+            return db.barcodeFoods[barcode];
+        }
+        if (!db.realBarcodeLookup) return null;
+        return realFoods.lookupBarcode(barcode, options);
+    },
 }));
 
 mock.module("./food-search.js", () => ({
@@ -856,6 +892,8 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.realBarcodeLookup = false;
+    db.lookupBarcodeCalls = [];
     db.foodSearchHits = [];
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
@@ -4634,6 +4672,68 @@ describe("household config tools", () => {
             }
         });
 
+        test("a household-scoped off-lookups kill switch stops Open Food Facts requests", async () => {
+            const barcode = "4000000000031";
+            // A catalog food with no nutrition of its own looks its
+            // barcode up too.
+            const bare = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Bare Biscuits",
+            });
+            await db.foodsStore.insertFood(bare);
+            await db.foodsStore.setBarcode("hh-1", "4000000000048", bare.id);
+            db.realBarcodeLookup = true;
+            const offRequests: string[] = [];
+            const realFetch = globalThis.fetch;
+            const realAgent = process.env.OFF_USER_AGENT;
+            process.env.OFF_USER_AGENT = "Foodable (test@example.invalid)";
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = String(
+                    input instanceof Request ? input.url : input,
+                );
+                if (url.includes("openfoodfacts")) offRequests.push(url);
+                return new Response("{}", { status: 404 });
+            }) as typeof fetch;
+            try {
+                // Off only for this household: a deploy-wide check would
+                // still see it on and call Open Food Facts.
+                for (const [offFor, expected] of [
+                    ["hh-1", 0],
+                    ["hh-other", 2],
+                ] as const) {
+                    offRequests.length = 0;
+                    setFlagsForTests(
+                        createMemoryFlags({
+                            "off-lookups": (ctx) => ctx.household_id !== offFor,
+                        }),
+                    );
+                    await withRateProductFlag(true, async (call) => {
+                        const r = await call("rate_product", { barcode });
+                        const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            r.structuredContent,
+                        );
+                        expect(out.found).toBe(false);
+                        const byFood = await call("rate_product", {
+                            food_id: bare.id,
+                        });
+                        RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            byFood.structuredContent,
+                        );
+                    });
+                    expect({ offFor, requests: offRequests.length }).toEqual({
+                        offFor,
+                        requests: expected,
+                    });
+                }
+            } finally {
+                globalThis.fetch = realFetch;
+                if (realAgent === undefined) delete process.env.OFF_USER_AGENT;
+                else process.env.OFF_USER_AGENT = realAgent;
+                resetFlagsForTests();
+            }
+        });
+
         test("food_id returns schema output with milk allergen block", async () => {
             await addAllergen(db.rulesStore, {
                 householdId: "hh-1",
@@ -8294,6 +8394,49 @@ describe("household PAT over HTTP has no default userId", () => {
                     expect(
                         body && "text" in body && body.text.length,
                     ).toBeGreaterThan(0);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
+describe("off-lookups kill switch over HTTP", () => {
+    test.each(ERAS)(
+        "lookup_barcode surfaces the paused message (%p)",
+        async (mode) => {
+            setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+            db.realBarcodeLookup = true;
+            try {
+                await withHttpClient("u1", mode, async (client) => {
+                    const made = await client.callTool({
+                        name: "upsert_food",
+                        arguments: {
+                            name: "Paused lookup food",
+                            barcode: "737628064502",
+                            calories: 120,
+                        },
+                    });
+                    expect(made.isError).toBeFalsy();
+                    const r = await client.callTool({
+                        name: "lookup_barcode",
+                        arguments: { barcode: "737628064502" },
+                    });
+                    expect(r.isError).toBeFalsy();
+                    const text = (
+                        r.content as { type: string; text?: string }[]
+                    )
+                        .map((c) => c.text ?? "")
+                        .join("\n");
+                    expect(text).toContain("Online food lookups are paused");
+                    expect(text).toContain("Paused lookup food");
+                    expect(text).toContain("Source: household catalog");
+                    expect(text).not.toContain("Open Food Facts has no fiber");
+                    const lookupCall = db.lookupBarcodeCalls.find(
+                        (c) => c.barcode === "737628064502",
+                    );
+                    expect(lookupCall?.options?.householdId).toBe("hh-1");
                 });
             } finally {
                 resetFlagsForTests();

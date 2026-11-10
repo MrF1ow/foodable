@@ -117,6 +117,7 @@ const HIGH_EXACT = new Set([
     "src/auth-context.ts",
     "src/domain/auth.ts",
     "src/oauth.ts",
+    "src/oauth-login-sessions.ts",
     "src/oauth-redirect.ts",
     "src/web/middleware.ts",
     "src/mcp/server.ts",
@@ -265,6 +266,10 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/dashboard-data.ts": "platform",
     "src/discovery.ts": "platform",
     "src/domain/export-link.ts": "platform",
+    "src/domain/signup.ts": "platform",
+    "src/domain/signup.test.ts": "platform",
+    "src/db/invites.ts": "platform",
+    "src/web/pages/v2/settings-household-invites.ts": "web",
     "src/domain/notices.ts": "web",
     "src/domain/notice-dismissals.ts": "web",
     "src/domain/notices-for.ts": "web",
@@ -299,6 +304,9 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/version.ts": "platform",
     "src/widgets.ts": "platform",
     "bun.lock": "deps",
+    "flags/rollout.yml": "platform",
+    "src/flags-rollout.ts": "platform",
+    "scripts/flags-apply.ts": "platform",
 };
 
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [

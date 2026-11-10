@@ -4,7 +4,8 @@ import type { HouseholdConfig } from "../household.js";
 import { runRestockCheck } from "../domain/restock.js";
 import { liveRestockStore } from "./restock.js";
 import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
-import { describeDb } from "./testing/pg.js";
+import { currentActor, setFallbackActorForTests, type Actor } from "./actor.js";
+import { describeDb, householdOwnerActor } from "./testing/pg.js";
 import {
     seedFood,
     seedFridgeItem,
@@ -258,7 +259,22 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
             },
         });
         const now = new Date("2026-06-06T12:00:00.000Z");
-        await runRestockCheck(liveRestockCheckDeps(), now);
+        const deps = liveRestockCheckDeps();
+        const ownerLookupActors: Array<Actor | undefined> = [];
+        const getOwnerProfile = deps.getOwnerProfile;
+        deps.getOwnerProfile = (id) => {
+            ownerLookupActors.push(currentActor());
+            return getOwnerProfile(id);
+        };
+        // The runner names its own actors: with no test fallback, a query it
+        // left without one would throw and the household would not run.
+        setFallbackActorForTests(null);
+        try {
+            await runRestockCheck(deps, now);
+        } finally {
+            setFallbackActorForTests(householdOwnerActor);
+        }
+        expect(ownerLookupActors).toEqual([{ kind: "household", householdId }]);
         const config = await getHouseholdConfig(householdId);
         expect(config.preferences.restock.lastRunOn).toBe(runOn);
         const lines = await sql`

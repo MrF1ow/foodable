@@ -45,6 +45,7 @@ import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
 import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
+import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
 import {
     DEFAULT_RESTOCK,
     EMPTY_HOUSEHOLD_PREFERENCES,
@@ -901,6 +902,36 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 restock: { ...DEFAULT_RESTOCK, enabled: true },
             },
             ownerTimezoneLabel: "America/Los_Angeles",
+        }),
+        "settings-household-invites": renderHouseholdInvitesPage({
+            chrome,
+            flags: PREVIEW_FLAGS,
+            backHref: "/",
+            member: { ...ME, role: "owner" },
+            invites: [
+                {
+                    id: "i-active",
+                    householdId: H,
+                    createdBy: ME.userId,
+                    // Relative to the preview clock, so it always shows as active.
+                    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+                    expiresAt: new Date(
+                        Date.now() + 6 * 86_400_000,
+                    ).toISOString(),
+                    usedAt: null,
+                    usedBy: null,
+                },
+                {
+                    id: "i-used",
+                    householdId: H,
+                    createdBy: ME.userId,
+                    createdAt: "2026-02-20T12:00:00.000Z",
+                    expiresAt: "2026-02-27T12:00:00.000Z",
+                    usedAt: "2026-02-22T09:00:00.000Z",
+                    usedBy: SAM.userId,
+                },
+            ],
+            createdCode: "preview-invite-code",
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),

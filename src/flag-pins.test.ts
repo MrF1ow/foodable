@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
     PIN_TTL_MS,
     createMemoryFlagPinStore,
+    snapshotSubjectKey,
     type MemoryFlagPinStore,
+    type SnapshotSubject,
 } from "./domain/flag-pins.js";
 import {
     FLAGS,
@@ -16,7 +18,8 @@ import {
     type FlagContext,
     type RailwayFlagsSdk,
 } from "./flags.js";
-import { createFlagPinRuntime } from "./flag-pins.js";
+import { currentActor, type Actor } from "./db/actor.js";
+import { createFlagPinRuntime, systemFlagPinStore } from "./flag-pins.js";
 import { loadViewerFlags } from "./viewer-flags.js";
 import { VERSION } from "./version.js";
 
@@ -30,6 +33,8 @@ const REGISTRY = {
 const USER = "11111111-1111-4111-8111-111111111111";
 const USER_B = "22222222-2222-4222-8222-222222222222";
 const HOUSEHOLD = "33333333-3333-4333-8333-333333333333";
+const HH_SNAPSHOT: SnapshotSubject = { kind: "household", id: HOUSEHOLD };
+const USER_SNAPSHOT: SnapshotSubject = { kind: "user", id: USER };
 
 function ctxFor(overrides: Partial<FlagContext> = {}): FlagContext {
     return {
@@ -521,7 +526,7 @@ describe("kill switches", () => {
 
     test("a fresh process with only a snapshot serves the snapshot", async () => {
         const { store, railway, read } = setup();
-        store.snapshot.set("k-hh", false);
+        await store.saveSnapshot("k-hh", false, HH_SNAPSHOT);
         railway.set("k-hh", true, "STALE");
         const e = await read("k-hh");
         expect(e.value).toBe(false);
@@ -542,7 +547,9 @@ describe("kill switches", () => {
         railway.set("k-hh", true);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(1);
-        expect(store.snapshot.get("k-hh")).toBe(true);
+        expect(
+            store.snapshots.get(snapshotSubjectKey(HH_SNAPSHOT))?.get("k-hh"),
+        ).toBe(true);
         await read("k-hh");
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(1);
@@ -550,12 +557,17 @@ describe("kill switches", () => {
         railway.set("k-hh", false);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(2);
-        expect(store.snapshot.get("k-hh")).toBe(false);
+        expect(
+            store.snapshots.get(snapshotSubjectKey(HH_SNAPSHOT))?.get("k-hh"),
+        ).toBe(false);
     });
 
     test("a value equal to the loaded snapshot is not written again", async () => {
         const { store, railway, read } = setup();
-        store.snapshot.set("k-hh", true);
+        store.snapshots.set(
+            snapshotSubjectKey(HH_SNAPSHOT),
+            new Map([["k-hh", true]]),
+        );
         railway.set("k-hh", true);
         await read("k-hh");
         expect(store.calls.saveSnapshot).toBe(0);
@@ -583,6 +595,59 @@ describe("kill switches", () => {
         } finally {
             console.error = err;
         }
+    });
+
+    test("alternating households keep separate snapshots and last-known values", async () => {
+        const HH_A = "44444444-4444-4444-8444-444444444444";
+        const HH_B = "55555555-5555-4555-8555-555555555555";
+        const { store, railway, read } = setup();
+        railway.set("k-hh", false);
+        await read("k-hh", ctxFor({ household_id: HH_A }));
+        railway.set("k-hh", true);
+        await read("k-hh", ctxFor({ household_id: HH_B }));
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: HH_A,
+                })
+            ).get("k-hh"),
+        ).toBe(false);
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "household",
+                    id: HH_B,
+                })
+            ).get("k-hh"),
+        ).toBe(true);
+
+        railway.set("k-hh", false, "STALE");
+        const a = await read("k-hh", ctxFor({ household_id: HH_A }));
+        const b = await read("k-hh", ctxFor({ household_id: HH_B }));
+        expect(a.value).toBe(false);
+        expect(b.value).toBe(true);
+        expect(a.reason).toBe("LAST_KNOWN");
+        expect(b.reason).toBe("LAST_KNOWN");
+    });
+
+    test("a user-unit kill switch snapshots per user", async () => {
+        const { store, railway, read } = setup();
+        railway.set("k-user", false);
+        await read("k-user", ctxFor({ key: USER }));
+        railway.set("k-user", true);
+        await read("k-user", ctxFor({ key: USER_B }));
+        expect((await store.loadSnapshot(USER_SNAPSHOT)).get("k-user")).toBe(
+            false,
+        );
+        expect(
+            (
+                await store.loadSnapshot({
+                    kind: "user",
+                    id: USER_B,
+                })
+            ).get("k-user"),
+        ).toBe(true);
     });
 
     test("a failed snapshot load is retried, capped and cooled down", async () => {
@@ -747,5 +812,49 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "NO_MATCH" }),
         );
         expect(notReady.epoch(ctxFor()).reliable).toBe(false);
+    });
+});
+
+describe("systemFlagPinStore", () => {
+    test("every store call runs as the system", async () => {
+        const seen: Record<string, Actor | undefined> = {};
+        const note = (name: string) => {
+            seen[name] = currentActor();
+        };
+        const wrapped = systemFlagPinStore({
+            loadPins: async () => (note("loadPins"), []),
+            upsertPin: async () => note("upsertPin"),
+            clearPins: async () => note("clearPins"),
+            sweepExpired: async () => (note("sweepExpired"), 0),
+            loadSnapshot: async () => (note("loadSnapshot"), new Map()),
+            saveSnapshot: async () => note("saveSnapshot"),
+        });
+        const subject = { kind: "user", id: "u1" } as const;
+        await wrapped.loadPins(subject);
+        await wrapped.upsertPin(subject, {
+            flag: "f",
+            value: true,
+            reason: "rollout",
+            epoch: 1,
+            assignedAt: 0,
+            expiresAt: 1,
+        });
+        await wrapped.clearPins(subject);
+        await wrapped.sweepExpired(0);
+        await wrapped.loadSnapshot();
+        await wrapped.saveSnapshot("f", true);
+
+        expect(Object.keys(seen).sort()).toEqual([
+            "clearPins",
+            "loadPins",
+            "loadSnapshot",
+            "saveSnapshot",
+            "sweepExpired",
+            "upsertPin",
+        ]);
+        for (const actor of Object.values(seen)) {
+            expect(actor?.kind).toBe("system");
+        }
+        expect(currentActor()).toBeUndefined();
     });
 });

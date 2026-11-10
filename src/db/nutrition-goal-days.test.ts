@@ -10,7 +10,7 @@ import {
     upsertNutritionGoals,
 } from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
-import { seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { pgCode, setSqlForTests } from "./sql.js";
 
@@ -444,9 +444,9 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
         await upsertGoalDays(storeUserId, storeHouseholdId, ["2026-11-28"], {
             daily_calories: 1800,
         });
-        const other = await pgGoalDayStore.overrideForDate(
-            otherId,
-            "2026-11-27",
+        // The other user is outside the household, so only they can read it.
+        const other = await asUser(otherId, () =>
+            pgGoalDayStore.overrideForDate(otherId, "2026-11-27"),
         );
         expect(other!.daily_calories).toBe(9999);
     });
@@ -528,9 +528,17 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
                 daily_calories: 2000,
             },
         );
-        await upsertGoalDays(other, storeHouseholdId, ["2026-06-02"], {
-            daily_calories: 1900,
-        });
+        // Another user's row, seeded on the owner connection (the app may
+        // not stamp the store household on an outsider's row).
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id,
+                user_id,
+                date,
+                daily_calories
+            )
+            values (${storeHouseholdId}, ${other}, ${"2026-06-02"}, ${1900})
+        `;
         expect(await countGoalDays(storeUserId)).toBe(2);
         const rows = await getAllGoalDays(storeUserId);
         expect(rows.map((r) => r.date)).toEqual(["2026-06-01", "2026-06-03"]);

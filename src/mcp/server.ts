@@ -10,6 +10,8 @@ import { VERSION } from "../version.js";
 import { formatClientId } from "../client-id.js";
 import type { Context } from "hono";
 import type { AuthContext } from "../auth-context.js";
+import { currentActor, withActor } from "../db/actor.js";
+import { actorForAuthContext } from "../household-token.js";
 import {
     widgetsEnabledFromProfile,
     alcoholTrackingEnabledFromProfile,
@@ -456,17 +458,20 @@ export const handleMcp = async (c: Context) => {
     // either — nothing downstream needs it, and keeping it out of the SDK's
     // context means no handler or error path can echo it.
     const trace: McpEraTrace = {};
-    const response = await mcpHandler.fetch(c.req.raw, {
-        authInfo: {
-            token: "",
-            clientId: "",
-            scopes: [],
-            extra: {
-                auth,
-                trace,
+    const actor = currentActor() ?? (await actorForAuthContext(auth));
+    const response = await withActor(actor, () =>
+        mcpHandler.fetch(c.req.raw, {
+            authInfo: {
+                token: "",
+                clientId: "",
+                scopes: [],
+                extra: {
+                    auth,
+                    trace,
+                },
             },
-        },
-    });
+        }),
+    );
 
     // Published for the access log in src/index.ts, which runs outermost and
     // reads this after next() resolves. Set after fetch resolves, which is

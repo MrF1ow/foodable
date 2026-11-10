@@ -614,6 +614,7 @@ export async function sweepStaleExports(
     await store.sweepExpired();
 }
 
+// Per instance by design: overlap guard for export archive expiry; deletes are safe concurrently in Postgres.
 let sweepRunning = false;
 
 /** Start the periodic export-cleanup sweep. Call once at server startup. */

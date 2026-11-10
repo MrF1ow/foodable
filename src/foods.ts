@@ -20,6 +20,8 @@ import {
     type OffProductQuality,
 } from "./domain/off-quality.js";
 import { filterOffNutrientLevels } from "./domain/off-nutrient-levels.js";
+import { buildBackgroundFlagContext, buildFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 
 const OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
 // v2 /api/v2/search is filter-only (no full-text). Name search still needs the
@@ -29,6 +31,30 @@ const OFF_SEARCH_PAGE_SIZE = 20;
 const REQUEST_TIMEOUT_MS = 8_000;
 
 export const SOURCE_OFF = "openfoodfacts" as const;
+
+export const ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE =
+    "Online food lookups are paused; showing your saved foods.";
+
+export type FoodLookupOptions = {
+    householdId?: string;
+    isEnabled?: FlagCheck;
+    notice?: { message: string | null };
+};
+
+export type FoodLookupHooks = FoodLookupOptions;
+
+export async function foodLookupsOnline(
+    hooks: FoodLookupOptions,
+): Promise<boolean> {
+    const check = hooks.isEnabled ?? killSwitchOn;
+    const ctx =
+        hooks.householdId !== undefined
+            ? buildBackgroundFlagContext(hooks.householdId)
+            : buildFlagContext({
+                  auth: { kind: "user", userId: "__food_lookup__" },
+              });
+    return check("off-lookups", ctx);
+}
 // Open Food Facts is community-edited and changes often; refresh weekly.
 const OFF_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -441,8 +467,18 @@ export function isBarcodeCacheServable(
 // when Open Food Facts itself is unreachable.
 export async function lookupBarcode(
     barcode: string,
+    hooks: FoodLookupHooks = {},
 ): Promise<FoodResult | null> {
+    const online = await foodLookupsOnline(hooks);
     const cached = await getCachedFood(SOURCE_OFF, barcode, OFF_TTL_MS);
+    if (!online) {
+        if (hooks.notice) {
+            hooks.notice.message = ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;
+        }
+        if (isBarcodeCacheServable(cached)) return cached;
+        if (cached) return cached;
+        return null;
+    }
     if (isBarcodeCacheServable(cached)) return cached;
 
     // A fresh row cached before quality data existed is refetched once so the

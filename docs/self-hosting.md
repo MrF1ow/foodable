@@ -16,9 +16,51 @@ bun src/index.ts               # http://localhost:8080
 
 `GET /health` returns `ok` when the process is up.
 
+## Running more than one instance
+
+You can run several Foodable processes behind a load balancer as long as they share one `DATABASE_URL` and the same environment variables for secrets and feature flags. Each process keeps its own in-memory caches; authoritative state lives in Postgres.
+
+**Shared in Postgres (every instance sees the same data):**
+
+- Household data (meals, foods, fridge, grocery, recipes, goals, and the rest of the `public` schema)
+- OAuth login sessions (`oauth_login_sessions`), including the short-lived site approve flow
+- Rate-limit windows and authentication bans (`rate_limit_*`)
+- Sticky flag pins and kill-switch snapshots (`flag_pins`, `flag_snapshots`)
+- Recipe fetch memory (host refusals and dead links)
+- Export download archives, notices, and every other table the app writes
+
+**Per instance by design (safe to differ between processes):**
+
+- Assembled widget HTML, `/app.css`, `/app.js`, and related boot caches (same bytes on every instance for the same deployment)
+- Flag pin and snapshot **read caches** (about five minutes TTL; Postgres remains source of truth)
+- Recipe fetch **LRU** over refusals and dead links (about five minutes per entry; Postgres remains source of truth)
+- Parsed client-IP configuration (from env, fixed for the life of the process)
+- The feature-flag reader loaded at boot (Railway or `FOODABLE_FLAGS`)
+- Database connection pool (`Bun.sql`) and request-scoped transaction context
+
+`GET /robots.txt` reads the file from disk on each request; there is no in-memory cache.
+
+**Background sweeps** (export archives, login sessions, rate limits, flag pins, unverified recipes, fetch-memory expiry, automatic restock checks) start on every instance. Each sweep uses overlap guards so one process does not run two ticks at once. Deletes and expirations target Postgres rows idempotently, so concurrent sweeps on different instances are safe.
+
 ## Database
 
 Foodable talks to Postgres through `DATABASE_URL` and nothing else. Any Postgres works: Railway, Neon, RDS, a local `initdb` cluster, or the Docker Compose service below. The app owns its user accounts (`public.users`), so there is no separate auth service to run.
+
+### Row level security and `DATABASE_APP_URL`
+
+Every transaction tells Postgres who is acting: a signed-in user, the household bot token, or the system. Row level security policies (in `db/migrations/`) use that to keep each household's rows, and each person's own logs, out of anyone else's reach. They bind only the `foodable_app` role, which the migrations create without a password. The app connects with two pools:
+
+- **App pool**, `DATABASE_APP_URL`: everything done for a user or the household token. Point it at the same database as the `foodable_app` role.
+- **Owner pool**, `DATABASE_URL`: work the system does (sign-up and sign-in, OAuth, rate limits, the background sweeps), which no household boundary applies to. Migrations always run with `DATABASE_URL`.
+
+To turn it on, set the role's password once as the owner, then set the variable and redeploy:
+
+```bash
+psql "$DATABASE_URL" -c "alter role foodable_app password '<a long random password>'"
+# DATABASE_APP_URL = DATABASE_URL with foodable_app:<that password> as the user and password
+```
+
+When `DATABASE_APP_URL` is unset, both pools use `DATABASE_URL` and the policies are not enforced: that is the state before you set it, and unsetting it is the rollback. The server logs at boot which one it uses (it never prints the URL). A transaction that names no actor fails instead of running as nobody.
 
 ### How migrations work
 
@@ -152,11 +194,43 @@ bun run foods:merge-duplicates --apply  # merge exactly what the dry run listed
 
 On Railway, prefix both with `railway run`. `--json` prints the report as JSON. Each merge is its own transaction; a failed merge is reported and the rest continue, and a second `--apply` finds nothing to do. Reverting the code does not undo merges already applied.
 
+### Finding slow queries
+
+Production Postgres keeps two records of query time: the `pg_stat_statements` extension (totals per query shape) and the server log, which records every statement slower than 200 ms. Start performance work from these, not from guesses.
+
+Enable them once per database. `pg_stat_statements` must be in `shared_preload_libraries` (Railway's Postgres image already lists it; elsewhere add it and restart Postgres). The slow log needs only a reload:
+
+```sql
+create extension if not exists pg_stat_statements;
+alter system set log_min_duration_statement = '200ms';
+-- Never write bound values to the log: they include login tokens.
+alter system set log_parameter_max_length = 0;
+alter system set log_parameter_max_length_on_error = 0;
+select pg_reload_conf();
+```
+
+On Railway the database is internal-only, so run psql inside the Postgres service container (`<project-id>` is your Railway project):
+
+```bash
+# the ten query shapes with the most total time
+railway ssh -p <project-id> -s Postgres -e production -- \
+  'psql "$DATABASE_URL" -c "select calls, round(total_exec_time) as total_ms, round(mean_exec_time::numeric, 1) as mean_ms, left(query, 120) as query from pg_stat_statements order by total_exec_time desc limit 10"'
+
+# confirm the slow log is on
+railway ssh -p <project-id> -s Postgres -e production -- \
+  'psql "$DATABASE_URL" -c "show log_min_duration_statement"'
+```
+
+Slow statements appear in the Postgres service's logs as `duration: … ms  statement: …` (Railway dashboard, or `railway logs -s Postgres`). `select pg_stat_statements_reset()` starts the totals over, for example after a fix ships.
+
+The reads the household pages depend on (fridge, grocery, recipes, food catalog) have plan tests in `src/db/indexes.test.ts`: a change that makes one of them stop using its index fails CI.
+
 ## Environment variables
 
 | Variable                | Required     | Purpose                                                                                                                     |
 | ----------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`          | yes          | Postgres connection string                                                                                                  |
+| `DATABASE_APP_URL`      | recommended  | The database as `foodable_app`, so row level security applies (see [Database](#database))                                   |
 | `OAUTH_CLIENT_ID`       | yes          | MCP OAuth client id (`bun run generate-oauth-creds`)                                                                        |
 | `OAUTH_CLIENT_SECRET`   | yes          | MCP OAuth client secret                                                                                                     |
 | `SESSION_SECRET`        | production   | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). Setting it on a live deploy logs everyone out of the web app once. |
@@ -174,9 +248,15 @@ Leave `PUBLIC_ORIGIN` unset on a laptop. Then the request `Host` and `X-Forwarde
 
 ## Feature flags
 
-Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service. Every **temporary** flag is off and every **kill switch** stays on — the same behavior as today's app until a release removes a flag. Set `RAILWAY_TOKEN` to a Railway **project token** if you deploy on Railway and manage flags in the project UI (a checked-in rollout file arrives in a later release).
+`flags/rollout.yml` is the record of every flag's default and rules. Change rollout by opening a pull request that edits that file; merging to `main` runs GitHub Actions (`.github/workflows/flags.yml`) to apply the file to Railway and verify it stayed in sync.
 
-`FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `ui-v2:internal` or `ui-v2:all`. Modes:
+On Railway, set the repository secret `RAILWAY_TOKEN` to a **project token** from the project's token settings (the same kind of token the app reads at runtime). CI and `bun run flags:apply` use it to list and update flags in that project.
+
+Locally, with `RAILWAY_TOKEN` exported, run `bun run flags:apply --dry-run` to see what Railway would change without applying. Add `--check` to exit with an error when the file and Railway disagree (the scheduled drift job on `main` does only this).
+
+**Emergency kill:** flip the flag off in Railway first (`railway flag set <name> false`), then update `flags/rollout.yml` in a follow-up pull request. Until the file matches Railway, the drift check fails — that is intentional.
+
+Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service at runtime. Every **temporary** flag is off and every **kill switch** stays on. `FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `ui-v2:internal` or `ui-v2:all`. Modes:
 
 - `all` — on for every request.
 - `off` — off for every request (this is how you disable a kill switch locally).
@@ -243,6 +323,7 @@ Set the same variables as `.env.example` on the app service:
 | Variable                | Required                | Purpose                                                                                     |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`          | yes                     | Reference the database service: `${{Postgres.DATABASE_URL}}` (private network)              |
+| `DATABASE_APP_URL`      | recommended             | The private database URL with `foodable_app` and its password as the user                   |
 | `OAUTH_CLIENT_ID`       | yes                     | MCP OAuth client id (`bun run generate-oauth-creds`)                                        |
 | `OAUTH_CLIENT_SECRET`   | yes                     | MCP OAuth client secret                                                                     |
 | `SESSION_SECRET`        | yes                     | Site cookie HMAC (min 32 chars; `generate-oauth-creds`). New value logs web users out once. |
@@ -268,13 +349,13 @@ Use a single-label name such as `food.example.com`. A deeper name (`app.food.exa
 
 ## First-user flow
 
-One deploy, one Postgres database, one household.
+One deploy, one Postgres database. Sign-up policy is deploy config: set optional `FOODABLE_SIGNUP_POLICY` to `closed` (default), `invite`, or `open`. Unknown values log a warning and fall back to `closed`. With `closed`, the first user creates the household and further public sign-up stays closed. With `invite`, owners create single-use codes in Settings › Household › Invite codes (v2 shell, `ui-v2` flag); a new person enters the code once on the sign-in page and joins that household as a member. Codes are stored hashed, work once, and expire after 7 days; a sign-up that fails part way leaves the code unused and no account behind. On the sign-in page an existing account with a wrong password always gets "Wrong email, username or password.", a new email with no code is told a code is needed, and a new email with a bad, expired or used code is told so. With `open`, more than one household can exist: after sign-up a user without a household sees the create-household form. A person belongs to at most one household under every policy, and closed and invite deploys stay at exactly one household even when two creations race. `open` is experimental and must not be the default.
 
 1. Open the site at `/` (or complete MCP OAuth at `/authorize`). There is no Google button. The first visit, while no user accounts exist, is email and password.
-2. That first successful `/approve` **signs up** the first user. After any user exists, `/approve` only signs in. A second email is refused with "Wrong email, username or password."; a wrong password does not fall through to sign-up. If the database cannot answer (timeout, rate limit, outage) the page says to try again in a minute instead of blaming the password.
-3. The first user is not in a household yet. `/` shows **Create household** (household name and your name) instead of the app. Submit it. That RPC creates the singleton household and the caller as **owner**. A second create fails.
-4. Later people exist only when the owner adds them. Members and the household bot token are managed only in **Household › Members** (`/settings/household`) — add people there (email or username plus password). Members sign in with those credentials; a username member types just the username (it is stored as `<username>@household.invalid`). They cannot rotate the household token or add people unless the owner makes them an **admin**. Every member can edit their own allergens, dislikes and rules under **Rules**.
+2. That first successful `/approve` **signs up** the first user. After any user exists, `/approve` only signs in. With `closed`, a second email is refused with "Wrong email, username or password."; a wrong password does not fall through to sign-up. If the database cannot answer (timeout, rate limit, outage) the page says to try again in a minute instead of blaming the password.
+3. The first user is not in a household yet. `/` shows **Create household** (household name and your name) instead of the app. Submit it. That RPC creates the household and the caller as **owner**. Under `closed` and `invite` a second create fails.
+4. Under `closed`, later people exist only when the owner adds them (under `invite` they can also join with a code). Members and the household bot token are managed only in **Household › Members** (`/settings/household`) — add people there (email or username plus password). Members sign in with those credentials; a username member types just the username (it is stored as `<username>@household.invalid`). They cannot rotate the household token or add people unless the owner makes them an **admin**. Every member can edit their own allergens, dislikes and rules under **Rules**.
 5. The owner can make a member an admin (or back), hand ownership to another member, or remove a person, from that person's **Manage** dialog in Household › Members. An admin manages the household beside the owner: name, location, stores, store rules, everyone's rules, and adding people. Roles, removal, transfer and the bot token stay with the owner, who keeps ownership when they promote someone. Removing someone erases their login, tokens and personal nutrition history (the same path as `delete_account`); shared fridge, grocery, recipe and food data stays. If the owner deletes their account without handing over, an admin becomes owner, or else the member with the oldest account (trigger `household_members_promote_on_owner_leave`). An owner who is the last member leaves an empty household behind.
-6. Public registration stays closed. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path.
+6. With the default `closed` policy, public registration stays closed after the founder exists. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path.
 
 Connect an agent at `https://your-host/mcp` with the household account.

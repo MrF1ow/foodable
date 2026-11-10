@@ -1,0 +1,33 @@
+# The record of every flag in Railway: its default and its rules.
+# Rules always serve true; the default is the off value when no rule matches.
+# The internal: list expands to key == "<id>" for each id when a flag uses rule internal.
+# Emergency kills are flipped in Railway first, then recorded here until the drift job passes.
+
+internal:
+    - "842478ef-82e8-41c9-b86a-5ce7f5644a0d"
+
+flags:
+    ui-v2:
+        default: false
+        rules: []
+    off-lookups:
+        default: true
+        rules: []
+    recipe-link-reader:
+        default: true
+        rules: []
+    barcode-camera:
+        default: true
+        rules: []
+    restock-runner:
+        default: true
+        rules: []
+    mcp-rate-product:
+        default: false
+        rules: []
+    mcp-household-digest:
+        default: false
+        rules: []
+    flags-epoch:
+        default: 0
+        rules: []
