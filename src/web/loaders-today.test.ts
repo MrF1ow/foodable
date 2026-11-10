@@ -107,6 +107,7 @@ function fakeDeps(over: Partial<LoadTodayDeps>): LoadTodayDeps {
         loadHouseholdNotices: async () => emptyNotices(),
         householdToday: async () => "2026-03-03",
         todayInTz: () => "2026-03-03",
+        listFridgeLocations: async () => [],
         ...over,
     };
 }

@@ -42,6 +42,9 @@ import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
+import { renderTodayRail } from "./today-rail.js";
+import type { Notice } from "../../../domain/notices.js";
+import type { FridgeItem } from "../../../domain/fridge.js";
 
 export type TodayPageChrome = AppChromeBase & {
     subjectLabel?: string;
@@ -259,6 +262,22 @@ function gaugeMarkup(view: TodayView): Html {
     );
 }
 
+function macroDeltaHint(
+    actual: number | null,
+    goal: number | null,
+): { text: string; over: boolean } | null {
+    if (goal == null || !Number.isFinite(goal)) return null;
+    const eaten = actual != null && Number.isFinite(actual) ? actual : 0;
+    const delta = goal - eaten;
+    if (delta > 0) {
+        return { text: `${Math.round(delta)} g to go`, over: false };
+    }
+    if (delta < 0) {
+        return { text: `${Math.round(Math.abs(delta))} g over`, over: true };
+    }
+    return null;
+}
+
 function macroBarRow(
     key: MacroKey | "calories",
     label: string,
@@ -279,7 +298,11 @@ function macroBarRow(
     const dotHtml = String(
         dot(key === "calories" ? "calories" : key, { size: "sm" }),
     );
-    return `<article class="fd-today-macro fd-today-macro--${key}"><span class="fd-today-macro__label">${dotHtml}${esc(label)}</span><span class="fd-today-macro__nums${over}"><span class="fd-today-macro__actual">${esc(actualFmt)}</span>${goal != null ? `<span class="fd-today-macro__goal">${esc(goalText)}</span>` : ""}</span><div class="fd-today-macro__track" style="--fd-bar-h:${BAR_SPECS.today.height}px"><span class="fd-today-macro__fill" style="width:${pct}%"></span>${marker}</div></article>`;
+    const hint = key !== "calories" ? macroDeltaHint(actual, goal) : null;
+    const hintHtml = hint
+        ? `<p class="fd-today-macro__hint${hint.over ? " fd-today-macro__hint--over" : ""}">${esc(hint.text)}</p>`
+        : "";
+    return `<article class="fd-today-macro fd-today-macro--${key}"><span class="fd-today-macro__label">${dotHtml}${esc(label)}</span><span class="fd-today-macro__nums${over}"><span class="fd-today-macro__actual">${esc(actualFmt)}</span>${goal != null ? `<span class="fd-today-macro__goal">${esc(goalText)}</span>` : ""}</span><div class="fd-today-macro__track" style="--fd-bar-h:${BAR_SPECS.today.height}px"><span class="fd-today-macro__fill" style="width:${pct}%"></span>${marker}</div>${hintHtml}</article>`;
 }
 
 function macroBarsMarkup(view: TodayView): Html {
@@ -295,6 +318,55 @@ function macroBarsMarkup(view: TodayView): Html {
         );
     });
     return raw(`<div class="fd-today-macros">${rows.join("")}</div>`);
+}
+
+function alsoBarFill(actual: number | null, goal: number | null): number {
+    if (goal == null || goal <= 0) return 0;
+    const v = actual != null && Number.isFinite(actual) ? actual : 0;
+    return Math.min(100, Math.round((v / goal) * 100));
+}
+
+function alsoTrackedColumn(opts: {
+    key: string;
+    label: string;
+    nums: string;
+    pct: number;
+}): string {
+    return `<article class="fd-today-also-col fd-today-also-col--${opts.key}"><span class="fd-today-also-col__label">${esc(opts.label)}</span><span class="fd-today-also-col__nums">${opts.nums}</span><div class="fd-today-also-col__track"><span class="fd-today-also-col__fill" style="width:${opts.pct}%"></span></div></article>`;
+}
+
+function fmtAlsoWater(
+    ml: number,
+    goalMl: number | null,
+): { nums: string; pct: number } {
+    const liters = ml / 1000;
+    const lit =
+        Math.abs(liters - Math.round(liters)) < 0.05
+            ? String(Math.round(liters))
+            : (Math.round(liters * 10) / 10).toFixed(1);
+    if (goalMl == null || goalMl <= 0) {
+        return { nums: esc(`${lit} L`), pct: 0 };
+    }
+    const goalL =
+        Math.abs(goalMl / 1000 - Math.round(goalMl / 1000)) < 0.05
+            ? String(Math.round(goalMl / 1000))
+            : (Math.round((goalMl / 1000) * 10) / 10).toFixed(1);
+    return {
+        nums: `${esc(lit)} / ${esc(goalL)} L`,
+        pct: alsoBarFill(ml, goalMl),
+    };
+}
+
+function fmtAlsoGrams(
+    actual: number | null,
+    goal: number | null,
+): { nums: string; pct: number } {
+    const a = fmtWholeGrams(actual);
+    if (goal == null || goal <= 0) return { nums: esc(`${a} g`), pct: 0 };
+    return {
+        nums: `${esc(a)} / ${esc(String(Math.round(goal)))} g`,
+        pct: alsoBarFill(actual, goal),
+    };
 }
 
 function alsoTrackedMarkup(view: TodayView): Html {
@@ -320,9 +392,53 @@ function alsoTrackedMarkup(view: TodayView): Html {
                 `<span class="fd-today-also__item${i === 0 ? " fd-today-also__item--water" : ""}">${bit}</span>`,
         )
         .join("");
-    return raw(
-        `<div class="fd-today-also"><span class="fd-today-also__line">${line}</span><a class="fd-today-also__link" href="/trends" aria-label="Open trends">${iconChevronRight()}</a></div>`,
-    );
+    const phone = `<div class="fd-today-also fd-today-also--phone"><span class="fd-today-also__line">${line}</span><a class="fd-today-also__link" href="/trends" aria-label="Open trends">${iconChevronRight()}</a></div>`;
+
+    const water = fmtAlsoWater(totals.water_ml, goals?.daily_water_ml ?? null);
+    const cols = [
+        alsoTrackedColumn({
+            key: "water",
+            label: "Water",
+            nums: water.nums,
+            pct: water.pct,
+        }),
+        alsoTrackedColumn({
+            key: "fiber",
+            label: "Fiber",
+            ...fmtAlsoGrams(totals.fiber_g, goals?.daily_fiber_g ?? null),
+        }),
+        alsoTrackedColumn({
+            key: "sugar",
+            label: "Sugar",
+            ...fmtAlsoGrams(totals.sugar_g, goals?.daily_sugar_g ?? null),
+        }),
+        alsoTrackedColumn({
+            key: "caffeine",
+            label: "Caffeine",
+            nums:
+                goals?.daily_caffeine_mg != null && goals.daily_caffeine_mg > 0
+                    ? `${esc(fmtWholeMg(totals.caffeine_mg))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
+                    : esc(`${fmtWholeMg(totals.caffeine_mg)} mg`),
+            pct: alsoBarFill(
+                totals.caffeine_mg,
+                goals?.daily_caffeine_mg ?? null,
+            ),
+        }),
+    ];
+    if (view.alcoholTrackingEnabled) {
+        cols.push(
+            alsoTrackedColumn({
+                key: "alcohol",
+                label: "Alcohol",
+                ...fmtAlsoGrams(
+                    totals.alcohol_g,
+                    goals?.daily_alcohol_g ?? null,
+                ),
+            }),
+        );
+    }
+    const desktop = `<div class="fd-today-also-grid fd-today-also--desk">${cols.join("")}</div>`;
+    return raw(`${phone}${desktop}`);
 }
 
 function rowMacros(row: MealRow): Macros {
@@ -410,7 +526,16 @@ function mealSectionHead(
         rows.length > 0
             ? `<span class="fd-today-section__kcal">${esc(fmtKcal(sub.calories))}</span>`
             : "";
-    return `<div class="fd-today-section__head"><h2 id="fd-today-${mealType}" class="fd-today-section__title">${esc(MEAL_SECTION_LABEL[mealType].toUpperCase())}</h2>${macroHtml}${kcal}</div>`;
+    const meta =
+        macroHtml || kcal
+            ? `<span class="fd-today-section__head-meta">${macroHtml}${macroHtml && kcal ? `<span class="fd-today-section__head-sep" aria-hidden="true"> · </span>` : ""}${kcal}</span>`
+            : "";
+    return `<div class="fd-today-section__head"><h2 id="fd-today-${mealType}" class="fd-today-section__title">${esc(MEAL_SECTION_LABEL[mealType])}</h2>${meta}</div>`;
+}
+
+function mealSectionAddRow(readOnly: boolean): string {
+    if (readOnly) return "";
+    return `<a class="fd-today-section__add-food" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${iconPlus()}<span>Add food</span></a>`;
 }
 
 function mealsMarkup(data: TodayPageData): Html {
@@ -447,7 +572,8 @@ function mealsMarkup(data: TodayPageData): Html {
                 : readOnly
                   ? `<p class="fd-today-section__empty">Nothing yet</p>`
                   : `<div class="fd-today-section__empty-row"><span class="fd-today-section__empty">Nothing yet</span><a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
-        return `<section class="fd-today-section" aria-labelledby="fd-today-${mealType}">${head}${list}</section>`;
+        const addFood = mealSectionAddRow(readOnly);
+        return `<section class="fd-today-section" aria-labelledby="fd-today-${mealType}">${head}${list}${addFood}</section>`;
     });
     return raw(sections.join(""));
 }
@@ -468,8 +594,11 @@ export function renderTodayBody(data: TodayPageData): Html {
                           ? { [data.openEditMealId]: data.editError }
                           : undefined,
               });
+    const summary = `<section class="fd-today-summary" aria-label="Day summary"><div class="fd-today-summary__layout">${gaugeMarkup(view)}<div class="fd-today-summary__side">${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</div></div></section>`;
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>`;
+    const rail = renderTodayRail(data);
     return raw(
-        `<div class="fd-today-page">${banner}${headerMarkup(data)}${weekStripMarkup(data)}<section class="fd-today-summary" aria-label="Day summary">${gaugeMarkup(view)}${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</section><div class="fd-today-meals">${mealsMarkup(data)}</div>${sheets}</div>`,
+        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}</div>`,
     );
 }
 
@@ -698,6 +827,11 @@ export function buildPreviewTodayView(today: string): TodayView {
     const waterMl = 1600;
     return {
         date: today,
+        householdDate: today,
+        fridgeLocationNames: new Map([
+            ["loc-fridge", "Fridge"],
+            ["loc-freezer", "Freezer"],
+        ]),
         timezone: "UTC",
         preferredWeightUnit: "kg",
         alcoholTrackingEnabled: true,
@@ -710,6 +844,106 @@ export function buildPreviewTodayView(today: string): TodayView {
         expiringFridge: [],
         attention: { count: 0, notices: [], noticeFoods: new Map() },
         weight: { latest: null, series30d: [] },
+    };
+}
+
+const PREVIEW_FRIDGE: FridgeItem[] = [
+    {
+        id: "fr-salmon",
+        householdId: "hh",
+        locationId: "loc-fridge",
+        kind: "food",
+        displayName: "Salmon",
+        quantity: { amount: 1, unit: "lb" },
+        foodId: "f-salmon",
+        expiresOn: "2026-11-08",
+    },
+    {
+        id: "fr-spinach",
+        householdId: "hh",
+        locationId: "loc-fridge",
+        kind: "food",
+        displayName: "Baby <spinach>",
+        quantity: { amount: 0.5, unit: "bag" },
+        foodId: "f-spinach",
+        expiresOn: "2026-11-09",
+    },
+];
+
+function previewAttentionNotices(today: string): {
+    count: number;
+    notices: Notice[];
+    noticeFoods: Map<string, { genericFoodId: string | null }>;
+} {
+    const notices: Notice[] = [
+        {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: { kind: "fridge_item", id: "fr-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                amount: 6,
+                unit: "each",
+                expiresOn: today,
+                daysLeft: 0,
+                onGroceryList: "no",
+            },
+        },
+        {
+            code: "recipe.no_nutrition",
+            severity: "warn",
+            subject: {
+                kind: "recipe_ingredient",
+                id: "ing-lemon",
+                recipeId: "r1",
+            },
+            related: [],
+            params: { name: "Lemon", foodId: "f-lemon" },
+        },
+    ];
+    return {
+        count: notices.length,
+        notices,
+        noticeFoods: new Map([["f-lemon", { genericFoodId: null }]]),
+    };
+}
+
+function previewWeightSeries(): TodayView["weight"] {
+    const series30d = [
+        { date: "2026-10-12", weight_g: 83_000 },
+        { date: "2026-10-20", weight_g: 82_600 },
+        { date: "2026-11-01", weight_g: 82_300 },
+        { date: "2026-11-09", weight_g: 82_600 },
+    ];
+    return {
+        latest: {
+            id: "w1",
+            user_id: "preview",
+            weight_g: 82_600,
+            logged_at: "2026-11-09T08:00:00.000Z",
+            created_at: "2026-11-09T08:00:00.000Z",
+            idempotency_key: null,
+            notes: null,
+        },
+        series30d,
+    };
+}
+
+/** App-preview fixture with rail cards populated (expiring, notices, weight). */
+export function buildPreviewTodayViewWithRail(today: string): TodayView {
+    return {
+        ...buildPreviewTodayView(today),
+        preferredWeightUnit: "lb",
+        expiringFridge: PREVIEW_FRIDGE.map((item) => ({
+            ...item,
+            expiresOn:
+                item.id === "fr-salmon"
+                    ? shiftLocalDate(today, 1)
+                    : shiftLocalDate(today, 2),
+        })),
+        attention: previewAttentionNotices(today),
+        weight: previewWeightSeries(),
     };
 }
 

@@ -1959,6 +1959,18 @@ try {
 
     await goto("/");
     await setMarker();
+    const v2TodayDesk = await ev<string>(
+        `document.querySelector(".fd-today-rail") ? getComputedStyle(document.querySelector(".fd-today-rail")).display : "missing"`,
+    );
+    const v2TodayGrid = await ev<string>(
+        `document.querySelector(".fd-today-page") ? getComputedStyle(document.querySelector(".fd-today-page")).display : "missing"`,
+    );
+    record(
+        "v2 today at 1440px: two-column layout and right-hand rail",
+        v2TodayDesk === "flex" && v2TodayGrid === "grid",
+        { v2TodayDesk, v2TodayGrid, ex: drain() },
+    );
+
     const modK = process.platform === "darwin" ? 4 : 2;
     await send("Input.dispatchKeyEvent", {
         type: "rawKeyDown",

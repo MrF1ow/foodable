@@ -8,14 +8,22 @@ import {
 } from "../../../domain/today.js";
 import { shiftLocalDate } from "../../../domain/tz.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
+import { noticeHref } from "../../components/notices.js";
+import type { Notice } from "../../../domain/notices.js";
 import {
     buildPreviewTodayPageData,
     buildPreviewTodayView,
+    buildPreviewTodayViewWithRail,
     parseTodayDateParam,
     renderTodayBody,
     renderTodayV2Page,
     todayHref,
 } from "./today.js";
+import {
+    formatExpiryWhen,
+    renderTodayRail,
+    weightChange30d,
+} from "./today-rail.js";
 
 describe("parseTodayDateParam", () => {
     test("invalid date falls back to today", () => {
@@ -181,6 +189,150 @@ describe("renderTodayV2Page", () => {
         const html = String(renderTodayBody(data));
         expect(html).toContain("fd-row__sub");
         expect(html).toContain("Chicken breast");
+    });
+
+    test("desktop rail escapes expiring item names", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).not.toContain("<spinach>");
+        expect(rail).toContain("&lt;spinach&gt;");
+        expect(rail).toContain("Salmon");
+        expect(rail).toContain('href="/kitchen/fridge"');
+    });
+
+    test("notice action href matches needs-attention routes", () => {
+        const notice: Notice = {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: { kind: "fridge_item", id: "fr-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                amount: 6,
+                unit: "each",
+                expiresOn: "2026-11-10",
+                daysLeft: 0,
+                onGroceryList: "no",
+            },
+        };
+        const href = noticeHref(notice, { from: "/", foods: new Map() });
+        const view = buildPreviewTodayView("2026-11-10");
+        view.attention = {
+            count: 1,
+            notices: [notice],
+            noticeFoods: new Map(),
+        };
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 1, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(href).toBe("/kitchen/fridge/items/fr-eggs/add-to-grocery");
+        expect(rail).toContain("/kitchen/fridge/items/fr-eggs/add-to-grocery");
+    });
+
+    test("weight card uses lb and includes sparkline", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        view.preferredWeightUnit = "lb";
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("fd-today-weight__chart");
+        expect(rail).toContain('fd-today-weight__unit">lb</');
+        expect(rail).toContain("182.1");
+        expect(weightChange30d(view.weight.series30d, "lb")).not.toBeNull();
+    });
+
+    test("rail empty states and this week placeholder", () => {
+        const view = buildPreviewTodayView("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("Nothing expiring soon");
+        expect(rail).toContain("Nothing needs attention");
+        expect(rail).toContain("Nothing planned");
+        expect(rail).toContain("No weigh-ins yet");
+    });
+
+    test("peer view shows weight only", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+                subjectLabel: "Sam",
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("fd-today-card--weight");
+        expect(rail).not.toContain("Use soon");
+        expect(rail).not.toContain("Needs attention");
+        expect(rail).not.toContain("This week");
+    });
+
+    test("meal section titles are title case in markup", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toContain('fd-today-section__title">Breakfast</');
+        expect(html).not.toContain(">BREAKFAST</");
+    });
+
+    test("phone layout keeps fd-today-top and section gap wrapper", () => {
+        const body = String(renderTodayBody(data));
+        expect(body).toContain("fd-today-top");
+        expect(body).toContain("fd-today-main");
+        const page = body.indexOf("fd-today-page");
+        const main = body.indexOf("fd-today-main");
+        const header = body.indexOf("fd-today-header");
+        const week = body.indexOf("fd-today-week");
+        expect(page).toBeLessThan(main);
+        expect(main).toBeLessThan(header);
+        expect(header).toBeLessThan(week);
+    });
+
+    test("body keeps phone structure with rail wrapper", () => {
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const body = String(renderTodayBody(data));
+        expect(body).toContain("fd-today-main");
+        expect(body).toContain("fd-today-week");
+        expect(body).toContain("fd-today-gauge");
+        expect(body).toContain("fd-today-rail");
+    });
+
+    test("formatExpiryWhen labels tomorrow", () => {
+        expect(formatExpiryWhen("2026-11-10", "2026-11-11")).toBe("Tomorrow");
     });
 
     test("empty day shows log action", () => {

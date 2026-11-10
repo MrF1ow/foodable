@@ -14,6 +14,7 @@ import {
     type WeightEntry,
 } from "../db/nutrition.js";
 import { getProfile } from "../db/profiles.js";
+import { liveFridgeStore } from "../db/fridge.js";
 import { householdToday } from "../db/restock.js";
 import {
     buildDailyBuckets,
@@ -45,7 +46,7 @@ import {
 } from "../domain/tz.js";
 import type { WeightUnit } from "../domain/units.js";
 import { loadHouseholdNotices } from "./attention.js";
-import type { FridgeItem } from "../domain/fridge.js";
+import type { FridgeItem, FridgeLocation } from "../domain/fridge.js";
 import type { Notice } from "../domain/notices.js";
 
 export type TodayWeightPoint = {
@@ -61,7 +62,10 @@ export type TodayAttention = {
 
 export type TodayView = {
     date: string;
+    /** Household calendar date when the view was built (expiring-soon list). */
+    householdDate: string;
     timezone: string;
+    fridgeLocationNames: ReadonlyMap<string, string>;
     preferredWeightUnit: WeightUnit;
     alcoholTrackingEnabled: boolean;
     totals: TodayDayTotals;
@@ -94,6 +98,9 @@ export type LoadTodayDeps = {
     loadHouseholdNotices: typeof loadHouseholdNotices;
     householdToday: typeof householdToday;
     todayInTz: typeof todayInTz;
+    listFridgeLocations: (
+        householdId: string,
+    ) => Promise<readonly FridgeLocation[]>;
 };
 
 const defaultTodayDeps = (): LoadTodayDeps => ({
@@ -109,6 +116,8 @@ const defaultTodayDeps = (): LoadTodayDeps => ({
     loadHouseholdNotices,
     householdToday,
     todayInTz,
+    listFridgeLocations: (householdId) =>
+        liveFridgeStore().listLocations(householdId),
 });
 
 function tzFromProfile(
@@ -249,9 +258,16 @@ export async function loadToday(
     const preferredWeightUnit =
         profile?.preferred_weight_unit === "lb" ? "lb" : "kg";
 
+    const fridgeLocations = await deps.listFridgeLocations(householdId);
+    const fridgeLocationNames = new Map(
+        fridgeLocations.map((loc) => [loc.id, loc.name]),
+    );
+
     return {
         date: targetDate,
+        householdDate,
         timezone: tz,
+        fridgeLocationNames,
         preferredWeightUnit,
         alcoholTrackingEnabled: profile?.alcohol_tracking_enabled === true,
         totals,

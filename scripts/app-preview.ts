@@ -73,6 +73,7 @@ import {
 } from "../src/web/pages/v2/trends.js";
 import {
     buildPreviewTodayPageData,
+    buildPreviewTodayViewWithRail,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
@@ -627,9 +628,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         .filter((row) => row.genericFoodId === "f-eggs")
         .sort((a, b) => a.name.localeCompare(b.name));
     const nutrition = V2
-        ? renderTodayV2Page(
-              buildPreviewTodayPageData(chrome as never, "2026-11-07"),
-          )
+        ? renderTodayV2Page({
+              ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+              view: buildPreviewTodayViewWithRail("2026-11-10"),
+          })
         : await renderNutritionPage({
               access: { ok: true, mode: "self", viewer: ME, subject: ME },
               members: [ME, SAM],
