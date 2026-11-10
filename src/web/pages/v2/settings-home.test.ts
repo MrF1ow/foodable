@@ -33,8 +33,15 @@ describe("settings home v2", () => {
         expect(html).toContain('href="/settings/account"');
         expect(html).toContain('href="/settings/display"');
         expect(html).toContain('href="/settings/help"');
+        expect(html).toContain('href="/settings/goals"');
+        expect(html).toContain('href="/settings/saved"');
+        expect(html).toContain('href="/settings/export"');
         for (const label of SETTINGS_V2_MENU_LABELS) {
-            expect(html).toContain(label);
+            const needle =
+                label === "Saved foods & recipes"
+                    ? "Saved foods &amp; recipes"
+                    : label;
+            expect(html).toContain(needle);
         }
         expect(html).not.toContain("nav subnav");
         expect(html).toContain("fd-account-chip");

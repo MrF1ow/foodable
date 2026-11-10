@@ -138,6 +138,11 @@ import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
+import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
+import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
+import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
+import { getGoalsForDate } from "../db/nutrition.js";
+import { todayInTz } from "../domain/tz.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
 function alcoholOf(
@@ -665,6 +670,106 @@ export async function renderSettingsDisplayV2Route(
         html: renderSettingsDisplayV2Page({
             chrome,
             storedTheme: stored,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsGoalsV2Route(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    const tz = profile?.timezone?.trim() || "UTC";
+    const goalDate = todayInTz(tz);
+    const goals = await getGoalsForDate(viewerUserId, goalDate);
+    const weightUnit = preferredWeightUnitFromProfile(profile) ?? "kg";
+    const alcohol = alcoholTrackingEnabledFromProfile(profile)
+        ? (preferredDrinkUnitFromProfile(profile) ?? "us")
+        : null;
+    return {
+        status: 200,
+        html: renderSettingsGoalsV2Page({
+            chrome,
+            goals,
+            goalDate,
+            weightUnit,
+            alcohol,
+        }),
+    };
+}
+
+export async function renderSettingsSavedV2Route(
+    viewerUserId: string,
+    opts: {
+        error?: string;
+        openModalId?: string;
+        q?: string;
+    } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const store = liveFoodsStore();
+    const foods = await store.listFoods(householdId);
+    const aliasMap = await store.listAllAliases(householdId);
+    const withAliases = foods.map((food) => ({
+        ...food,
+        aliases: aliasMap.get(food.id) ?? [],
+    }));
+    const q = opts.q?.trim() ?? "";
+    let filteredFoods = withAliases;
+    let recipes = await listRecipes(liveRecipesStore(), householdId);
+    if (q) {
+        const searchable = withAliases.filter((f) => !f.archivedAt);
+        const matched = matchFoodsByWords(q, searchable, aliasMap);
+        const keepIds = new Set<string>();
+        for (const food of matched) {
+            keepIds.add(food.id);
+            if (food.genericFoodId) keepIds.add(food.genericFoodId);
+        }
+        for (const food of searchable) {
+            if (food.genericFoodId && keepIds.has(food.genericFoodId)) {
+                keepIds.add(food.id);
+            }
+        }
+        filteredFoods = withAliases.filter((f) => keepIds.has(f.id));
+        const lower = q.toLowerCase();
+        recipes = recipes.filter((r) => r.name.toLowerCase().includes(lower));
+    }
+    const noticeResult = await loadHouseholdNotices(householdId);
+    return {
+        status: 200,
+        html: renderSettingsSavedV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            foods: filteredFoods,
+            recipes,
+            searchQuery: q,
+            error: opts.error,
+            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+export async function renderSettingsExportV2Route(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsExportV2Page({
+            chrome,
             error: opts.error,
         }),
     };

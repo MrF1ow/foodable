@@ -57,6 +57,7 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { safeReturnPath } from "../usual-products-path.js";
 import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import {
     recipeIngredientRetryFields,
@@ -796,6 +797,14 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const recipeId = c.req.param("id");
+    const body = await c.req.parseBody();
+    const from = formText(body, "from");
+    // Settings paths are not generic back targets; the Saved page is the one
+    // place besides Recipes that deletes a recipe.
+    const returnTo =
+        from === "/settings/saved"
+            ? "/settings/saved"
+            : safeReturnPath(from, "/recipes");
     try {
         await deleteRecipe(liveRecipesStore(), member.householdId, recipeId, {
             userId,
@@ -807,7 +816,7 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/recipes", "recipes.deleted");
+    return redirectWithToast(c, returnTo, "recipes.deleted");
 });
 
 recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {

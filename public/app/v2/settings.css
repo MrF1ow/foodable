@@ -116,7 +116,17 @@
 }
 
 .fd-settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    flex-wrap: wrap;
     margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-head-actions {
+    display: flex;
+    gap: var(--fd-s-6);
 }
 
 .fd-settings-title {
@@ -377,6 +387,85 @@
     color: var(--accent-text);
     font-weight: 600;
     text-decoration: none;
+}
+
+.fd-settings-export-lead {
+    margin: 0 0 var(--fd-s-12);
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+    line-height: 1.45;
+}
+
+.fd-settings-goals-date,
+.fd-settings-goals-note {
+    margin: 0 0 var(--fd-s-12);
+    font-size: 0.875rem;
+}
+
+.fd-settings-goals-empty,
+.fd-settings-saved-empty {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+}
+
+.fd-settings-saved-search {
+    display: flex;
+    gap: var(--fd-s-6);
+    align-items: stretch;
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-saved-search .fd-search {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Linked products wrap onto their own line under the parent food. */
+.fd-settings-saved-products {
+    flex-basis: 100%;
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 var(--fd-s-12);
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+    border-left: 2px solid var(--line);
+    margin-left: var(--fd-s-6);
+    margin-top: var(--fd-s-6);
+}
+
+.fd-settings-saved-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    padding: var(--fd-s-10) 0;
+}
+
+.fd-settings-saved-row__title {
+    margin: 0;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.fd-settings-saved-row__meta {
+    margin: var(--fd-s-4) 0 0;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.fd-settings-saved-actions {
+    display: flex;
+    gap: var(--fd-s-6);
+    flex-shrink: 0;
+}
+
+.fd-settings-saved-merge-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
 }
 
 .fd-settings-form--inline {

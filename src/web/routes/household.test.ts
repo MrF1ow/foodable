@@ -961,6 +961,39 @@ describe("household usual products and items routes", () => {
         expect(r.headers.get("location")).toBe("/settings/household/items");
     });
 
+    test("POST items archive keeps nutrition and archives (v2 saved delete)", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        try {
+            const store = db.foodsStore;
+            const food = await store.insertFood(
+                newFood({
+                    householdId: HH,
+                    kind: "food",
+                    name: "Eggs",
+                    defaultUnit: "each",
+                    gramsPerEach: 50,
+                    calories: 155,
+                    proteinG: 13,
+                    allergens: ["egg"],
+                }),
+            );
+            const r = await post(
+                `/settings/household/items/${food.id}/archive`,
+                "",
+            );
+            expect(r.status).toBe(303);
+            expect(r.headers.get("location")).toBe("/settings/saved");
+            const row = await store.getFood(HH, food.id);
+            expect(row?.archivedAt).not.toBeNull();
+            expect(row?.calories).toBe(155);
+            expect(row?.proteinG).toBe(13);
+            expect(row?.gramsPerEach).toBe(50);
+            expect(row?.allergens).toEqual(["egg"]);
+        } finally {
+            resetFlagsForTests();
+        }
+    });
+
     test("POST items edit invalid patch leaves usual unchanged", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const r = await post(

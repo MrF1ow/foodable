@@ -77,6 +77,9 @@ import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-displa
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
+import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
+import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -975,6 +978,23 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       viewer: ME as never,
                       todayHref: `/?member=${SAM.userId}`,
                   }),
+                  "settings-goals": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_TRENDS_GOALS,
+                      goalDate: "2026-11-09",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                  }),
+                  "settings-saved": renderSettingsSavedV2Page({
+                      chrome,
+                      foods: catalog.map((f) => ({
+                          ...f,
+                          aliases: [] as string[],
+                      })),
+                      recipes: [RECIPE, RECIPE_TWO],
+                      searchQuery: "",
+                  }),
+                  "settings-export": renderSettingsExportV2Page({ chrome }),
               }
             : {}),
         household: renderHouseholdSettingsPage({
@@ -1499,6 +1519,9 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings-display" ||
                 shotBase === "settings-household-v2" ||
                 shotBase === "settings-household-v2-member" ||
+                shotBase === "settings-goals" ||
+                shotBase === "settings-saved" ||
+                shotBase === "settings-export" ||
                 shotBase === "help";
             const v2Phone = galleryFullPage ? "390,5400" : "390,844";
             const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";

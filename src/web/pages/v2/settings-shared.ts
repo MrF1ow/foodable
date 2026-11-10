@@ -8,7 +8,14 @@ import { APP_PATHS } from "../../route-map.js";
 
 /** Which settings screen is active (menu highlight and layout). */
 export type SettingsV2Section =
-    "home" | "account" | "display" | "help" | "household";
+    | "home"
+    | "account"
+    | "display"
+    | "help"
+    | "household"
+    | "goals"
+    | "saved"
+    | "export";
 
 type MenuRow = {
     id: Exclude<SettingsV2Section, "home">;
@@ -20,6 +27,13 @@ const SETTINGS_MENU: readonly MenuRow[] = [
     { id: "account", label: "Account", href: "/settings/account" },
     { id: "household", label: "Household", href: APP_PATHS.settingsHousehold },
     { id: "display", label: "Display", href: "/settings/display" },
+    { id: "goals", label: "Goals", href: "/settings/goals" },
+    {
+        id: "saved",
+        label: "Saved foods & recipes",
+        href: "/settings/saved",
+    },
+    { id: "export", label: "Export data", href: "/settings/export" },
     { id: "help", label: "Help", href: APP_PATHS.settingsHelp },
 ];
 
@@ -106,9 +120,12 @@ export function renderSettingsV2Page(layout: SettingsV2Layout): string {
     });
 }
 
-export function settingsPageHeader(title: string): Html {
+export function settingsPageHeader(title: string, actions?: string): Html {
+    const extra = actions
+        ? `<div class="fd-settings-head-actions">${actions}</div>`
+        : "";
     return raw(
-        `<header class="fd-settings-head"><h1 class="fd-settings-title">${esc(title)}</h1></header>`,
+        `<header class="fd-settings-head"><h1 class="fd-settings-title">${esc(title)}</h1>${extra}</header>`,
     );
 }
 

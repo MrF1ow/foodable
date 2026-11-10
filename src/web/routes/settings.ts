@@ -8,10 +8,16 @@ import {
     renderSettingsAccountPage,
     renderSettingsAccountV2Route,
     renderSettingsDisplayV2Route,
+    renderSettingsExportV2Route,
+    renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
     renderSettingsHomeRoute,
     renderSettingsHouseholdRoute,
+    renderSettingsSavedV2Route,
 } from "../loaders.js";
+import { liveExportArchiveStore } from "../../db/exports.js";
+import { exportAllData } from "../../domain/export.js";
+import { checkRateLimit } from "../../rate-limit.js";
 import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
 import { viewerFlagsFor } from "../attention.js";
 import { gatedRoute } from "../gated.js";
@@ -96,6 +102,68 @@ settingsRoutes.get(
     async (c) => {
         const page = await renderSettingsDisplayV2Route(c.get("userId"));
         return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/goals",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsGoalsV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/saved",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsSavedV2Route(c.get("userId"), {
+            q: c.req.query("q"),
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/export",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsExportV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.post(
+    "/settings/export",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const limited = await checkRateLimit(userId);
+        if (!limited.allowed) {
+            return c.text("Too many requests. Try again in a minute.", 429, {
+                "Retry-After": String(limited.retryAfterSeconds ?? 60),
+            });
+        }
+        const origin = getBaseUrl(c);
+        const result = await exportAllData(
+            userId,
+            liveExportArchiveStore(),
+            origin,
+        );
+        if (!result.downloadPath) {
+            const page = await renderSettingsExportV2Route(userId, {
+                error: "Nothing to export yet.",
+            });
+            // A non-member gets the membership page with its own status.
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect(result.downloadPath, 303);
     },
 );
 

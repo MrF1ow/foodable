@@ -87,7 +87,9 @@ import {
     renderUsualProductsListPage,
     renderUsualProductsPickerPage,
     renderPossibleDuplicatesRoute,
+    renderSettingsSavedV2Route,
 } from "../loaders.js";
+import { viewerFlagsFor } from "../attention.js";
 import {
     dismissNotice,
     type NoticesForDeps,
@@ -106,6 +108,7 @@ import {
 } from "../pages/household.js";
 import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
+import { savedFoodDeleteSheetId } from "../pages/v2/settings-saved.js";
 import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
@@ -124,7 +127,7 @@ import {
 } from "../../db/invites.js";
 import { renderHouseholdInvitesPage } from "../pages/v2/settings-household-invites.js";
 import { getProfile } from "../../db/profiles.js";
-import { viewerChromeWithAttention, viewerFlagsFor } from "../attention.js";
+import { viewerChromeWithAttention } from "../attention.js";
 import { settingsBackHref } from "../settings-back.js";
 import { getBaseUrl } from "../../url.js";
 import { forbiddenDashboardHtml } from "../loaders.js";
@@ -193,7 +196,17 @@ householdRoutes.post(
 );
 
 householdRoutes.get("/settings/household/items", requireSiteUser, async (c) => {
-    const page = await renderSettingsFoodsPage(c.get("userId"), {
+    const userId = c.get("userId");
+    const member = await getHouseholdMembership(userId);
+    if (member && (await viewerFlagsFor(member)).uiV2) {
+        const q = c.req.query("q");
+        const target = q
+            ? `/settings/saved?q=${encodeURIComponent(q)}`
+            : "/settings/saved";
+        // toast: none
+        return c.redirect(target, 302);
+    }
+    const page = await renderSettingsFoodsPage(userId, {
         linkProductId: c.req.query("link_product"),
         from: c.req.query("from") ?? "/settings/household/items",
     });
@@ -1044,6 +1057,14 @@ function formOptionalNutrient(
     return Number(raw);
 }
 
+async function savedCatalogPath(userId: string): Promise<string> {
+    const member = await getHouseholdMembership(userId);
+    if (member && (await viewerFlagsFor(member)).uiV2) {
+        return "/settings/saved";
+    }
+    return "/settings/household/items";
+}
+
 async function foodsFormError(
     userId: string,
     err: unknown,
@@ -1055,6 +1076,14 @@ async function foodsFormError(
             : err instanceof Error
               ? err.message
               : "Could not update foods.";
+    const member = await getHouseholdMembership(userId);
+    if (member && (await viewerFlagsFor(member)).uiV2) {
+        const page = await renderSettingsSavedV2Route(userId, {
+            error: message,
+            openModalId,
+        });
+        return { html: page.html, status: 400 as const };
+    }
     const page = await renderSettingsFoodsPage(userId, {
         error: message,
         openModalId,
@@ -1086,8 +1115,36 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/settings/household/items",
+            await savedCatalogPath(userId),
             "settings.foods.merged",
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/items/:id/archive",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("id");
+        const store = liveFoodsStore();
+        try {
+            await updateFood(store, member.householdId, foodId, {
+                archived: true,
+            });
+        } catch (err) {
+            const page = await foodsFormError(
+                userId,
+                err,
+                savedFoodDeleteSheetId(foodId),
+            );
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            await savedCatalogPath(userId),
+            "settings.foods.updated",
         );
     },
 );
@@ -1194,7 +1251,7 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/settings/household/items",
+            await savedCatalogPath(userId),
             "settings.foods.updated",
         );
     },
