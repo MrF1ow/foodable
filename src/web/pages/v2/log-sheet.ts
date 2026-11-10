@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../../html.js";
-import { formatLocalDateTime } from "../../../domain/tz.js";
+import { formatLocalDateTime, weekdayInTz } from "../../../domain/tz.js";
+import { fromGrams, type WeightUnit } from "../../../domain/units.js";
 import { unitHintsForLog } from "../../../domain/log-search.js";
 import {
     formatLogMacroGrams,
@@ -15,7 +16,12 @@ import { rowList, searchResultRow } from "../../components/v2/rows.js";
 
 export const FD_LOG_SEARCH_SHEET_ID = "fd-log-search";
 export const FD_LOG_AMOUNT_SHEET_ID = "fd-log-amount";
+export const FD_LOG_QUICK_CAL_SHEET_ID = "fd-log-quick-cal";
+export const FD_LOG_WEIGH_IN_SHEET_ID = "fd-log-weigh-in";
 export const FD_LOG_POST = "/log";
+export const FD_LOG_QUICK_POST = "/log/quick";
+export const FD_LOG_WATER_POST = "/log/water";
+export const FD_LOG_WEIGHT_POST = "/log/weight";
 
 const MEAL_TYPES = [
     { value: "breakfast", label: "Breakfast" },
@@ -51,6 +57,26 @@ export type LogAmountPrefill = {
     source?: string | null;
 };
 
+export type QuickCaloriesPrefill = {
+    calories?: number;
+    protein_g?: number;
+    carbs_g?: number;
+    fat_g?: number;
+    description?: string;
+    meal_type?: string;
+    logged_at?: string;
+};
+
+export type WeighInPrefill = {
+    weight?: number;
+    unit?: WeightUnit;
+    /** Unit for the “Last:” subtitle (viewer preference). */
+    preferredUnit?: WeightUnit;
+    logged_at?: string;
+    lastWeightG?: number | null;
+    lastLoggedAt?: string | null;
+};
+
 export type RenderLogSheetsOpts = {
     timezone: string;
     /** Reopen the amount sheet after a validation error. */
@@ -59,6 +85,13 @@ export type RenderLogSheetsOpts = {
     searchOpenOnLoad?: boolean;
     amount?: LogAmountPrefill;
     amountError?: string;
+    searchError?: string;
+    quickCaloriesOpenOnLoad?: boolean;
+    quickCalories?: QuickCaloriesPrefill;
+    quickCaloriesError?: string;
+    weighInOpenOnLoad?: boolean;
+    weighIn?: WeighInPrefill;
+    weighInError?: string;
     /** Preview-only: static empty search sheet with recents. */
     previewSearch?: "empty" | "results";
     /** Preview-only: pre-filled search query (e.g. "chick"). */
@@ -82,6 +115,24 @@ function todayTimeLabel(tz: string): string {
     const ap = h >= 12 ? "PM" : "AM";
     const h12 = h % 12 || 12;
     return `Today ${h12}:${m} ${ap}`;
+}
+
+/** 24-hour “Today 7:10” label for weigh-in time chips. */
+export function todayTimeLabel24(tz: string): string {
+    const time = formatLocalDateTime(new Date(), tz).slice(11, 16);
+    return `Today ${time}`;
+}
+
+export function weighInLastSubtitle(
+    lastWeightG: number | null | undefined,
+    lastLoggedAt: string | null | undefined,
+    unit: WeightUnit,
+    tz: string,
+): string | undefined {
+    if (lastWeightG == null || !lastLoggedAt) return undefined;
+    const text = fromGrams(lastWeightG, unit).toFixed(1);
+    const day = weekdayInTz(lastLoggedAt, tz);
+    return `Last: ${text} ${unit} · ${day}`;
 }
 
 export function guessMealType(tz: string): string {
@@ -167,6 +218,134 @@ const PREVIEW_RECENTS: Array<{
         payload: { name: "Banana", food_id: "f-banana", kcal: 105 },
     },
 ];
+
+function quickIconBolt(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2L4.5 13.5H11L9 22l10.5-12.5H13.5L13 2z"/></svg>`;
+}
+
+function quickIconWater(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3c-4.5 6-7 9.8-7 13a7 7 0 1 0 14 0c0-3.2-2.5-7-7-13z"/></svg>`;
+}
+
+function quickIconScale(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 20h12M7 20v-2h10v2M8.5 18V10a3.5 3.5 0 0 1 7 0v8"/><path d="M10 8h4"/></svg>`;
+}
+
+function quickActionsHtml(): string {
+    const water = `<form class="fd-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250" /><input type="hidden" name="return_to" value="/" /><button type="submit" class="fd-quick-tile"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconWater()}</span><span class="fd-quick-tile__label">Water +250 ml</span></button></form>`;
+    const cal = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconBolt()}</span><span class="fd-quick-tile__label">Quick calories</span></button>`;
+    const weight = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScale()}</span><span class="fd-quick-tile__label">Weigh in</span></button>`;
+    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}</div>`;
+}
+
+function macroField(
+    id: string,
+    name: string,
+    label: string,
+    value: number | string | undefined = "",
+): string {
+    const v = escapeHtml(
+        value === undefined || value === "" ? "" : String(value),
+    );
+    return `<label class="fd-log-macro-field"><span class="fd-log-macro-field__label">${escapeHtml(label)}</span><input class="fd-log-macro-field__input" id="${escapeHtml(id)}" type="number" name="${escapeHtml(name)}" value="${v}" min="0" step="0.1" inputmode="decimal" /></label>`;
+}
+
+function logQuickCaloriesSheet(opts: RenderLogSheetsOpts): string {
+    const tz = opts.timezone;
+    const prefill = opts.quickCalories;
+    const meal =
+        prefill?.meal_type &&
+        MEAL_TYPES.some((t) => t.value === prefill.meal_type)
+            ? prefill.meal_type!
+            : guessMealType(tz);
+    const calories = prefill?.calories ?? 350;
+    const description = prefill?.description ?? "Quick calories";
+    const formId = `${FD_LOG_QUICK_CAL_SHEET_ID}-form`;
+    const error = opts.quickCaloriesError
+        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.quickCaloriesError)}</p>`
+        : "";
+    const body = `${error}<form id="${formId}" class="fd-log-quick-cal-form" method="post" action="${FD_LOG_QUICK_POST}">
+<input type="hidden" name="return_to" value="/" />
+<div class="fd-log-kcal-hero"><input class="fd-log-kcal-input" id="fd-log-kcal" type="number" name="calories" value="${escapeHtml(String(calories))}" min="1" step="1" inputmode="numeric" required aria-label="Calories" /><span class="fd-log-kcal-suffix">kcal</span></div>
+<div class="fd-log-macro-grid">${macroField("fd-log-protein", "protein_g", "Protein g", prefill?.protein_g ?? "")}${macroField("fd-log-carbs", "carbs_g", "Carbs g", prefill?.carbs_g ?? "")}${macroField("fd-log-fat", "fat_g", "Fat g", prefill?.fat_g ?? "")}</div>
+<label class="fd-log-name-field"><span class="fd-log-name-field__label">Name</span><input class="fd-log-name-field__input" id="fd-log-quick-name" type="text" name="description" value="${escapeHtml(description)}" autocomplete="off" /></label>
+${mealChoiceHtml("meal_type", meal, "fd-log-meals-quick")}
+</form>`;
+    const submitLabel =
+        MEAL_SUBMIT_LABEL[meal] ?? MEAL_SUBMIT_LABEL.dinner ?? "Log";
+    const actions = `<button type="submit" class="fd-btn fd-btn--primary fd-log-submit" form="${formId}" data-fd-quick-cal-submit>${escapeHtml(submitLabel)}</button>`;
+    return sheet({
+        id: FD_LOG_QUICK_CAL_SHEET_ID,
+        kind: "edit",
+        title: "Quick calories",
+        subtitle: "Log without picking a food",
+        body,
+        actions,
+        openOnLoad: opts.quickCaloriesOpenOnLoad,
+        closeLabel: "Close",
+    }).replace(
+        'class="fd-sheet fd-sheet--edit" id="fd-log-quick-cal"',
+        'class="fd-sheet fd-sheet--edit fd-log-quick-cal-sheet" id="fd-log-quick-cal" data-fd-sheet-focus="panel"',
+    );
+}
+
+function logWeighInSheet(opts: RenderLogSheetsOpts): string {
+    const tz = opts.timezone;
+    const prefill = opts.weighIn ?? {};
+    const unit = prefill.unit ?? "kg";
+    const weight = prefill.weight ?? (unit === "lb" ? 165 : 75);
+    const usePickTime = Boolean(prefill.logged_at);
+    const loggedAt = prefill.logged_at
+        ? datetimeLocalValue(prefill.logged_at)
+        : defaultLoggedAtLocal(tz);
+    const todayLabel = todayTimeLabel24(tz);
+    const subtitle = weighInLastSubtitle(
+        prefill.lastWeightG,
+        prefill.lastLoggedAt,
+        prefill.preferredUnit ?? unit,
+        tz,
+    );
+    const error = opts.weighInError
+        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.weighInError)}</p>`
+        : "";
+    const formId = `${FD_LOG_WEIGH_IN_SHEET_ID}-form`;
+    const body = `${error}<form id="${formId}" class="fd-log-weigh-in-form" method="post" action="${FD_LOG_WEIGHT_POST}">
+<input type="hidden" name="return_to" value="/" />
+<input type="hidden" name="unit" value="${escapeHtml(unit)}" />
+${stepper({
+    name: "weight",
+    label: "Weight",
+    value: weight,
+    min: 0.1,
+    step: 0.1,
+    unit,
+    id: "fd-log-weight-value",
+    className: "fd-log-stepper",
+}).toString()}
+<fieldset class="fd-choice-group fd-log-time">
+<legend class="fd-sr">When</legend>
+<div class="fd-chips fd-log-time-chips">
+<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_weigh_time_mode" value="now"${usePickTime ? "" : " checked"} data-fd-weigh-time-mode><span class="fd-chip__face"><span class="fd-chip__label" data-fd-weigh-today-label>${escapeHtml(todayLabel)}</span></span></label>
+<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_weigh_time_mode" value="pick"${usePickTime ? " checked" : ""} data-fd-weigh-time-mode><span class="fd-chip__face"><span class="fd-chip__label">Pick a time</span></span></label>
+</div>
+<input class="fd-log-time-input" id="fd-weigh-time" type="datetime-local" name="logged_at" value="${escapeHtml(loggedAt)}" required aria-label="Time"${usePickTime ? "" : " hidden disabled"} />
+</fieldset>
+</form>`;
+    const actions = `<button type="submit" class="fd-btn fd-btn--primary fd-log-submit" form="${formId}">Save</button>`;
+    return sheet({
+        id: FD_LOG_WEIGH_IN_SHEET_ID,
+        kind: "edit",
+        title: "Weigh in",
+        subtitle,
+        body,
+        actions,
+        openOnLoad: opts.weighInOpenOnLoad,
+        closeLabel: "Close",
+    }).replace(
+        'class="fd-sheet fd-sheet--edit" id="fd-log-weigh-in"',
+        'class="fd-sheet fd-sheet--edit fd-log-weigh-in-sheet" id="fd-log-weigh-in" data-fd-sheet-focus="panel"',
+    );
+}
 
 function recentChipsHtml(items: typeof PREVIEW_RECENTS): string {
     if (items.length === 0) return "";
@@ -323,7 +502,10 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
     const emptyHidden = showResults ? " hidden" : "";
     const resultsHidden = showResults ? "" : " hidden";
     const previewRecents = preview === "empty" ? PREVIEW_RECENTS : [];
-    const emptyBody = `${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>`;
+    const searchError = opts.searchError
+        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
+        : "";
+    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml()}`;
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" data-fd-log-result-list></ul>`;
@@ -476,7 +658,7 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
 
 /** Search and amount sheets included once in the v2 shell. */
 export function renderLogSheets(opts: RenderLogSheetsOpts): string {
-    return `${logSearchSheet(opts)}${logAmountSheet(opts)}`;
+    return `${logSearchSheet(opts)}${logAmountSheet(opts)}${logQuickCaloriesSheet(opts)}${logWeighInSheet(opts)}`;
 }
 
 /** For tests: unit chips offered on the amount sheet for the given factors. */

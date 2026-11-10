@@ -153,6 +153,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/log-macro-format.ts": "nutrition",
     "src/domain/log-macro-format.test.ts": "nutrition",
     "src/meal-write.ts": "nutrition",
+    "src/weight-write.ts": "nutrition",
     "src/domain/meals.ts": "nutrition",
     "src/domain/insights.ts": "nutrition",
     "src/domain/layout.ts": "nutrition",

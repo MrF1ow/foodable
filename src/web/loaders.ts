@@ -92,6 +92,10 @@ import {
     recipeNotices,
 } from "../domain/recipes.js";
 import { orderCards } from "../domain/layout.js";
+import { validateTz } from "../domain/tz.js";
+import { fromGrams } from "../domain/units.js";
+import { getLatestWeight } from "../db/nutrition.js";
+import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
 import {
     renderNutritionPage,
     viewerChromeFromProfile,
@@ -123,6 +127,30 @@ function alcoholOf(
 ): AlcoholDisplay {
     if (!alcoholTrackingEnabledFromProfile(profile)) return null;
     return preferredDrinkUnitFromProfile(profile) ?? "us";
+}
+
+/** Latest weight prefill for the member who is logging (always the viewer). */
+export async function weighInPrefillForUser(
+    userId: string,
+): Promise<WeighInPrefill> {
+    const [profile, latest] = await Promise.all([
+        getProfile(userId),
+        getLatestWeight(userId),
+    ]);
+    const unit = preferredWeightUnitFromProfile(profile) ?? "kg";
+    const start =
+        latest != null
+            ? fromGrams(latest.weight_g, unit)
+            : unit === "lb"
+              ? 165
+              : 75;
+    return {
+        weight: start,
+        unit,
+        preferredUnit: unit,
+        lastWeightG: latest?.weight_g ?? null,
+        lastLoggedAt: latest?.logged_at ?? null,
+    };
 }
 
 export type DashboardView = NutritionView;
@@ -199,7 +227,10 @@ export async function renderDashboardPage(
     requestedMember: string | undefined,
     error?: string,
     openModalId?: string,
-    v2LogSheet?: import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
+    v2LogSheet?: Omit<
+        import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
+        "timezone"
+    >,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -225,17 +256,36 @@ export async function renderDashboardPage(
     const alcohol = alcoholOf(subjectProfile);
     const members = await listHouseholdMembers(access.viewer.householdId);
 
-    const [summary, goals, trends, weight] = await Promise.all([
+    const subjectTz =
+        subjectProfile?.timezone && validateTz(subjectProfile.timezone)
+            ? subjectProfile.timezone
+            : "UTC";
+    const [summary, goals, trends, weight, weighInPrefill] = await Promise.all([
         getNutritionSummaryPayload(access.subject.userId, alcohol, 7),
         getGoalProgressPayload(access.subject.userId, alcohol),
         getTrendsPayload(access.subject.userId, alcohol),
         getWeightTrendsPayload(access.subject.userId),
+        weighInPrefillForUser(access.viewer.userId),
     ]);
 
     const viewMemberId =
         requestedMember && requestedMember !== viewerUserId
             ? requestedMember
             : undefined;
+
+    const chrome = await viewerChromeWithAttention(
+        viewerProfile,
+        access.viewer,
+    );
+    const mergedLogSheet =
+        chrome.flags.uiV2 && v2LogSheet == null
+            ? { weighIn: weighInPrefill }
+            : chrome.flags.uiV2
+              ? {
+                    ...v2LogSheet,
+                    weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
+                }
+              : v2LogSheet;
 
     return {
         status: 200,
@@ -246,15 +296,12 @@ export async function renderDashboardPage(
             goals,
             trends,
             weight,
-            chrome: await viewerChromeWithAttention(
-                viewerProfile,
-                access.viewer,
-            ),
+            chrome,
             cardOrder: orderCards(viewerProfile?.nutrition_layout),
             viewMemberId,
             error,
             openModalId,
-            v2LogSheet,
+            v2LogSheet: mergedLogSheet,
             weightUnit: preferredWeightUnitFromProfile(viewerProfile) ?? "kg",
         }),
     };

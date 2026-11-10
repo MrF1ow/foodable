@@ -53,6 +53,7 @@ const realAttention = { ...actualAttention };
 const realDashboardData = { ...actualDashboardData };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
+const BOB = "22222222-2222-4222-8222-222222222222";
 const HH = "hh-1";
 const BARCODE = "1111111111111";
 
@@ -82,6 +83,8 @@ let listFoodsCalls = 0;
 let listRecipesCalls = 0;
 let listFridgeItemsCalls = 0;
 const mealsInserted: Array<Record<string, unknown>> = [];
+const waterInserted: Array<Record<string, unknown>> = [];
+const weightsInserted: Array<Record<string, unknown>> = [];
 
 function offHit(query: string): FoodResult {
     return {
@@ -127,21 +130,37 @@ mock.module("../../db/household.js", () => ({
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
 mock.module("../../db/profiles.js", () => ({
     ...realProfiles,
-    getProfile: async (userId: string) =>
-        userId === ALICE
-            ? {
-                  user_id: ALICE,
-                  theme: "light",
-                  timezone: "America/Los_Angeles",
-                  preferred_weight_unit: null,
-                  widgets_enabled: true,
-                  alcohol_tracking_enabled: false,
-                  preferred_drink_unit: null,
-                  nutrition_layout: null,
-                  created_at: "2026-01-01T00:00:00.000Z",
-                  updated_at: "2026-01-01T00:00:00.000Z",
-              }
-            : null,
+    getProfile: async (userId: string) => {
+        if (userId === ALICE) {
+            return {
+                user_id: ALICE,
+                theme: "light",
+                timezone: "America/Los_Angeles",
+                preferred_weight_unit: "lb",
+                widgets_enabled: true,
+                alcohol_tracking_enabled: false,
+                preferred_drink_unit: null,
+                nutrition_layout: null,
+                created_at: "2026-01-01T00:00:00.000Z",
+                updated_at: "2026-01-01T00:00:00.000Z",
+            };
+        }
+        if (userId === BOB) {
+            return {
+                user_id: BOB,
+                theme: "light",
+                timezone: "America/Los_Angeles",
+                preferred_weight_unit: "kg",
+                widgets_enabled: true,
+                alcohol_tracking_enabled: false,
+                preferred_drink_unit: null,
+                nutrition_layout: null,
+                created_at: "2026-01-01T00:00:00.000Z",
+                updated_at: "2026-01-01T00:00:00.000Z",
+            };
+        }
+        return null;
+    },
 }));
 
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
@@ -173,11 +192,47 @@ mock.module("../../db/nutrition.js", () => ({
             deduplicated: false,
         };
     },
+    insertWater: async (userId: string, input: Record<string, unknown>) => {
+        waterInserted.push({ userId, ...input });
+        return {
+            entry: {
+                id: `water-${waterInserted.length}`,
+                user_id: userId,
+                ...input,
+            },
+            deduplicated: false,
+        };
+    },
+    insertWeight: async (userId: string, input: Record<string, unknown>) => {
+        weightsInserted.push({ userId, ...input });
+        return {
+            entry: {
+                id: `weight-${weightsInserted.length}`,
+                user_id: userId,
+                ...input,
+            },
+            deduplicated: false,
+        };
+    },
     searchMeals: async () => [],
     getMealsByDate: async () => [],
     getWaterByDate: async () => [],
     getGoalsForDate: async () => null,
-    getLatestWeight: async () => null,
+    getLatestWeight: async (userId: string) => {
+        if (userId === ALICE) {
+            return {
+                weight_g: 83007,
+                logged_at: "2026-11-04T12:00:00.000Z",
+            };
+        }
+        if (userId === BOB) {
+            return {
+                weight_g: 90000,
+                logged_at: "2026-11-03T12:00:00.000Z",
+            };
+        }
+        return null;
+    },
     getWaterInRange: async () => [],
     getGoalsForRange: async () => ({
         forDate: () => null,
@@ -340,6 +395,8 @@ afterEach(async () => {
 
 beforeEach(async () => {
     mealsInserted.length = 0;
+    waterInserted.length = 0;
+    weightsInserted.length = 0;
     offThrows = false;
     offServing = "30 g";
     offCalls = 0;
@@ -769,5 +826,268 @@ describe("POST /log", () => {
         });
         expect(res.status).toBe(400);
         expect(mealsInserted).toHaveLength(0);
+    });
+});
+
+const quickPostUrl = "http://x/log/quick";
+const waterPostUrl = "http://x/log/water";
+const weightPostUrl = "http://x/log/weight";
+
+describe("POST /log/quick", () => {
+    test("returns 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { body, headers } = logForm({
+            calories: "350",
+            meal_type: "snack",
+        });
+        const res = await app.request(quickPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(404);
+    });
+
+    test("writes quick calories without logged_at", async () => {
+        const { body, headers } = logForm({
+            calories: "350",
+            meal_type: "snack",
+        });
+        const res = await app.request(quickPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+    });
+
+    test("writes a free-text meal with macros and no items", async () => {
+        const { body, headers } = logForm({
+            calories: "350",
+            protein_g: "12",
+            carbs_g: "40",
+            fat_g: "14",
+            description: "Coffee",
+            meal_type: "snack",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(quickPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+        const row = mealsInserted[0]!;
+        expect(row.calories).toBe(350);
+        expect(row.protein_g).toBe(12);
+        expect(row.description).toBe("Coffee");
+        expect(row.items ?? []).toHaveLength(0);
+    });
+
+    test("offset-less local time stays on that local day", async () => {
+        const { body, headers } = logForm({
+            calories: "200",
+            meal_type: "dinner",
+            logged_at: "2026-11-01T21:00",
+        });
+        const res = await app.request(quickPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(String(mealsInserted[0]!.logged_at)).toBe(
+            "2026-11-02T05:00:00.000Z",
+        );
+    });
+
+    test("invalid calories returns 400 and does not write", async () => {
+        const { body, headers } = logForm({
+            calories: "0",
+            meal_type: "lunch",
+        });
+        const res = await app.request(quickPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(mealsInserted).toHaveLength(0);
+    });
+});
+
+describe("POST /log/water", () => {
+    test("returns 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { body, headers } = logForm({ amount_ml: "250" });
+        const res = await app.request(waterPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(404);
+    });
+
+    test("writes water with an explicit local time", async () => {
+        const { body, headers } = logForm({
+            amount_ml: "250",
+            logged_at: "2026-11-01T21:00",
+        });
+        const res = await app.request(waterPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(waterInserted).toHaveLength(1);
+        expect(waterInserted[0]!.amount_ml).toBe(250);
+        expect(String(waterInserted[0]!.logged_at)).toBe(
+            "2026-11-02T05:00:00.000Z",
+        );
+    });
+
+    test("writes water without logged_at", async () => {
+        const { body, headers } = logForm({ amount_ml: "250" });
+        const res = await app.request(waterPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(waterInserted).toHaveLength(1);
+        expect(waterInserted[0]!.amount_ml).toBe(250);
+    });
+
+    test("invalid amount returns 400", async () => {
+        const { body, headers } = logForm({ amount_ml: "0" });
+        const res = await app.request(waterPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(waterInserted).toHaveLength(0);
+    });
+
+    test("invalid amount reopens search with the error message", async () => {
+        const { body, headers } = logForm({ amount_ml: "0" });
+        const res = await app.request(waterPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        const html = await res.text();
+        expect(res.status).toBe(400);
+        expect(html).toContain("Enter a water amount greater than zero.");
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain('id="fd-log-search"');
+    });
+});
+
+describe("POST /log/weight", () => {
+    test("returns 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { body, headers } = logForm({
+            weight: "180",
+            unit: "lb",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(404);
+    });
+
+    test("writes weight without logged_at", async () => {
+        const { body, headers } = logForm({
+            weight: "180",
+            unit: "lb",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(weightsInserted).toHaveLength(1);
+    });
+
+    test("stores lb the same way log_weight would", async () => {
+        const { body, headers } = logForm({
+            weight: "180",
+            unit: "lb",
+            logged_at: "2026-11-01T08:00",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(weightsInserted).toHaveLength(1);
+        expect(weightsInserted[0]!.weight_g).toBeCloseTo(81646.6, 0);
+    });
+
+    test("offset-less local time stays on that local day", async () => {
+        const { body, headers } = logForm({
+            weight: "75",
+            unit: "kg",
+            logged_at: "2026-11-01T21:00",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(String(weightsInserted[0]!.logged_at)).toBe(
+            "2026-11-02T05:00:00.000Z",
+        );
+    });
+
+    test("invalid weight returns 400", async () => {
+        const { body, headers } = logForm({
+            weight: "0",
+            unit: "kg",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(weightsInserted).toHaveLength(0);
+    });
+
+    test("weight validation error keeps the last-weight subtitle", async () => {
+        const { body, headers } = logForm({
+            weight: "0",
+            unit: "kg",
+        });
+        const res = await app.request(weightPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        const html = await res.text();
+        expect(res.status).toBe(400);
+        expect(html).toMatch(/Last: 183\.0 lb/);
+    });
+});
+
+describe("weighInPrefillForUser", () => {
+    test("uses each viewer's own latest weight and unit", async () => {
+        const { weighInPrefillForUser } = await import("../loaders.js");
+        const alice = await weighInPrefillForUser(ALICE);
+        expect(alice.unit).toBe("lb");
+        expect(alice.weight).toBeCloseTo(183, 0);
+        expect(alice.lastWeightG).toBe(83007);
+        const bob = await weighInPrefillForUser(BOB);
+        expect(bob.unit).toBe("kg");
+        expect(bob.weight).toBe(90);
+        expect(bob.lastWeightG).toBe(90000);
     });
 });

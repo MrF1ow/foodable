@@ -105,6 +105,24 @@ describe("gated route harness on composed app", () => {
                 flag: "ui-v2",
                 notFound: true,
             },
+            {
+                method: "POST",
+                path: "/log/quick",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log/water",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log/weight",
+                flag: "ui-v2",
+                notFound: true,
+            },
         ]);
     });
 });

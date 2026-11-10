@@ -950,6 +950,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       theme,
                       "amount",
                   ),
+                  "nutrition-log-quick-cal": await logSheetPreview(
+                      theme,
+                      "quick-cal",
+                  ),
+                  "nutrition-log-weigh-in": await logSheetPreview(
+                      theme,
+                      "weigh-in",
+                  ),
               }
             : {}),
     };
@@ -982,7 +990,7 @@ function findChromium(): string | null {
 
 async function logSheetPreview(
     theme: "light" | "dark",
-    mode: "empty" | "results" | "amount",
+    mode: "empty" | "results" | "amount" | "quick-cal" | "weigh-in",
 ): Promise<string> {
     const chrome = {
         ...previewChrome(theme),
@@ -1010,6 +1018,36 @@ async function logSheetPreview(
                     protein_per_100g: 31,
                     carbs_per_100g: 0,
                     fat_per_100g: 3.3,
+                },
+            },
+        });
+    }
+    if (mode === "quick-cal") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                quickCaloriesOpenOnLoad: true,
+                quickCalories: {
+                    calories: 350,
+                    protein_g: 12,
+                    carbs_g: 40,
+                    fat_g: 14,
+                    description: "Coffee & pastry",
+                    meal_type: "snack",
+                },
+            },
+        });
+    }
+    if (mode === "weigh-in") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                weighInOpenOnLoad: true,
+                weighIn: {
+                    weight: 182.4,
+                    unit: "lb",
+                    lastWeightG: 83007,
+                    lastLoggedAt: "2026-11-04T19:00:00.000Z",
                 },
             },
         });

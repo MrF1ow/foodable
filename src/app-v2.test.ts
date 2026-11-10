@@ -118,7 +118,7 @@ describe("/app-v2.js", () => {
         const js = await getAppV2Js();
         expect(js).toContain("window.FoodableApp.onLoad(");
         expect(js).not.toContain("Turbo.start");
-        expect(js.length).toBeLessThan(52_000);
+        expect(js.length).toBeLessThan(55_000);
     });
 });
 

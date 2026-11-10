@@ -48,8 +48,6 @@ import {
 import {
     formatWeight,
     fromGrams,
-    pickWriteUnit,
-    isPlausibleWeightGrams,
     toGrams,
     type WeightUnit,
 } from "../domain/units.js";
@@ -1258,26 +1256,10 @@ export { resolveWriteTimestamp } from "../meal-write.js";
 // otherwise the user's saved preference. If neither exists, refuse rather than
 // guess — silently assuming kg for someone who meant lb is exactly the mis-log
 // this feature exists to prevent.
-export async function resolveWriteWeightUnit(
-    userId: string,
-    explicit: WeightUnit | undefined,
-): Promise<WeightUnit> {
-    return pickWriteUnit(explicit, await getPreferredWeightUnit(userId));
-}
-
-// Reject magnitude mistakes (value typed in grams, an extra digit, a sub-unit
-// typo). Suggests the other unit when the same number would be plausible there.
-export function assertPlausibleWeight(grams: number, unit: WeightUnit): void {
-    if (isPlausibleWeightGrams(grams)) return;
-    const other: WeightUnit = unit === "kg" ? "lb" : "kg";
-    const asOther = toGrams(fromGrams(grams, unit), other);
-    const hint = isPlausibleWeightGrams(asOther)
-        ? ` If you meant ${fromGrams(grams, unit)} ${other}, pass unit: '${other}'.`
-        : "";
-    throw new Error(
-        `${formatWeight(grams, unit)} is outside the plausible body-weight range (20–500 kg / 44–1102 lb). Double-check the number and unit.${hint}`,
-    );
-}
+export {
+    assertPlausibleWeight,
+    resolveWriteWeightUnit,
+} from "../weight-write.js";
 
 export function formatMeal(meal: Meal, alcohol: AlcoholDisplay = null): string {
     const parts = [

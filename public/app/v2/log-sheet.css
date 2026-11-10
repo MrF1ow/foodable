@@ -201,8 +201,180 @@
     }
 }
 
+.fd-log-quick-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--fd-s-12) var(--space-gap);
+    justify-items: start;
+    margin-top: var(--space-gap);
+}
+
+.fd-quick-form {
+    display: contents;
+}
+
+.fd-quick-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-s-8);
+    width: 100%;
+    max-width: 88px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font: 500 12px/16px var(--font-body);
+    text-align: center;
+    cursor: pointer;
+}
+
+.fd-quick-tile__icon {
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 60px;
+    height: 60px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+}
+
+.fd-quick-tile__icon .fd-quick-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.fd-quick-tile__label {
+    display: block;
+    max-width: 88px;
+    line-height: 16px;
+}
+
+.fd-log-quick-cal-form,
+.fd-log-weigh-in-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-log-kcal-hero {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--fd-s-8);
+}
+
+.fd-log-kcal-input {
+    /* An input is about 20 characters wide by default; size it to the
+       number so "kcal" sits beside it, as in the design. */
+    width: 4ch;
+    field-sizing: content;
+    min-width: 2ch;
+    max-width: 6ch;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font: 600 44px/1 var(--font-display);
+    text-align: center;
+    appearance: textfield;
+}
+
+.fd-log-kcal-input:focus {
+    outline: none;
+}
+
+.fd-log-kcal-input:focus-visible {
+    outline: none;
+    box-shadow: none;
+    text-decoration: underline;
+    text-decoration-color: var(--accent-fill);
+    text-underline-offset: 6px;
+    text-decoration-thickness: 2px;
+}
+
+.fd-log-kcal-input::-webkit-outer-spin-button,
+.fd-log-kcal-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.fd-log-kcal-suffix {
+    font: 500 17px/24px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-log-macro-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-gap);
+}
+
+.fd-log-macro-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-log-macro-field__label,
+.fd-log-name-field__label {
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-log-macro-field__input,
+.fd-log-name-field__input {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+}
+
+.fd-log-name-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-log-meals-quick {
+    margin-top: 0;
+}
+
+.fd-log-weigh-in-sheet .fd-stepper__input {
+    text-align: center;
+}
+
+.fd-log-weigh-in-sheet .fd-stepper__input:focus {
+    outline: none;
+}
+
+.fd-log-weigh-in-sheet .fd-stepper__input:focus-visible {
+    outline: none;
+    box-shadow: none;
+    text-decoration: underline;
+    text-decoration-color: var(--accent-fill);
+    text-underline-offset: 4px;
+    text-decoration-thickness: 2px;
+}
+
 @media (min-width: 1024px) {
     .fd-log-search-field {
         margin-bottom: var(--space-gutter);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-quick-tile {
+        transition: none;
     }
 }

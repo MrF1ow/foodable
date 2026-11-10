@@ -2,6 +2,8 @@
 // amount posts to /log.
 const SEARCH_ID = "fd-log-search";
 const AMOUNT_ID = "fd-log-amount";
+const QUICK_CAL_ID = "fd-log-quick-cal";
+const WEIGH_IN_ID = "fd-log-weigh-in";
 const DEBOUNCE_MS = 250;
 
 const MEAL_LABEL = {
@@ -295,6 +297,8 @@ function syncMealToAmount(root, mealType) {
 
 const searchSheetInit = new WeakSet();
 const amountSheetInit = new WeakSet();
+const quickCalSheetInit = new WeakSet();
+const weighInSheetInit = new WeakSet();
 let openersBound = false;
 
 function bindSearchSheet(root) {
@@ -492,6 +496,51 @@ function syncAmountHidden(form, item) {
     set("display_name", item.name || "");
 }
 
+function bindQuickCalSheet(root) {
+    const dialog = document.getElementById(QUICK_CAL_ID);
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    if (quickCalSheetInit.has(dialog)) return;
+    quickCalSheetInit.add(dialog);
+    const form = dialog.querySelector(".fd-log-quick-cal-form");
+    const submit = dialog.querySelector("[data-fd-quick-cal-submit]");
+    form?.addEventListener("change", (event) => {
+        if (event.target?.name === "meal_type" && submit) {
+            const meal = form.querySelector(
+                'input[name="meal_type"]:checked',
+            )?.value;
+            submit.textContent = MEAL_LABEL[meal] ?? MEAL_LABEL.dinner;
+        }
+    });
+}
+
+function bindWeighInSheet(root) {
+    const dialog = document.getElementById(WEIGH_IN_ID);
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    if (weighInSheetInit.has(dialog)) return;
+    weighInSheetInit.add(dialog);
+    const form = dialog.querySelector(".fd-log-weigh-in-form");
+    const timeInput = dialog.querySelector("#fd-weigh-time");
+    const todayLabel = dialog.querySelector("[data-fd-weigh-today-label]");
+    if (todayLabel?.textContent) {
+        const m = todayLabel.textContent.match(/^Today /);
+        if (m) {
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, "0");
+            const mm = String(now.getMinutes()).padStart(2, "0");
+            todayLabel.textContent = `Today ${hh}:${mm}`;
+        }
+    }
+    form?.addEventListener("change", (event) => {
+        if (event.target?.name === "fd_weigh_time_mode" && timeInput) {
+            const pick = form.querySelector(
+                'input[name="fd_weigh_time_mode"][value="pick"]:checked',
+            );
+            timeInput.hidden = !pick;
+            timeInput.disabled = !pick;
+        }
+    });
+}
+
 function bindAmountSheet(root) {
     const dialog = root.querySelector(`#${AMOUNT_ID}`);
     if (!(dialog instanceof HTMLDialogElement)) return;
@@ -637,6 +686,8 @@ function init() {
     if (!document.querySelector(".fd-shell")) return;
     bindSearchSheet(document);
     bindAmountSheet(document);
+    bindQuickCalSheet(document);
+    bindWeighInSheet(document);
     bindOpeners();
 }
 

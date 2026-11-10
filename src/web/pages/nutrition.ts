@@ -62,7 +62,10 @@ export type NutritionView = {
     viewMemberId?: string;
     error?: string;
     openModalId?: string;
-    v2LogSheet?: import("./v2/log-sheet.js").RenderLogSheetsOpts;
+    v2LogSheet?: Omit<
+        import("./v2/log-sheet.js").RenderLogSheetsOpts,
+        "timezone"
+    >;
     /** The viewer's preferred weight unit; the log-weight form writes as the viewer. */
     weightUnit?: WeightUnit;
 };

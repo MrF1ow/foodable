@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
     FD_LOG_AMOUNT_SHEET_ID,
+    FD_LOG_QUICK_CAL_SHEET_ID,
     FD_LOG_SEARCH_SHEET_ID,
+    FD_LOG_WEIGH_IN_SHEET_ID,
     logAmountUnitChips,
     renderLogSheets,
+    todayTimeLabel24,
+    weighInLastSubtitle,
 } from "./log-sheet.js";
 
 describe("renderLogSheets", () => {
@@ -91,7 +95,9 @@ describe("renderLogSheets", () => {
 
     test("shell amount sheet starts with no unit radios", () => {
         const html = renderLogSheets({ timezone: "UTC" });
-        const amount = html.slice(html.indexOf(FD_LOG_AMOUNT_SHEET_ID));
+        const amountStart = html.indexOf(FD_LOG_AMOUNT_SHEET_ID);
+        const amountEnd = html.indexOf(FD_LOG_QUICK_CAL_SHEET_ID, amountStart);
+        const amount = html.slice(amountStart, amountEnd);
         expect(amount).toContain("data-fd-log-unit-chips");
         expect(amount).not.toMatch(/name="unit"[^>]*value="/);
     });
@@ -162,5 +168,67 @@ describe("renderLogSheets", () => {
         expect(html).toContain("fd-log-filters");
         expect(html).toContain("Chicken breast, grilled");
         expect(html).toContain("fd-row--search");
+    });
+
+    test("water validation error shows in the search sheet", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            searchOpenOnLoad: true,
+            searchError: "Enter a water amount greater than zero.",
+            previewSearch: "empty",
+        });
+        expect(html).toContain("Enter a water amount greater than zero.");
+        expect(html).toContain("data-sheet-open-on-load");
+    });
+
+    test("empty search shows exactly three QUICK tiles", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            previewSearch: "empty",
+        });
+        expect(html).toContain("fd-log-quick-grid");
+        expect(html).toContain("Quick calories");
+        expect(html).toContain("Water +250 ml");
+        expect(html).toContain("Weigh in");
+        expect(html).not.toContain("Scan barcode");
+        const tiles = html.match(/\bclass="fd-quick-tile"/g) ?? [];
+        expect(tiles).toHaveLength(3);
+    });
+
+    test("quick calories and weigh-in sheets render their fields", () => {
+        const html = renderLogSheets({
+            timezone: "America/Los_Angeles",
+            quickCaloriesOpenOnLoad: true,
+            weighInOpenOnLoad: true,
+            weighIn: {
+                weight: 182.4,
+                unit: "lb",
+                lastWeightG: 83007,
+                lastLoggedAt: "2026-11-04T12:00:00.000Z",
+            },
+        });
+        expect(html).toContain(`id="${FD_LOG_QUICK_CAL_SHEET_ID}"`);
+        expect(html).toContain(`id="${FD_LOG_WEIGH_IN_SHEET_ID}"`);
+        expect(html).toContain('name="calories"');
+        expect(html).toContain('name="protein_g"');
+        expect(html).toContain('name="description"');
+        expect(html).toContain('action="/log/quick"');
+        expect(html).toContain('action="/log/weight"');
+        expect(html).toContain("data-fd-quick-cal-submit");
+    });
+
+    test("weighInLastSubtitle formats last entry", () => {
+        expect(
+            weighInLastSubtitle(
+                83007,
+                "2026-11-04T12:00:00.000Z",
+                "lb",
+                "America/Los_Angeles",
+            ),
+        ).toMatch(/^Last: 183\.0 lb ·/);
+    });
+
+    test("todayTimeLabel24 is 24-hour Today prefix", () => {
+        expect(todayTimeLabel24("UTC")).toMatch(/^Today \d{2}:\d{2}$/);
     });
 });

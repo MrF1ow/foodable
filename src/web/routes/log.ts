@@ -33,13 +33,28 @@ import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
 import { MealItemsError, type MealItemSpec } from "../../domain/meals.js";
 import { toGrams } from "../../domain/food-quantity.js";
 import { unitHintsForLog } from "../../domain/log-search.js";
-import { insertMeal } from "../../db/nutrition.js";
+import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
-import { formAmount, formText } from "../form.js";
+import { MAX_CALORIES, MAX_MACRO_G } from "../../domain/import.js";
+import {
+    assertPlausibleWeight,
+    resolveWriteWeightUnit,
+} from "../../weight-write.js";
+import { toGrams as weightToGrams, isWeightUnit } from "../../domain/units.js";
+import { formAmount, formOptionalNumber, formText } from "../form.js";
+import { logWaterFromForm } from "../pages/nutrition.js";
 import { redirectWithToast } from "../components/toast.js";
-import { renderDashboardPage } from "../loaders.js";
+import { renderDashboardPage, weighInPrefillForUser } from "../loaders.js";
 import { getHouseholdMembership } from "../../db/household.js";
-import { FD_LOG_POST, type LogAmountPrefill } from "../pages/v2/log-sheet.js";
+import {
+    FD_LOG_POST,
+    FD_LOG_QUICK_POST,
+    FD_LOG_WATER_POST,
+    FD_LOG_WEIGHT_POST,
+    type LogAmountPrefill,
+    type QuickCaloriesPrefill,
+    type WeighInPrefill,
+} from "../pages/v2/log-sheet.js";
 import { safeReturnPath } from "../usual-products-path.js";
 import { gatedRoute } from "../gated.js";
 import { requireMember, siteMember } from "../middleware.js";
@@ -507,6 +522,28 @@ async function enrichAmountPrefill(
     return prefill;
 }
 
+type LogSheetRerender = Omit<
+    import("../pages/v2/log-sheet.js").RenderLogSheetsOpts,
+    "timezone"
+>;
+
+async function logSheetErrorPage(
+    userId: string,
+    sheet: LogSheetRerender,
+): Promise<Response> {
+    const page = await renderDashboardPage(
+        userId,
+        undefined,
+        undefined,
+        undefined,
+        sheet,
+    );
+    return new Response(page.html, {
+        status: page.status === 200 ? 400 : page.status,
+        headers: { "content-type": "text/html; charset=utf-8" },
+    });
+}
+
 async function logErrorPage(
     userId: string,
     error: string,
@@ -521,7 +558,6 @@ async function logErrorPage(
         undefined,
         undefined,
         {
-            timezone: tz,
             amountOpenOnLoad: true,
             amountError: error,
             amount: prefill,
@@ -666,6 +702,181 @@ logRoutes.post(
                 prefill,
             );
             return logErrorPage(userId, message, filled, tz);
+        }
+    },
+);
+
+function parseBoundedMacro(
+    raw: number | undefined,
+    label: string,
+): number | undefined {
+    if (raw === undefined) return undefined;
+    if (!Number.isFinite(raw) || raw < 0) {
+        throw new MealItemsError(`Enter ${label} as zero or more.`);
+    }
+    if (raw > MAX_MACRO_G) {
+        throw new MealItemsError(`Keep ${label} at ${MAX_MACRO_G} g or less.`);
+    }
+    return raw;
+}
+
+function parseQuickCalories(raw: number): number {
+    if (!Number.isFinite(raw) || raw <= 0) {
+        throw new MealItemsError("Enter calories greater than zero.");
+    }
+    if (raw > MAX_CALORIES) {
+        throw new MealItemsError(`Keep calories at ${MAX_CALORIES} or less.`);
+    }
+    return raw;
+}
+
+logRoutes.post(
+    FD_LOG_QUICK_POST,
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const userId = member.userId;
+        const profile = await getProfile(userId);
+        const tz =
+            profile?.timezone && validateTz(profile.timezone)
+                ? profile.timezone
+                : "UTC";
+        const body = await c.req.parseBody();
+        const calories = formAmount(body, "calories");
+        const meal_type = formText(body, "meal_type");
+        const description = formText(body, "description") || "Quick calories";
+        const logged_at = formText(body, "logged_at") || undefined;
+        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+        const prefill: QuickCaloriesPrefill = {
+            calories,
+            protein_g: formOptionalNumber(body, "protein_g"),
+            carbs_g: formOptionalNumber(body, "carbs_g"),
+            fat_g: formOptionalNumber(body, "fat_g"),
+            description,
+            meal_type,
+            logged_at,
+        };
+        try {
+            const mealType = parseMealType(meal_type);
+            const kcal = parseQuickCalories(calories);
+            const protein_g = parseBoundedMacro(prefill.protein_g, "protein");
+            const carbs_g = parseBoundedMacro(prefill.carbs_g, "carbs");
+            const fat_g = parseBoundedMacro(prefill.fat_g, "fat");
+            const { iso } = await resolveWriteTimestamp(userId, logged_at);
+            await insertMeal(userId, {
+                description,
+                meal_type: mealType,
+                logged_at: iso,
+                calories: kcal,
+                protein_g,
+                carbs_g,
+                fat_g,
+            });
+            return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+        } catch (err) {
+            const message =
+                err instanceof MealItemsError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not log this meal.";
+            return logSheetErrorPage(userId, {
+                quickCaloriesOpenOnLoad: true,
+                quickCaloriesError: message,
+                quickCalories: prefill,
+            });
+        }
+    },
+);
+
+logRoutes.post(
+    FD_LOG_WATER_POST,
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const userId = member.userId;
+        const body = await c.req.parseBody();
+        const logged_at = formText(body, "logged_at") || undefined;
+        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+        try {
+            const amountRaw =
+                formText(body, "amount_ml") ||
+                String(formAmount(body, "amount_ml"));
+            const result = await logWaterFromForm(
+                userId,
+                { amount_ml: amountRaw },
+                async (uid, input) =>
+                    insertWater(uid, {
+                        ...input,
+                        logged_at: (
+                            await resolveWriteTimestamp(userId, logged_at)
+                        ).iso,
+                    }),
+            );
+            if (!result.ok) {
+                throw new MealItemsError(result.error);
+            }
+            return redirectWithToast(c, returnTo, "nutrition.water.logged");
+        } catch (err) {
+            const message =
+                err instanceof MealItemsError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not log water.";
+            return logSheetErrorPage(userId, {
+                searchOpenOnLoad: true,
+                searchError: message,
+            });
+        }
+    },
+);
+
+logRoutes.post(
+    FD_LOG_WEIGHT_POST,
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const userId = member.userId;
+        const body = await c.req.parseBody();
+        const weight = formAmount(body, "weight");
+        const unitRaw = formText(body, "unit");
+        const logged_at = formText(body, "logged_at") || undefined;
+        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+        const resolvedUnit = isWeightUnit(unitRaw)
+            ? unitRaw
+            : await resolveWriteWeightUnit(userId, undefined);
+        const weighBase = await weighInPrefillForUser(userId);
+        const prefill: WeighInPrefill = {
+            ...weighBase,
+            weight,
+            unit: resolvedUnit,
+            logged_at,
+        };
+        try {
+            const { iso } = await resolveWriteTimestamp(userId, logged_at);
+            const weight_g = weightToGrams(weight, resolvedUnit);
+            assertPlausibleWeight(weight_g, resolvedUnit);
+            await insertWeight(userId, {
+                weight_g,
+                logged_at: iso,
+            });
+            return redirectWithToast(c, returnTo, "nutrition.weight.logged");
+        } catch (err) {
+            const message =
+                err instanceof MealItemsError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not log weight.";
+            return logSheetErrorPage(userId, {
+                weighInOpenOnLoad: true,
+                weighInError: message,
+                weighIn: prefill,
+            });
         }
     },
 );
