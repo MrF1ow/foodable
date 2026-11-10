@@ -15,6 +15,7 @@ import type { HouseholdMember } from "../household.js";
 import { getHouseholdConfig, listHouseholdMembers } from "../db/household.js";
 import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import type { AppTabId, ShellIdentity, ViewerChrome } from "./shell.js";
+import { validateTz } from "../domain/tz.js";
 import { resolveTheme } from "./shell.js";
 
 export type AttentionChrome = {
@@ -28,6 +29,11 @@ export type AppChromeBase = ViewerChrome & {
     /** The new shell's sidebar and account chip. Only loaded when `ui-v2` is
      *  on for the viewer, so a viewer on the old shell costs no extra query. */
     identity?: ShellIdentity;
+    v2Timezone?: string;
+    v2LogSheet?: Omit<
+        import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
+        "timezone"
+    >;
     /** Open `food.possible_duplicate` notices (Household sub-nav badge). */
     householdPossibleDuplicates?: number;
 };
@@ -70,7 +76,7 @@ export async function loadHouseholdNotices(
 }
 
 export async function viewerChromeWithAttention(
-    profile: { theme?: string | null } | null,
+    profile: { theme?: string | null; timezone?: string | null } | null,
     viewer: HouseholdMember,
     prefetched?: NoticesForResult,
     /** Seam for tests: how the new shell's household identity is loaded. */
@@ -82,6 +88,10 @@ export async function viewerChromeWithAttention(
         prefetched ?? (await loadHouseholdNotices(viewer.householdId));
     const flags = await viewerFlagsFor(viewer);
     const identity = flags.uiV2 ? await loadIdentity(viewer) : undefined;
+    const tz =
+        profile?.timezone && validateTz(profile.timezone)
+            ? profile.timezone
+            : "UTC";
     return {
         theme: resolveTheme(profile?.theme),
         attention: attentionFromNotices(noticeResult),
@@ -89,6 +99,7 @@ export async function viewerChromeWithAttention(
             noticeResult.notices,
         ),
         flags,
+        ...(flags.uiV2 ? { v2Timezone: tz } : {}),
         ...(identity ? { identity } : {}),
     };
 }

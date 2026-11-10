@@ -1252,43 +1252,7 @@ export function drinkUnitLabel(unit: DrinkUnit): string {
 // profile, so staying silent here left the migration's whole warning
 // unreachable in practice (found live: a meal logged with no logged_at and no
 // profile timezone produced no warning at all).
-export async function resolveWriteTimestamp(
-    userId: string,
-    raw: string | undefined,
-): Promise<{ iso: string | undefined; note: string }> {
-    const profile = await getProfile(userId);
-    const tz = timezoneFromProfile(profile);
-    const unsetTzNote = (value: string) =>
-        `${JSON.stringify(value)} carries no UTC offset and this account has no timezone set, so it was read as UTC. Set one with set_timezone.`;
-
-    if (raw === undefined) {
-        const note =
-            tz === null
-                ? "\n\nNote: this account has no timezone set, so today's date is being read in UTC — set one with set_timezone."
-                : "";
-        return { iso: undefined, note };
-    }
-
-    let resolved;
-    try {
-        resolved = resolveWriteLoggedAt(raw, tz ?? "UTC", Date.now());
-    } catch (err) {
-        if (
-            err instanceof LoggedAtError &&
-            err.usedProfileTimezone &&
-            tz === null
-        ) {
-            throw new Error(`${err.message} ${unsetTzNote(raw)}`);
-        }
-        throw err;
-    }
-
-    const note =
-        resolved.usedProfileTimezone && tz === null
-            ? `\n\nNote: ${unsetTzNote(raw)} Then re-check this entry.`
-            : "";
-    return { iso: resolved.instant.toISOString(), note };
-}
+export { resolveWriteTimestamp } from "../meal-write.js";
 
 // Resolve the unit to use when WRITING a weight value: an explicit unit wins,
 // otherwise the user's saved preference. If neither exists, refuse rather than

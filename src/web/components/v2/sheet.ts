@@ -33,6 +33,8 @@ export function sheet(opts: {
     openOnLoad?: boolean;
     /** Accessible name of the close button. Default "Close". */
     closeLabel?: string;
+    /** When false, the sheet has no close button (grabber/backdrop/Esc still close). */
+    showClose?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const titleId = `${id}-title`;
@@ -47,6 +49,10 @@ export function sheet(opts: {
         ? `\n<div class="fd-sheet-actions">\n${opts.actions}\n</div>`
         : "";
     const closeLabel = escapeHtml(opts.closeLabel ?? "Close");
+    const showClose = opts.showClose !== false;
+    const closeBtn = showClose
+        ? `<button type="button" class="fd-sheet-close" command="close" commandfor="${id}" aria-label="${closeLabel}"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>`
+        : "";
     return `<dialog class="fd-sheet fd-sheet--${kind}" id="${id}" aria-labelledby="${titleId}"${describedBy}${reopen}>
 <div class="fd-sheet-panel" tabindex="-1">
 <div class="fd-sheet-handle" aria-hidden="true"></div>
@@ -54,7 +60,7 @@ export function sheet(opts: {
 <div class="fd-sheet-heading">
 <h2 class="fd-sheet-title" id="${titleId}">${escapeHtml(opts.title)}</h2>${subtitle}
 </div>
-<button type="button" class="fd-sheet-close" command="close" commandfor="${id}" aria-label="${closeLabel}"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+${closeBtn}
 </header>
 <div class="fd-sheet-body">
 ${opts.body}

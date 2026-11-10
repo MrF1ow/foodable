@@ -65,6 +65,13 @@ export type AppChrome = ViewerChrome & {
      *  `active` (grocery → groceries, anything else → fridge); the usual
      *  products pages set "usuals". The old shell ignores it. */
     v2Kitchen?: V2KitchenTab;
+    /** New shell only: profile timezone for the log sheet defaults. */
+    v2Timezone?: string;
+    /** New shell only: log sheet open state after validation errors. */
+    v2LogSheet?: Omit<
+        import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
+        "timezone"
+    >;
 };
 
 export function resolveTheme(theme: string | null | undefined): ThemePref {

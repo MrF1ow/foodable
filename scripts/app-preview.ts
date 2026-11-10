@@ -62,6 +62,8 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
+import { pageHeader } from "../src/web/components/ui.js";
+import { renderAppShell } from "../src/web/shell.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import {
     didYouMeanView,
@@ -936,7 +938,20 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
-        ...(V2 ? { "dev-gallery-v2": renderDevGalleryV2Page(chrome) } : {}),
+        ...(V2
+            ? {
+                  "dev-gallery-v2": renderDevGalleryV2Page(chrome),
+                  "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-log-results": await logSheetPreview(
+                      theme,
+                      "results",
+                  ),
+                  "nutrition-log-amount": await logSheetPreview(
+                      theme,
+                      "amount",
+                  ),
+              }
+            : {}),
     };
 }
 
@@ -963,6 +978,50 @@ function findChromium(): string | null {
         if (path) return path;
     }
     return null;
+}
+
+async function logSheetPreview(
+    theme: "light" | "dark",
+    mode: "empty" | "results" | "amount",
+): Promise<string> {
+    const chrome = {
+        ...previewChrome(theme),
+        v2Timezone: "America/Los_Angeles",
+    };
+    const base = {
+        ...chrome,
+        title: "Nutrition",
+        active: "nutrition" as const,
+        body: pageHeader({ title: "Ethan Flow" }),
+    };
+    if (mode === "amount") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                amountOpenOnLoad: true,
+                amount: {
+                    name: "Chicken breast, grilled",
+                    food_id: "f-chicken",
+                    unit_hints: ["g", "each"],
+                    amount: 150,
+                    unit: "g",
+                    meal_type: "dinner",
+                    kcal_per_100g: 165,
+                    protein_per_100g: 31,
+                    carbs_per_100g: 0,
+                    fat_per_100g: 3.3,
+                },
+            },
+        });
+    }
+    return renderAppShell({
+        ...base,
+        v2LogSheet: {
+            searchOpenOnLoad: true,
+            previewSearch: mode,
+            previewQuery: mode === "results" ? "chick" : "",
+        },
+    });
 }
 
 async function nutritionWithModal(

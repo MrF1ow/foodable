@@ -122,6 +122,14 @@ document.addEventListener("turbo:before-morph-element", (event) => {
 });
 
 function focusFirstField(dialog) {
+    if (!dialog) return;
+    if (dialog.dataset?.fdSheetFocus === "panel") {
+        const panel = dialog.querySelector(".fd-sheet-panel");
+        if (panel && typeof panel.focus === "function") {
+            panel.focus({ preventScroll: true });
+        }
+        return;
+    }
     const field = dialog.querySelector(
         'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
     );

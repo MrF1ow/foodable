@@ -38,6 +38,8 @@ import {
     checkWebSearchRateLimit,
     _resetBuckets,
 } from "../../rate-limit.js";
+import * as actualAttention from "../attention.js";
+import * as actualDashboardData from "../../dashboard-data.js";
 
 const realHousehold = { ...actualHousehold };
 const realProfiles = { ...actualProfiles };
@@ -46,6 +48,9 @@ const realFridgeDb = { ...actualFridgeDb };
 const realRecipesDb = { ...actualRecipesDb };
 const realNutritionDb = { ...actualNutritionDb };
 const realFoodSearch = { ...actualFoodSearch };
+// Snapshots taken before mock.module: Bun patches the namespace in place.
+const realAttention = { ...actualAttention };
+const realDashboardData = { ...actualDashboardData };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const HH = "hh-1";
@@ -76,6 +81,7 @@ const rangeCalls: Array<{
 let listFoodsCalls = 0;
 let listRecipesCalls = 0;
 let listFridgeItemsCalls = 0;
+const mealsInserted: Array<Record<string, unknown>> = [];
 
 function offHit(query: string): FoodResult {
     return {
@@ -105,6 +111,17 @@ mock.module("../../db/household.js", () => ({
     getHouseholdMembership: async (userId: string) =>
         userId === ALICE ? member : null,
     householdExists: async () => true,
+    listHouseholdMembers: async () => [member],
+    getHouseholdConfig: async () => ({
+        household_id: HH,
+        name: "Test",
+        preferences: { timezone: null },
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+    }),
+    getHouseholdOwnerProfile: async () => ({
+        timezone: "America/Los_Angeles",
+    }),
 }));
 
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
@@ -145,7 +162,28 @@ mock.module("../../db/recipes.js", () => ({
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
 mock.module("../../db/nutrition.js", () => ({
     ...realNutritionDb,
+    insertMeal: async (userId: string, input: Record<string, unknown>) => {
+        mealsInserted.push({ userId, ...input });
+        return {
+            meal: {
+                id: `meal-${mealsInserted.length}`,
+                user_id: userId,
+                ...input,
+            },
+            deduplicated: false,
+        };
+    },
     searchMeals: async () => [],
+    getMealsByDate: async () => [],
+    getWaterByDate: async () => [],
+    getGoalsForDate: async () => null,
+    getLatestWeight: async () => null,
+    getWaterInRange: async () => [],
+    getGoalsForRange: async () => ({
+        forDate: () => null,
+    }),
+    getWeightInRange: async () => [],
+    getNutritionGoals: async () => null,
     getMealsInRange: async (
         userId: string,
         start: string,
@@ -208,7 +246,45 @@ mock.module("../../food-search.js", () => ({
     },
 }));
 
+mock.module("../attention.js", () => ({
+    ...realAttention,
+    viewerChromeWithAttention: async (
+        profile: { timezone?: string | null } | null,
+        viewer: HouseholdMember,
+    ) => {
+        const flags = await realAttention.viewerFlagsFor(viewer);
+        const tz =
+            profile?.timezone && profile.timezone.trim()
+                ? profile.timezone
+                : "America/Los_Angeles";
+        return {
+            theme: "light" as const,
+            attention: { count: 0, tabs: {} },
+            householdPossibleDuplicates: 0,
+            flags,
+            ...(flags.uiV2 ? { v2Timezone: tz } : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test",
+                memberCount: 1,
+            },
+        };
+    },
+}));
+
+const widgetStub = { locale: "en" };
+mock.module("../../dashboard-data.js", () => ({
+    ...realDashboardData,
+    getNutritionSummaryPayload: async () => widgetStub,
+    getGoalProgressPayload: async () => widgetStub,
+    getTrendsPayload: async () => widgetStub,
+    getWeightTrendsPayload: async () => widgetStub,
+}));
+
 afterAll(() => {
+    mock.module("../attention.js", () => realAttention);
+    mock.module("../../dashboard-data.js", () => realDashboardData);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/household.js", () => realHousehold);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
@@ -263,6 +339,7 @@ afterEach(async () => {
 });
 
 beforeEach(async () => {
+    mealsInserted.length = 0;
     offThrows = false;
     offServing = "30 g";
     offCalls = 0;
@@ -438,6 +515,7 @@ describe("GET /api/log/search", () => {
         expect(item.id).toBe("meal-recipe");
         expect(item.recipe_id).toBe("recipe-chili");
         expect(item.kcal).toBe(400);
+        expect(item.meal_kcal).toBe(400);
         expect(item.amount).toBe(1);
         expect(item.unit).toBe("portion");
         expect(item.unit_hints).toEqual(["portion"]);
@@ -489,5 +567,207 @@ describe("GET /api/log/search", () => {
         expect((await checkRateLimit(ALICE)).allowed).toBe(false);
         expect((await checkWebSearchRateLimit(ALICE)).allowed).toBe(false);
         expect((await checkWebSearchRateLimit(ALICE)).limit).toBe(120);
+    });
+});
+
+const logPostUrl = "http://x/log";
+
+function logForm(fields: Record<string, string>): {
+    body: URLSearchParams;
+    headers: Record<string, string>;
+} {
+    const body = new URLSearchParams(fields);
+    return {
+        body,
+        headers: {
+            cookie: sessionCookie(ALICE),
+            "content-type": "application/x-www-form-urlencoded",
+        },
+    };
+}
+
+describe("POST /log", () => {
+    test("returns 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { body, headers } = logForm({
+            food_id: "x",
+            amount: "100",
+            unit: "g",
+            meal_type: "lunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(404);
+    });
+
+    test("logging 150 g of a food writes one meal and scales totals 1.5× per 100 g", async () => {
+        const rice = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Fried rice",
+        )!;
+        await updateFood(db.foodsStore, HH, rice.id, {
+            calories: 100,
+            proteinG: 10,
+            carbsG: 20,
+            fatG: 5,
+        });
+        const { body, headers } = logForm({
+            food_id: rice.id,
+            amount: "150",
+            unit: "g",
+            meal_type: "lunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+        const row = mealsInserted[0]!;
+        expect(row.calories).toBe(150);
+        expect(row.protein_g).toBe(15);
+        expect(row.carbs_g).toBe(30);
+        expect(row.fat_g).toBe(7.5);
+        const items = row.items as Array<Record<string, unknown>>;
+        expect(items).toHaveLength(1);
+        expect(items[0]!.food_id).toBe(rice.id);
+    });
+
+    test("recipe portion writes one meal with a recipe item", async () => {
+        const recipes = await db.recipesStore.listRecipes(HH);
+        const recipe = recipes[0]!;
+        const { body, headers } = logForm({
+            recipe_id: recipe.id,
+            amount: "1",
+            unit: "portion",
+            meal_type: "dinner",
+            logged_at: "2026-11-01T18:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+        const items = mealsInserted[0]!.items as Array<Record<string, unknown>>;
+        expect(items).toHaveLength(1);
+        expect(items[0]!.recipe_id).toBe(recipe.id);
+    });
+
+    test("offset-less local time stays on that local day in the profile zone", async () => {
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        await updateFood(db.foodsStore, HH, egg.id, { gramsPerEach: 50 });
+        const { body, headers } = logForm({
+            food_id: egg.id,
+            amount: "1",
+            unit: "each",
+            meal_type: "dinner",
+            logged_at: "2026-11-01T21:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        const logged = String(mealsInserted[0]!.logged_at);
+        expect(logged).toBe("2026-11-02T05:00:00.000Z");
+    });
+
+    test("OFF barcode creates the household food and logs it", async () => {
+        offServing = "100 g";
+        const { body, headers } = logForm({
+            barcode: BARCODE,
+            amount: "100",
+            unit: "g",
+            meal_type: "snack",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+        const items = mealsInserted[0]!.items as Array<Record<string, unknown>>;
+        expect(items).toHaveLength(1);
+        expect(items[0]!.food_id).toBeTruthy();
+        const barcodes = await db.foodsStore.getBarcodeFoodIds(HH, [BARCODE]);
+        expect(barcodes.get(BARCODE)).toBe(String(items[0]!.food_id));
+    });
+
+    test("amount above limit returns 400", async () => {
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        const { body, headers } = logForm({
+            food_id: egg.id,
+            amount: "5001",
+            unit: "g",
+            meal_type: "lunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(mealsInserted).toHaveLength(0);
+        const html = await res.text();
+        expect(html).toContain("fd-log-amount");
+        expect(html).not.toContain("Adjust the amount and try again.");
+        // The error shows once, inside the reopened sheet, not also as a
+        // page-level banner.
+        expect(html).not.toContain('class="error-banner');
+    });
+
+    test("unknown meal_type returns 400", async () => {
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        const { body, headers } = logForm({
+            food_id: egg.id,
+            amount: "50",
+            unit: "g",
+            meal_type: "brunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(mealsInserted).toHaveLength(0);
+    });
+
+    test("invalid unit returns 4xx and does not write", async () => {
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        const { body, headers } = logForm({
+            food_id: egg.id,
+            amount: "1",
+            unit: "ml",
+            meal_type: "lunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(mealsInserted).toHaveLength(0);
     });
 });

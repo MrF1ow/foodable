@@ -62,6 +62,7 @@ export type NutritionView = {
     viewMemberId?: string;
     error?: string;
     openModalId?: string;
+    v2LogSheet?: import("./v2/log-sheet.js").RenderLogSheetsOpts;
     /** The viewer's preferred weight unit; the log-weight form writes as the viewer. */
     weightUnit?: WeightUnit;
 };
@@ -502,6 +503,11 @@ export async function renderNutritionPage(
     `;
     return renderAppShell({
         ...view.chrome,
+        ...(view.v2LogSheet
+            ? {
+                  v2LogSheet: view.v2LogSheet,
+              }
+            : {}),
         title: "Nutrition",
         active: "nutrition",
         body,

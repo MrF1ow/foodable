@@ -29,6 +29,10 @@ import {
     type V2KitchenTab,
     type V2NavId,
 } from "./shell.js";
+import {
+    FD_LOG_SEARCH_SHEET_ID,
+    renderLogSheets,
+} from "./pages/v2/log-sheet.js";
 
 /** The nutrition page's log-meal dialog (`NUTRITION_LOG_MEAL_MODAL_ID`) and its
  *  Trends card (`data-nutrition-card="trends"`). Search, Scan and Log food link
@@ -208,7 +212,7 @@ function phoneTabs(chrome: AppChrome, active: V2NavId): string {
         return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${ariaLabel(t.label, attention)}">${fdIcon(t.icon)}<span class="${dotClass("fd-tab-dot", attention)}" aria-hidden="true"></span></a>`;
     };
     const [today, kitchen, recipes, trends] = FD_TABS;
-    const log = `<a class="fd-log" href="${FD_LOG_HREF}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
+    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
     return `<nav class="fd-tabs" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`;
 }
 
@@ -272,7 +276,7 @@ function withKitchenTabs(body: string, chrome: AppChrome): string {
 }
 
 function topBar(): string {
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
 /** Head for the new shell: the shared meta, then the old stylesheet and script
@@ -306,6 +310,7 @@ ${topBar()}
 </div>
 ${phoneTabs(chrome, active)}
 </div>
+${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", ...chrome.v2LogSheet }) : ""}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

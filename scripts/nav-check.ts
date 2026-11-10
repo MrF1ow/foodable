@@ -2072,9 +2072,9 @@ try {
         `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
     );
     record(
-        "v2 Log opens the log-meal dialog; Trends scrolls to its card",
+        "v2 Log opens the search sheet; Trends scrolls to its card",
         v2Log.marker === "stay" &&
-            v2Log.open.includes("nutrition-log-meal") &&
+            v2Log.open.includes("fd-log-search") &&
             v2Log.hash === "" &&
             v2Trends.marker === "stay" &&
             v2Trends.active === "Today" &&

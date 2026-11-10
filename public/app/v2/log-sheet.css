@@ -1,0 +1,208 @@
+/* Log search + amount sheets (phone-first). */
+
+.fd-log-search-sheet .fd-sheet-title,
+.fd-log-search-sheet .fd-sheet-sub {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* One rule per vendor pseudo: a selector list with a pseudo-element the
+ * browser does not know (::-ms-clear in Chromium) drops the whole rule. */
+.fd-log-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+}
+
+.fd-log-search-field {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-10);
+    margin-bottom: var(--space-section);
+    padding: var(--fd-s-10) var(--fd-s-14);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+}
+
+.fd-log-search-field .fd-icon {
+    flex: none;
+    width: 20px;
+    height: 20px;
+}
+
+.fd-log-search-input {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+    appearance: none;
+}
+
+.fd-log-search-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.fd-log-search-input:focus {
+    outline: none;
+}
+
+.fd-log-search-clear {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.fd-log-section-label {
+    margin: var(--space-section) 0 var(--space-gap);
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-log-meals-search {
+    margin-top: 0;
+}
+
+.fd-log-recents {
+    flex-wrap: wrap;
+}
+
+.fd-log-recent {
+    cursor: pointer;
+}
+
+.fd-log-filters {
+    margin-bottom: var(--space-row);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.fd-log-filters::-webkit-scrollbar {
+    display: none;
+}
+
+.fd-log-filter {
+    flex: none;
+    cursor: pointer;
+}
+
+.fd-log-online {
+    display: block;
+    width: 100%;
+    margin-top: var(--space-section);
+    padding: var(--space-row) 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: 500 15px/20px var(--font-body);
+    text-align: center;
+    cursor: pointer;
+}
+
+.fd-log-amount-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-log-amount-sheet .fd-sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-log-units .fd-chips {
+    justify-content: center;
+}
+
+.fd-log-units .fd-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.fd-log-time {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.fd-log-time-chips {
+    margin-top: var(--space-gap);
+}
+
+.fd-log-time-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: var(--space-gap);
+    padding: var(--fd-s-10) var(--fd-s-14);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+}
+
+.fd-log-time-input[hidden] {
+    display: none !important;
+}
+
+.fd-log-error {
+    color: var(--status-over);
+    margin: 0;
+}
+
+.fd-log-amount-sheet .fd-sheet-actions {
+    padding-top: var(--space-row);
+}
+
+.fd-log-submit {
+    width: 100%;
+}
+
+.fd-row--search .fd-icon-btn[data-fd-log-pick] {
+    cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-log-filter,
+    .fd-log-recent,
+    .fd-log-search-clear {
+        transition: none;
+    }
+}
+
+@media (min-width: 1024px) {
+    .fd-log-search-field {
+        margin-bottom: var(--space-gutter);
+    }
+}

@@ -74,24 +74,37 @@ describe("gated route harness on composed app", () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
-        expect(routes.find((r) => r.path === "/dev/gallery-v2")).toEqual({
-            method: "GET",
-            path: "/dev/gallery-v2",
-            flag: "ui-v2",
-            notFound: true,
-        });
-        expect(routes.find((r) => r.path === "/api/log/search")).toEqual({
-            method: "GET",
-            path: "/api/log/search",
-            flag: "ui-v2",
-            notFound: true,
-        });
-        expect(routes.map((r) => r.path).sort()).toEqual([
-            "/api/log/search",
-            "/dev/gallery-v2",
+        const invites = routes.filter((r) =>
+            r.path.startsWith("/settings/household/invites"),
+        );
+        expect(invites.map((r) => r.path).sort()).toEqual([
             "/settings/household/invites",
             "/settings/household/invites",
             "/settings/household/invites/revoke",
+        ]);
+        expect(
+            routes.filter(
+                (r) => !r.path.startsWith("/settings/household/invites"),
+            ),
+        ).toEqual([
+            {
+                method: "GET",
+                path: "/dev/gallery-v2",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/api/log/search",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log",
+                flag: "ui-v2",
+                notFound: true,
+            },
         ]);
     });
 });

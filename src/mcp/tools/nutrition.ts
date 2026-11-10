@@ -10,7 +10,6 @@ import {
     countMeals,
     existingIdempotencyKeys,
     existingMealIds,
-    snapshotToMealItemWrite,
     type Meal,
     type MealInput,
 } from "../../db/nutrition.js";
@@ -68,16 +67,14 @@ import { liveRecipesStore } from "../../db/recipes.js";
 import {
     callerSentTotals,
     COMPUTED_TOTALS_WARNING,
-    descriptionFromItems,
-    itemListDigest,
     MealItemsError,
-    resolveAndBuildMeal,
     type MealItemSpec,
 } from "../../domain/meals.js";
 import {
     registerNutritionReadTools,
     registerNutritionInsightTools,
 } from "./nutrition-insights.js";
+import { mealWriteFromItems as mealWriteFromItemsCore } from "../../meal-write.js";
 
 // ---------- bulk_import_meals ----------
 
@@ -356,52 +353,12 @@ export async function mealWriteFromItems(
     householdId: string,
     items: z.infer<typeof MEAL_ITEM_INPUT_SCHEMA>[],
     onSimilar?: OnSimilar,
-): Promise<{
-    totals: Pick<
-        MealInput,
-        | "calories"
-        | "protein_g"
-        | "carbs_g"
-        | "fat_g"
-        | "fiber_g"
-        | "sugar_g"
-        | "alcohol_g"
-        | "caffeine_mg"
-    >;
-    items: MealInput["items"];
-    item_digest: string;
-    unknownNote: string;
-    description: string;
-}> {
-    const specs = specsFromToolItems(items);
-    const { built, specs: resolved } = await resolveAndBuildMeal({
+): Promise<Awaited<ReturnType<typeof mealWriteFromItemsCore>>> {
+    return mealWriteFromItemsCore(
         householdId,
-        foods: liveFoodsStore(),
-        recipes: liveRecipesStore(),
-        items: specs,
+        specsFromToolItems(items),
         onSimilar,
-    });
-    return {
-        totals: {
-            calories: built.totals.calories ?? undefined,
-            protein_g: built.totals.protein_g ?? undefined,
-            carbs_g: built.totals.carbs_g ?? undefined,
-            fat_g: built.totals.fat_g ?? undefined,
-            fiber_g: built.totals.fiber_g ?? undefined,
-            sugar_g: built.totals.sugar_g ?? undefined,
-            alcohol_g: built.totals.alcohol_g ?? undefined,
-            caffeine_mg: built.totals.caffeine_mg ?? undefined,
-        },
-        items: built.items.map((item) =>
-            snapshotToMealItemWrite(item, householdId),
-        ),
-        item_digest: itemListDigest(resolved),
-        unknownNote:
-            built.unknownItems.length > 0
-                ? `\n\nNutrition unknown for: ${built.unknownItems.join(", ")}.`
-                : "",
-        description: descriptionFromItems(built.items),
-    };
+    );
 }
 
 export function registerNutritionWriteTools(

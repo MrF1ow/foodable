@@ -199,6 +199,7 @@ export async function renderDashboardPage(
     requestedMember: string | undefined,
     error?: string,
     openModalId?: string,
+    v2LogSheet?: import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -253,6 +254,7 @@ export async function renderDashboardPage(
             viewMemberId,
             error,
             openModalId,
+            v2LogSheet,
             weightUnit: preferredWeightUnitFromProfile(viewerProfile) ?? "kg",
         }),
     };

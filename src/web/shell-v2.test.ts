@@ -131,10 +131,13 @@ describe("flag on: the new shell", () => {
         );
         expect(navs).toEqual(["Main navigation", "Main tabs"]);
         expect(new Set(navs).size).toBe(navs.length);
-        // The desktop top bar is the only <header> the shell adds; the account
-        // chip is a link inside <main>, and the sidebar a plain container.
-        expect(html.match(/<header\b/g)?.length).toBe(1);
+        // The desktop top bar is the only page-level header; log sheets add
+        // `<header class="fd-sheet-head">` inside their dialogs.
         expect(html).toContain('<header class="fd-topbar">');
+        const pageHeaders = [...html.matchAll(/<header class="([^"]+)"/g)]
+            .map((m) => m[1])
+            .filter((cls) => cls === "fd-topbar");
+        expect(pageHeaders).toEqual(["fd-topbar"]);
         expect(html).not.toContain("fd-phonebar");
         expect(html).not.toContain("<aside");
         expect(html).toContain('<div class="fd-sidebar">');

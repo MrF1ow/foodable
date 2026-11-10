@@ -285,3 +285,29 @@ describe("recentHistoryStart", () => {
         expect(recentHistoryStart("2026-03-01", 14)).toBe("2026-02-15");
     });
 });
+
+describe("stock rows", () => {
+    test("carry the fridge quantity for the subtitle, never as a log amount", () => {
+        const result = mergeLogResults(
+            {
+                stock: [
+                    {
+                        kind: "stock",
+                        id: "s1",
+                        name: "Chicken thighs",
+                        food_id: "f1",
+                        source: "fridge",
+                        stock_amount: 0.5,
+                        stock_unit: "lb",
+                    },
+                ],
+            },
+            "chicken",
+        );
+        const item = result.groups[0]!.items[0]!;
+        expect(item.stock_amount).toBe(0.5);
+        expect(item.stock_unit).toBe("lb");
+        expect(item.amount).toBeUndefined();
+        expect(item.unit).toBeUndefined();
+    });
+});
