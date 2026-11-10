@@ -84,23 +84,48 @@ const templates = new Map<string, Promise<void>>();
  * belong to an unrelated process, which `pg_ctl stop` would signal.
  */
 function postmasterIsOurs(data: string): boolean {
-    let pid: string | undefined;
-    try {
-        pid = readFileSync(join(data, "postmaster.pid"), "utf8").split("\n")[0];
-    } catch {
-        return false;
-    }
-    if (!pid || !/^\d+$/.test(pid.trim())) return false;
-    const ps = Bun.spawnSync(["ps", "-o", "command=", "-p", pid.trim()], {
+    const pid = postmasterLine(data, 0);
+    if (!pid || !/^\d+$/.test(pid)) return false;
+    // -ww: never cut the command line at the terminal width ($COLUMNS),
+    // or the data path would not match and a live server would be orphaned.
+    const ps = Bun.spawnSync(["ps", "-ww", "-o", "command=", "-p", pid], {
         stdout: "pipe",
         stderr: "ignore",
     });
     return ps.exitCode === 0 && ps.stdout.toString().includes(data);
 }
 
+function postmasterLine(data: string, index: number): string | undefined {
+    try {
+        return readFileSync(join(data, "postmaster.pid"), "utf8")
+            .split("\n")
+            [index]?.trim();
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Whether a server answers on the port `data/postmaster.pid` records. A run
+ * in another pid namespace (a sandbox or container sharing the root) has a
+ * postmaster this process cannot see with `ps` or `kill -0`, but it still
+ * answers on 127.0.0.1.
+ */
+function postmasterAnswers(bin: string, data: string): boolean {
+    const port = postmasterLine(data, 3);
+    if (!port || !/^\d+$/.test(port)) return false;
+    const ready = Bun.spawnSync(
+        [`${bin}pg_isready`, "-q", "-h", "127.0.0.1", "-p", port, "-t", "2"],
+        { stdout: "ignore", stderr: "ignore" },
+    );
+    // 0 accepting, 1 rejecting (starting or stopping): a server is there.
+    return ready.exitCode === 0 || ready.exitCode === 1;
+}
+
 // `fast` checkpoints first, so a kept cluster has every commit despite
 // fsync and synchronous_commit being off; `immediate` is for throwing away.
-function stopClusterSync(
+// Exported for scripts/db-rehearse.ts, which cleans up the dry run's cluster.
+export function stopClusterSync(
     bin: string,
     data: string,
     mode: "fast" | "immediate" = "immediate",
@@ -138,7 +163,7 @@ const REAPER = `trap '' INT TERM HUP
 while kill -0 "$1" 2>/dev/null; do sleep 1; done
 [ -e "$2/${KEEP_FILE}" ] && exit 0
 pid=$(head -n 1 "$2/data/postmaster.pid" 2>/dev/null)
-if [ -n "$pid" ] && ps -o command= -p "$pid" 2>/dev/null | grep -qF -- "$2/data"; then
+if [ -n "$pid" ] && ps -ww -o command= -p "$pid" 2>/dev/null | grep -qF -- "$2/data"; then
     "$3" -D "$2/data" -m immediate stop
 fi
 rm -rf "$2"`;
@@ -178,8 +203,9 @@ function pidAlive(pid: number): boolean {
  * alone when it is marked KEEP, when its owner pid is still alive, when it
  * has neither an owner file nor an initdb'd `data/` (not ours), or when it has
  * no owner yet and is younger than an hour (another process may be creating
- * it right now). A server is only stopped when its postmaster.pid still
- * names a postgres for that folder.
+ * it right now), or when a server we cannot see still answers on its port
+ * (a live run in another pid namespace). A server is only stopped when its
+ * postmaster.pid still names a postgres for that folder.
  */
 export function sweepPgTestRoot(
     root: string,
@@ -215,7 +241,11 @@ export function sweepPgTestRoot(
             continue;
         }
         if (owner === null && now - st.mtimeMs < staleMs) continue;
-        stopClusterSync(bin, join(dir, "data"));
+        const data = join(dir, "data");
+        // A server we can see is an orphan of a dead run: stop it. One we
+        // cannot see but that answers belongs to a live run we cannot see.
+        if (postmasterIsOurs(data)) stopClusterSync(bin, data);
+        else if (postmasterAnswers(bin, data)) continue;
         rmSync(dir, { recursive: true, force: true });
         removed.push(dir);
     }
@@ -231,7 +261,22 @@ async function createCluster(port?: number): Promise<Cluster> {
     }
     const bin = binPrefix(pgDir);
     const root = pgTestRoot();
-    mkdirSync(root, { recursive: true, mode: 0o700 });
+    // pg_ctl runs postgres through /bin/sh with the data and log paths in
+    // double quotes, so these would be expanded or break the command.
+    if (/["'$`\\\n]/.test(root)) {
+        throw new Error(
+            `The test Postgres folder ${JSON.stringify(root)} contains a quote, $, backtick, backslash or newline, which pg_ctl's shell would expand. Set FOODABLE_PG_TEST_DIR to a plain path.`,
+        );
+    }
+    let dir: string;
+    try {
+        mkdirSync(root, { recursive: true, mode: 0o700 });
+        dir = mkdtempSync(join(root, RUN_PREFIX));
+    } catch (err) {
+        throw new Error(
+            `Cannot create a test Postgres folder in ${root} (${(err as NodeJS.ErrnoException).code}). Set FOODABLE_PG_TEST_DIR to a writable folder.`,
+        );
+    }
     if (!swept) {
         swept = true;
         sweepPgTestRoot(root, bin);
@@ -241,7 +286,6 @@ async function createCluster(port?: number): Promise<Cluster> {
         process.on("exit", stopAllTempPostgres);
     }
 
-    const dir = mkdtempSync(join(root, RUN_PREFIX));
     writeFileSync(join(dir, OWNER_FILE), `${process.pid}\n`);
     const cluster: Cluster = {
         bin,
@@ -262,8 +306,9 @@ async function createCluster(port?: number): Promise<Cluster> {
         }
         const serverOpts = [
             `-p ${cluster.port}`,
-            // pg_ctl hands -o to /bin/sh, so quote the one path in it.
-            `-k '${dir.replace(/'/g, "'\\''")}'`,
+            // pg_ctl hands -o to /bin/sh, so quote the one path in it (the
+            // root cannot hold a quote; see above).
+            `-k '${dir}'`,
             "-h 127.0.0.1",
             ...SERVER_OPTIONS,
         ].join(" ");

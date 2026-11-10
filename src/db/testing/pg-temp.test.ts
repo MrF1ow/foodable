@@ -7,6 +7,7 @@ import {
     test,
 } from "bun:test";
 import {
+    chmodSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
@@ -148,17 +149,23 @@ test.skipIf(!pgAvailable)(
     },
 );
 
-// One fresh cluster under a root whose path has a space and a quote, stopped
-// with keep: it must start at all, and the kept data must hold the last
-// commit even though durability is off.
+// One fresh cluster under a root whose path has a space, stopped with keep:
+// it must start at all, and the kept data must hold the last commit even
+// though durability is off.
 describe.skipIf(!pgAvailable)("a kept cluster", () => {
     let base: string;
-    let kept: { dir: string; row: string; started: boolean } | undefined;
+    let kept:
+        | {
+              dir: string;
+              row: string;
+              started: boolean;
+          }
+        | undefined;
 
     beforeAll(async () => {
         base = mkdtempSync(join(tmpdir(), "foodable-keep-"));
         const before = process.env.FOODABLE_PG_TEST_DIR;
-        process.env.FOODABLE_PG_TEST_DIR = join(base, "pg root's");
+        process.env.FOODABLE_PG_TEST_DIR = join(base, "pg root");
         try {
             const pg = await startTempPostgres();
             await pg.scalar(
@@ -206,8 +213,8 @@ describe.skipIf(!pgAvailable)("a kept cluster", () => {
         if (base) rmSync(base, { recursive: true, force: true });
     });
 
-    test("starts under a root with a space and a quote", () => {
-        expect(kept?.dir).toContain("pg root's");
+    test("starts under a root with a space", () => {
+        expect(kept?.dir).toContain("pg root/");
     });
 
     test("keeps the last commit", () => {
@@ -215,6 +222,111 @@ describe.skipIf(!pgAvailable)("a kept cluster", () => {
         expect(kept?.row).toBe("42");
     });
 });
+
+test.skipIf(!pgAvailable)(
+    "sweep leaves a folder whose server answers but cannot be seen",
+    async () => {
+        // A live run in another pid namespace: its owner and postmaster pids
+        // look dead from here, but its server answers on its port.
+        root = mkdtempSync(join(tmpdir(), "foodable-sweep-"));
+        const live = await createTestDatabase();
+        try {
+            const port = new URL(live.url).port;
+            const dir = runDir("run-other-namespace", deadPid());
+            writeFileSync(
+                join(dir, "data/postmaster.pid"),
+                `${deadPid()}\n${join(dir, "data")}\n0\n${port}\n`,
+            );
+            const bin = binPrefix((await findPgBin())!);
+            expect(sweepPgTestRoot(root, bin)).toEqual([]);
+            expect(existsSync(dir)).toBe(true);
+        } finally {
+            await live.stop();
+        }
+    },
+);
+
+// ps cuts its output at $COLUMNS, which once hid the data path from the
+// "is this our postgres" check and orphaned a live server. Bun does not pass
+// a runtime process.env change to children, so this runs in its own process.
+describe.skipIf(!pgAvailable)("with a narrow COLUMNS", () => {
+    let base: string;
+    let result: { stoppedAlive: boolean; dirLeft: boolean } | undefined;
+
+    beforeAll(async () => {
+        base = mkdtempSync(join(tmpdir(), "foodable-columns-"));
+        const script = `
+            import { readFileSync, existsSync } from "node:fs";
+            import { startTempPostgres } from ${JSON.stringify(join(import.meta.dir, "pg-temp.ts"))};
+            const pg = await startTempPostgres();
+            const pid = Number(readFileSync(pg.dir + "/data/postmaster.pid", "utf8").split("\\n")[0]);
+            await pg.stop();
+            let alive = true;
+            try { process.kill(pid, 0); } catch { alive = false; }
+            console.log(JSON.stringify({ stoppedAlive: alive, dirLeft: existsSync(pg.dir) }));
+        `;
+        const proc = Bun.spawnSync(
+            [process.execPath, "--no-env-file", "-e", script],
+            {
+                env: {
+                    ...process.env,
+                    COLUMNS: "20",
+                    FOODABLE_PG_TEST_DIR: join(base, "pg"),
+                },
+            },
+        );
+        const line = proc.stdout.toString().trim().split("\n").at(-1) ?? "";
+        result = JSON.parse(line);
+    }, DB_SETUP_TIMEOUT_MS);
+
+    afterAll(() => {
+        if (base) rmSync(base, { recursive: true, force: true });
+    });
+
+    test("stop() still stops the server", () => {
+        expect(result).toEqual({ stoppedAlive: false, dirLeft: false });
+    });
+});
+
+async function startError(root: string): Promise<string> {
+    const before = process.env.FOODABLE_PG_TEST_DIR;
+    process.env.FOODABLE_PG_TEST_DIR = root;
+    try {
+        const pg = await startTempPostgres();
+        await pg.stop();
+        return "started";
+    } catch (err) {
+        return (err as Error).message;
+    } finally {
+        if (before === undefined) delete process.env.FOODABLE_PG_TEST_DIR;
+        else process.env.FOODABLE_PG_TEST_DIR = before;
+    }
+}
+
+test.skipIf(!pgAvailable)(
+    "a root pg_ctl's shell would expand is refused, not run",
+    async () => {
+        root = mkdtempSync(join(tmpdir(), "foodable-root-"));
+        const marker = join(root, "MARKER");
+        const message = await startError(join(root, `pg $(touch ${marker})`));
+        expect(message).toContain("FOODABLE_PG_TEST_DIR");
+        expect(existsSync(marker)).toBe(false);
+    },
+);
+
+test.skipIf(!pgAvailable)(
+    "an unwritable root names FOODABLE_PG_TEST_DIR",
+    async () => {
+        root = mkdtempSync(join(tmpdir(), "foodable-root-"));
+        chmodSync(root, 0o500);
+        try {
+            const message = await startError(join(root, "pg"));
+            expect(message).toContain("Set FOODABLE_PG_TEST_DIR");
+        } finally {
+            chmodSync(root, 0o700);
+        }
+    },
+);
 
 test("sweep of a missing root is a no-op", () => {
     expect(sweepPgTestRoot("/nonexistent/foodable-pg-test", "/x/")).toEqual([]);

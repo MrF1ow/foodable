@@ -22,6 +22,7 @@ import {
     findPgBin,
     PG_BIN_HINT,
 } from "../src/db/testing/pg-shared.js";
+import { stopClusterSync } from "../src/db/testing/pg-temp.js";
 
 export const DEFAULTS = {
     project: "5c73bffd-c005-4e7f-8c92-57db06aed483",
@@ -217,7 +218,7 @@ async function main(): Promise<number> {
         console.error(PG_BIN_HINT);
         return 1;
     }
-    const pgCtl = `${binPrefix(pgDir)}pg_ctl`;
+    const pgBin = binPrefix(pgDir);
 
     process.umask(0o077);
     const dir = mkdtempSync(join(tmpdir(), "foodable-rehearse-"));
@@ -242,10 +243,8 @@ async function main(): Promise<number> {
             onlyFiles: true,
         })) {
             const data = join(dir, entry, "..");
-            Bun.spawnSync([pgCtl, "-D", data, "-m", "immediate", "stop"], {
-                stdout: "ignore",
-                stderr: "ignore",
-            });
+            // Only when postmaster.pid still names this cluster's server.
+            stopClusterSync(pgBin, data);
         }
         rmSync(dir, { recursive: true, force: true });
     };
