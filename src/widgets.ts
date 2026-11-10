@@ -361,7 +361,7 @@ function minifyScript(js: string): string {
 }
 
 const BLOCK_RE =
-    /(<script\b[^>]*>)([\s\S]*?)(<\/script>)|(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi;
+    /(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)|(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi;
 
 /** Minify assembled MCP widget HTML (scripts, styles, trim HTML indent). */
 export function minifyWidgetHtml(html: string): string {

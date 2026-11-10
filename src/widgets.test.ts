@@ -44,7 +44,7 @@ async function partialAsInlined(rel: string): Promise<string> {
 
 function widgetScriptBodies(html: string): string[] {
     const bodies: string[] = [];
-    for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
         bodies.push(m[1]!);
     }
     return bodies;
@@ -210,9 +210,9 @@ test.each(V2_TEMPLATES)(
         expect(source.match(/\/\*@include/g)).toBeNull();
         expect(source.match(/\/\*@inlinets/g)).toBeNull();
         expect((html.match(/<style>/g) ?? []).length).toBe(1);
-        expect((html.match(/<script>/g) ?? []).length).toBe(1);
+        expect((html.match(/<script\b[^>]*>/gi) ?? []).length).toBe(1);
         expect(html).not.toContain("<link");
-        expect(html).not.toMatch(/<script[^>]+src=/);
+        expect(html).not.toMatch(/<script[^>]+src=/i);
         expect((html.match(/initWidget\(\{/g) ?? []).length).toBe(1);
 
         // The Theme palette, never the v1 NEUTRAL tokens or a web font.
@@ -2424,7 +2424,7 @@ test("attention v2: Dismiss is aria-disabled while the call is in flight", async
     await new Promise((r) => setTimeout(r, 0));
     expect(w.html()).toMatch(
         new RegExp(
-            `data-dismiss-key="${ATTENTION_DISMISS_A.replace(/\|/g, "\\|")}"[^>]*aria-disabled="true"`,
+            `data-dismiss-key="${ATTENTION_DISMISS_A.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*aria-disabled="true"`,
         ),
     );
     release();
