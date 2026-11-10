@@ -45,7 +45,8 @@ function floorTargetApplies(target: number | null): boolean {
     return target != null && target > 0;
 }
 
-export type CalorieDayGrade = "on_target" | "under" | "over" | "no_goal";
+export type CalorieDayGrade =
+    "on_target" | "under" | "over" | "no_goal" | "no_data";
 
 /** Grade one day's calories against that calendar day's own goal (±10% band). */
 export function gradeCaloriesForDay(
@@ -406,7 +407,11 @@ function buildMemberNutrition(
             protein_g: b.protein_g,
             calorieGoal,
             proteinGoal,
-            calorieGrade: gradeCaloriesForDay(b.calories, calorieGoal),
+            // A day with nothing logged is unknown, not "under".
+            calorieGrade:
+                b.meals.length === 0
+                    ? "no_data"
+                    : gradeCaloriesForDay(b.calories, calorieGoal),
         };
     });
 
@@ -649,7 +654,8 @@ function familyHasPositiveStock(
     foodsById: ReadonlyMap<string, EffectiveFood>,
 ): boolean {
     for (const item of items) {
-        if (item.kind !== "food" || item.foodId == null) continue;
+        // Supplies have usual products too, so their stock counts.
+        if (item.foodId == null) continue;
         const food = foodsById.get(item.foodId);
         const fam = food ? familyOf(food) : item.foodId;
         if (fam !== familyId) continue;

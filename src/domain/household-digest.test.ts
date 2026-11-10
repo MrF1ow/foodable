@@ -7,6 +7,7 @@ import {
     gradeCaloriesForDay,
     groceryListFoodIdsForSuggestions,
     ranOutInWindow,
+    usualsAtZeroForDigest,
     type HouseholdDigestInputs,
     type HouseholdDigestStockInput,
 } from "./household-digest.js";
@@ -21,7 +22,9 @@ import { zonedDayStartUtc } from "./tz.js";
 import { applyMovement, createMemoryStockStore } from "./stock.js";
 import {
     createMemoryFoodsStore,
+    effectiveFoodsFromListed,
     findOrCreateManualFood,
+    newFood,
     updateFood,
 } from "./foods.js";
 import { addLocation, createMemoryFridgeStore } from "./fridge.js";
@@ -795,4 +798,93 @@ test("ranOutInWindow counts supplies still in stock", async () => {
         "UTC",
     );
     expect(ranOut).toEqual([]);
+});
+
+test("a day with nothing logged is graded no_data, not under", () => {
+    const meals = [
+        {
+            id: "m1",
+            user_id: "u1",
+            logged_at: "2026-11-03T12:00:00Z",
+            description: "x",
+            calories: 2000,
+            protein_g: 100,
+            carbs_g: 1,
+            fat_g: 1,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            meal_type: null,
+        },
+    ];
+    const buckets = buildDailyBuckets(
+        meals as never,
+        [],
+        "2026-11-03",
+        "2026-11-09",
+        "UTC",
+    );
+    const digest = buildHouseholdDigest({
+        timezone: "UTC",
+        today: "2026-11-09",
+        window: { from: "2026-11-03", to: "2026-11-09" },
+        fridgeItems: [],
+        stock: {
+            movements: [],
+            fridgeItems: [],
+            displayNameByFoodId: new Map(),
+        },
+        members: [
+            {
+                memberId: "u1",
+                displayName: "A",
+                buckets,
+                goalsOn: () =>
+                    ({ daily_calories: 2000, daily_protein_g: 100 }) as never,
+            },
+        ],
+        restockLines: [],
+        usualAtZero: [],
+        groceryLines: [],
+        groceryListFoodIds: new Set(),
+    } as never);
+    const grades = digest.members[0]!.days.map((d) => d.calorieGrade);
+    expect(grades[0]).toBe("on_target");
+    expect(grades.slice(1).every((g) => g === "no_data")).toBe(true);
+});
+
+test("a usual supply with stock on hand is not suggested", () => {
+    const plain = newFood({
+        householdId: "hh",
+        kind: "supply",
+        name: "Toilet paper",
+    });
+    const product = newFood({
+        householdId: "hh",
+        kind: "supply",
+        name: "Soft 9-pack",
+        genericFoodId: plain.id,
+    });
+    plain.usualProductId = product.id;
+    const foods = [plain, product];
+    const items = [
+        {
+            id: "i1",
+            householdId: "hh",
+            locationId: "l",
+            kind: "supply",
+            displayName: "Toilet paper",
+            quantity: { amount: 6, unit: "each" },
+            foodId: plain.id,
+        },
+    ];
+    expect(
+        usualsAtZeroForDigest({
+            items,
+            foods,
+            foodsById: effectiveFoodsFromListed(foods),
+            stores: [{ id: "s1" }],
+        } as never),
+    ).toEqual([]);
 });

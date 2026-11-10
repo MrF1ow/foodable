@@ -50,7 +50,7 @@ const DAY_NUTRITION_SCHEMA = z.object({
     protein_g: z.number(),
     calorie_goal: z.number().nullable(),
     protein_goal: z.number().nullable(),
-    calorie_grade: z.enum(["on_target", "under", "over", "no_goal"]),
+    calorie_grade: z.enum(["on_target", "under", "over", "no_goal", "no_data"]),
 });
 
 const MEMBER_NUTRITION_SCHEMA = z.object({

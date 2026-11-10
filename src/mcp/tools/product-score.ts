@@ -168,9 +168,9 @@ function per100gFromOffHit(hit: FoodResult) {
 function servingNutritionFromOffHit(
     hit: FoodResult,
 ): ProductServingNutrition | null {
+    // A hit that is not per 100 g carries every value per serving (see
+    // normalizeOFFProduct), whatever the serving's unit: 330 ml, 1 bar.
     if (offHitIsPer100g(hit)) return null;
-    const grams = servingGramsFromHit(hit);
-    if (grams == null) return null;
     return {
         calories: hit.calories,
         proteinG: hit.protein_g,
