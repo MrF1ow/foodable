@@ -7,6 +7,7 @@ import {
     WIDGET_BUDGETS,
     WIDGET_TEMPLATES,
     WIDGET_TEMPLATES_V2,
+    harnessNeedsV2,
     widgetAssemblies,
     widgetTemplateName,
 } from "./widgets.js";
@@ -707,6 +708,69 @@ test("v2 macro copy carries no unused strings", async () => {
 
 // ---- v2 macro-strip widgets --------------------------------------------------
 
+const WIDGET_FOOTER =
+    "You can enable or disable these widgets anytime — just ask to update your settings.";
+
+// #root stub: records #widget-mount and any footer nodes bridge.js appends.
+function widgetRootStub(clickSink?: (fn: (e: unknown) => void) => void) {
+    let legacyInner = "";
+    let mountEl: { id: string; innerHTML: string } | null = null;
+    const footerText: string[] = [];
+    const root = {
+        get innerHTML() {
+            return mountEl ? mountEl.innerHTML : legacyInner;
+        },
+        set innerHTML(v: string) {
+            legacyInner = v;
+            mountEl = null;
+            footerText.length = 0;
+        },
+        appendChild(node: {
+            id?: string;
+            innerHTML?: string;
+            textContent?: string;
+        }) {
+            if (node.id === "widget-mount") {
+                mountEl = node as { id: string; innerHTML: string };
+            } else if (
+                node.textContent &&
+                node.textContent.includes("enable or disable these widgets")
+            ) {
+                footerText.push(node.textContent);
+            }
+        },
+        addEventListener: (type: string, fn: (e: unknown) => void) => {
+            if (type === "click") clickSink?.(fn);
+        },
+        querySelector: () => null,
+    };
+    return {
+        root,
+        document: {
+            getElementById: (id: string) => {
+                if (id === "root") return root;
+                if (id === "widget-mount") return mountEl;
+                return null;
+            },
+            documentElement: {
+                setAttribute: () => {},
+                style: {} as object,
+                getBoundingClientRect: () => ({ height: 120 }),
+            },
+            body: {},
+            addEventListener: () => {},
+            createElement: () => ({
+                id: "",
+                innerHTML: "",
+                textContent: "",
+                style: {} as object,
+            }),
+        },
+        html: () =>
+            (mountEl ? mountEl.innerHTML : legacyInner) + footerText.join(""),
+    };
+}
+
 // Run an assembled widget's script against a stub document, the way the
 // household app seeds a frame: window.__WIDGET_DATA__ is painted straight
 // through render(), with no host and no chat footer. Returns the card markup.
@@ -723,22 +787,9 @@ function mountWidget(
 ): { html: () => string; clickRange: (value: number) => void } {
     type Listener = (e: unknown) => void;
     const clicks: Listener[] = [];
-    // appendChild: the no-host sample path adds the chat footer.
-    const root = {
-        innerHTML: "",
-        appendChild: () => {},
-        addEventListener: (type: string, fn: Listener) => {
-            if (type === "click") clicks.push(fn);
-        },
-    };
+    const dom = widgetRootStub((fn) => clicks.push(fn));
+    const { root, document } = dom;
     const noop = () => {};
-    const document = {
-        getElementById: (id: string) => (id === "root" ? root : null),
-        documentElement: { setAttribute: noop, style: {} as object },
-        body: {},
-        addEventListener: noop,
-        createElement: () => ({ style: {} }),
-    };
     const window: Record<string, unknown> = {
         __WIDGET_DATA__: data,
         addEventListener: noop,
@@ -760,7 +811,82 @@ function mountWidget(
         };
         for (const fn of clicks) fn({ target });
     };
-    return { html: () => root.innerHTML, clickRange };
+    return { html: dom.html, clickRange };
+}
+
+// Chat host paint path (no __WIDGET_DATA__): bridge appends the settings footer.
+async function mountChatWidget(
+    html: string,
+    data: unknown,
+): Promise<{
+    html: () => string;
+    clickRange: (value: number) => void;
+    redeliver: (next: unknown) => Promise<void>;
+}> {
+    type Listener = (e: unknown) => void;
+    const clicks: Listener[] = [];
+    const dom = widgetRootStub((fn) => clicks.push(fn));
+    const { document } = dom;
+    const windowListeners: Listener[] = [];
+    const deliver = (payload: object) => {
+        for (const fn of windowListeners) fn({ source: host, data: payload });
+    };
+    const host = {
+        postMessage(msg: { id?: number; method: string; params?: object }) {
+            if (msg.method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id: msg.id,
+                    result: {
+                        hostCapabilities: { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (msg.method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: data },
+                });
+            }
+        },
+    };
+    const noop = () => {};
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Listener) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    for (let i = 0; i < 32; i++) await Promise.resolve();
+    const clickRange = (value: number) => {
+        const button = {
+            getAttribute: (name: string) =>
+                name === "data-range" ? String(value) : null,
+            dataset: { range: String(value) },
+        };
+        const target = {
+            closest: (sel: string) =>
+                sel.includes("data-range") ? button : null,
+        };
+        for (const fn of clicks) fn({ target });
+    };
+    const redeliver = async (next: unknown) => {
+        deliver({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: { structuredContent: next },
+        });
+        for (let i = 0; i < 32; i++) await Promise.resolve();
+    };
+    return { html: dom.html, clickRange, redeliver };
 }
 
 // A local calendar date, written the way the payloads carry it.
@@ -1255,6 +1381,28 @@ test("v2 trends: sample, and the toggle re-slices rings, averages and the streak
     expect(out).toContain('<span class="fig-v">3</span>');
 });
 
+test("v2 trends: range toggle keeps the chat settings footer", async () => {
+    const html = await v2Widget("trends");
+    const w = await mountChatWidget(html, trendsPayload());
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    w.clickRange(14);
+    expect(w.html()).toContain(WIDGET_FOOTER);
+});
+
+test("v2 re-rendering widgets drop the loading text and keep one footer per tool result", async () => {
+    const count = (h: string, needle: string) => h.split(needle).length - 1;
+    for (const [key, payload] of [
+        ["trends", trendsPayload()],
+        ["weight-trends", weightPayload()],
+    ] as const) {
+        const w = await mountChatWidget(await v2Widget(key), payload);
+        expect(w.html(), key).not.toContain("Loading");
+        expect(count(w.html(), WIDGET_FOOTER), key).toBe(1);
+        await w.redeliver(payload);
+        expect(count(w.html(), WIDGET_FOOTER), key).toBe(1);
+    }
+});
+
 test("v2 trends: empty payloads, and a range with missing days", async () => {
     const html = await v2Widget("trends");
     const emptyMsg = "No meals or water logged in this range yet.";
@@ -1347,6 +1495,14 @@ test("v2 weight-trends: sample, and the toggle re-slices figure, change and char
     expect(pressed(out)).toBe("14");
     expect(out).toContain(`↓ ${w1(1.6)} lb since Jun 29`);
     expect(out).toContain("4 weigh-ins");
+});
+
+test("v2 weight-trends: range toggle keeps the chat settings footer", async () => {
+    const html = await v2Widget("weight-trends");
+    const w = await mountChatWidget(html, weightPayload());
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    w.clickRange(7);
+    expect(w.html()).toContain(WIDGET_FOOTER);
 });
 
 test("v2 weight-trends: no target, one reading, an empty range and no data", async () => {
@@ -1957,29 +2113,9 @@ async function mountAttention(
     const calls: DismissArgs[] = [];
     const listeners: Record<string, Fn[]> = {};
     const windowListeners: Fn[] = [];
-    const root = {
-        innerHTML: "",
-        appendChild: () => {},
-        addEventListener: (type: string, fn: Fn) =>
-            (listeners[type] ??= []).push(fn),
-        querySelector: () => null,
-    };
+    const dom = widgetRootStub((fn) => (listeners.click ??= []).push(fn));
+    const { root, document } = dom;
     const noop = () => {};
-    const document = {
-        getElementById: (id: string) => (id === "root" ? root : null),
-        documentElement: {
-            setAttribute: noop,
-            style: {} as object,
-            getBoundingClientRect: () => ({ height: 120 }),
-        },
-        body: {},
-        addEventListener: noop,
-        createElement: () => ({
-            className: "",
-            textContent: "",
-            style: {},
-        }),
-    };
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const deliver = (data: object) => {
         for (const fn of windowListeners) fn({ source: host, data });
@@ -2050,7 +2186,7 @@ async function mountAttention(
     await tick();
     await tick();
     const mount = {
-        html: () => root.innerHTML,
+        html: dom.html,
         calls,
         clickDismissKey(key: string) {
             for (const fn of listeners.click ?? []) {
@@ -2070,8 +2206,7 @@ async function mountAttention(
                                               const re = new RegExp(
                                                   `data-dismiss-key="${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*aria-disabled="([^"]+)"`,
                                               );
-                                              const m =
-                                                  root.innerHTML.match(re);
+                                              const m = dom.html().match(re);
                                               return m ? m[1]! : "false";
                                           }
                                           return null;
@@ -2162,6 +2297,15 @@ test("attention v2 sample renders grouped rows", async () => {
     expect(body).toContain("Expiring");
     expect(body).not.toContain("Salmon");
     expect(body).toContain("Baby &lt;img&gt; spinach");
+});
+
+test("attention v2: Dismiss success keeps the chat settings footer", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: ATTENTION_SAMPLE,
+    });
+    expect(w.html()).toContain(WIDGET_FOOTER);
+    await w.dismissKey(ATTENTION_DISMISS_A);
+    expect(w.html()).toContain(WIDGET_FOOTER);
 });
 
 test("attention v2: Dismiss calls dismiss_notice and removes the row", async () => {
@@ -2298,4 +2442,43 @@ test("attention v2: notice text is escaped", async () => {
     expect(body).not.toContain("<script>");
     expect(body).not.toContain("<img");
     expect(body).toContain("&lt;img&gt;");
+});
+
+// ---- widget harness (v2-only keys) ------------------------------------------
+
+test("harnessNeedsV2 marks attention and not v1 twins", () => {
+    expect(harnessNeedsV2("attention")).toBe(true);
+    expect(harnessNeedsV2("trends")).toBe(false);
+});
+
+test("harness index and widget route serve v2-only attention", async () => {
+    const port = 18840;
+    const proc = Bun.spawn(["bun", "run", "scripts/widget-harness.ts"], {
+        cwd: import.meta.dir + "/..",
+        env: { ...process.env, HARNESS_PORT: String(port) },
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    try {
+        let ready = false;
+        for (let i = 0; i < 2000 && !ready; i++) {
+            try {
+                const r = await fetch(`http://127.0.0.1:${port}/`);
+                if (r.ok) ready = true;
+            } catch {
+                /* server still starting */
+            }
+            await Promise.resolve();
+        }
+        expect(ready).toBe(true);
+        const index = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+        expect(index).toContain('href="/host?widget=attention&v2=1"');
+        const widget = await fetch(
+            `http://127.0.0.1:${port}/widget/attention?v2=1`,
+        );
+        expect(widget.status).toBe(200);
+    } finally {
+        proc.kill();
+        await proc.exited;
+    }
 });

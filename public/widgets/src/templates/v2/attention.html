@@ -281,9 +281,11 @@
             function render(data) {
                 rootEl = document.getElementById("root");
                 if (!data || typeof data !== "object") {
-                    rootEl.innerHTML = card(
-                        v2Header(T.title) +
-                            `<p class="note">${esc(T.empty)}</p>`,
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
                     );
                     return;
                 }
@@ -295,7 +297,7 @@
                     errors: MODEL && MODEL.errors ? { ...MODEL.errors } : {},
                 };
                 const showDismiss = !!(API && API.canCallTools);
-                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+                v2Paint(renderBody(MODEL, showDismiss));
             }
 
             function removeNoticeByKey(key) {
@@ -313,14 +315,14 @@
                 );
                 if (MODEL.errors[key]) delete MODEL.errors[key];
                 const showDismiss = !!(API && API.canCallTools);
-                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+                v2Paint(renderBody(MODEL, showDismiss));
             }
 
             function setRowError(key, message) {
                 if (!MODEL) return;
                 MODEL.errors[key] = message;
                 const showDismiss = !!(API && API.canCallTools);
-                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+                v2Paint(renderBody(MODEL, showDismiss));
             }
 
             async function onDismissClick(key) {
@@ -335,7 +337,7 @@
                 if (MODEL.errors[key]) delete MODEL.errors[key];
                 dismissing.add(key);
                 const showDismiss = !!(API && API.canCallTools);
-                rootEl.innerHTML = renderBody(MODEL, showDismiss);
+                v2Paint(renderBody(MODEL, showDismiss));
                 try {
                     const res = await API.callTool("dismiss_notice", args);
                     const sc =
@@ -384,7 +386,7 @@
                 name: "attention-widget",
                 loading: `<div class="empty">${esc(T.loading)}</div>`,
                 coerce,
-                render,
+                render: v2BridgeRender(render),
                 sample: SAMPLE,
                 onReady(api) {
                     API = api;

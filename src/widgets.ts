@@ -100,6 +100,11 @@ export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
 
 export type WidgetHtmlOptions = { v2?: boolean };
 
+/** v2 template with no v1 twin — the harness must frame the v2 assembly. */
+export function harnessNeedsV2(key: string): boolean {
+    return key in WIDGET_TEMPLATES_V2 && !(key in WIDGET_TEMPLATES);
+}
+
 /** Every assembly the server can serve: v1 for each v1 template, v2 for every key. */
 export function widgetAssemblies(): { key: string; v2: boolean }[] {
     return [

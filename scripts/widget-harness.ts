@@ -22,6 +22,7 @@
 
 import {
     getWidgetHtml,
+    harnessNeedsV2,
     WIDGET_TEMPLATES,
     WIDGET_TEMPLATES_V2,
 } from "../src/widgets.js";
@@ -59,10 +60,11 @@ const KEYS = [
 ];
 
 function indexPage(): string {
-    const links = KEYS.map(
-        (k) =>
-            `<li><a href="/host?widget=${encodeURIComponent(k)}">${k}</a></li>`,
-    ).join("");
+    const links = KEYS.map((k) => {
+        const v2 = harnessNeedsV2(k);
+        const qs = v2 ? "&v2=1" : "";
+        return `<li><a href="/host?widget=${encodeURIComponent(k)}${qs}">${k}</a></li>`;
+    }).join("");
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Widget harness</title>
 <style>
@@ -87,7 +89,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
     const maxHeight = params.get("maxHeight");
     const failCalls = params.get("fail") === "1";
     // ?v2=1 frames the widget's v2 assembly (getWidgetHtml(key, { v2: true })).
-    const v2 = params.get("v2") === "1";
+    const v2 = params.get("v2") === "1" || harnessNeedsV2(widget);
     // The alcohol opt-in, as every tool that touches alcohol sends it:
     // "us"/"uk" when the user tracks alcohol, null when they do not. Default
     // null, because that is the default account state and the state the

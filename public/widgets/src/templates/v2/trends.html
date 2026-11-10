@@ -215,9 +215,11 @@
                     ? data.days.filter((d) => d && utcDay(d.date))
                     : [];
                 if (!days.some(dayHasData)) {
-                    root.innerHTML = card(
-                        v2Header(T.title) +
-                            `<p class="note">${esc(T.empty)}</p>`,
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
                     );
                     return;
                 }
@@ -263,19 +265,21 @@
                     slice.length - 1,
                 );
 
-                document.getElementById("root").innerHTML = card(
-                    v2Header(T.title, null, seg) +
-                        rings +
-                        macroLegendV2() +
-                        `<div class="grp">${v2Label(tpl(T.avgAllDays, { range }))}${averagesV2(avg, data.goals)}</div>` +
-                        v2Figures([
-                            { value: String(streak), unit: T.streak },
-                            { value: `${pct}%`, unit: T.logged },
-                        ]),
+                v2Paint(
+                    card(
+                        v2Header(T.title, null, seg) +
+                            rings +
+                            macroLegendV2() +
+                            `<div class="grp">${v2Label(tpl(T.avgAllDays, { range }))}${averagesV2(avg, data.goals)}</div>` +
+                            v2Figures([
+                                { value: String(streak), unit: T.streak },
+                                { value: `${pct}%`, unit: T.logged },
+                            ]),
+                    ),
                 );
             }
 
-            // Delegated on #root, which survives paint()'s innerHTML rewrites.
+            // Delegated on #root so clicks reach the mount and the bridge footer.
             document.getElementById("root").addEventListener("click", (e) => {
                 const btn = e.target?.closest?.("button[data-range]");
                 if (!btn) return;
@@ -298,7 +302,7 @@
                 name: "trends-widget",
                 loading: `<div class="empty">${esc(T.loading)}</div>`,
                 coerce,
-                render,
+                render: v2BridgeRender(render),
                 sample: SAMPLE,
             });
         </script>

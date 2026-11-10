@@ -342,9 +342,11 @@
                           .sort((a, b) => (a.date < b.date ? -1 : 1))
                     : [];
                 if (all.length === 0) {
-                    root.innerHTML = card(
-                        v2Header(T.title) +
-                            `<p class="note">${esc(T.empty)}</p>`,
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
                     );
                     return;
                 }
@@ -388,12 +390,10 @@
                         : figure(slice, target, unit) +
                           `<div>${weightChart(slice, target, unit)}</div>` +
                           footer(slice, target, unit);
-                document.getElementById("root").innerHTML = card(
-                    v2Header(T.title, null, seg) + body,
-                );
+                v2Paint(card(v2Header(T.title, null, seg) + body));
             }
 
-            // Delegated on #root, which survives paint()'s innerHTML rewrites.
+            // Delegated on #root so clicks reach the mount and the bridge footer.
             document.getElementById("root").addEventListener("click", (e) => {
                 const btn = e.target?.closest?.("button[data-range]");
                 if (!btn) return;
@@ -420,7 +420,7 @@
                 name: "weight-trends-widget",
                 loading: `<div class="empty">${esc(T.loading)}</div>`,
                 coerce,
-                render,
+                render: v2BridgeRender(render),
                 sample: SAMPLE,
             });
         </script>

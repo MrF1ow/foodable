@@ -260,3 +260,32 @@ function v2Buttons(items) {
         )
         .join("")}</div>`;
 }
+
+// Card markup lives under #widget-mount inside #root. bridge.js appends the
+// chat settings footer as a sibling after render(), so in-widget re-renders
+// must not assign #root.innerHTML.
+function v2Mount() {
+    const root = document.getElementById("root");
+    let el = document.getElementById("widget-mount");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "widget-mount";
+        root.appendChild(el);
+    }
+    return el;
+}
+
+function v2Paint(html) {
+    v2Mount().innerHTML = html;
+}
+
+// The bridge's render entry: start from an empty #root, so neither the
+// loading placeholder nor a footer from an earlier tool result survives,
+// then draw. In-widget re-renders call the template's render (or v2Paint)
+// directly and keep the footer.
+function v2BridgeRender(render) {
+    return (data) => {
+        document.getElementById("root").innerHTML = "";
+        render(data);
+    };
+}
