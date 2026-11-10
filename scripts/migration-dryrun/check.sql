@@ -735,17 +735,14 @@ begin
     end if;
 
     -- Every table with a household_id gives foodable_app a policy, except the
-    -- ones named here on purpose: system-only tables and a person's own rows,
-    -- which carry their own policies. A listed table that gains a policy must
-    -- leave the list.
+    -- system-only ones named here on purpose. A listed table that gains a
+    -- policy must leave the list.
     declare
         missing text;
         stale text;
         exempt text[] := array[
             'flag_assignments',
-            'household_mcp_tokens',
-            'meal_items',
-            'nutrition_goal_days'
+            'household_mcp_tokens'
         ];
     begin
         select string_agg(c.relname, ', ' order by c.relname) into missing
@@ -774,6 +771,32 @@ begin
         where p.tablename = any (exempt);
         if stale is not null then
             raise exception 'exempt from the household policy check but has a foodable_app policy: %', stale;
+        end if;
+    end;
+
+    -- A person's own data: foodable_app reaches it through policies on the
+    -- user and the household's members, never without one.
+    declare
+        missing text;
+    begin
+        select string_agg(t, ', ' order by t) into missing
+        from unnest(array[
+            'meal_items',
+            'meals',
+            'nutrition_goal_days',
+            'nutrition_goals',
+            'profiles',
+            'water_log',
+            'weight_log'
+        ]) as t
+        where not exists (
+            select 1 from pg_policies p
+            where p.schemaname = 'public'
+              and p.tablename = t
+              and 'foodable_app' = any (p.roles)
+        );
+        if missing is not null then
+            raise exception 'personal tables with no foodable_app policy: %', missing;
         end if;
     end;
 

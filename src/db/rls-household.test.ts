@@ -35,8 +35,9 @@ const SYSTEM_ONLY_HOUSEHOLD_TABLES = [
     "flag_assignments",
     "household_mcp_tokens",
 ];
-// A person's own rows; their policies (owner plus household visibility) are
-// written separately, so for now foodable_app sees none of them.
+// A person's own rows that also carry a household_id. Their policies key on
+// the person (rls-personal.test.ts), so the household checks below stop at
+// "household A cannot reach them".
 const PERSONAL_HOUSEHOLD_TABLES = ["meal_items", "nutrition_goal_days"];
 
 // Tables without a household_id that foodable_app never reaches: sign-in,
@@ -50,14 +51,6 @@ const SYSTEM_ONLY_TABLES = [
     "oauth_login_sessions",
     "rate_limit_buckets",
     "registered_clients",
-];
-// Personal tables without a household_id, covered separately.
-const PERSONAL_TABLES = [
-    "meals",
-    "nutrition_goals",
-    "profiles",
-    "water_log",
-    "weight_log",
 ];
 
 // A deploy holds one household, but the policies must hold for two, so this
@@ -221,7 +214,7 @@ describeDb(pgAvailable !== null, "foodable_app row level security", (ctx) => {
         await owner(ctx().pg, SEED);
     });
 
-    test("every table is classified: a foodable_app policy, or listed as system-only or personal", async () => {
+    test("every table is classified: a foodable_app policy, or listed as system-only", async () => {
         const { pg } = ctx();
         const out = await owner(
             pg,
@@ -238,12 +231,7 @@ describeDb(pgAvailable !== null, "foodable_app row level security", (ctx) => {
         );
         const withoutPolicy = out.split("\n").filter(Boolean);
         expect(withoutPolicy).toEqual(
-            [
-                ...SYSTEM_ONLY_HOUSEHOLD_TABLES,
-                ...PERSONAL_HOUSEHOLD_TABLES,
-                ...SYSTEM_ONLY_TABLES,
-                ...PERSONAL_TABLES,
-            ].sort(),
+            [...SYSTEM_ONLY_HOUSEHOLD_TABLES, ...SYSTEM_ONLY_TABLES].sort(),
         );
     });
 
