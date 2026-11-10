@@ -166,10 +166,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
     expect(signUps).toBe(1);
 });
 
-const MESSAGES = {
-    invalidCredentials: "Wrong email, username or password.",
-    signInUnavailable: "Couldn't sign in right now. Try again in a minute.",
-};
+const { LOGIN_ERRORS: MESSAGES } = await import("./copy/login.js");
 
 // Shaped like SignInError from src/domain/auth.ts (legacy GoTrue status/code).
 function signInError(status: number | undefined, code?: string): Error {
@@ -301,6 +298,172 @@ test("existing users still sign in after signup closes", async () => {
     });
     expect(userId).toBe("11111111-1111-4111-8111-111111111111");
     expect(signUps).toBe(0);
+});
+
+function failedSignIn(): never {
+    throw Object.assign(new Error("Invalid login credentials"), {
+        status: 400,
+        code: "invalid_credentials",
+    });
+}
+
+// A deploy with an owner, where every sign-in attempt fails on credentials.
+function inviteArgs(over: Partial<Parameters<typeof resolveApproveUser>[0]>) {
+    return {
+        email: "newbie@example.com",
+        password: "secret123456",
+        authUserCount: async () => 1,
+        householdExists: async () => true,
+        signupPolicy: "invite" as const,
+        accountExists: async () => false,
+        signInUser: async () => failedSignIn(),
+        signUpUser: async (): Promise<string> => {
+            throw new Error("plain sign-up must not run under invite");
+        },
+        signUpWithInvite: async () => {
+            throw new Error("invite sign-up must not run");
+        },
+        messages: MESSAGES,
+        ...over,
+    };
+}
+
+test("invite policy signs up once with a valid code", async () => {
+    const calls: unknown[] = [];
+    const userId = await resolveApproveUser(
+        inviteArgs({
+            inviteCode: " test-invite-code ",
+            peekInvite: async () => ({ valid: true }),
+            signUpWithInvite: async (args) => {
+                calls.push(args);
+                return {
+                    ok: true,
+                    userId: "22222222-2222-4222-8222-222222222222",
+                    householdId: "hh-invite-1",
+                };
+            },
+        }),
+    );
+    expect(userId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(calls).toEqual([
+        {
+            code: "test-invite-code",
+            email: "newbie@example.com",
+            password: "secret123456",
+            displayName: "newbie",
+        },
+    ]);
+});
+
+test("invite policy: a new email with no code is told a code is needed", async () => {
+    await expect(resolveApproveUser(inviteArgs({}))).rejects.toThrow(
+        MESSAGES.inviteRequired,
+    );
+    await expect(
+        resolveApproveUser(inviteArgs({ inviteCode: "   " })),
+    ).rejects.toThrow(MESSAGES.inviteRequired);
+});
+
+test("invite policy: a new email with a bad, expired or used code is told so", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "nope",
+                peekInvite: async () => ({ valid: false }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidInvite);
+    // Valid when peeked, used by someone else before the claim.
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "raced",
+                peekInvite: async () => ({ valid: true }),
+                signUpWithInvite: async () => ({
+                    ok: false,
+                    reason: "invalid-invite",
+                }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidInvite);
+});
+
+test("invite policy: an existing account with a wrong password gets the plain answer", async () => {
+    let peeks = 0;
+    for (const inviteCode of [undefined, "", "some-code"]) {
+        await expect(
+            resolveApproveUser(
+                inviteArgs({
+                    inviteCode,
+                    accountExists: async () => true,
+                    peekInvite: async () => {
+                        peeks += 1;
+                        return { valid: true };
+                    },
+                }),
+            ),
+        ).rejects.toThrow(MESSAGES.invalidCredentials);
+    }
+    expect(peeks).toBe(0);
+});
+
+test("invite policy: an account created between the checks gets the plain answer", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "good",
+                peekInvite: async () => ({ valid: true }),
+                signUpWithInvite: async () => ({
+                    ok: false,
+                    reason: "already-registered",
+                }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
+});
+
+test("closed policy: a code from a new email says sign-up is closed", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({ signupPolicy: "closed", inviteCode: "x" }),
+        ),
+    ).rejects.toThrow(MESSAGES.inviteClosed);
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                signupPolicy: "closed",
+                inviteCode: "x",
+                accountExists: async () => true,
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
+});
+
+test("open policy allows a second sign-up", async () => {
+    let signUps = 0;
+    const userId = await resolveApproveUser(
+        inviteArgs({
+            email: "solo@example.com",
+            signupPolicy: "open",
+            signUpUser: async () => {
+                signUps += 1;
+                return "33333333-3333-4333-8333-333333333333";
+            },
+        }),
+    );
+    expect(userId).toBe("33333333-3333-4333-8333-333333333333");
+    expect(signUps).toBe(1);
+});
+
+test("open policy: an existing account with a wrong password gets the plain answer", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                signupPolicy: "open",
+                accountExists: async () => true,
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
 });
 
 test("closed policy refuses a second sign-up", async () => {

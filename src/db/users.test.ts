@@ -36,6 +36,8 @@ const EXPECTED_USER_FKS: {
     { table: "foods", column: "created_by", deltype: "n" },
     { table: "household_mcp_tokens", column: "issued_by", deltype: "n" },
     { table: "notice_dismissals", column: "dismissed_by", deltype: "n" },
+    { table: "household_invites", column: "created_by", deltype: "n" },
+    { table: "household_invites", column: "used_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "flag_assignments", column: "user_id", deltype: "c" },
@@ -526,10 +528,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
     });
 
     test("resolveApproveUser first user and closed household", async () => {
-        const messages = {
-            invalidCredentials: "Wrong password.",
-            signInUnavailable: "Try again.",
-        };
+        const { LOGIN_ERRORS: messages } = await import("../copy/login.js");
         const first = await resolveApproveUser({
             email: "first@example.com",
             password: "secret123456",
@@ -550,7 +549,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
                 signUpUser,
                 messages,
             }),
-        ).rejects.toThrow("Wrong password.");
+        ).rejects.toThrow(messages.invalidCredentials);
         const countBefore = await authUserCount();
         expect(countBefore).toBe(1);
     });

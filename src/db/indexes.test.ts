@@ -53,6 +53,10 @@ const EXPECTED: Record<string, string> = {
         "ON public.meal_items USING btree (household_id)",
     household_members_user_id_idx:
         "ON public.household_members USING btree (user_id)",
+    household_members_one_household_per_user:
+        "ON public.household_members USING btree (user_id)",
+    household_invites_household_id_idx:
+        "ON public.household_invites USING btree (household_id)",
     nutrition_goal_days_user_id_idx:
         "ON public.nutrition_goal_days USING btree (user_id, date)",
 };
@@ -395,11 +399,13 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
              where user_id = '${bench.userId}'`,
             ["set enable_seqscan = off"],
         );
-        expectIndexOnTable(
-            plan,
-            "household_members_user_id_idx",
-            "public.household_members",
+        // Two indexes cover user_id since one household per person became a
+        // unique index; the planner may read either.
+        expect(plan).toMatch(
+            /household_members_(user_id_idx|one_household_per_user)/,
         );
+        expect(plan).toMatch(/Index Scan|Index Only Scan|Bitmap Index Scan/);
+        expect(plan).not.toContain("Seq Scan on public.household_members");
     });
 
     test("per-day goal overrides read the user and date index", async () => {

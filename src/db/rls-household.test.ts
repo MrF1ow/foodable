@@ -56,7 +56,7 @@ const SYSTEM_ONLY_TABLES = [
 // A deploy holds one household, but the policies must hold for two, so this
 // throwaway database lifts the one-household index before seeding.
 const SEED = `
-drop index public.households_singleton;
+drop index if exists public.households_singleton;
 insert into public.users (id, email) values
     ('${USER_A}', 'a@example.invalid'),
     ('${USER_B}', 'b@example.invalid');
@@ -102,6 +102,8 @@ insert into public.person_rules (household_id, user_id, body)
     values ('${HH_B}', '${USER_B}', 'No pork');
 insert into public.notice_dismissals (household_id, code, subject_kind, subject_id)
     values ('${HH_B}', 'fridge.expiring', 'food', '${FOOD_B}');
+insert into public.household_invites (household_id, code_hash, expires_at)
+    values ('${HH_B}', repeat('c', 64), now() + interval '7 days');
 insert into public.social_reader_status (household_id, reader)
     values ('${HH_B}', 'tiktok');
 insert into public.fetch_host_refusals (household_id, host, status, expires_at)

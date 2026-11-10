@@ -8,8 +8,14 @@ import {
     consumeRefreshToken,
     registerClient,
 } from "./db/tokens.js";
-import { signUpUser, signInUser, authUserCount } from "./db/users.js";
+import {
+    signUpUser,
+    signInUser,
+    authAccountExists,
+    authUserCount,
+} from "./db/users.js";
 import { householdExists } from "./db/household.js";
+import { peekInviteCode, signUpWithInvite } from "./db/invites.js";
 import {
     canSignUp,
     getSignupPolicy,
@@ -86,12 +92,26 @@ export async function renderLoginPage(
             connectHint = "";
         }
     }
+    const policy = getSignupPolicy();
+    const inviteFields =
+        policy === "invite"
+            ? `<label for="invite_code">${escapeHtml(LOGIN.inviteCodeLabel)}</label>
+                    <input type="text" id="invite_code" name="invite_code" autocomplete="off" autocapitalize="none" spellcheck="false" />
+                    <p class="auth-note">${escapeHtml(LOGIN.inviteCodeHint)}</p>`
+            : "";
     return template
         .replaceAll("{{SESSION_ID}}", escapeHtml(sessionId))
         .replaceAll("{{ERROR}}", errorHtml)
         .replaceAll("{{CONNECT_HINT}}", connectHint)
+        .replaceAll("{{INVITE_FIELDS}}", inviteFields)
         .replaceAll("{{APP_CSS_HREF}}", appStylesheetHref())
         .replaceAll("{{APP_JS_HREF}}", appScriptHref());
+}
+
+function displayNameFromLogin(email: string): string {
+    const local = email.includes("@") ? email.split("@")[0]! : email;
+    const trimmed = local.trim();
+    return trimmed.length > 0 ? trimmed.slice(0, 80) : "Member";
 }
 
 async function finishAuthorization(
@@ -151,51 +171,119 @@ export function classifySignInFailure(err: unknown): SignInFailure {
 export async function resolveApproveUser(args: {
     email: string;
     password: string;
+    inviteCode?: string;
     authUserCount: () => Promise<number>;
     householdExists: () => Promise<boolean>;
     signInUser: (email: string, password: string) => Promise<string>;
     signUpUser: (email: string, password: string) => Promise<string>;
-    messages: { invalidCredentials: string; signInUnavailable: string };
+    messages: typeof LOGIN_ERRORS;
     signupPolicy?: ReturnType<typeof getSignupPolicy>;
+    accountExists?: (email: string) => Promise<boolean>;
+    peekInvite?: (code: string) => Promise<{ valid: true } | { valid: false }>;
+    signUpWithInvite?: typeof signUpWithInvite;
 }): Promise<string> {
     const count = await args.authUserCount();
     const policy = signupPolicyForRoutes(
         args.signupPolicy ?? getSignupPolicy(),
     );
-    const register = canSignUp(policy, {
-        userCount: count,
-        // Registration never depends on whether a household exists, so a
-        // sign-in once users exist skips that query (and cannot fail on it).
-        householdExists: count === 0 ? await args.householdExists() : true,
-        mode: "register",
-    });
-    if (register.ok && count === 0) {
-        try {
-            return await args.signInUser(args.email, args.password);
-        } catch {
-            return await args.signUpUser(args.email, args.password);
+    if (count === 0) {
+        const first = canSignUp(policy, {
+            userCount: 0,
+            householdExists: await args.householdExists(),
+            mode: "register",
+            callerHasHousehold: false,
+        });
+        if (first.ok) {
+            try {
+                return await args.signInUser(args.email, args.password);
+            } catch {
+                return await args.signUpUser(args.email, args.password);
+            }
         }
     }
-    // Once the owner exists, accounts are only created in Household ›
-    // Household, so a failed sign-in never falls through to sign-up.
     try {
         return await args.signInUser(args.email, args.password);
     } catch (err) {
         const failure = classifySignInFailure(err);
-        if (failure === "credentials") {
-            console.warn("[auth] sign-in refused: invalid credentials");
-            throw new Error(args.messages.invalidCredentials);
-        }
         if (failure === "account") {
             const { code } = err as { code?: string };
             console.warn(`[auth] sign-in refused: ${JSON.stringify(code)}`);
             throw err as Error;
         }
+        if (failure === "unavailable") {
+            console.error(
+                `[auth] sign-in unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
+            );
+            throw new Error(args.messages.signInUnavailable);
+        }
+        return registerAfterFailedSignIn(args, count, policy);
+    }
+}
+
+// The password did not match, or no login has this email. An existing login
+// always gets the plain wrong-credentials answer, whatever the invite field
+// holds; only a new email can sign up, and only as the policy allows.
+async function registerAfterFailedSignIn(
+    args: Parameters<typeof resolveApproveUser>[0],
+    count: number,
+    policy: ReturnType<typeof getSignupPolicy>,
+): Promise<string> {
+    const invalidCredentials = (): Error => {
+        console.warn("[auth] sign-in refused: invalid credentials");
+        return new Error(args.messages.invalidCredentials);
+    };
+    const inviteCode = args.inviteCode?.trim() ?? "";
+    // Closed and no code: the answer is the same either way, so skip the lookup.
+    if (policy === "closed" && !inviteCode) throw invalidCredentials();
+    let exists: boolean;
+    try {
+        exists = await (args.accountExists ?? authAccountExists)(args.email);
+    } catch (err) {
         console.error(
-            `[auth] sign-in unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
+            `[auth] account lookup unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
         );
         throw new Error(args.messages.signInUnavailable);
     }
+    if (exists) throw invalidCredentials();
+    if (policy === "closed") throw new Error(args.messages.inviteClosed);
+    const invite =
+        policy === "invite" && inviteCode
+            ? await (args.peekInvite ?? peekInviteCode)(inviteCode)
+            : undefined;
+    const register = canSignUp(
+        policy,
+        {
+            userCount: count,
+            householdExists: true,
+            mode: "register",
+            callerHasHousehold: false,
+        },
+        invite,
+    );
+    if (!register.ok) {
+        if (register.reason === "invite-required") {
+            throw new Error(
+                inviteCode
+                    ? args.messages.invalidInvite
+                    : args.messages.inviteRequired,
+            );
+        }
+        throw invalidCredentials();
+    }
+    if (register.joins === "existing-household") {
+        const result = await (args.signUpWithInvite ?? signUpWithInvite)({
+            code: inviteCode,
+            email: args.email,
+            password: args.password,
+            displayName: displayNameFromLogin(args.email),
+        });
+        if (result.ok) return result.userId;
+        if (result.reason === "invalid-invite") {
+            throw new Error(args.messages.invalidInvite);
+        }
+        throw invalidCredentials();
+    }
+    return args.signUpUser(args.email, args.password);
 }
 
 // A client whose callback is not allow-listed fails before anyone signs in,
@@ -375,6 +463,8 @@ export function createOAuthRouter() {
         const sessionId = body.session_id as string;
         const email = authEmailForSignIn(String(body.email ?? ""));
         const password = body.password as string;
+        const inviteCode =
+            typeof body.invite_code === "string" ? body.invite_code : undefined;
 
         if (!sessionId || !email || !password) {
             return c.json({ error: "invalid_request" }, 400);
@@ -394,6 +484,7 @@ export function createOAuthRouter() {
                 resolveApproveUser({
                     email,
                     password,
+                    inviteCode,
                     authUserCount,
                     householdExists,
                     signInUser,

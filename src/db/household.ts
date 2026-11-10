@@ -99,7 +99,9 @@ export async function createHouseholdForCaller(
     userId: string,
     name: string,
     displayName: string,
+    opts?: { allowAdditional?: boolean },
 ): Promise<string> {
+    const allowAdditional = opts?.allowAdditional === true;
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ id: string }>(
@@ -108,7 +110,8 @@ export async function createHouseholdForCaller(
                     select public.create_household(
                         p_user_id => ${userId}::uuid,
                         p_name => ${name},
-                        p_display_name => ${displayName}
+                        p_display_name => ${displayName},
+                        p_allow_additional => ${allowAdditional}
                     ) as id
                 `,
                 "create household",
@@ -119,7 +122,11 @@ export async function createHouseholdForCaller(
             return data.id;
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            if (message.toLowerCase().includes("household already exists")) {
+            const lower = message.toLowerCase();
+            if (
+                lower.includes("household already exists") ||
+                lower.includes("already in a household")
+            ) {
                 throw new HouseholdAlreadyExistsError();
             }
             throw new Error(message);

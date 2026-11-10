@@ -268,6 +268,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/export-link.ts": "platform",
     "src/domain/signup.ts": "platform",
     "src/domain/signup.test.ts": "platform",
+    "src/db/invites.ts": "platform",
+    "src/web/pages/v2/settings-household-invites.ts": "web",
     "src/domain/notices.ts": "web",
     "src/domain/notice-dismissals.ts": "web",
     "src/domain/notices-for.ts": "web",

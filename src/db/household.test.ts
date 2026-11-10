@@ -132,6 +132,97 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         ).rejects.toBeInstanceOf(HouseholdAlreadyExistsError);
     });
 
+    test("createHouseholdForCaller allows a second household only when open", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const first = await seedUser(sql);
+        await createHouseholdForCaller(first, "Alpha", "Ava");
+        const second = await seedUser(sql);
+        await expect(
+            createHouseholdForCaller(second, "Beta", "Ben"),
+        ).rejects.toBeInstanceOf(HouseholdAlreadyExistsError);
+        const secondId = await createHouseholdForCaller(second, "Beta", "Ben", {
+            allowAdditional: true,
+        });
+        expect(secondId).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        );
+    });
+
+    test("create_household serialises creations: two racing calls make one household", async () => {
+        const { sql, pg, truncateAll } = getCtx();
+        await truncateAll();
+        const first = await seedUser(sql);
+        const second = await seedUser(sql);
+        const { SQL } = await import("bun");
+        const a = new SQL(pg.url, { prepare: false, max: 1 });
+        const b = new SQL(pg.url, { prepare: false, max: 1 });
+        try {
+            await a.unsafe("begin");
+            await a`select public.create_household(${first}::uuid, 'A', 'Ann', false)`;
+            await b.unsafe("begin");
+            // Without the lock this would see no committed household and succeed.
+            const racing =
+                b`select public.create_household(${second}::uuid, 'B', 'Bo', false)`.then(
+                    () => "created",
+                    (err: unknown) =>
+                        err instanceof Error ? err.message : String(err),
+                );
+            // Wait until the second call either finished or is queued on the lock.
+            let settled = false;
+            void racing.then(() => {
+                settled = true;
+            });
+            for (let i = 0; i < 1000 && !settled; i++) {
+                const [waiting] = (await sql`
+                    select count(*)::int as n
+                    from pg_locks
+                    where locktype = 'advisory' and not granted
+                `) as { n: number }[];
+                if (waiting!.n > 0) break;
+            }
+            await a.unsafe("commit");
+            expect(await racing).toContain("household already exists");
+            await b.unsafe("rollback");
+        } finally {
+            await a.close();
+            await b.close();
+        }
+        const [row] = (await sql`
+            select count(*)::int as n from public.households
+        `) as { n: number }[];
+        expect(row!.n).toBe(1);
+    });
+
+    test("a member of a household cannot create or join another", async () => {
+        const { sql } = getCtx();
+        await expect(
+            createHouseholdForCaller(ownerId, "Second", "Ann", {
+                allowAdditional: true,
+            }),
+        ).rejects.toBeInstanceOf(HouseholdAlreadyExistsError);
+        const [count] = (await sql`
+            select count(*)::int as n from public.households
+        `) as { n: number }[];
+        expect(count!.n).toBe(1);
+
+        // The database itself holds one household per person.
+        const otherHousehold = crypto.randomUUID();
+        await sql`insert into public.households (id, name) values (${otherHousehold}, 'Other')`;
+        // Awaited by hand: expect().rejects on a lazy Bun.sql query never settles.
+        const err = await sql`
+            insert into public.household_members (household_id, user_id, role, display_name)
+            values (${otherHousehold}, ${ownerId}, 'owner', 'Ann')
+        `.then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(String(err)).toContain(
+            "household_members_one_household_per_user",
+        );
+    });
+
     test("listHouseholdMembers order and shape", async () => {
         const { sql } = getCtx();
         const memberA = await seedUser(sql);

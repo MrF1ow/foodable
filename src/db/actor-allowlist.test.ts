@@ -11,6 +11,8 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     "src/db/exports.ts",
     // Adding and removing a member's login, and the first-household check.
     "src/db/household.ts",
+    // Invite code peek and single-use redeem during sign-up.
+    "src/db/invites.ts",
     // Reading an archive by its signed link, which has no session.
     "src/exports-route.ts",
     // Process-wide flag pin and snapshot cache, and its sweep.

@@ -77,7 +77,7 @@ ${
 // A deploy holds one household, but the policies must hold for two, so this
 // throwaway database lifts the one-household index before seeding.
 const SEED = `
-drop index public.households_singleton;
+drop index if exists public.households_singleton;
 insert into public.users (id, email) values
     ('${USER_A}', 'a@example.invalid'),
     ('${USER_A2}', 'a2@example.invalid'),

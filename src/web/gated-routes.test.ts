@@ -70,11 +70,15 @@ afterEach(() => {
 });
 
 describe("gated route harness on composed app", () => {
-    test("finds no gated routes until UI-3 mounts them", async () => {
+    test("gated invite routes redirect when ui-v2 is off", async () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
-        expect(routes).toEqual([]);
+        expect(routes.map((r) => r.path).sort()).toEqual([
+            "/settings/household/invites",
+            "/settings/household/invites",
+            "/settings/household/invites/revoke",
+        ]);
     });
 });
 

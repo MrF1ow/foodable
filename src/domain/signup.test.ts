@@ -15,26 +15,31 @@ const STATE = {
         userCount: 0,
         householdExists: false,
         mode: "register",
+        callerHasHousehold: false,
     } satisfies SignupState,
     ownerNoHousehold: {
         userCount: 1,
         householdExists: false,
         mode: "register",
+        callerHasHousehold: false,
     } satisfies SignupState,
     closedDeploy: {
         userCount: 1,
         householdExists: true,
         mode: "register",
+        callerHasHousehold: false,
     } satisfies SignupState,
     founderCreatesHousehold: {
         userCount: 1,
         householdExists: false,
         mode: "create-household",
+        callerHasHousehold: false,
     } satisfies SignupState,
     secondHouseholdAttempt: {
         userCount: 1,
         householdExists: true,
         mode: "create-household",
+        callerHasHousehold: false,
     } satisfies SignupState,
 } as const;
 
@@ -131,9 +136,30 @@ describe("canSignUp truth table", () => {
         });
     });
 
-    test("invite and open routes keep closed behaviour until invite/open flows ship", () => {
-        expect(signupPolicyForRoutes("invite")).toBe("closed");
-        expect(signupPolicyForRoutes("open")).toBe("closed");
+    test("no policy lets a household member create a second household", () => {
+        for (const policy of SIGNUP_POLICIES) {
+            expect(
+                canSignUp(policy, {
+                    userCount: 2,
+                    householdExists: true,
+                    mode: "create-household",
+                    callerHasHousehold: true,
+                }),
+            ).toEqual({ ok: false, reason: "already-in-household" });
+        }
+        expect(
+            canSignUp("closed", {
+                userCount: 1,
+                householdExists: false,
+                mode: "create-household",
+                callerHasHousehold: true,
+            }),
+        ).toEqual({ ok: false, reason: "already-in-household" });
+    });
+
+    test("signupPolicyForRoutes passes the deploy policy through", () => {
+        expect(signupPolicyForRoutes("invite")).toBe("invite");
+        expect(signupPolicyForRoutes("open")).toBe("open");
         expect(signupPolicyForRoutes("closed")).toBe("closed");
     });
 });

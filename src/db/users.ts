@@ -1,6 +1,7 @@
 import {
     AlreadyRegisteredError,
     type AuthStore,
+    normalizeEmail,
     signIn as domainSignIn,
     signUp as domainSignUp,
     type SignInOptions,
@@ -118,6 +119,11 @@ export async function signInUser(
     opts?: SignInOptions,
 ): Promise<string> {
     return domainSignIn(liveAuthStore(), email, password, opts);
+}
+
+/** Whether a login exists for this email (case-insensitive). */
+export async function authAccountExists(email: string): Promise<boolean> {
+    return (await findUserByEmail(normalizeEmail(email))) != null;
 }
 
 export async function authUserCount(): Promise<number> {

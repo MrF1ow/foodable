@@ -25,6 +25,7 @@ import {
 } from "../../household.js";
 import {
     createHouseholdForCaller,
+    getHouseholdMembership,
     getHouseholdConfig,
     householdExists,
     updateHouseholdConfig,
@@ -210,12 +211,15 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
         userCount: await authUserCount(),
         householdExists: await householdExists(),
         mode: "create-household",
+        callerHasHousehold: (await getHouseholdMembership(userId)) != null,
     });
     if (!createHousehold.ok) {
         return c.html(forbiddenDashboardHtml(), 403);
     }
     try {
-        await createHouseholdForCaller(userId, name, displayName);
+        await createHouseholdForCaller(userId, name, displayName, {
+            allowAdditional: policy === "open",
+        });
     } catch (err) {
         if (err instanceof HouseholdAlreadyExistsError) {
             return c.html(forbiddenDashboardHtml(), 403);

@@ -180,6 +180,7 @@ async function memberGate(viewerUserId: string): Promise<MemberGate> {
             userCount: await authUserCount(),
             householdExists: await householdExists(),
             mode: "create-household",
+            callerHasHousehold: false,
         });
         if (createHousehold.ok) {
             return {

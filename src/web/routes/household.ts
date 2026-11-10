@@ -112,6 +112,18 @@ import {
 } from "../../domain/fetch-memory.js";
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
+import { gatedRoute } from "../gated.js";
+import {
+    createHouseholdInvite,
+    listHouseholdInvites,
+    revokeHouseholdInvite,
+} from "../../db/invites.js";
+import { renderHouseholdInvitesPage } from "../pages/v2/settings-household-invites.js";
+import { getProfile } from "../../db/profiles.js";
+import { viewerChromeWithAttention, viewerFlagsFor } from "../attention.js";
+import { settingsBackHref } from "../settings-back.js";
+import { getBaseUrl } from "../../url.js";
+import { forbiddenDashboardHtml } from "../loaders.js";
 
 // TOAST_KEYS: "household.fetch-refusal.cleared"
 
@@ -1287,5 +1299,106 @@ householdRoutes.post(
         }
         // toast: none
         return c.redirect("/settings/household/possible-duplicates", 303);
+    },
+);
+
+function invitesBackHref(c: Context, from?: string) {
+    return settingsBackHref({
+        from,
+        referer: c.req.header("referer"),
+        origin: getBaseUrl(c),
+    });
+}
+
+async function renderInvitesRoute(
+    userId: string,
+    backHref: string,
+    opts?: { createdCode?: string; error?: string },
+) {
+    const member = await getHouseholdMembership(userId);
+    if (!member) {
+        return { status: 403 as const, html: forbiddenDashboardHtml() };
+    }
+    if (member.role !== "owner") {
+        return { status: 403 as const, html: forbiddenDashboardHtml() };
+    }
+    const profile = await getProfile(userId);
+    const [chrome, invites, flags] = await Promise.all([
+        viewerChromeWithAttention(profile, member),
+        listHouseholdInvites(member.householdId),
+        viewerFlagsFor(member),
+    ]);
+    return {
+        status: 200 as const,
+        html: renderHouseholdInvitesPage({
+            chrome,
+            flags,
+            backHref,
+            member,
+            invites,
+            createdCode: opts?.createdCode,
+            error: opts?.error,
+        }),
+    };
+}
+
+householdRoutes.get(
+    "/settings/household/invites",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderInvitesRoute(
+            c.get("userId"),
+            invitesBackHref(c, c.req.query("from")),
+        );
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/invites",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backHref = invitesBackHref(c, formText(body, "from"));
+        try {
+            const { code } = await createHouseholdInvite(
+                member.householdId,
+                member.userId,
+            );
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                createdCode: code,
+            });
+            return c.html(page.html, page.status);
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Could not create invite.";
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                error: message,
+            });
+            return c.html(page.html, 400);
+        }
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/invites/revoke",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backHref = invitesBackHref(c, formText(body, "from"));
+        const inviteId = formText(body, "invite_id");
+        if (!inviteId) {
+            return c.text("Bad Request", 400);
+        }
+        await revokeHouseholdInvite(member.householdId, inviteId);
+        return c.redirect(
+            `/settings/household/invites${backHref !== "/" ? `?from=${encodeURIComponent(backHref)}` : ""}`,
+            303,
+        );
     },
 );

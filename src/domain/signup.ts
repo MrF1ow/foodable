@@ -6,6 +6,8 @@ export type SignupState = {
     userCount: number;
     householdExists: boolean;
     mode: "register" | "create-household";
+    /** The caller already belongs to a household (a person belongs to at most one). */
+    callerHasHousehold: boolean;
 };
 
 export type SignupInvite = { valid: true } | { valid: false };
@@ -14,7 +16,11 @@ export type SignupDecision =
     | { ok: true; joins: "new-household" | "existing-household" }
     | {
           ok: false;
-          reason: "signup-closed" | "invite-required" | "household-exists";
+          reason:
+              | "signup-closed"
+              | "invite-required"
+              | "household-exists"
+              | "already-in-household";
       };
 
 const warnedUnknownPolicy = new Set<string>();
@@ -50,10 +56,7 @@ export function resetSignupPolicyCache(): void {
     cachedSignupPolicy = undefined;
 }
 
-// Invite and open routes ship in a later phase; until then HTTP gates keep closed
-// behaviour so a mis-set policy cannot widen sign-up without the matching flows.
 export function signupPolicyForRoutes(policy: SignupPolicy): SignupPolicy {
-    if (policy === "invite" || policy === "open") return "closed";
     return policy;
 }
 
@@ -98,6 +101,9 @@ export function canSignUp(
     state: SignupState,
     invite?: SignupInvite,
 ): SignupDecision {
+    if (state.mode === "create-household" && state.callerHasHousehold) {
+        return { ok: false, reason: "already-in-household" };
+    }
     switch (policy) {
         case "closed":
             return closedDecision(state);
