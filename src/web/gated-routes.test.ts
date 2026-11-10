@@ -95,6 +95,24 @@ describe("gated route harness on composed app", () => {
         ).toEqual([
             {
                 method: "GET",
+                path: "/settings/account",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/display",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/display",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
                 path: "/dev/gallery-v2",
                 flag: "ui-v2",
                 notFound: true,

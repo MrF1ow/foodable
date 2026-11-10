@@ -1,0 +1,327 @@
+/* Settings v2 (flag ui-v2): home, account, display, help. Phone first; desktop
+ * two-pane layout is last so it wins on cascade (same rule as trends.css). */
+
+.fd-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    padding: var(--space-gutter);
+    padding-bottom: calc(var(--space-gutter) + 5.5rem);
+    max-width: 40rem;
+}
+
+.fd-settings-aside {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-settings-profile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-s-6);
+    padding: var(--fd-s-12);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    text-align: center;
+}
+
+.fd-settings-profile__avatar {
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.125rem;
+}
+
+.fd-settings-profile__name {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fd-settings-profile__email {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.fd-settings-menu__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+}
+
+.fd-settings-menu__list--inset {
+    margin-top: var(--fd-s-6);
+}
+
+.fd-settings-menu__item + .fd-settings-menu__item {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-menu__link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    padding: var(--fd-s-12) var(--fd-s-12);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 1rem;
+}
+
+.fd-settings-menu__link:hover {
+    background: var(--surface-panel);
+}
+
+.fd-settings-menu__link[aria-current="page"] {
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+.fd-settings-menu__chev {
+    color: var(--text-tertiary);
+    flex: none;
+}
+
+.fd-settings-card--household {
+    margin-top: var(--fd-s-6);
+}
+
+.fd-settings-back {
+    display: inline-flex;
+    align-items: center;
+    margin-bottom: var(--fd-s-12);
+    color: var(--accent-text);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.fd-settings-back::before {
+    content: "‹";
+    margin-right: 0.25rem;
+}
+
+.fd-settings-main {
+    min-width: 0;
+}
+
+.fd-settings-head {
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fd-settings-error {
+    margin: 0 0 var(--fd-s-12);
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border-radius: var(--radius-sm);
+    background: color-mix(
+        in srgb,
+        var(--status-over) 12%,
+        var(--surface-raised)
+    );
+    color: var(--status-over);
+    font-size: 0.875rem;
+}
+
+.fd-settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    padding: var(--fd-s-12);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+}
+
+.fd-settings-form--prefs {
+    margin-top: var(--fd-s-12);
+}
+
+.fd-settings-section-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fd-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-settings-field__label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.fd-settings-input,
+.fd-settings-select {
+    width: 100%;
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font: inherit;
+}
+
+.fd-settings-check {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+    font-size: 0.9375rem;
+    color: var(--text-primary);
+}
+
+.fd-settings-check__text {
+    flex: 1;
+}
+
+.fd-settings-submit {
+    align-self: flex-start;
+    padding: var(--fd-s-10) var(--fd-s-14);
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fd-settings-session {
+    margin: var(--fd-s-12) 0 0;
+    font-size: 0.9375rem;
+}
+
+.fd-settings-session a {
+    color: var(--accent-text);
+}
+
+.fd-settings-help {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+}
+
+.fd-settings-help-entry {
+    padding: var(--fd-s-12);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+}
+
+.fd-settings-help-entry__title {
+    margin: 0 0 var(--fd-s-6);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fd-settings-help-entry p {
+    margin: 0;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+/* Hide the side menu on phone subpages (home shows the full menu). */
+.fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
+    .fd-settings-aside
+    .fd-settings-menu {
+    display: none;
+}
+
+.fd-settings[data-fd-settings-page="home"] .fd-settings-back {
+    display: none;
+}
+
+.fd-settings[data-fd-settings-page="home"]
+    .fd-settings-main
+    .fd-settings-card--household {
+    display: none;
+}
+
+/* The home's in-content profile card is desktop-only (the phone shows its
+   own above the menu). */
+.fd-settings[data-fd-settings-page="home"]
+    .fd-settings-content
+    > .fd-settings-profile {
+    display: none;
+}
+
+@media (min-width: 1024px) {
+    .fd-settings {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: var(--space-section);
+        max-width: none;
+        padding-bottom: var(--space-gutter);
+    }
+
+    .fd-settings-aside {
+        flex: 0 0 17.5rem;
+        position: sticky;
+        top: var(--fd-s-12);
+    }
+
+    .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
+        .fd-settings-aside
+        .fd-settings-menu {
+        display: block;
+    }
+
+    .fd-settings-profile-phone {
+        display: none;
+    }
+
+    .fd-settings[data-fd-settings-page="home"]
+        .fd-settings-content
+        > .fd-settings-profile {
+        display: flex;
+        margin-bottom: var(--fd-s-12);
+    }
+
+    .fd-settings[data-fd-settings-page="home"] .fd-settings-aside {
+        flex-basis: 14rem;
+    }
+
+    .fd-settings-main {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .fd-settings[data-fd-settings-page="home"] .fd-settings-main {
+        flex: 1 1 0;
+    }
+
+    .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
+        .fd-settings-back {
+        display: none;
+    }
+
+    .fd-settings[data-fd-settings-page="home"]
+        .fd-settings-main
+        .fd-settings-card--household {
+        display: block;
+    }
+}

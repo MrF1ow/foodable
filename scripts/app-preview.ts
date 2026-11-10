@@ -71,6 +71,10 @@ import {
     buildPreviewTrendsPageData,
     renderTrendsV2Page,
 } from "../src/web/pages/v2/trends.js";
+import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
+import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
+import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -889,17 +893,41 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 {},
             ),
         } as never),
-        settings: renderSettingsPage({
-            chrome,
-            flags: PREVIEW_FLAGS,
-            backHref: "/kitchen/fridge",
-            displayName: "Ethan",
-            timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
-        } as never),
+        settings: V2
+            ? renderSettingsHomeV2Page({
+                  chrome,
+                  displayName: "Ethan Flow",
+                  email: "ethan@example.com",
+              })
+            : renderSettingsPage({
+                  chrome,
+                  flags: PREVIEW_FLAGS,
+                  backHref: "/kitchen/fridge",
+                  displayName: "Ethan",
+                  timezone: "America/Los_Angeles",
+                  weightUnit: "kg",
+                  widgetsEnabled: true,
+                  alcoholTrackingEnabled: false,
+                  drinkUnit: "",
+              } as never),
+        ...(V2
+            ? {
+                  "settings-account": renderSettingsAccountV2Page({
+                      chrome,
+                      backHref: "/kitchen/fridge",
+                      displayName: "Ethan Flow",
+                      timezone: "America/Los_Angeles",
+                      weightUnit: "kg",
+                      widgetsEnabled: true,
+                      alcoholTrackingEnabled: false,
+                      drinkUnit: "",
+                  }),
+                  "settings-display": renderSettingsDisplayV2Page({
+                      chrome,
+                      storedTheme: null,
+                  }),
+              }
+            : {}),
         household: renderHouseholdSettingsPage({
             chrome,
             householdName: "Flow house",
@@ -1016,11 +1044,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
-        help: renderSettingsHelpPage({
-            chrome,
-            flags: PREVIEW_FLAGS,
-            backHref: "/kitchen/fridge",
-        } as never),
+        help: V2
+            ? renderSettingsHelpV2Page({ chrome })
+            : renderSettingsHelpPage({
+                  chrome,
+                  flags: PREVIEW_FLAGS,
+                  backHref: "/kitchen/fridge",
+              } as never),
         "needs-attention": (() => {
             const fridgeItems = fridgeView(null).items;
             return renderNeedsAttentionPage({
@@ -1411,9 +1441,14 @@ if (process.argv.includes("--shots")) {
             // The new shell's two layouts: the phone nav at 390 wide, the
             // sidebar and top bar at the design's 1440. The dev gallery is
             // one long page — use a tall window so --shots capture every block.
+            const shotBase = name.replace(/-(?:light|dark)$/, "");
             const galleryFullPage =
-                name.startsWith("dev-gallery-v2") ||
-                name.startsWith("trends-v2");
+                shotBase.startsWith("dev-gallery-v2") ||
+                shotBase.startsWith("trends-v2") ||
+                shotBase === "settings" ||
+                shotBase === "settings-account" ||
+                shotBase === "settings-display" ||
+                shotBase === "help";
             const v2Phone = galleryFullPage ? "390,5400" : "390,844";
             const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
             await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();

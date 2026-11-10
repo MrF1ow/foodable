@@ -109,6 +109,10 @@
                                 "src/db/rules",
                                 "src/db/settings",
                                 "src/db/stock"
+                            ],
+                            "src/web/routes/settings.test.ts": [
+                                "src/db/household",
+                                "src/db/profiles"
                             ]
                         }
                     }

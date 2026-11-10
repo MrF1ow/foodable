@@ -132,6 +132,11 @@ import { NoticeDismissError } from "../domain/notice-dismissals.js";
 import type { NoticeCode } from "../domain/notices.js";
 import type { NoticeSubjectKind } from "../domain/notice-dismissals.js";
 import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
+import { maybeOne, run } from "../db/sql.js";
+import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
+import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
+import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
+import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
 function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],
@@ -580,19 +585,106 @@ export async function groceryAllergenMembers(householdId: string) {
     );
 }
 
-export async function renderSettingsAccountPage(
+async function settingsViewerEmail(userId: string): Promise<string> {
+    try {
+        return await run(async (tx) => {
+            const row = await maybeOne<{ email: string }>(
+                tx,
+                tx`
+                    select email
+                    from public.users
+                    where id = ${userId}
+                `,
+                "settings viewer email",
+            );
+            return row?.email ?? "";
+        });
+    } catch {
+        return "";
+    }
+}
+
+export async function renderSettingsHomeRoute(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    const email = await settingsViewerEmail(viewerUserId);
+    return {
+        status: 200,
+        html: renderSettingsHomeV2Page({
+            chrome,
+            displayName: gate.viewer.displayName,
+            email,
+        }),
+    };
+}
+
+export async function renderSettingsAccountV2Route(
     viewerUserId: string,
     opts: { error?: string; backHref?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsAccountV2Page({
+            chrome,
+            backHref: opts.backHref ?? "/",
+            displayName: gate.viewer.displayName,
+            timezone: profile?.timezone ?? "",
+            weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
+            widgetsEnabled: widgetsEnabledFromProfile(profile),
+            alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
+            drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsDisplayV2Route(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    const stored =
+        profile?.theme === "light" || profile?.theme === "dark"
+            ? profile.theme
+            : null;
+    return {
+        status: 200,
+        html: renderSettingsDisplayV2Page({
+            chrome,
+            storedTheme: stored,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsAccountPage(
+    viewerUserId: string,
+    opts: { error?: string; backHref?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const flags = await viewerFlagsFor(gate.viewer);
+    if (flags.uiV2) {
+        return renderSettingsAccountV2Route(viewerUserId, opts);
+    }
+    const profile = await getProfile(viewerUserId);
     const chrome = viewerChromeFromProfile(profile);
     return {
         status: 200,
         html: renderSettingsPage({
             chrome,
-            flags: await viewerFlagsFor(gate.viewer),
+            flags,
             backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
             timezone: profile?.timezone ?? "",
@@ -612,11 +704,19 @@ export async function renderSettingsHelpRoute(
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
+    const flags = await viewerFlagsFor(gate.viewer);
+    if (flags.uiV2) {
+        const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+        return {
+            status: 200,
+            html: renderSettingsHelpV2Page({ chrome }),
+        };
+    }
     return {
         status: 200,
         html: renderSettingsHelpPageHtml({
             chrome: viewerChromeFromProfile(profile),
-            flags: await viewerFlagsFor(gate.viewer),
+            flags,
             backHref: opts.backHref ?? "/",
         }),
     };

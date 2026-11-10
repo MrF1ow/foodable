@@ -644,16 +644,13 @@ describe("Settings sub-nav under ui-v2", () => {
         ].map((m) => `${m[2]} ${m[1]}`);
     const on = { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true };
 
-    test("flag on: Members links to the members page, Household stays preferences", () => {
+    test("flag on: legacy household prefs still expose v2 sub-nav", () => {
         const expected = [
             "Account /settings?from=%2Fkitchen%2Ffridge",
             "Household /settings/household-settings?from=%2Fkitchen%2Ffridge",
             "Members /settings/household?from=%2Fkitchen%2Ffridge",
             "Help /settings/help?from=%2Fkitchen%2Ffridge",
         ];
-        expect(
-            labels(renderSettingsAccountPage({ ...view, flags: on })),
-        ).toEqual(expected);
         expect(
             labels(
                 renderSettingsHelpPage({

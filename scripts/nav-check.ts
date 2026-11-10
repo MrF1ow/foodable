@@ -2094,23 +2094,33 @@ try {
 
     await goto("/settings");
     await setMarker();
-    const membersLink = await ev<string | null>(
-        `[...document.querySelectorAll("nav.subnav a")].find((a) => a.textContent === "Members")?.getAttribute("href") ?? null`,
-    );
-    await clickSel(
-        'nav.subnav a[href^="/settings/household?"], nav.subnav a[href="/settings/household"]',
-    );
-    await sleep(500);
-    const members = await ev<{ path: string; h1: string | null }>(`({
+    const settingsHome = await ev<{
+        page: string | null;
+        hasMenu: boolean;
+        marker: string | null;
+    }>(`({
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        hasMenu: !!document.querySelector(".fd-settings-menu a[href='/settings/account']"),
+        marker: window.__marker ?? null,
+    })`);
+    await clickSel(".fd-settings-menu a[href='/settings/account']");
+    await sleep(400);
+    const accountPage = await ev<{
+        path: string;
+        backTurbo: string | null;
+        marker: string | null;
+    }>(`({
         path: location.pathname,
-        h1: document.querySelector("h1")?.textContent?.trim() ?? null,
+        backTurbo: document.querySelector(".fd-settings-back")?.getAttribute("data-turbo") ?? null,
+        marker: window.__marker ?? null,
     })`);
     record(
-        "v2 Settings sub-nav reaches the household members page",
-        membersLink != null &&
-            membersLink.startsWith("/settings/household") &&
-            members.path === "/settings/household",
-        { membersLink, members, ex: drain() },
+        "v2 Settings home and account menu navigation",
+        settingsHome.page === "home" &&
+            settingsHome.hasMenu &&
+            accountPage.path === "/settings/account" &&
+            accountPage.backTurbo === "false",
+        { settingsHome, accountPage, ex: drain() },
     );
 
     await goto("/kitchen/fridge");

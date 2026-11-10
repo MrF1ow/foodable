@@ -103,7 +103,8 @@ const GLOSSARY: GlossaryEntry[] = [
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
 const PROMPT_FIELD_ID = "help-unverified-recipes-prompt";
 
-function glossaryHtml(): string {
+/** Glossary sections for Help (legacy and v2 settings). */
+export function renderSettingsGlossaryHtml(): string {
     return GLOSSARY.map((entry) => {
         const promptBlock =
             entry.id === "unverified-recipes"
@@ -129,7 +130,7 @@ export function renderSettingsHelpPage(view: SettingsHelpView): string {
         })}
         ${panel({
             title: "Glossary",
-            body: glossaryHtml(),
+            body: renderSettingsGlossaryHtml(),
         })}
     `;
     return renderSettingsShell({

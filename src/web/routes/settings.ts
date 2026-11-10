@@ -6,9 +6,15 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
     renderSettingsAccountPage,
+    renderSettingsAccountV2Route,
+    renderSettingsDisplayV2Route,
     renderSettingsHelpRoute,
+    renderSettingsHomeRoute,
     renderSettingsHouseholdRoute,
 } from "../loaders.js";
+import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
+import { viewerFlagsFor } from "../attention.js";
+import { gatedRoute } from "../gated.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -58,12 +64,63 @@ function resolveBackHref(c: Context) {
 }
 
 settingsRoutes.get("/settings", requireSiteUser, async (c) => {
+    const userId = c.get("userId");
+    const member = await getHouseholdMembership(userId);
+    const flags = member ? await viewerFlagsFor(member) : null;
+    if (flags?.uiV2) {
+        const page = await renderSettingsHomeRoute(userId);
+        return c.html(page.html, page.status);
+    }
     const backHref = resolveBackHref(c);
-    const page = await renderSettingsAccountPage(c.get("userId"), {
-        backHref,
-    });
+    const page = await renderSettingsAccountPage(userId, { backHref });
     return c.html(page.html, page.status);
 });
+
+settingsRoutes.get(
+    "/settings/account",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const backHref = resolveBackHref(c);
+        const page = await renderSettingsAccountV2Route(c.get("userId"), {
+            backHref,
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/display",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsDisplayV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.post(
+    "/settings/display",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const body = await c.req.parseBody();
+        const themeRaw = formText(body, "theme");
+        if (!isValidDisplayTheme(themeRaw)) {
+            const page = await renderSettingsDisplayV2Route(userId, {
+                error: "Choose Auto, Light, or Dark.",
+            });
+            return c.html(page.html, 400);
+        }
+        const appearance = parseAppearanceInput({
+            theme: themeRaw === "system" ? "system" : themeRaw,
+        });
+        await upsertProfile(userId, appearance);
+        // toast: none full reload refreshes theme chrome on this page
+        return c.redirect("/settings/display", 303);
+    },
+);
 
 settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
     const backHref = resolveBackHref(c);
@@ -186,8 +243,10 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         await upsertProfile(userId, prefs);
         return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
     }
-    const appearance = parseAppearanceInput({ theme: body.theme });
-    await upsertProfile(userId, appearance);
+    if ("theme" in body) {
+        const appearance = parseAppearanceInput({ theme: body.theme });
+        await upsertProfile(userId, appearance);
+    }
     const displayName = formText(body, "display_name").trim();
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);

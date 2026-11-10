@@ -52,6 +52,10 @@ import {
     buildPreviewTrendsPageData,
     renderTrendsV2Page,
 } from "../src/web/pages/v2/trends.js";
+import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
+import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
+import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
@@ -415,17 +419,41 @@ async function pages(
             viewerId: "u1",
         } as never),
         recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
-        settings: renderSettingsPage({
-            chrome,
-            flags: chrome.flags,
-            backHref: "/kitchen/fridge",
-            displayName: "Ethan",
-            timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
-        } as never),
+        settings: v2
+            ? renderSettingsHomeV2Page({
+                  chrome: chrome as never,
+                  displayName: "Ethan Flow",
+                  email: "ethan@example.com",
+              })
+            : renderSettingsPage({
+                  chrome,
+                  flags: chrome.flags,
+                  backHref: "/kitchen/fridge",
+                  displayName: "Ethan",
+                  timezone: "America/Los_Angeles",
+                  weightUnit: "kg",
+                  widgetsEnabled: true,
+                  alcoholTrackingEnabled: false,
+                  drinkUnit: "",
+              } as never),
+        ...(v2
+            ? {
+                  "settings-account": renderSettingsAccountV2Page({
+                      chrome: chrome as never,
+                      backHref: "/kitchen/fridge",
+                      displayName: "Ethan Flow",
+                      timezone: "America/Los_Angeles",
+                      weightUnit: "kg",
+                      widgetsEnabled: true,
+                      alcoholTrackingEnabled: false,
+                      drinkUnit: "",
+                  }),
+                  "settings-display": renderSettingsDisplayV2Page({
+                      chrome: chrome as never,
+                      storedTheme: null,
+                  }),
+              }
+            : {}),
         household: renderHouseholdSettingsPage({
             chrome,
             householdName: "Flow house",
@@ -457,11 +485,13 @@ async function pages(
             isOwner: true,
         } as never),
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
-        help: renderSettingsHelpPage({
-            chrome,
-            flags: chrome.flags,
-            backHref: "/kitchen/fridge",
-        } as never),
+        help: v2
+            ? renderSettingsHelpV2Page({ chrome: chrome as never })
+            : renderSettingsHelpPage({
+                  chrome,
+                  flags: chrome.flags,
+                  backHref: "/kitchen/fridge",
+              } as never),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
             flags: chrome.flags,
@@ -533,6 +563,8 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes": "recipes",
     "/trends": "trends",
     "/settings": "settings",
+    "/settings/account": "settings-account",
+    "/settings/display": "settings-display",
     "/settings/help": "help",
     "/settings/household-settings": "settings-household",
     "/settings/household": "household",
