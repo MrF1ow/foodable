@@ -9,7 +9,10 @@ import { relative } from "node:path";
 const RUN_AS_SYSTEM_ALLOWLIST = [
     // The household token writing a member's export archive.
     "src/db/exports.ts",
-    // Adding and removing a member's login, and the first-household check.
+    // Adding and removing a member's login, the first-household check, and
+    // every membership, ownership, household-creation and bot-token write
+    // (the security definer functions foodable_app may not call), each after
+    // the route's own owner, manager or sign-up policy check.
     "src/db/household.ts",
     // Invite code peek and single-use redeem during sign-up.
     "src/db/invites.ts",

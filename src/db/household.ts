@@ -95,6 +95,14 @@ async function householdExistsInTx(): Promise<boolean> {
     });
 }
 
+// The security definer functions below take a household id and act on it as
+// their owner, so foodable_app may not call them: each runs as the system,
+// and every caller checks first that the person may do it (the sign-up policy
+// for a new household, the owner or a manager for members, roles, ownership
+// and the bot token, the member themselves for their display name).
+
+// `allowAdditional` comes from the deploy's sign-up policy (open only), never
+// from the request.
 export async function createHouseholdForCaller(
     userId: string,
     name: string,
@@ -102,6 +110,17 @@ export async function createHouseholdForCaller(
     opts?: { allowAdditional?: boolean },
 ): Promise<string> {
     const allowAdditional = opts?.allowAdditional === true;
+    return runAsSystem("creating a household after the sign-up check", () =>
+        createHouseholdInTx(userId, name, displayName, allowAdditional),
+    );
+}
+
+async function createHouseholdInTx(
+    userId: string,
+    name: string,
+    displayName: string,
+    allowAdditional: boolean,
+): Promise<string> {
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ id: string }>(
@@ -248,19 +267,23 @@ function liveAddMemberRpc(): AddMemberRpc {
     return {
         async insertMember({ householdId, userId, displayName }) {
             try {
-                const data = await run(async (tx) => {
-                    return await maybeOne<{ id: string }>(
-                        tx,
-                        tx`
+                const data = await runAsSystem(
+                    "adding a household member after the manager check",
+                    () =>
+                        run(async (tx) => {
+                            return await maybeOne<{ id: string }>(
+                                tx,
+                                tx`
                             select public.add_household_member(
                                 p_household_id => ${householdId}::uuid,
                                 p_auth_user_id => ${userId}::uuid,
                                 p_display_name => ${displayName}
                             ) as id
                         `,
-                        "add household member",
-                    );
-                });
+                                "add household member",
+                            );
+                        }),
+                );
                 if (typeof data?.id !== "string" || data.id.length === 0) {
                     return {
                         ok: false,
@@ -421,6 +444,17 @@ export async function rotateHouseholdMcpToken(args: {
     tokenHashHex: string;
     issuedBy: string | null;
 }): Promise<string> {
+    return runAsSystem(
+        "rotating the household token after the owner check",
+        () => rotateHouseholdMcpTokenInTx(args),
+    );
+}
+
+async function rotateHouseholdMcpTokenInTx(args: {
+    householdId: string;
+    tokenHashHex: string;
+    issuedBy: string | null;
+}): Promise<string> {
     return run(async (tx) => {
         try {
             const data = await maybeOne<{ issued_at: string }>(
@@ -460,19 +494,22 @@ export async function updateMemberDisplayName(
     userId: string,
     displayName: string,
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            await tx`
+    return runAsSystem("a member renaming themselves", () =>
+        run(async (tx) => {
+            try {
+                await tx`
                 update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
                 set display_name = ${displayName}
                 where household_id = ${householdId}
                   and user_id = ${userId}
             `;
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`Failed to update display name: ${message}`);
-        }
-    });
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed to update display name: ${message}`);
+            }
+        }),
+    );
 }
 
 // Hands the owner role to another member in one transaction. The database
@@ -483,20 +520,23 @@ export async function transferHouseholdOwnership(
     fromUserId: string,
     toUserId: string,
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            await tx`
+    return runAsSystem("an owner handing over ownership", () =>
+        run(async (tx) => {
+            try {
+                await tx`
                 select public.transfer_household_ownership(
                     p_household_id => ${householdId}::uuid,
                     p_from_user_id => ${fromUserId}::uuid,
                     p_to_user_id => ${toUserId}::uuid
                 )
             `;
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`Failed to transfer ownership: ${message}`);
-        }
-    });
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed to transfer ownership: ${message}`);
+            }
+        }),
+    );
 }
 
 // Moves a member between admin and member. The owner row is excluded in the
@@ -507,11 +547,12 @@ export async function setHouseholdMemberRole(
     userId: string,
     role: "admin" | "member",
 ): Promise<void> {
-    return run(async (tx) => {
-        try {
-            const updated = await rows<{ user_id: string }>(
-                tx,
-                tx`
+    return runAsSystem("an owner changing a member's role", () =>
+        run(async (tx) => {
+            try {
+                const updated = await rows<{ user_id: string }>(
+                    tx,
+                    tx`
                     update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
                     set role = ${role}
                     where household_id = ${householdId}
@@ -519,18 +560,22 @@ export async function setHouseholdMemberRole(
                       and role <> 'owner'
                     returning user_id
                 `,
-            );
-            if (updated.length === 0) {
-                throw new Error("That person is not a member you can change.");
+                );
+                if (updated.length === 0) {
+                    throw new Error(
+                        "That person is not a member you can change.",
+                    );
+                }
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                if (message === "That person is not a member you can change.") {
+                    throw err;
+                }
+                throw new Error(`Failed to change role: ${message}`);
             }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (message === "That person is not a member you can change.") {
-                throw err;
-            }
-            throw new Error(`Failed to change role: ${message}`);
-        }
-    });
+        }),
+    );
 }
 
 /**

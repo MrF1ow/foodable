@@ -23,7 +23,6 @@ begin
         'grocery_lines',
         'grocery_sections',
         'grocery_stores',
-        'household_members',
         'member_allergens',
         'member_dislikes',
         'notice_dismissals',
@@ -51,6 +50,18 @@ begin
     end loop;
 end
 $$;
+
+-- Members of the household read its memberships; nothing in foodable_app
+-- writes them. Adding, removing, renaming and role changes run as the system
+-- after the app checks the caller may (owner, manager or the member
+-- themselves), or through the security definer functions, which the app also
+-- calls as the system. A for-all policy here let a member promote
+-- themselves to owner.
+create policy household_members_app_household
+    on public.household_members
+    for select
+    to foodable_app
+    using (household_id = nullif(current_setting('app.household_id', true), '')::uuid);
 
 -- A signed-in user resolves their own membership before the household is
 -- known to the transaction.

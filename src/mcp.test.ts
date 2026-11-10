@@ -4666,6 +4666,67 @@ describe("household config tools", () => {
             }
         });
 
+        test("a household-scoped off-lookups kill switch stops Open Food Facts requests", async () => {
+            const barcode = "4000000000031";
+            // A catalog food with no nutrition of its own looks its
+            // barcode up too.
+            const bare = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Bare Biscuits",
+            });
+            await db.foodsStore.insertFood(bare);
+            await db.foodsStore.setBarcode("hh-1", "4000000000048", bare.id);
+            const offRequests: string[] = [];
+            const realFetch = globalThis.fetch;
+            const realAgent = process.env.OFF_USER_AGENT;
+            process.env.OFF_USER_AGENT = "Foodable (test@example.invalid)";
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = String(
+                    input instanceof Request ? input.url : input,
+                );
+                if (url.includes("openfoodfacts")) offRequests.push(url);
+                return new Response("{}", { status: 404 });
+            }) as typeof fetch;
+            try {
+                // Off only for this household: a deploy-wide check would
+                // still see it on and call Open Food Facts.
+                for (const [offFor, expected] of [
+                    ["hh-1", 0],
+                    ["hh-other", 2],
+                ] as const) {
+                    offRequests.length = 0;
+                    setFlagsForTests(
+                        createMemoryFlags({
+                            "off-lookups": (ctx) => ctx.household_id !== offFor,
+                        }),
+                    );
+                    await withRateProductFlag(true, async (call) => {
+                        const r = await call("rate_product", { barcode });
+                        const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            r.structuredContent,
+                        );
+                        expect(out.found).toBe(false);
+                        const byFood = await call("rate_product", {
+                            food_id: bare.id,
+                        });
+                        RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            byFood.structuredContent,
+                        );
+                    });
+                    expect({ offFor, requests: offRequests.length }).toEqual({
+                        offFor,
+                        requests: expected,
+                    });
+                }
+            } finally {
+                globalThis.fetch = realFetch;
+                if (realAgent === undefined) delete process.env.OFF_USER_AGENT;
+                else process.env.OFF_USER_AGENT = realAgent;
+                resetFlagsForTests();
+            }
+        });
+
         test("food_id returns schema output with milk allergen block", async () => {
             await addAllergen(db.rulesStore, {
                 householdId: "hh-1",

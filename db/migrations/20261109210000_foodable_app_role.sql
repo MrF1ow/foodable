@@ -52,9 +52,27 @@ begin
 end
 $$;
 
--- The app calls these functions today as the owner; several had EXECUTE
--- revoked from public and granted to service_role only.
-grant execute on all functions in schema public to foodable_app;
+-- No EXECUTE on public functions. The security definer ones (household
+-- creation, membership, ownership and bot token functions) take a household
+-- id and act on it as their owner, so foodable_app calling one could reach
+-- another household. The app calls them as the system, after its own check
+-- that the caller may. Trigger functions still fire for foodable_app's
+-- writes: a trigger's function is not checked for EXECUTE when it fires.
+do $$
+declare
+    r record;
+begin
+    for r in
+        select p.oid::regprocedure as fn
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.prosecdef
+    loop
+        execute format('revoke execute on function %s from foodable_app', r.fn);
+    end loop;
+end
+$$;
 
 -- Objects created later by whoever runs the migrations (the owner).
 alter default privileges in schema public
@@ -62,6 +80,3 @@ alter default privileges in schema public
 
 alter default privileges in schema public
     grant usage, select on sequences to foodable_app;
-
-alter default privileges in schema public
-    grant execute on functions to foodable_app;

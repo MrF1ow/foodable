@@ -84,3 +84,5 @@ revoke all on function public.create_household(uuid, text, text, boolean) from p
 revoke all on function public.create_household(uuid, text, text, boolean) from anon;
 revoke all on function public.create_household(uuid, text, text, boolean) from authenticated;
 grant execute on function public.create_household(uuid, text, text, boolean) to service_role;
+-- Called as the system only, after the app has checked the sign-up policy.
+revoke execute on function public.create_household(uuid, text, text, boolean) from foodable_app;

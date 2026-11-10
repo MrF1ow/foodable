@@ -20,6 +20,8 @@ const HH_A = "aaaaaaaa-0000-4000-8000-00000000000a";
 const HH_B = "bbbbbbbb-0000-4000-8000-00000000000b";
 const USER_A = "aaaaaaaa-1111-4000-8000-00000000000a";
 const USER_B = "bbbbbbbb-1111-4000-8000-00000000000b";
+// A plain member of household A, for the checks a member must not pass.
+const MEMBER_A = "aaaaaaaa-1111-4000-8000-0000000000a2";
 const FOOD_B = "bbbbbbbb-2222-4000-8000-000000000001";
 const LOCATION_B = "bbbbbbbb-2222-4000-8000-000000000002";
 const STORE_B = "bbbbbbbb-2222-4000-8000-000000000003";
@@ -39,6 +41,9 @@ const SYSTEM_ONLY_HOUSEHOLD_TABLES = [
 // the person (rls-personal.test.ts), so the household checks below stop at
 // "household A cannot reach them".
 const PERSONAL_HOUSEHOLD_TABLES = ["meal_items", "nutrition_goal_days"];
+// Tables the app reads in its own household but never writes: every change
+// to a membership goes through the system after the app's own owner check.
+const APP_READ_ONLY_HOUSEHOLD_TABLES = ["household_members"];
 
 // Tables without a household_id that foodable_app never reaches: sign-in,
 // OAuth, rate limiting, flag bookkeeping. Keep in step with the migrations.
@@ -59,13 +64,15 @@ const SEED = `
 drop index if exists public.households_singleton;
 insert into public.users (id, email) values
     ('${USER_A}', 'a@example.invalid'),
-    ('${USER_B}', 'b@example.invalid');
+    ('${USER_B}', 'b@example.invalid'),
+    ('${MEMBER_A}', 'a2@example.invalid');
 insert into public.households (id, name) values
     ('${HH_A}', 'Household A'),
     ('${HH_B}', 'Household B');
 insert into public.household_members (household_id, user_id, role, display_name) values
     ('${HH_A}', '${USER_A}', 'owner', 'Al'),
-    ('${HH_B}', '${USER_B}', 'owner', 'Bea');
+    ('${HH_B}', '${USER_B}', 'owner', 'Bea'),
+    ('${HH_A}', '${MEMBER_A}', 'member', 'Ann');
 insert into public.fridge_locations (id, household_id, name)
     values ('${LOCATION_B}', '${HH_B}', 'Fridge');
 insert into public.grocery_stores (id, household_id, name)
@@ -327,6 +334,14 @@ describeDb(pgAvailable !== null, "foodable_app row level security", (ctx) => {
                     `update public.${table} set household_id = household_id ${where}`,
                 ),
             );
+            if (APP_READ_ONLY_HOUSEHOLD_TABLES.includes(table)) {
+                if (!ownUpdate.ok || ownUpdate.out !== "0") {
+                    failures.push(
+                        `${table}: household B updated its own read-only rows: ${ownUpdate.out}`,
+                    );
+                }
+                continue;
+            }
             if (!ownUpdate.ok || ownUpdate.out === "0") {
                 failures.push(
                     `${table}: household B cannot update its own rows: ${ownUpdate.out}`,
@@ -621,5 +636,136 @@ describeDb(pgAvailable !== null, "foodable_app row level security", (ctx) => {
                 "select count(*) from public.registered_clients",
             ),
         ).toEqual({ ok: true, out: "0" });
+    });
+
+    test("foodable_app can execute no security definer function in public", async () => {
+        const { pg } = ctx();
+        const out = await owner(
+            pg,
+            `select p.proname
+             from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and p.prosecdef
+               and has_function_privilege('foodable_app', p.oid, 'execute')
+             order by 1`,
+        );
+        expect(out.split("\n").filter(Boolean)).toEqual([]);
+    });
+
+    // Each one acted across households when foodable_app could call it.
+    const DEFINER_CALLS: [string, string][] = [
+        [
+            "add_household_member",
+            `select public.add_household_member('${HH_B}', '${MEMBER_A}', 'Intruder')`,
+        ],
+        [
+            "create_household",
+            `select public.create_household('${MEMBER_A}', 'Extra', 'Ann', true)`,
+        ],
+        [
+            "rotate_household_mcp_token",
+            `select public.rotate_household_mcp_token('${HH_B}', repeat('cd', 32), '${USER_A}')`,
+        ],
+        [
+            "transfer_household_ownership",
+            `select public.transfer_household_ownership('${HH_B}', '${USER_B}', '${USER_A}')`,
+        ],
+        [
+            "resolve_household_mcp_token",
+            `select public.resolve_household_mcp_token(repeat('ab', 32))`,
+        ],
+        [
+            "household_mcp_token_hash",
+            `select public.household_mcp_token_hash(repeat('ab', 32))`,
+        ],
+        [
+            "promote_household_owner_on_leave",
+            `select public.promote_household_owner_on_leave()`,
+        ],
+    ];
+    for (const [name, call] of DEFINER_CALLS) {
+        test(`foodable_app is refused ${name}`, async () => {
+            const res = await asApp(
+                ctx().pg,
+                { user: USER_A, household: HH_A },
+                call,
+            );
+            expect(res.ok).toBe(false);
+            expect(res.out).toMatch(/permission denied for function/);
+        });
+    }
+
+    test("household_members: a member cannot insert, update or delete memberships, even in their own household", async () => {
+        const { pg } = ctx();
+        const member = { user: MEMBER_A, household: HH_A };
+        expect(
+            await asApp(
+                pg,
+                member,
+                "select count(*) from public.household_members",
+            ),
+        ).toEqual({ ok: true, out: "2" });
+        expect(
+            await asApp(
+                pg,
+                member,
+                touched(
+                    `update public.household_members
+                     set role = case when user_id = '${MEMBER_A}' then 'owner' else 'member' end`,
+                ),
+            ),
+        ).toEqual({ ok: true, out: "0" });
+        expect(
+            await asApp(
+                pg,
+                member,
+                touched(
+                    `update public.household_members set display_name = 'x'
+                     where user_id = '${MEMBER_A}'`,
+                ),
+            ),
+        ).toEqual({ ok: true, out: "0" });
+        expect(
+            await asApp(
+                pg,
+                member,
+                touched(
+                    `delete from public.household_members where user_id = '${USER_A}'`,
+                ),
+            ),
+        ).toEqual({ ok: true, out: "0" });
+        const insert = await asApp(
+            pg,
+            member,
+            `insert into public.household_members (household_id, user_id, role, display_name)
+             values ('${HH_A}', '${USER_B}', 'owner', 'Bea')`,
+        );
+        expect(insert.ok).toBe(false);
+        expect(insert.out).toMatch(/row-level security/);
+        expect(
+            await owner(
+                pg,
+                `select role from public.household_members where user_id = '${USER_A}'`,
+            ),
+        ).toBe("owner");
+    });
+
+    test("the owner-leave trigger still runs when foodable_app deletes an owner's login", async () => {
+        const { pg } = ctx();
+        const res = await asApp(
+            pg,
+            { user: USER_A, household: HH_A },
+            `begin;
+             delete from public.auth_codes where user_id = '${USER_A}';
+             delete from public.oauth_tokens where user_id = '${USER_A}';
+             delete from public.refresh_tokens where user_id = '${USER_A}';
+             delete from public.users where id = '${USER_A}';
+             set local app.household_id = '${HH_A}';
+             set local "request.jwt.claim.sub" = '${MEMBER_A}';
+             select role from public.household_members where user_id = '${MEMBER_A}';
+             rollback;`,
+        );
+        expect(res).toEqual({ ok: true, out: "owner" });
     });
 });

@@ -20,7 +20,7 @@ import {
 import { describeDb } from "./testing/pg.js";
 import { asUser, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { run, setSqlForTests } from "./sql.js";
+import { setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -227,19 +227,17 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
         const { sql } = getCtx();
         const memberA = await seedUser(sql);
         const memberZ = await seedUser(sql);
-        await run(async (tx) => {
-            await tx`
-                insert into household_members (
-                    household_id,
-                    user_id,
-                    role,
-                    display_name
-                )
-                values
-                    (${householdId}, ${memberA}, ${"member"}, ${"Alice"}),
-                    (${householdId}, ${memberZ}, ${"member"}, ${"Zed"})
-            `;
-        });
+        await sql`
+            insert into public.household_members (
+                household_id,
+                user_id,
+                role,
+                display_name
+            )
+            values
+                (${householdId}, ${memberA}, ${"member"}, ${"Alice"}),
+                (${householdId}, ${memberZ}, ${"member"}, ${"Zed"})
+        `;
         const list = await listHouseholdMembers(householdId);
         expect(list.map((m) => m.displayName)).toEqual([
             "Alice",
@@ -359,17 +357,15 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
     test("transferHouseholdOwnership success", async () => {
         const { sql } = getCtx();
         const memberId = await seedUser(sql);
-        await run(async (tx) => {
-            await tx`
-                insert into household_members (
-                    household_id,
-                    user_id,
-                    role,
-                    display_name
-                )
-                values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
-            `;
-        });
+        await sql`
+            insert into public.household_members (
+                household_id,
+                user_id,
+                role,
+                display_name
+            )
+            values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
+        `;
         await transferHouseholdOwnership(householdId, ownerId, memberId);
         expect(await getHouseholdMembership(ownerId)).toMatchObject({
             role: "member",
@@ -382,17 +378,15 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
     test("transferHouseholdOwnership error paths", async () => {
         const { sql } = getCtx();
         const memberId = await seedUser(sql);
-        await run(async (tx) => {
-            await tx`
-                insert into household_members (
-                    household_id,
-                    user_id,
-                    role,
-                    display_name
-                )
-                values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
-            `;
-        });
+        await sql`
+            insert into public.household_members (
+                household_id,
+                user_id,
+                role,
+                display_name
+            )
+            values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
+        `;
         await expectRejectsWithMessage(
             transferHouseholdOwnership(householdId, memberId, ownerId),
             "Failed to transfer ownership: only the household owner may transfer ownership",
@@ -414,17 +408,15 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
     test("setHouseholdMemberRole", async () => {
         const { sql } = getCtx();
         const memberId = await seedUser(sql);
-        await run(async (tx) => {
-            await tx`
-                insert into household_members (
-                    household_id,
-                    user_id,
-                    role,
-                    display_name
-                )
-                values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
-            `;
-        });
+        await sql`
+            insert into public.household_members (
+                household_id,
+                user_id,
+                role,
+                display_name
+            )
+            values (${householdId}, ${memberId}, ${"member"}, ${"Member"})
+        `;
         await setHouseholdMemberRole(householdId, memberId, "admin");
         expect(await getHouseholdMembership(memberId)).toMatchObject({
             role: "admin",

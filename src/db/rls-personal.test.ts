@@ -406,15 +406,32 @@ describeDb(
 
         test("leaving the household ends another member's reach", async () => {
             const { pg } = ctx();
-            const res = await asApp(
+            // Removing a membership is system work (the app only reads
+            // household_members), so the owner connection removes it and
+            // puts it back.
+            const row = await owner(
                 pg,
-                memberA,
-                `begin;
-                 delete from public.household_members where user_id = '${USER_A2}';
-                 select count(*) from public.meals where user_id = '${USER_A2}';
-                 rollback;`,
+                `select row_to_json(m) from public.household_members m
+                 where user_id = '${USER_A2}'`,
             );
-            expect(res).toEqual({ ok: true, out: "0" });
+            await owner(
+                pg,
+                `delete from public.household_members where user_id = '${USER_A2}'`,
+            );
+            try {
+                const res = await asApp(
+                    pg,
+                    memberA,
+                    `select count(*) from public.meals where user_id = '${USER_A2}'`,
+                );
+                expect(res).toEqual({ ok: true, out: "0" });
+            } finally {
+                await owner(
+                    pg,
+                    `insert into public.household_members
+                     select * from json_populate_record(null::public.household_members, ${quote(row)})`,
+                );
+            }
         });
     },
 );

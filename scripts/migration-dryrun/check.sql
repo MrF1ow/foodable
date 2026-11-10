@@ -734,6 +734,37 @@ begin
         raise exception 'foodable_app must not use foodable_migrations schema';
     end if;
 
+    -- Security definer functions take a household id and act as their owner:
+    -- the app calls them as the system, never as foodable_app.
+    if exists (
+        select 1
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.prosecdef
+          and has_function_privilege('foodable_app', p.oid, 'execute')
+    ) then
+        raise exception 'foodable_app can execute a security definer function: %', (
+            select string_agg(p.proname, ', ')
+            from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public'
+              and p.prosecdef
+              and has_function_privilege('foodable_app', p.oid, 'execute')
+        );
+    end if;
+
+    if exists (
+        select 1
+        from pg_policies
+        where schemaname = 'public'
+          and tablename = 'household_members'
+          and 'foodable_app' = any (roles)
+          and cmd <> 'SELECT'
+    ) then
+        raise exception 'foodable_app may only read household_members';
+    end if;
+
     -- Every table with a household_id gives foodable_app a policy, except the
     -- system-only ones named here on purpose. A listed table that gains a
     -- policy must leave the list.
