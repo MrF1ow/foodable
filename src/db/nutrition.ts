@@ -10,7 +10,11 @@ import {
     type GoalDayStore,
     type GoalsByDate,
 } from "../domain/insights.js";
-import { zonedDayStartUtc, zonedNextDayStartUtc } from "../domain/tz.js";
+import {
+    dateInTz,
+    zonedDayStartUtc,
+    zonedNextDayStartUtc,
+} from "../domain/tz.js";
 import { decodeEscapeSequences } from "../normalize.js";
 import { toStoredInteger } from "../domain/units.js";
 import { escapeLikePattern, tokenizeQuery } from "../search.js";
@@ -658,6 +662,103 @@ export async function getMealsInRange(
         }
     });
     return attachMealItems(userId, meals);
+}
+
+function localDatesFromInstants(
+    instants: readonly { logged_at: string }[],
+    tz: string,
+): string[] {
+    const dates = new Set<string>();
+    for (const row of instants) {
+        dates.add(dateInTz(row.logged_at, tz));
+    }
+    return [...dates].sort();
+}
+
+/** Distinct local calendar dates with at least one meal log (no meal_items fetch). */
+export async function getMealLoggedLocalDatesInRange(
+    userId: string,
+    startDate: string,
+    endDate: string,
+    tz: string = "UTC",
+): Promise<string[]> {
+    const startUtc = zonedDayStartUtc(startDate, tz);
+    const endUtc = zonedNextDayStartUtc(endDate, tz);
+
+    const instants = await run(async (tx) => {
+        try {
+            return await rows<{ logged_at: string }>(
+                tx,
+                tx`
+                    select logged_at
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("list meal log dates", err);
+        }
+    });
+    return localDatesFromInstants(instants, tz);
+}
+
+/** Distinct local calendar dates with at least one water log. */
+export async function getWaterLoggedLocalDatesInRange(
+    userId: string,
+    startDate: string,
+    endDate: string,
+    tz: string = "UTC",
+): Promise<string[]> {
+    const startUtc = zonedDayStartUtc(startDate, tz);
+    const endUtc = zonedNextDayStartUtc(endDate, tz);
+
+    const instants = await run(async (tx) => {
+        try {
+            return await rows<{ logged_at: string }>(
+                tx,
+                tx`
+                    select logged_at
+                    from ${tx.unsafe(WATER_LOG)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("list water log dates", err);
+        }
+    });
+    return localDatesFromInstants(instants, tz);
+}
+
+export async function getMealsInRangeWithoutItems(
+    userId: string,
+    startDate: string,
+    endDate: string,
+    tz: string = "UTC",
+): Promise<Meal[]> {
+    const startUtc = zonedDayStartUtc(startDate, tz);
+    const endUtc = zonedNextDayStartUtc(endDate, tz);
+
+    return run(async (tx) => {
+        try {
+            return await rows<Meal>(
+                tx,
+                tx`
+                    select *
+                    from ${tx.unsafe(MEALS)}
+                    where user_id = ${userId}
+                      and logged_at >= ${startUtc.toISOString()}
+                      and logged_at < ${endUtc.toISOString()}
+                    order by logged_at asc
+                `,
+            );
+        } catch (err) {
+            throw nutritionFailed("get meals", err);
+        }
+    });
 }
 
 /**

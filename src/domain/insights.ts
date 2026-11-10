@@ -4,7 +4,7 @@ import type {
     WaterEntry,
     WeightEntry,
 } from "../db/nutrition.js";
-import { dateInTz, hourInTz } from "./tz.js";
+import { dateInTz, hourInTz, shiftLocalDate } from "./tz.js";
 import { formatWeight, fromGrams, type WeightUnit } from "./units.js";
 
 export const GOAL_DAY_FIELDS = [
@@ -54,6 +54,12 @@ export function goalDayFromRow(row: Record<string, unknown>): GoalDayOverride {
         out[f] = goalNum(row[f]);
     }
     return out;
+}
+
+export function activeCalorieGoal(goals: NutritionGoals | null): number | null {
+    const g = goals?.daily_calories;
+    if (g == null || !Number.isFinite(g) || g <= 0) return null;
+    return g;
 }
 
 export function goalsForDate(
@@ -418,6 +424,24 @@ export function currentStreak<T>(
     for (let i = buckets.length - 1; i >= 0; i--) {
         if (predicate(buckets[i]!)) count++;
         else break;
+    }
+    return count;
+}
+
+/** Consecutive logged local dates ending on `today`, or on yesterday when today is empty. */
+export function loggingStreakFromDates(
+    loggedDates: ReadonlySet<string>,
+    today: string,
+): number {
+    let end = today;
+    if (!loggedDates.has(today)) {
+        end = shiftLocalDate(today, -1);
+    }
+    let count = 0;
+    let cur = end;
+    while (loggedDates.has(cur)) {
+        count++;
+        cur = shiftLocalDate(cur, -1);
     }
     return count;
 }

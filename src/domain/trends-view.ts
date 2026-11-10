@@ -1,4 +1,5 @@
 import {
+    activeCalorieGoal,
     currentStreak,
     longestStreak,
     type DailyBucket,
@@ -125,12 +126,6 @@ function mean(values: number[]): number | null {
     let sum = 0;
     for (const v of values) sum += v;
     return sum / values.length;
-}
-
-function activeCalorieGoal(goals: NutritionGoals | null): number | null {
-    const g = goals?.daily_calories;
-    if (g == null || !Number.isFinite(g) || g <= 0) return null;
-    return g;
 }
 
 function activeMacroGoal(
