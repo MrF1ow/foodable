@@ -92,6 +92,10 @@ export type FoodsStore = {
     /** Counts referring rows per food id in fridge, grocery, recipe, meals, and stock (household-scoped). */
     countFoodRefs(householdId: string): Promise<Map<string, number>>;
     getFood(householdId: string, id: string): Promise<Food | null>;
+    getFoodsByIds(
+        householdId: string,
+        ids: readonly string[],
+    ): Promise<Map<string, Food>>;
     insertFood(row: Food): Promise<Food>;
     updateFoodRow(row: Food): Promise<Food | null>;
     getByNormalizedName(
@@ -675,6 +679,18 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 (food) => food.householdId === householdId && food.id === id,
             );
             return row ? copyFood(row) : null;
+        },
+        async getFoodsByIds(householdId, ids) {
+            const unique = [...new Set(ids)];
+            const out = new Map<string, Food>();
+            for (const id of unique) {
+                const row = foods.find(
+                    (food) =>
+                        food.householdId === householdId && food.id === id,
+                );
+                if (row) out.set(id, copyFood(row));
+            }
+            return out;
         },
         async insertFood(row) {
             const key = foodKey(row);
@@ -1540,13 +1556,8 @@ export async function foodsByIds(
             [...ids].filter((id): id is string => Boolean(id && id.trim())),
         ),
     ];
-    const entries = await Promise.all(
-        unique.map(async (id) => {
-            const food = await store.getFood(householdId, id);
-            return food ? ([id, food] as const) : null;
-        }),
-    );
-    return new Map(entries.filter((entry) => entry != null));
+    if (unique.length === 0) return new Map();
+    return store.getFoodsByIds(householdId, unique);
 }
 
 export type FoodProductRef = { id: string; name: string; brand: string | null };

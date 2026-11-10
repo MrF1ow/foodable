@@ -89,8 +89,14 @@ import {
     macrosForPerson,
     RecipeInputError,
     recipeDislikeNote,
+    recipeFilters,
     recipeNotices,
 } from "../domain/recipes.js";
+import {
+    applyV2RecipeListFilters,
+    parseV2RecipeListFilter,
+    renderRecipesListV2Page,
+} from "./pages/v2/recipes-list.js";
 import { orderCards } from "../domain/layout.js";
 import { validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
@@ -933,6 +939,8 @@ export async function renderRecipesListPage(
         canMakeNow?: boolean;
         safeFor?: string;
         verification?: string;
+        q?: string;
+        filter?: string;
         importUrl?: string;
         importError?: string;
         importDuplicateRecipeId?: string;
@@ -957,6 +965,71 @@ export async function renderRecipesListPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
+    const noticeResult = await loadHouseholdNotices(householdId);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    const v2Query = filter.q?.trim() ?? "";
+    const v2Filter = parseV2RecipeListFilter(filter.filter);
+    if (chrome.flags.uiV2) {
+        const { recipes, allIngredients, fridgeItems, foodsById } =
+            noticeResult.recipesListPrefetch;
+        const ingredientsByRecipe = new Map<string, typeof allIngredients>();
+        for (const row of allIngredients) {
+            const list = ingredientsByRecipe.get(row.recipeId) ?? [];
+            list.push(row);
+            ingredientsByRecipe.set(row.recipeId, list);
+        }
+        const stock = fridgeItems.map((item) => ({
+            quantity: item.quantity,
+            foodId: item.foodId,
+        }));
+        const rows = recipes.map((recipe) => {
+            const ingredients = ingredientsByRecipe.get(recipe.id) ?? [];
+            return {
+                recipe,
+                ingredients,
+                macrosPerPortion: macrosForPerson(
+                    ingredients,
+                    recipe.yieldPortions,
+                    1,
+                    foodsById,
+                ),
+            };
+        });
+        const flags = recipeFilters(rows, stock, foodsById);
+        const cards = rows.map((row, index) => ({
+            recipe: row.recipe,
+            flags: flags[index]!,
+        }));
+        const filtered = applyV2RecipeListFilters(cards, v2Query, v2Filter);
+        return {
+            status: 200,
+            html: renderRecipesListV2Page({
+                chrome,
+                query: v2Query,
+                filter: v2Filter,
+                cards: filtered,
+                totalCount: recipes.length,
+                importError: opts.importError,
+                importPasteStep: opts.importPasteStep,
+                importUrl: opts.importUrl,
+                importPasteText: opts.importPasteText,
+                importWebsiteError: opts.importWebsiteError,
+                importWebsiteUrl: opts.importWebsiteUrl,
+                importShowRetry: opts.importShowRetry,
+                importRetryDisabled: opts.importRetryDisabled,
+                importTextOnly: opts.importTextOnly,
+                importTextOrigin: opts.importTextOrigin,
+                importDuplicateRecipeId: opts.importDuplicateRecipeId,
+                importCredit: opts.importCredit,
+                importSourceKind: opts.importSourceKind,
+                importSourceLabel: opts.importSourceLabel,
+            }),
+        };
+    }
     const members = await listHouseholdMembers(householdId);
     const tag = filter.tag?.trim() ?? "";
     const canMakeNow = filter.canMakeNow === true;
@@ -1026,7 +1099,7 @@ export async function renderRecipesListPage(
     return {
         status: 200,
         html: renderRecipesPage({
-            chrome: await viewerChromeWithAttention(profile, gate.viewer),
+            chrome,
             recipes,
             members: members.map((member) => ({
                 userId: member.userId,

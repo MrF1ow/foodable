@@ -8,6 +8,7 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     findUpsertFoodByName,
+    foodsByIds,
     looseFoodKey,
     mapOffAllergenTags,
     matchFoodsByWords,
@@ -517,6 +518,31 @@ async function productRow(
         }),
     );
 }
+
+test("foodsByIds loads ids in one getFoodsByIds call", async () => {
+    const base = createMemoryFoodsStore();
+    let batch = 0;
+    const store: FoodsStore = {
+        ...base,
+        async getFoodsByIds(householdId, ids) {
+            batch += 1;
+            return base.getFoodsByIds(householdId, ids);
+        },
+    };
+    const ids = await Promise.all(
+        Array.from({ length: 20 }, (_, i) =>
+            store.insertFood(
+                newFood({ householdId: HH, kind: "food", name: `F${i}` }),
+            ),
+        ),
+    );
+    await foodsByIds(
+        store,
+        HH,
+        ids.map((f) => f.id),
+    );
+    expect(batch).toBe(1);
+});
 
 test("searchFoodCatalog batches barcode lookups and preserves hit shape", async () => {
     const base = createMemoryFoodsStore();

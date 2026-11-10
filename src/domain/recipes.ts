@@ -1809,6 +1809,101 @@ export function recipeCanMakeNow(
     });
 }
 
+/** Prep plus cook minutes when both are known; null when either is unknown. */
+export function recipeTotalMinutes(recipe: Recipe): number | null {
+    const { prepMinutes, cookMinutes } = recipe;
+    if (prepMinutes == null || cookMinutes == null) return null;
+    return prepMinutes + cookMinutes;
+}
+
+/** Card copy for partial or total time; empty when both are unknown. */
+export function recipeTimeLabel(recipe: Recipe): string {
+    const { prepMinutes, cookMinutes } = recipe;
+    const total = recipeTotalMinutes(recipe);
+    if (total != null) return `${total} min`;
+    if (prepMinutes != null) return `Prep ${prepMinutes} min`;
+    if (cookMinutes != null) return `Cook ${cookMinutes} min`;
+    return "";
+}
+
+/** Per-portion protein is at least 25% of kcal (protein_g × 4 / kcal). */
+export function recipeHighProtein(macrosPerPortion: RecipeMacros): boolean {
+    const { calories, protein_g } = macrosPerPortion;
+    if (calories == null || protein_g == null || calories <= 0) return false;
+    return (protein_g * 4) / calories >= 0.25;
+}
+
+export function recipeMissingIngredientCount(
+    ingredients: RecipeIngredient[],
+    fridgeStock: LinkedNeed[],
+    foodsById: ReadonlyMap<string, Food> = new Map(),
+): number {
+    if (ingredients.length === 0) return 0;
+    let missing = 0;
+    for (const ingredient of ingredients) {
+        const tag = alreadyHaveTag(
+            {
+                quantity: ingredient.quantity,
+                foodId: ingredient.foodId,
+            },
+            fridgeStock,
+            foodsById,
+        );
+        if (tag?.cover !== "full") missing += 1;
+    }
+    return missing;
+}
+
+export type RecipeFilterFlags = {
+    cookable: boolean;
+    highProtein: boolean;
+    quick: boolean;
+    missingCount: number;
+    hasIngredients: boolean;
+};
+
+export type RecipeFilterRow = {
+    recipe: Recipe;
+    ingredients: RecipeIngredient[];
+    macrosPerPortion: RecipeMacros;
+};
+
+export function recipeFilterFlags(
+    row: RecipeFilterRow,
+    fridgeStock: LinkedNeed[],
+    foodsById: ReadonlyMap<string, Food> = new Map(),
+): RecipeFilterFlags {
+    const totalMinutes = recipeTotalMinutes(row.recipe);
+    const hasIngredients = row.ingredients.length > 0;
+    return {
+        cookable: hasIngredients
+            ? recipeCanMakeNow(
+                  row.recipe,
+                  row.ingredients,
+                  fridgeStock,
+                  foodsById,
+              )
+            : false,
+        highProtein: recipeHighProtein(row.macrosPerPortion),
+        quick: totalMinutes != null && totalMinutes <= 30,
+        missingCount: recipeMissingIngredientCount(
+            row.ingredients,
+            fridgeStock,
+            foodsById,
+        ),
+        hasIngredients,
+    };
+}
+
+/** Pure filter metadata for each recipe row (cookable, high protein, quick, missing count). */
+export function recipeFilters(
+    rows: RecipeFilterRow[],
+    fridgeStock: LinkedNeed[],
+    foodsById: ReadonlyMap<string, Food> = new Map(),
+): RecipeFilterFlags[] {
+    return rows.map((row) => recipeFilterFlags(row, fridgeStock, foodsById));
+}
+
 export function recipeIsSafeFor(
     ingredients: RecipeIngredient[],
     foodsById: ReadonlyMap<string, Food>,

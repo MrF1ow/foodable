@@ -63,6 +63,12 @@ const emptyNotices: NoticesForResult = {
     aliasMap: new Map(),
     barcodedIds: new Set(),
     possibleDuplicatePairs: [],
+    recipesListPrefetch: {
+        recipes: [],
+        allIngredients: [],
+        fridgeItems: [],
+        foodsById: new Map(),
+    },
 };
 
 afterEach(() => {

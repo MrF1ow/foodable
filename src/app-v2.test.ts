@@ -119,7 +119,7 @@ describe("/app-v2.js", () => {
         expect(js).toContain("window.FoodableApp.onLoad(");
         expect(js).not.toContain("Turbo.start");
         // +~1.8 KB amount Enter helpers, step-any stepping, listbox rows.
-        expect(js.length).toBeLessThan(64_500);
+        expect(js.length).toBeLessThan(65_200);
     });
 });
 

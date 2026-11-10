@@ -35,6 +35,9 @@ import {
     removeRecipeIngredient,
     reorderRecipeIngredients,
     recipeCanMakeNow,
+    recipeFilters,
+    recipeHighProtein,
+    recipeTotalMinutes,
     recipeMatchesFilter,
     setPersonPortion,
     updateRecipe,
@@ -2297,4 +2300,178 @@ test("recipeCanMakeNow and verification filter ignore unverified recipes", async
             verification: "unverified",
         }),
     ).toBe(true);
+});
+
+const verifiedRecipeBase = {
+    id: "r-filter",
+    householdId: HH,
+    creatorId: ALICE,
+    name: "Filter test",
+    yieldPortions: 2,
+    instructions: "Go",
+    sourceUrl: null,
+    tags: [],
+    notes: null,
+    prepMinutes: null as number | null,
+    cookMinutes: null as number | null,
+    verification: "verified" as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const emptyMacros = {
+    calories: null,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    incomplete: true,
+    incompleteReasons: [],
+    gaps: [],
+};
+
+test("recipeTotalMinutes sums prep and cook when both known", () => {
+    expect(
+        recipeTotalMinutes({
+            ...verifiedRecipeBase,
+            prepMinutes: 10,
+            cookMinutes: 15,
+        }),
+    ).toBe(25);
+    expect(recipeTotalMinutes({ ...verifiedRecipeBase, prepMinutes: 5 })).toBe(
+        null,
+    );
+    expect(
+        recipeTotalMinutes({ ...verifiedRecipeBase, cookMinutes: 20 }),
+    ).toBeNull();
+    expect(recipeTotalMinutes(verifiedRecipeBase)).toBeNull();
+});
+
+test("recipeHighProtein uses 25% kcal from protein boundary", () => {
+    expect(
+        recipeHighProtein({ ...emptyMacros, calories: 400, protein_g: 25 }),
+    ).toBe(true);
+    expect(
+        recipeHighProtein({ ...emptyMacros, calories: 400, protein_g: 24.9 }),
+    ).toBe(false);
+    expect(
+        recipeHighProtein({ ...emptyMacros, calories: null, protein_g: 30 }),
+    ).toBe(false);
+    expect(
+        recipeHighProtein({ ...emptyMacros, calories: 400, protein_g: null }),
+    ).toBe(false);
+});
+
+test("recipeFilters cookable, quick, and missing count", () => {
+    const flour = recipeIngredientFromRow({
+        id: "i1",
+        household_id: HH,
+        recipe_id: verifiedRecipeBase.id,
+        kind: "food",
+        display_name: "Flour",
+        amount: 200,
+        unit: "g",
+        sort_order: 0,
+        food_id: "f-flour",
+    });
+    const eggs = recipeIngredientFromRow({
+        id: "i2",
+        household_id: HH,
+        recipe_id: verifiedRecipeBase.id,
+        kind: "food",
+        display_name: "Eggs",
+        amount: 2,
+        unit: "each",
+        sort_order: 1,
+        food_id: "f-eggs",
+    });
+    const stock = [{ quantity: { amount: 500, unit: "g" }, foodId: "f-flour" }];
+    const foods = new Map([
+        [
+            "f-flour",
+            {
+                id: "f-flour",
+                name: "Flour",
+                grams_per_each: null,
+                grams_per_ml: null,
+            },
+        ],
+        [
+            "f-eggs",
+            {
+                id: "f-eggs",
+                name: "Eggs",
+                grams_per_each: 50,
+                grams_per_ml: null,
+            },
+        ],
+    ] as const);
+    const [flags] = recipeFilters(
+        [
+            {
+                recipe: {
+                    ...verifiedRecipeBase,
+                    prepMinutes: 10,
+                    cookMinutes: 15,
+                },
+                ingredients: [flour, eggs],
+                macrosPerPortion: {
+                    ...emptyMacros,
+                    calories: 200,
+                    protein_g: 10,
+                    incomplete: false,
+                },
+            },
+        ],
+        stock,
+        foods as never,
+    );
+    expect(flags?.cookable).toBe(false);
+    expect(flags?.missingCount).toBe(1);
+    expect(flags?.quick).toBe(true);
+    expect(flags?.highProtein).toBe(false);
+
+    const [cookable] = recipeFilters(
+        [
+            {
+                recipe: {
+                    ...verifiedRecipeBase,
+                    prepMinutes: 45,
+                    cookMinutes: null,
+                },
+                ingredients: [flour],
+                macrosPerPortion: {
+                    ...emptyMacros,
+                    calories: 100,
+                    protein_g: 30,
+                    incomplete: false,
+                },
+            },
+        ],
+        stock,
+        foods as never,
+    );
+    expect(cookable?.cookable).toBe(true);
+    expect(cookable?.missingCount).toBe(0);
+    expect(cookable?.quick).toBe(false);
+
+    const [partialTime] = recipeFilters(
+        [
+            {
+                recipe: {
+                    ...verifiedRecipeBase,
+                    prepMinutes: 10,
+                    cookMinutes: null,
+                },
+                ingredients: [flour],
+                macrosPerPortion: emptyMacros,
+            },
+        ],
+        stock,
+        foods as never,
+    );
+    expect(partialTime?.quick).toBe(false);
+    expect(cookable?.quick).toBe(false);
+    expect(cookable?.highProtein).toBe(true);
 });

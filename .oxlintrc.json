@@ -96,6 +96,15 @@
                                 "src/db/settings",
                                 "src/db/social-readers",
                                 "src/db/stock"
+                            ],
+                            "src/web/routes/recipes-list.test.ts": [
+                                "src/db/foods",
+                                "src/db/fridge",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/notice-dismissals",
+                                "src/db/profiles",
+                                "src/db/recipes"
                             ]
                         }
                     }

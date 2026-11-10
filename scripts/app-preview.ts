@@ -32,6 +32,7 @@ import {
     renderRecipeDetailPage,
     renderRecipesPage,
 } from "../src/web/pages/recipes.js";
+import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import {
     renderFoodsSettingsPage,
@@ -349,6 +350,8 @@ const RECIPE = {
     notes: null,
     prepMinutes: 10,
     cookMinutes: 20,
+    verification: "verified" as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 const RECIPE_TWO = {
@@ -363,6 +366,8 @@ const RECIPE_TWO = {
     notes: null,
     prepMinutes: 5,
     cookMinutes: 10,
+    verification: "verified" as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 const MACROS = {
@@ -695,12 +700,41 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 { kind: "food", location_id: "l1" },
             ),
         } as never),
-        recipes: renderRecipesPage({
-            chrome,
-            recipes: [RECIPE, RECIPE_TWO],
-            members: [ME, SAM],
-            viewerId: "u1",
-        } as never),
+        recipes: V2
+            ? renderRecipesListV2Page({
+                  chrome,
+                  query: "",
+                  filter: "",
+                  totalCount: 2,
+                  cards: [
+                      {
+                          recipe: RECIPE,
+                          flags: {
+                              cookable: true,
+                              highProtein: false,
+                              quick: true,
+                              missingCount: 0,
+                              hasIngredients: true,
+                          },
+                      },
+                      {
+                          recipe: RECIPE_TWO,
+                          flags: {
+                              cookable: false,
+                              highProtein: false,
+                              quick: true,
+                              missingCount: 2,
+                              hasIngredients: true,
+                          },
+                      },
+                  ],
+              })
+            : renderRecipesPage({
+                  chrome,
+                  recipes: [RECIPE, RECIPE_TWO],
+                  members: [ME, SAM],
+                  viewerId: "u1",
+              } as never),
         recipe: renderRecipeDetailPage(recipeView as never),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,

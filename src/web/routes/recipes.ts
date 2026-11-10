@@ -177,6 +177,8 @@ recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
         canMakeNow: c.req.query("can_make_now") === "1",
         safeFor: c.req.query("safe_for") ?? "",
         verification: c.req.query("verification") ?? "",
+        q: c.req.query("q") ?? "",
+        filter: c.req.query("filter") ?? "",
     });
     return c.html(page.html, page.status);
 });

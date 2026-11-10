@@ -1,4 +1,4 @@
-import type { Food, PossibleDuplicatePair } from "./foods.js";
+import type { EffectiveFood, Food, PossibleDuplicatePair } from "./foods.js";
 import {
     duplicatesNeedRefCounts,
     foodDisplayName,
@@ -20,7 +20,14 @@ import {
 import type { Notice } from "./notices.js";
 import type { NoticeSubjectKind } from "./notice-dismissals.js";
 import { NOTICE_SEVERITY, sortNotices } from "./notices.js";
-import { listRecipes, recipeNotices, type RecipesStore } from "./recipes.js";
+import {
+    listRecipes,
+    recipeNotices,
+    type Recipe,
+    type RecipeIngredient,
+    type RecipesStore,
+} from "./recipes.js";
+import type { FridgeItem } from "./fridge.js";
 import type { GroceryListStore } from "./grocery.js";
 import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices } from "./stock.js";
@@ -36,6 +43,13 @@ export type NoticesForDeps = {
     grocery?: GroceryListStore;
 };
 
+export type RecipesListPrefetch = {
+    recipes: Recipe[];
+    allIngredients: RecipeIngredient[];
+    fridgeItems: FridgeItem[];
+    foodsById: ReadonlyMap<string, EffectiveFood>;
+};
+
 export type NoticesForResult = {
     notices: Notice[];
     dismissals: NoticeDismissal[];
@@ -47,6 +61,7 @@ export type NoticesForResult = {
     aliasMap: ReadonlyMap<string, string[]>;
     barcodedIds: ReadonlySet<string>;
     possibleDuplicatePairs: PossibleDuplicatePair[];
+    recipesListPrefetch: RecipesListPrefetch;
 };
 
 function subjectNameKey(kind: NoticeSubjectKind, id: string): string {
@@ -350,6 +365,12 @@ export async function noticesFor(
         aliasMap,
         barcodedIds,
         possibleDuplicatePairs,
+        recipesListPrefetch: {
+            recipes,
+            allIngredients,
+            fridgeItems,
+            foodsById: catalog,
+        },
     };
 }
 
