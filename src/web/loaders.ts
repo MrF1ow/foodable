@@ -75,7 +75,7 @@ import {
     usualProductsPickerHref,
 } from "./usual-products-path.js";
 import type { Notice } from "../domain/notices.js";
-import { listFridge } from "../domain/fridge.js";
+import { defaultFreezeExpiry, listFridge } from "../domain/fridge.js";
 import {
     allergenNotices,
     listGrocery,
@@ -98,6 +98,10 @@ import {
     parseV2RecipeListFilter,
     renderRecipesListV2Page,
 } from "./pages/v2/recipes-list.js";
+import {
+    renderKitchenFridgeV2Page,
+    type KitchenFridgeFoodMeta,
+} from "./pages/v2/kitchen-fridge.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
 import {
@@ -372,6 +376,33 @@ export async function renderDashboardPage(
     };
 }
 
+function openFridgeItemId(
+    openModalId: string | undefined,
+    openItemId: string | undefined,
+    knownItemIds: ReadonlySet<string>,
+): string | undefined {
+    let raw: string | undefined;
+    if (openItemId?.trim()) raw = openItemId.trim();
+    else if (openModalId?.startsWith("fridge-edit-")) {
+        raw = openModalId.slice("fridge-edit-".length);
+    } else if (openModalId?.startsWith("fd-fridge-item-")) {
+        raw = openModalId.slice("fd-fridge-item-".length);
+    }
+    if (!raw) return undefined;
+    return knownItemIds.has(raw) ? raw : undefined;
+}
+
+function openFridgeAddSheet(
+    openModalId: string | undefined,
+    openAdd?: boolean,
+): boolean {
+    if (openAdd) return true;
+    return (
+        openModalId?.startsWith("fridge-add-food-") === true ||
+        openModalId?.startsWith("fridge-add-supply-") === true
+    );
+}
+
 export async function renderFridgeInventoryPage(
     viewerUserId: string,
     error?: string,
@@ -380,6 +411,7 @@ export async function renderFridgeInventoryPage(
     extras?: {
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     },
+    opts: { openItemId?: string; openAdd?: boolean } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -391,12 +423,41 @@ export async function renderFridgeInventoryPage(
         liveGroceryStore().listLines(householdId),
         householdToday(householdId),
     ]);
-    const foodsById = new Map(
+    const foodsById = new Map<string, KitchenFridgeFoodMeta>(
         allFoods.map((row) => [
             row.id,
-            { id: row.id, genericFoodId: row.genericFoodId },
+            {
+                id: row.id,
+                genericFoodId: row.genericFoodId,
+                usualAmount: row.usualAmount,
+            },
         ]),
     );
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        await loadHouseholdNotices(householdId, { today }),
+    );
+    const flags = await viewerFlagsFor(gate.viewer);
+    if (flags.uiV2) {
+        const knownIds = new Set(snapshot.items.map((row) => row.id));
+        const itemId = openFridgeItemId(openModalId, opts.openItemId, knownIds);
+        return {
+            status: 200,
+            html: renderKitchenFridgeV2Page({
+                ...snapshot,
+                today,
+                chrome,
+                error,
+                openItemId: itemId,
+                openAdd: openFridgeAddSheet(openModalId, opts.openAdd),
+                openModalId,
+                didYouMean: extras?.didYouMean,
+                foodsById,
+                freezeDefaultExpiry: defaultFreezeExpiry(today),
+            }),
+        };
+    }
     const linkProductPrompt = linkProductId
         ? linkProductPromptFromFoods(
               allFoods,
@@ -411,11 +472,7 @@ export async function renderFridgeInventoryPage(
         html: renderFridgePage({
             ...snapshot,
             today,
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                await loadHouseholdNotices(householdId, { today }),
-            ),
+            chrome,
             error,
             openModalId,
             didYouMean: extras?.didYouMean,

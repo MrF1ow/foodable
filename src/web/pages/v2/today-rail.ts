@@ -70,7 +70,7 @@ export function railNoticesListed(notices: readonly Notice[]): Notice[] {
     return out;
 }
 
-function expiryToneClass(level: ExpiryLevel): string {
+export function expiryToneClass(level: ExpiryLevel): string {
     if (level === "expired" || level === "high")
         return "fd-today-rail-row__when--high";
     if (level === "medium") return "fd-today-rail-row__when--medium";

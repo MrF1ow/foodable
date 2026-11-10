@@ -122,6 +122,15 @@
                             "src/web/routes/today-meals.test.ts": [
                                 "src/db/household",
                                 "src/db/nutrition"
+                            ],
+                            "src/web/routes/fridge.test.ts": [
+                                "src/db/fridge",
+                                "src/db/foods",
+                                "src/db/grocery",
+                                "src/db/household",
+                                "src/db/profiles",
+                                "src/db/restock",
+                                "src/db/stock"
                             ]
                         }
                     }

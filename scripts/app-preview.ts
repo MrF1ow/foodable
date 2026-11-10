@@ -76,6 +76,11 @@ import {
     buildPreviewTodayViewWithRail,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
+import {
+    buildPreviewKitchenFridgeView,
+    renderKitchenFridgeV2Page,
+} from "../src/web/pages/v2/kitchen-fridge.js";
+import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
@@ -761,7 +766,59 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         nutrition,
         ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
         "nutrition-peer": nutritionPeer,
-        fridge: renderFridgePage(fridgeView(chrome) as never),
+        fridge: (() => {
+            const snap = fridgeView(chrome);
+            return V2
+                ? renderKitchenFridgeV2Page(
+                      buildPreviewKitchenFridgeView(
+                          chrome as never,
+                          snap.today,
+                          {
+                              locations: snap.locations,
+                              items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
+                              foodsById: new Map(
+                                  [...snap.foodsById.entries()].map(
+                                      ([id, row]) => [
+                                          id,
+                                          { ...row, usualAmount: null },
+                                      ],
+                                  ),
+                              ),
+                              freezeDefaultExpiry: defaultFreezeExpiry(
+                                  snap.today,
+                              ),
+                          },
+                      ),
+                  )
+                : renderFridgePage(snap as never);
+        })(),
+        ...(V2
+            ? {
+                  "kitchen-fridge-item": renderKitchenFridgeV2Page(
+                      buildPreviewKitchenFridgeView(
+                          chrome as never,
+                          fridgeView(chrome).today,
+                          {
+                              locations: fridgeView(chrome).locations,
+                              items: fridgeView(chrome)
+                                  .items as import("../src/domain/fridge.js").FridgeItem[],
+                              foodsById: new Map(
+                                  [
+                                      ...fridgeView(chrome).foodsById.entries(),
+                                  ].map(([id, row]) => [
+                                      id,
+                                      { ...row, usualAmount: null },
+                                  ]),
+                              ),
+                              openItemId: "i2",
+                              freezeDefaultExpiry: defaultFreezeExpiry(
+                                  fridgeView(chrome).today,
+                              ),
+                          },
+                      ),
+                  ),
+              }
+            : {}),
         grocery: renderGroceryPage(groceryView(chrome) as never),
         "grocery-allergen-modal": renderGroceryPage({
             ...(groceryView(chrome) as object),

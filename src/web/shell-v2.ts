@@ -266,7 +266,7 @@ function accountChip(chrome: AppChrome): string {
 /** The page's own header is what `pageHeader` (components/ui.ts) writes first:
  *  a bare <h1>, or a <header class="dash-head">. */
 const LEADING_PAGE_HEADER =
-    /^\s*(?:<h1>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>)/;
+    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>)/;
 
 /** The Kitchen text tabs go directly under the page header, as in the design.
  *  A body that does not start with one gets them first. */

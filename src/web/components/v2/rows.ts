@@ -320,15 +320,18 @@ export function fridgeRow(
         qty?: Text;
         date?: Text;
         dateTime?: string;
+        /** Extra class on the date cell (expiry tone). */
+        dateClass?: string;
         href?: string;
     },
 ): Html {
+    const dateExtra = opts.dateClass ? ` ${opts.dateClass}` : "";
     const date =
         opts.date == null || opts.date === ""
             ? ""
             : opts.dateTime
-              ? `<time class="fd-row__date" datetime="${esc(opts.dateTime)}">${esc(opts.date)}</time>`
-              : `<span class="fd-row__date">${esc(opts.date)}</span>`;
+              ? `<time class="fd-row__date${dateExtra}" datetime="${esc(opts.dateTime)}">${esc(opts.date)}</time>`
+              : `<span class="fd-row__date${dateExtra}">${esc(opts.date)}</span>`;
     return rowShell({
         ...opts,
         variant: "fridge",
