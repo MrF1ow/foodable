@@ -150,6 +150,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
         email: "founder@example.com",
         password: "secret123456",
         authUserCount: async () => 0,
+        householdExists: async () => false,
         signInUser: async () => {
             throw new Error("Invalid login credentials");
         },
@@ -191,6 +192,7 @@ test("a wrong password after the owner exists says so and never signs up", async
                 email: "stranger@example.com",
                 password: "wrong-password",
                 authUserCount: async () => 1,
+                householdExists: async () => true,
                 signInUser: async () => {
                     throw signInError(400, "invalid_credentials");
                 },
@@ -222,6 +224,7 @@ for (const [label, err] of [
                     email: "founder@example.com",
                     password: "right-password",
                     authUserCount: async () => 1,
+                    householdExists: async () => true,
                     signInUser: async () => {
                         throw err;
                     },
@@ -266,6 +269,7 @@ test("an account-state refusal shows the sign-in error's own message", async () 
                 email: "sam@example.com",
                 password: "right-password",
                 authUserCount: async () => 1,
+                householdExists: async () => true,
                 signInUser: async () => {
                     throw Object.assign(new Error("Email not confirmed"), {
                         status: 400,
@@ -287,6 +291,7 @@ test("existing users still sign in after signup closes", async () => {
         email: "founder@example.com",
         password: "secret123456",
         authUserCount: async () => 1,
+        householdExists: async () => true,
         signInUser: async () => "11111111-1111-4111-8111-111111111111",
         signUpUser: async () => {
             signUps += 1;
@@ -295,6 +300,31 @@ test("existing users still sign in after signup closes", async () => {
         messages: MESSAGES,
     });
     expect(userId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(signUps).toBe(0);
+});
+
+test("closed policy refuses a second sign-up", async () => {
+    let signUps = 0;
+    await expect(
+        resolveApproveUser({
+            email: "stranger@example.com",
+            password: "secret123456",
+            authUserCount: async () => 1,
+            householdExists: async () => true,
+            signupPolicy: "closed",
+            signInUser: async () => {
+                throw Object.assign(new Error("Invalid login credentials"), {
+                    status: 400,
+                    code: "invalid_credentials",
+                });
+            },
+            signUpUser: async () => {
+                signUps += 1;
+                return "should-not-create";
+            },
+            messages: MESSAGES,
+        }),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
     expect(signUps).toBe(0);
 });
 

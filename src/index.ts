@@ -64,6 +64,7 @@ import {
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
 import { initFlags } from "./flags.js";
+import { getSignupPolicy } from "./domain/signup.js";
 import { legacyRedirects } from "./web/legacy-redirects.js";
 
 const app = new Hono();
@@ -490,6 +491,7 @@ if (import.meta.main) {
     // Load feature flags before widgets; bounded by initFlags timeout and never
     // fails boot.
     await initFlags();
+    getSignupPolicy();
 
     // Assemble every MCP Apps widget from its source partials up front, so a
     // broken @include/partial fails fast at boot rather than on a client's

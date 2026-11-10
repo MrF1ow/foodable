@@ -346,13 +346,13 @@ Use a single-label name such as `food.example.com`. A deeper name (`app.food.exa
 
 ## First-user flow
 
-One deploy, one Postgres database, one household.
+One deploy, one Postgres database, one household. Sign-up policy is deploy config: set optional `FOODABLE_SIGNUP_POLICY` to `closed` (default), `invite`, or `open`. Only `closed` is fully enforced today; `invite` and `open` still behave like `closed` until their flows ship. Unknown values log a warning and fall back to `closed`. `open` is experimental and must not be the default.
 
 1. Open the site at `/` (or complete MCP OAuth at `/authorize`). There is no Google button. The first visit, while no user accounts exist, is email and password.
 2. That first successful `/approve` **signs up** the first user. After any user exists, `/approve` only signs in. A second email is refused with "Wrong email, username or password."; a wrong password does not fall through to sign-up. If the database cannot answer (timeout, rate limit, outage) the page says to try again in a minute instead of blaming the password.
 3. The first user is not in a household yet. `/` shows **Create household** (household name and your name) instead of the app. Submit it. That RPC creates the singleton household and the caller as **owner**. A second create fails.
 4. Later people exist only when the owner adds them. Members and the household bot token are managed only in **Household › Members** (`/settings/household`) — add people there (email or username plus password). Members sign in with those credentials; a username member types just the username (it is stored as `<username>@household.invalid`). They cannot rotate the household token or add people unless the owner makes them an **admin**. Every member can edit their own allergens, dislikes and rules under **Rules**.
 5. The owner can make a member an admin (or back), hand ownership to another member, or remove a person, from that person's **Manage** dialog in Household › Members. An admin manages the household beside the owner: name, location, stores, store rules, everyone's rules, and adding people. Roles, removal, transfer and the bot token stay with the owner, who keeps ownership when they promote someone. Removing someone erases their login, tokens and personal nutrition history (the same path as `delete_account`); shared fridge, grocery, recipe and food data stays. If the owner deletes their account without handing over, an admin becomes owner, or else the member with the oldest account (trigger `household_members_promote_on_owner_leave`). An owner who is the last member leaves an empty household behind.
-6. Public registration stays closed. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path.
+6. With the default `closed` policy, public registration stays closed after the founder exists. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path.
 
 Connect an agent at `https://your-host/mcp` with the household account.

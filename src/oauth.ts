@@ -9,6 +9,12 @@ import {
     registerClient,
 } from "./db/tokens.js";
 import { signUpUser, signInUser, authUserCount } from "./db/users.js";
+import { householdExists } from "./db/household.js";
+import {
+    canSignUp,
+    getSignupPolicy,
+    signupPolicyForRoutes,
+} from "./domain/signup.js";
 import { runAsSystem } from "./db/actor.js";
 import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
@@ -146,12 +152,24 @@ export async function resolveApproveUser(args: {
     email: string;
     password: string;
     authUserCount: () => Promise<number>;
+    householdExists: () => Promise<boolean>;
     signInUser: (email: string, password: string) => Promise<string>;
     signUpUser: (email: string, password: string) => Promise<string>;
     messages: { invalidCredentials: string; signInUnavailable: string };
+    signupPolicy?: ReturnType<typeof getSignupPolicy>;
 }): Promise<string> {
     const count = await args.authUserCount();
-    if (count === 0) {
+    const policy = signupPolicyForRoutes(
+        args.signupPolicy ?? getSignupPolicy(),
+    );
+    const register = canSignUp(policy, {
+        userCount: count,
+        // Registration never depends on whether a household exists, so a
+        // sign-in once users exist skips that query (and cannot fail on it).
+        householdExists: count === 0 ? await args.householdExists() : true,
+        mode: "register",
+    });
+    if (register.ok && count === 0) {
         try {
             return await args.signInUser(args.email, args.password);
         } catch {
@@ -377,6 +395,7 @@ export function createOAuthRouter() {
                     email,
                     password,
                     authUserCount,
+                    householdExists,
                     signInUser,
                     signUpUser,
                     messages: LOGIN_ERRORS,
