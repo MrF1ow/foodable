@@ -1,0 +1,20 @@
+{
+    "code": "3083681095296",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "3083681095296",
+        "product_name": "Ratatouille Cuisinée à la Provençal",
+        "nutriscore_grade": "a",
+        "nova_group": 3,
+        "ecoscore_grade": "b",
+        "additives_tags": [],
+        "nutrient_levels": {
+            "fat": "moderate",
+            "salt": "moderate",
+            "saturated-fat": "low",
+            "sugars": "moderate"
+        },
+        "nutriments": { "sugars_100g": 5.5, "saturated-fat_100g": 0.6 }
+    }
+}

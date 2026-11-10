@@ -1,9 +1,12 @@
 import type { SQL } from "bun";
 import {
+    GOAL_DAY_FIELDS,
     goalDayFromRow,
     goalsForDate,
     goalsResolver,
     isCalendarDate,
+    type GoalDayField,
+    type GoalDayOverride,
     type GoalDayStore,
     type GoalsByDate,
 } from "../domain/insights.js";
@@ -1024,6 +1027,37 @@ export interface NutritionGoalsInput {
     target_weight_g?: number | null;
 }
 
+/** Per-day override writes omit target_weight_g (defaults-only). */
+export type NutritionGoalDayInput = Omit<
+    NutritionGoalsInput,
+    "target_weight_g"
+>;
+
+function assertCalendarDates(dates: readonly string[], context: string): void {
+    for (const date of dates) {
+        if (!isCalendarDate(date)) {
+            throw new Error(`${context}: invalid calendar date ${date}`);
+        }
+    }
+}
+
+function goalDayStoredValue(
+    field: GoalDayField,
+    value: number | null | undefined,
+): number | null {
+    if (value == null) return null;
+    if (field === "daily_calories" || field === "daily_water_ml") {
+        return toStoredInteger(value);
+    }
+    return value;
+}
+
+function goalDayOverrideAllNull(
+    row: Record<GoalDayField, number | null>,
+): boolean {
+    return GOAL_DAY_FIELDS.every((f) => row[f] == null);
+}
+
 export async function upsertNutritionGoals(
     userId: string,
     input: NutritionGoalsInput,
@@ -1108,6 +1142,154 @@ export async function getNutritionGoals(
             throw nutritionFailed("get goals", err);
         }
     });
+}
+
+export async function upsertGoalDays(
+    userId: string,
+    householdId: string,
+    dates: string[],
+    input: NutritionGoalDayInput,
+): Promise<GoalDayOverride[]> {
+    assertCalendarDates(dates, "upsert goal days");
+    // Only the fields the caller gave are written, in one statement per day,
+    // so two overlapping partial updates of the same day both survive (a
+    // read-merge-write would let the later call put back the earlier one's
+    // stale values).
+    const provided = GOAL_DAY_FIELDS.filter((f) => input[f] !== undefined);
+    const uniqueDates = [...new Set(dates)];
+    if (provided.length === 0 || uniqueDates.length === 0) return [];
+    const allNull = GOAL_DAY_FIELDS.map((f) => `${f} is null`).join(" and ");
+    return run(async (tx) => {
+        const saved: GoalDayOverride[] = [];
+        try {
+            for (const date of uniqueDates) {
+                const payload: Record<string, unknown> = {
+                    household_id: householdId,
+                    user_id: userId,
+                    date,
+                    updated_at: new Date().toISOString(),
+                };
+                for (const field of provided) {
+                    payload[field] = goalDayStoredValue(field, input[field]);
+                }
+                const keys = Object.keys(payload);
+                const setClause = [...provided, "updated_at"]
+                    .map((k) => `${k} = excluded.${k}`)
+                    .join(", ");
+                const written = await one<Record<string, unknown>>(
+                    tx,
+                    tx`
+                        insert into ${tx.unsafe(NUTRITION_GOAL_DAYS)} ${tx(payload, ...patchKeys(keys))}
+                        on conflict (household_id, user_id, date) do update
+                        set ${tx.unsafe(setClause)}
+                        returning *
+                    `,
+                    "upsert goal day",
+                );
+                const row = goalDayFromRow(written);
+                if (goalDayOverrideAllNull(row)) {
+                    // An override with every field cleared means "use the
+                    // defaults", the same as no row at all.
+                    await tx`
+                        delete from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                        where
+                            household_id = ${householdId}
+                            and user_id = ${userId}
+                            and date = ${date}::date
+                            and ${tx.unsafe(allNull)}
+                    `;
+                    continue;
+                }
+                saved.push(row);
+            }
+            return saved;
+        } catch (err) {
+            throw nutritionFailed("upsert goal days", err);
+        }
+    });
+}
+
+export async function clearGoalDays(
+    userId: string,
+    householdId: string,
+    dates: string[],
+): Promise<number> {
+    assertCalendarDates(dates, "clear goal days");
+    if (dates.length === 0) return 0;
+    return run(async (tx) => {
+        try {
+            const deleted = await rows<{ id: string }>(
+                tx,
+                tx`
+                    delete from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                    where
+                        household_id = ${householdId}
+                        and user_id = ${userId}
+                        and date::text = any(${tx.array(dates, "text")})
+                    returning id
+                `,
+            );
+            return deleted.length;
+        } catch (err) {
+            throw nutritionFailed("clear goal days", err);
+        }
+    });
+}
+
+/**
+ * How many per-day goal overrides this user has. Independent exact count, used
+ * by `getAllGoalDays` to prove the paged fetch came back whole.
+ */
+export async function countGoalDays(userId: string): Promise<number> {
+    return run(async (tx) =>
+        countForUser(tx, NUTRITION_GOAL_DAYS, userId, "count goal days"),
+    );
+}
+
+/**
+ * All of a user's per-day goal overrides, sorted by calendar date — used by
+ * export_all_data. Pages through `fetchAllPages` for consistency with the other
+ * export readers. `id` is a secondary sort key so rows sharing a date still get
+ * a stable order across page boundaries. Reconciles the fetched total against
+ * `countGoalDays` so a truncated result throws instead of silently exporting
+ * less than the user has.
+ */
+export async function getAllGoalDays(
+    userId: string,
+): Promise<GoalDayOverride[]> {
+    const expected = await countGoalDays(userId);
+    if (expected === 0) return [];
+
+    const raw = await fetchAllPages<Record<string, unknown>>(
+        async (from, to) => {
+            const limit = to - from + 1;
+            return run(async (tx) => {
+                try {
+                    return await rows<Record<string, unknown>>(
+                        tx,
+                        tx`
+                        select *
+                        from ${tx.unsafe(NUTRITION_GOAL_DAYS)}
+                        where user_id = ${userId}
+                        order by date asc, id asc
+                        offset ${from}
+                        limit ${limit}
+                    `,
+                    );
+                } catch (err) {
+                    throw nutritionFailed("get goal days", err);
+                }
+            });
+        },
+    );
+
+    const goalDays = raw.map(goalDayFromRow);
+    if (goalDays.length < expected) {
+        throw new Error(
+            `getAllGoalDays: fetched ${goalDays.length} rows but countGoalDays reported ${expected} — export would be truncated`,
+        );
+    }
+    return goalDays;
 }
 
 export const pgGoalDayStore: GoalDayStore = {

@@ -63,10 +63,10 @@ export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
     id: z.string().nullable(),
     display_name: z.string().nullable(),
     already_have: z.string().nullable(),
-    warning: z.string().nullable(),
     store_id: z.string().nullable(),
     amount: z.number().nullable(),
     unit: z.string().nullable(),
+    notices: z.array(NOTICE_SCHEMA),
 });
 
 const groceryLineSchema = z.object({
@@ -312,7 +312,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
+                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches. Allergen matches for household members are in this result's `notices`.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -350,10 +350,10 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         id: null,
                         display_name: null,
                         already_have: null,
-                        warning: null,
                         store_id: null,
                         amount: null,
                         unit: null,
+                        notices: [],
                     };
                     try {
                         const stores = await settings.listStores(householdId);
@@ -466,7 +466,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
                         ];
                         if (extras.alreadyHave) bits.push(extras.alreadyHave);
-                        if (extras.warning) bits.push(extras.warning);
+                        if (extras.allergenText) bits.push(extras.allergenText);
                         return {
                             content: [{ type: "text", text: bits.join(". ") }],
                             structuredContent: {
@@ -475,10 +475,10 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 id: line.id,
                                 display_name: line.displayName,
                                 already_have: extras.alreadyHave,
-                                warning: extras.warning,
                                 store_id: line.storeId,
                                 amount: line.quantity.amount,
                                 unit: line.quantity.unit,
+                                notices: extras.notices.map(noticeToWire),
                             },
                         };
                     } catch (err) {

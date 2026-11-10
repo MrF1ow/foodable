@@ -53,10 +53,12 @@ import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
 import * as actualDbUsers from "./db/users.js";
 import {
+    GOAL_DAY_FIELDS,
     goalsForDate,
     goalsResolver,
     type GoalDayOverride,
 } from "./domain/insights.js";
+import { SET_NUTRITION_GOALS_OUTPUT_SCHEMA } from "./mcp/tools/goals.js";
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
@@ -67,6 +69,8 @@ import {
     buildFlagContext,
     createMemoryFlags,
     defaultFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
 } from "./flags.js";
 import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
 import { createToolContext } from "./mcp/shared.js";
@@ -116,8 +120,11 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
     mergeFoods,
+    newFood,
     updateFood,
 } from "./domain/foods.js";
+import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
 import {
     FOOD_OUTPUT,
     GET_FOOD_OUTPUT,
@@ -327,6 +334,7 @@ const db = {
     wipedUsers: [] as string[],
     ownershipTransfers: [] as { from: string; to: string }[],
     profileReads: [] as string[],
+    profilesByUserId: {} as Record<string, actualProfiles.Profile>,
     membershipReads: [] as string[],
     members: [] as actualHousehold.HouseholdMembership[],
     addedLogins: [] as string[],
@@ -469,12 +477,73 @@ mock.module("./db/nutrition.js", () => ({
         db.goals = { ...goals(), user_id: userId, ...patch } as NutritionGoals;
         return db.goals;
     },
+    upsertGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+        input: Record<string, number | null | undefined>,
+    ) => {
+        const provided = GOAL_DAY_FIELDS.filter((f) => input[f] !== undefined);
+        if (provided.length === 0 || dates.length === 0) return [];
+        const saved: GoalDayOverride[] = [];
+        for (const date of [...new Set(dates)]) {
+            let row = db.goalDays.find(
+                (o) => o.user_id === userId && o.date === date,
+            );
+            if (!row) {
+                row = {
+                    user_id: userId,
+                    date,
+                    updated_at: new Date().toISOString(),
+                    daily_calories: null,
+                    daily_protein_g: null,
+                    daily_carbs_g: null,
+                    daily_fat_g: null,
+                    daily_fiber_g: null,
+                    daily_sugar_g: null,
+                    daily_alcohol_g: null,
+                    daily_caffeine_mg: null,
+                    daily_water_ml: null,
+                };
+                db.goalDays.push(row);
+            }
+            for (const field of provided) {
+                row[field] = input[field] ?? null;
+            }
+            row.updated_at = new Date().toISOString();
+            if (GOAL_DAY_FIELDS.every((f) => row![f] == null)) {
+                db.goalDays = db.goalDays.filter(
+                    (o) => !(o.user_id === userId && o.date === date),
+                );
+            } else {
+                saved.push({ ...row });
+            }
+        }
+        return saved;
+    },
+    clearGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+    ) => {
+        let removed = 0;
+        for (const date of dates) {
+            const before = db.goalDays.length;
+            db.goalDays = db.goalDays.filter(
+                (o) => !(o.user_id === userId && o.date === date),
+            );
+            if (db.goalDays.length < before) removed += 1;
+        }
+        return removed;
+    },
     getLatestWeight: async () => null,
     getWeightInRange: async () => [],
     getAllMeals: async () => db.meals,
+    searchMeals: async () => db.meals,
     getAllMealItems: async () => [],
     getAllWater: async () => db.water,
     getAllWeight: async () => [],
+    getAllGoalDays: async () => db.goalDays,
 }));
 
 mock.module("./db/exports.js", () => ({
@@ -486,6 +555,9 @@ mock.module("./db/profiles.js", () => ({
     ...actualProfiles,
     getProfile: async (userId: string) => {
         db.profileReads.push(userId);
+        if (db.profilesByUserId[userId]) {
+            return db.profilesByUserId[userId];
+        }
         return db.profile;
     },
     getUserTimezone: async () => db.profile?.timezone ?? "UTC",
@@ -754,6 +826,7 @@ beforeEach(() => {
     db.wipedUsers = [];
     db.ownershipTransfers = [];
     db.profileReads = [];
+    db.profilesByUserId = {};
     db.membershipReads = [];
     db.addedLogins = [];
     db.tokenRotations = [];
@@ -1354,6 +1427,59 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
     });
 });
 
+describe("search_meals groups food-backed variations by food set", () => {
+    test("returns one variation for differently worded meals with the same foods", async () => {
+        const eggs = "11111111-1111-4111-8111-111111111101";
+        const toast = "11111111-1111-4111-8111-111111111102";
+        const item = (food_id: string): NonNullable<Meal["items"]>[number] => ({
+            id: `i-${food_id}`,
+            meal_id: "m",
+            user_id: "u1",
+            household_id: "hh-1",
+            food_id,
+            recipe_id: null,
+            label: "Item",
+            amount: 1,
+            unit: "each",
+            grams: 50,
+            portions: null,
+            calories: 100,
+            protein_g: 10,
+            carbs_g: 1,
+            fat_g: 5,
+            fiber_g: 0,
+            sugar_g: 0,
+            alcohol_g: null,
+            caffeine_mg: null,
+            sort_order: 0,
+            created_at: "2026-06-20T14:30:00.000Z",
+        });
+        db.meals = [
+            meal({
+                id: "m1",
+                description: "Eggs and toast",
+                logged_at: "2026-06-20T08:00:00.000Z",
+                items: [item(eggs), item(toast)],
+            }),
+            meal({
+                id: "m2",
+                description: "Breakfast plate",
+                logged_at: "2026-06-21T08:00:00.000Z",
+                items: [item(toast), item(eggs)],
+            }),
+        ];
+        await withTools(null, async (call) => {
+            const text = textOf(
+                await call("search_meals", { queries: ["eggs"] }),
+            );
+            expect(text).toContain("Found 2 past meals");
+            expect(text).toContain("logged 2×");
+            expect(text).toContain("Breakfast plate");
+            expect(text).not.toMatch(/2\.\s/);
+        });
+    });
+});
+
 describe("log_meal with food items", () => {
     test("computes totals from snapshots and ignores caller-sent totals", async () => {
         const eggs = await findOrCreateManualFood(
@@ -1504,6 +1630,176 @@ describe("per-day nutrition goal overrides (read path)", () => {
                 }),
             );
             expect(text).toContain("varies by day");
+        });
+    });
+});
+
+describe("set_nutrition_goals per-day overrides", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+    const otherDay = "2026-07-05";
+
+    test("override on one day; another day keeps the default", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const set = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(set.isError).toBeFalsy();
+            SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(set.structuredContent);
+            expect(set.structuredContent?.scope).toBe("days");
+            const onDay = await call("get_goal_progress", {
+                date: "2026-07-04",
+            });
+            expect(textOf(onDay)).toContain("2800");
+            const other = await call("get_goal_progress", { date: otherDay });
+            expect(textOf(other)).toContain("2000");
+        });
+    });
+
+    test("a three-day range writes each day", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-08-01",
+                to: "2026-08-03",
+                daily_protein_g: 180,
+            });
+            expect(r.isError).toBeFalsy();
+            const sc = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(sc.days).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+            expect(
+                db.goalDays
+                    .filter((o) => o.user_id === "u1")
+                    .map((o) => o.date),
+            ).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+        });
+    });
+
+    test("clear removes an override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                clear: true,
+            });
+            expect(db.goalDays).toHaveLength(0);
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2000");
+            expect(textOf(r)).not.toContain("2800");
+        });
+    });
+
+    test("null on one field clears only that override field", async () => {
+        db.goals = goals({ daily_calories: 2000, daily_protein_g: 150 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+                daily_protein_g: 200,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_protein_g: null,
+            });
+            const row = db.goalDays.find(
+                (o) => o.date === "2026-07-04" && o.user_id === "u1",
+            );
+            expect(row?.daily_calories).toBe(2800);
+            expect(row?.daily_protein_g).toBeNull();
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2800");
+            expect(textOf(r)).toContain("150");
+        });
+    });
+
+    test("an empty date is refused instead of writing the defaults", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "",
+                daily_calories: 2100,
+            });
+            expect(r.isError).toBe(true);
+            expect(db.goals?.daily_calories).toBe(2000);
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("standing defaults do not need a household membership", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 2200,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals?.daily_calories).toBe(2200);
+        });
+    });
+
+    test("a 93-day range is refused without writing", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-01-01",
+                to: "2026-04-03",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("92");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("date and from together is refused", async () => {
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                from: "2026-07-01",
+                to: "2026-07-02",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("not both");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("target_member writes the other member's override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                target_member: bob,
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(
+                db.goalDays.some(
+                    (o) => o.user_id === bob && o.daily_calories === 2800,
+                ),
+            ).toBe(true);
         });
     });
 });
@@ -2965,6 +3261,7 @@ describe("export_all_data is on the tool surface", () => {
             "water.csv",
             "weight.csv",
             "goals.csv",
+            "goal_days.csv",
             "profile.csv",
             "README.txt",
         ]) {
@@ -3512,11 +3809,22 @@ describe("household config tools", () => {
             { name: "foodable-test", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
         );
+        const flags = evaluateViewerFlags(
+            buildFlagContext({
+                auth: { kind: "household", householdId: "hh-1" },
+                householdId: "hh-1",
+            }),
+            createMemoryFlags(allFlagsOn()),
+        );
         registerTools(
             server,
             { kind: "household", householdId: "hh-1" },
             true,
             null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
         );
         const [clientTransport, serverTransport] =
             InMemoryTransport.createLinkedPair();
@@ -3867,7 +4175,7 @@ describe("household config tools", () => {
 
         // The snapshot is the all-flags-on list. With a flag off, tools/list
         // is the snapshot minus exactly the gated tools left unregistered, in
-        // the same order. No real tool is gated yet, so today both are equal.
+        // the same order.
         async function listAgainstSnapshot(flags: ViewerFlags) {
             const { names, gated } = await toolNamesFor(flags);
             const hidden = new Set(
@@ -4135,6 +4443,575 @@ describe("household config tools", () => {
                 required: false,
             });
         }
+    });
+
+    async function withRateProductFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-rate-product": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [clientTransport, serverTransport] =
+            InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test-client", version: "0.0.0" });
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+        try {
+            await run(
+                (name, args = {}) =>
+                    client.callTool({
+                        name,
+                        arguments: callToolArguments(name, args),
+                    }) as Promise<ToolResult>,
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    async function seedMilkProduct(): Promise<string> {
+        const food = newFood({
+            householdId: "hh-1",
+            kind: "food",
+            name: "Milk Yogurt",
+            brand: "Test",
+            calories: 60,
+            sugarG: 8,
+            saturatedFatG: 2,
+            offQuality: {
+                nutriscoreGrade: "b",
+                novaGroup: 3,
+                ecoscoreGrade: "c",
+                additives: null,
+                allergensTags: ["en:milk"],
+                tracesTags: null,
+                ingredientsAnalysisTags: null,
+                labelsTags: null,
+                fetchedAt: "2026-11-09T12:00:00.000Z",
+            },
+        });
+        await db.foodsStore.insertFood(food);
+        return food.id;
+    }
+
+    describe("rate_product", () => {
+        test("a gluten-only product warns the same in the catalog and by barcode", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "wheat",
+            });
+            const { findOrCreateFoodByBarcodeFromHit } =
+                await import("./domain/foods.js");
+            const hitFor = (barcode: string) => ({
+                name: "Wheat Crackers",
+                brand: "Test",
+                serving: "100 g",
+                serving_quantity: null,
+                serving_quantity_unit: null,
+                calories: 450,
+                protein_g: 10,
+                carbs_g: 70,
+                fat_g: 12,
+                fiber_g: 3,
+                sugar_g: 2,
+                saturated_fat_g: 1,
+                alcohol_g: null,
+                nutriscore_grade: "c",
+                nova_group: 3,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                allergens_tags: ["en:gluten"],
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "c",
+                    nova_group: 3,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: ["en:gluten"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            const inCatalog = "4000000000017";
+            const notInCatalog = "4000000000024";
+            await findOrCreateFoodByBarcodeFromHit(
+                db.foodsStore,
+                "hh-1",
+                inCatalog,
+                hitFor(inCatalog) as never,
+            );
+            db.barcodeFoods[notInCatalog] = hitFor(notInCatalog) as never;
+            await withRateProductFlag(true, async (call) => {
+                for (const barcode of [inCatalog, notInCatalog]) {
+                    const r = await call("rate_product", { barcode });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(
+                        out.checks[0]!.notices.map((n) => [n.code, n.severity]),
+                    ).toEqual([["food.product_gluten", "warn"]]);
+                }
+            });
+        });
+
+        test("flag off hides tool and rejects calls", async () => {
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const flagCtx = buildFlagContext({
+                auth: { kind: "user", userId: "u1" },
+            });
+            const flags = evaluateViewerFlags(
+                flagCtx,
+                createMemoryFlags({ "mcp-rate-product": false }),
+            );
+            registerTools(
+                server,
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                flags,
+            );
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([server.connect(st), client.connect(ct)]);
+            try {
+                const list = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(list).not.toContain("rate_product");
+                await expect(
+                    client.callTool({
+                        name: "rate_product",
+                        arguments: { barcode: "12345678" },
+                    }),
+                ).rejects.toThrow(/not found/i);
+            } finally {
+                await client.close();
+                await server.close();
+            }
+        });
+
+        test("food_id returns schema output with milk allergen block", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: foodId });
+                expect(r.isError).toBeFalsy();
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.checks).toHaveLength(1);
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("catalogued per-serving product uses off cache for goal notices", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
+            const barcode = "5449000000996";
+            const colaHit = {
+                name: "Cola",
+                brand: null,
+                serving: "330 ml",
+                serving_quantity: 330,
+                serving_quantity_unit: "ml",
+                calories: 139,
+                protein_g: 0,
+                carbs_g: 35,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 35,
+                saturated_fat_g: 0,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: [],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            db.barcodeFoods[barcode] = colaHit as never;
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Cola",
+                calories: null,
+                proteinG: null,
+                carbsG: null,
+                fatG: null,
+                fiberG: null,
+                sugarG: null,
+                alcoholG: null,
+                offQuality: colaHit.quality as never,
+            });
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            await withRateProductFlag(true, async (call) => {
+                for (const args of [
+                    { barcode },
+                    { food_id: food.id },
+                ] as const) {
+                    const r = await call("rate_product", args);
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    const messages = out.checks[0]!.notices.map(
+                        (n) => n.message,
+                    );
+                    expect(messages).toContain("35 g sugar, 40 g left today");
+                }
+            });
+        });
+
+        test("a per-serving barcode in ml still gives goal notices", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
+            const barcode = "5449000000996";
+            db.barcodeFoods[barcode] = {
+                name: "Cola",
+                brand: null,
+                serving: "330 ml",
+                serving_quantity: 330,
+                serving_quantity_unit: "ml",
+                calories: 139,
+                protein_g: 0,
+                carbs_g: 35,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 35,
+                saturated_fat_g: 0,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: [],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            } as never;
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const messages = out.checks[0]!.notices.map((n) => n.message);
+                expect(messages).toContain("35 g sugar, 40 g left today");
+            });
+        });
+
+        test("barcode resolves off cache without creating a food", async () => {
+            const barcode = "4006381333931";
+            db.barcodeFoods[barcode] = {
+                name: "Nutella",
+                brand: "Ferrero",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: { sugars: "high" },
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: "d",
+                    additives_tags: ["en:e322"],
+                    allergens_tags: ["en:nuts", "en:milk"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            db.goals = goals({ daily_sugar_g: 40 });
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.food_id).toBeNull();
+                expect(out.product.barcode).toBe(barcode);
+                expect(out.info_rows[0]!.per_100g).toBeNull();
+                expect(out.info_rows[0]!.level).toBe("high");
+                const sugarGoal = out.checks[0]!.notices.find(
+                    (n) =>
+                        n.code === "food.product_goal" &&
+                        n.message.includes("sugar"),
+                );
+                expect(sugarGoal).toBeDefined();
+                expect(sugarGoal!.message).toContain("8.4 g sugar");
+            });
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+
+        test("catalog milk allergen blocks when offQuality is missing", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Creamer",
+                allergens: ["milk"],
+                offQuality: null,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("gramsPerEach drives goal notice from per-100g macros", async () => {
+            db.goals = goals({ daily_sugar_g: 30 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Sweet Bar",
+                sugarG: 50,
+                gramsPerEach: 40,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const goal = out.checks[0]!.notices.find(
+                    (n) => n.code === "food.product_goal",
+                );
+                expect(goal?.message).toContain("20 g sugar");
+                expect(goal?.message).toContain("30 g left today");
+            });
+        });
+
+        test("no alcohol goal notice while alcohol display is off", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_alcohol_g: 20 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Lager",
+                alcoholG: 4,
+                gramsPerEach: 330,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const messages = out.checks[0]!.notices.map((n) => n.message);
+                expect(messages.some((m) => m.includes("alcohol"))).toBe(false);
+            });
+        });
+
+        test("missing food_id returns found false", async () => {
+            const missing = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: missing });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
+
+        test("archived household barcode falls through to off cache", async () => {
+            const barcode = "3017620422003";
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Archived Jar",
+            });
+            food.archivedAt = "2026-11-09T12:00:00.000Z";
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            db.barcodeFoods[barcode] = {
+                name: "Off Jar",
+                brand: "Test",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+            };
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.name).toBe("Off Jar");
+                expect(out.product.food_id).toBeNull();
+            });
+        });
+
+        test("user_id narrows checks to one member", async () => {
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "Alex",
+                },
+                {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    role: "member",
+                    displayName: "Bob",
+                },
+            ];
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: "u2",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.checks).toHaveLength(1);
+                expect(out.checks[0]!.user_id).toBe("u2");
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(false);
+            });
+        });
+
+        test("rejects user_id from another household", async () => {
+            const other = "22222222-2222-4222-8222-222222222222";
+            db.members.push({
+                householdId: "hh-2",
+                userId: other,
+                role: "owner",
+                displayName: "Elsewhere",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: other,
+                });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toContain("not a household member");
+            });
+        });
+
+        test("unknown barcode returns found false", async () => {
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    barcode: "9999888877776",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
     });
 });
 
@@ -4660,10 +5537,17 @@ describe("phone-app domain MCP tools", () => {
             });
             const got = await call("get_recipe", { id: recipeId });
             expect(got.isError).toBeFalsy();
-            const macros = MACROS_ITEM_OUTPUT_SCHEMA.parse(
+            MACROS_ITEM_OUTPUT_SCHEMA.parse(
                 got.structuredContent?.macros_per_portion,
             );
-            expect(macros.gaps[0]?.reason).toBe("no_nutrition");
+            const sc = got.structuredContent as {
+                notices: Array<{ code: string }>;
+                macros_per_portion: { incomplete: boolean };
+            };
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(
+                sc.notices.some((n) => n.code === "recipe.no_nutrition"),
+            ).toBe(true);
             expect(textOf(got)).toContain(
                 "Half and half: no nutrition — add it, or pick a usual product",
             );
@@ -6199,12 +7083,16 @@ describe("phone-app domain MCP tools", () => {
                 amount: 100,
             });
             expect(line.isError).toBeFalsy();
-            expect(line.structuredContent?.warning).toContain("peanut");
             expect(textOf(line).toLowerCase()).toContain("peanut");
+            const sc = ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(
+                line.structuredContent,
+            );
+            expect(sc.notices.map((n) => n.code)).toEqual(["grocery.allergen"]);
+            expect(sc.notices[0]!.severity).toBe("block");
         });
     });
 
-    test("get_recipe wires recipe.no_nutrition notices beside gaps", async () => {
+    test("get_recipe wires recipe.no_nutrition notices", async () => {
         await withUser(alice, async (call) => {
             const plain = await call("upsert_food", { name: "Half and half" });
             const plainId = plain.structuredContent?.id as string;
@@ -6236,7 +7124,7 @@ describe("phone-app domain MCP tools", () => {
                     message: string;
                     action: { label: string } | null;
                 }>;
-                macros_per_portion: { gaps: Array<{ message: string }> };
+                macros_per_portion: { incomplete: boolean };
             };
             for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
             const nn = sc.notices.find((n) => n.code === "recipe.no_nutrition");
@@ -6244,7 +7132,8 @@ describe("phone-app domain MCP tools", () => {
             expect(nn?.subject.kind).toBe("recipe_ingredient");
             expect(nn?.subject.recipe_id).toBe(recipeId);
             expect(nn?.action).toEqual({ label: "Pick usual product" });
-            expect(nn?.message).toBe(sc.macros_per_portion.gaps[0]?.message);
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(nn?.message).toContain("no nutrition");
         });
     });
 
@@ -6374,9 +7263,8 @@ describe("phone-app domain MCP tools", () => {
                 name: "Peanut Butter",
                 amount: 1,
             });
-            expect(added.structuredContent?.warning).toBe(
-                "Contains peanut — Bob.",
-            );
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(added.structuredContent);
+            expect(textOf(added)).toContain("Contains peanut — Bob.");
             await call("add_grocery_line", {
                 store_id: store.id,
                 kind: "food",
@@ -6416,9 +7304,7 @@ describe("phone-app domain MCP tools", () => {
                     (r) => r.kind === "member" && r.name === "Bob",
                 ),
             ).toBe(true);
-            expect(pean!.notices[0]?.message).toBe(
-                added.structuredContent?.warning as string,
-            );
+            expect(pean!.notices[0]?.message).toBe("Contains peanut — Bob.");
             expect(textOf(listed)).toContain(" — Contains peanut — Bob.");
             const oats = lines.find((l) =>
                 l.display_name.toLowerCase().includes("oats"),
@@ -6963,6 +7849,339 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
 
+describe("set_nutrition_goals over HTTP", () => {
+    test.each(ERAS)(
+        "per-day override and get_goal_progress agree (%p)",
+        async (era) => {
+            db.goals = goals({ daily_calories: 2000 });
+            await withHttpClient("u1", era, async (client) => {
+                const set = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: {
+                        date: "2026-07-04",
+                        daily_calories: 2800,
+                    },
+                })) as ToolResult;
+                expect(set.isError).toBeFalsy();
+                const out = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                    set.structuredContent,
+                );
+                expect(out.scope).toBe("days");
+                expect(out.days).toEqual(["2026-07-04"]);
+                const prog = (await client.callTool({
+                    name: "get_goal_progress",
+                    arguments: { date: "2026-07-04" },
+                })) as ToolResult;
+                expect(textOf(prog)).toContain("2800");
+            });
+        },
+    );
+});
+
+describe("rate_product over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Rated Bar",
+                offQuality: {
+                    nutriscoreGrade: "c",
+                    novaGroup: 3,
+                    ecoscoreGrade: "b",
+                    additives: null,
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("rate_product");
+                    const r = (await client.callTool({
+                        name: "rate_product",
+                        arguments: { food_id: food.id },
+                    })) as ToolResult;
+                    RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits rate_product from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": false }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("rate_product");
+                    await expect(
+                        client.callTool({
+                            name: "rate_product",
+                            arguments: { barcode: "12345678" },
+                        }),
+                    ).rejects.toThrow(/not found/i);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
+describe("get_household_digest", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+
+    async function withHouseholdDigestFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const call: CallTool = async (name, args) =>
+                (await client.callTool({
+                    name,
+                    arguments: args ?? {},
+                })) as ToolResult;
+            await run(call);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    test("flag off hides tool and rejects calls", async () => {
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": false }),
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const list = (await client.listTools()).tools.map((t) => t.name);
+            expect(list).not.toContain("get_household_digest");
+            const resources = await client.listResources();
+            expect(
+                resources.resources.some(
+                    (r) => r.uri === "household://weekly-digest",
+                ),
+            ).toBe(false);
+            await expect(
+                client.callTool({
+                    name: "get_household_digest",
+                    arguments: {},
+                }),
+            ).rejects.toThrow(/not found/i);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    });
+
+    test("flag on returns schema output and respects week_of", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "2026-08-07",
+            });
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(out.window).toEqual({
+                from: "2026-08-01",
+                to: "2026-08-07",
+            });
+            expect(out.text.length).toBeGreaterThan(0);
+        });
+    });
+
+    test("invalid week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "not-a-date",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("week_of");
+        });
+    });
+
+    test("impossible calendar week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            for (const bad of ["2026-02-31", "2026-13-01"]) {
+                const r = await call("get_household_digest", { week_of: bad });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toMatch(/week_of|calendar/i);
+            }
+        });
+    });
+
+    test("every household member a caller can read appears", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {});
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            const ids = out.members.map((m) => m.member_id);
+            expect(ids).toContain("u1");
+            expect(ids).toContain(bob);
+        });
+    });
+});
+
+describe("get_household_digest over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("get_household_digest");
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits get_household_digest from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": false }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("get_household_digest");
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (r) => r.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(false);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
 describe("household PAT over HTTP has no default userId", () => {
     async function withHouseholdHttp<T>(
         mode: EraMode,
@@ -7038,6 +8257,49 @@ describe("household PAT over HTTP has no default userId", () => {
             expect(db.inserted).toHaveLength(0);
         });
     });
+
+    test.each(ERAS)(
+        "get_household_digest succeeds for household PAT (%p)",
+        async (mode) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHouseholdHttp(mode, async (client) => {
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    expect(r.isError).toBeFalsy();
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (res) => res.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(true);
+                    const payload = await client.readResource({
+                        uri: "household://weekly-digest",
+                    });
+                    const body = payload.contents[0];
+                    expect(
+                        body && "text" in body && body.text.length,
+                    ).toBeGreaterThan(0);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
 });
 
 describe("/mcp serves the 2026-07-28 revision", () => {

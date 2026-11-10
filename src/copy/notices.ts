@@ -120,12 +120,64 @@ function fridgeExpiringSentence(notice: Notice): string {
     return fridgeExpirySentence(notice);
 }
 
-/** Today's `groceryAllergenWarning` text: the first allergen, then every affected member. */
+function formatAllergenList(allergens: string[]): string {
+    if (allergens.length === 0) return "allergen";
+    if (allergens.length === 1) return allergens[0]!;
+    if (allergens.length === 2) {
+        return `${allergens[0]} and ${allergens[1]}`;
+    }
+    return `${allergens.slice(0, -1).join(", ")} and ${allergens[allergens.length - 1]}`;
+}
+
+/** Grocery allergen block notice: every matched allergen, then every affected member. */
 function allergenSentence(notice: Notice): string {
     const allergens = (notice.params.allergens ?? []) as string[];
-    const label = allergens[0] ?? "allergen";
+    const label = formatAllergenList(allergens);
     const names = notice.related.map((r) => r.name);
     return `Contains ${label} — ${names.join(", ")}.`;
+}
+
+function productAllergenSentence(notice: Notice): string {
+    return allergenSentence(notice);
+}
+
+function productTraceSentence(notice: Notice): string {
+    const allergens = (notice.params.allergens ?? []) as string[];
+    const label = formatAllergenList(allergens);
+    const names = notice.related.map((r) => r.name);
+    return `May contain ${label} — ${names.join(", ")}.`;
+}
+
+function productGlutenSentence(_notice: Notice): string {
+    return "Possible wheat (contains gluten)";
+}
+
+function productGoalSentence(notice: Notice): string {
+    const serving = String(notice.params.servingAmount);
+    const remaining = String(notice.params.remainingAmount);
+    const remainingNum = Number(notice.params.remainingAmount);
+    const noneLeft =
+        notice.params.remainingAmount !== "" &&
+        !Number.isNaN(remainingNum) &&
+        Math.round(remainingNum * 10) / 10 <= 0;
+    const word = String(notice.params.word);
+    const unit = String(notice.params.unit);
+    if (unit === "cal") {
+        if (noneLeft) return `${serving} ${word}, none left today`;
+        return `${serving} ${word}, ${remaining} ${word} left today`;
+    }
+    if (unit === "mg") {
+        if (noneLeft) return `${serving} mg ${word}, none left today`;
+        return `${serving} mg ${word}, ${remaining} mg left today`;
+    }
+    if (noneLeft) return `${serving} g ${word}, none left today`;
+    return `${serving} g ${word}, ${remaining} g left today`;
+}
+
+function productDislikeSentence(notice: Notice): string {
+    const dislike = String(notice.params.dislike);
+    const names = notice.related.map((r) => r.name);
+    return `${names.join(", ")} dislikes ${dislike}`;
 }
 
 const NUTRIENT_WORD: Record<RecipeGapNutrient, string> = {
@@ -254,6 +306,36 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
         dismissible: true,
         dismissLabel: "Keep separate",
         dismissPair: true,
+    },
+    "food.product_allergen": {
+        badge: "Allergen",
+        sentence: productAllergenSentence,
+        help: "allergens",
+        dismissible: false,
+    },
+    "food.product_trace": {
+        badge: "May contain",
+        sentence: productTraceSentence,
+        help: "allergens",
+        dismissible: false,
+    },
+    "food.product_gluten": {
+        badge: "Gluten",
+        sentence: productGlutenSentence,
+        help: "allergens",
+        dismissible: false,
+    },
+    "food.product_goal": {
+        badge: "Goals",
+        sentence: productGoalSentence,
+        help: "needs-attention",
+        dismissible: true,
+    },
+    "food.product_dislike": {
+        badge: "Dislike",
+        sentence: productDislikeSentence,
+        help: "needs-attention",
+        dismissible: true,
     },
 };
 

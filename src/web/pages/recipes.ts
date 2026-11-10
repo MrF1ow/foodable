@@ -596,9 +596,10 @@ function macrosBlock(
 ): string {
     const label = scope === "portion" ? "Per portion" : "This portion";
     const reasons =
-        macros.incompleteReasons.length > 0
+        view.notices.length > 0
             ? noticeList(view.notices, {
                   className: "recipe-macros-reasons",
+                  ctx: view.noticeContext,
               })
             : "";
     if (macros.incomplete && macros.calories == null) {

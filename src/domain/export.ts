@@ -5,6 +5,7 @@ import {
 import { signExportToken } from "./export-link.js";
 import { resolveSessionSigningSecret } from "../site-session.js";
 import {
+    getAllGoalDays,
     getAllMealItems,
     getAllMeals,
     getAllWater,
@@ -16,6 +17,7 @@ import {
     type WaterEntry,
     type WeightEntry,
 } from "../db/nutrition.js";
+import { GOAL_DAY_FIELDS, type GoalDayOverride } from "./insights.js";
 import {
     getProfile,
     timezoneFromProfile,
@@ -321,6 +323,28 @@ export function buildGoalsCsv(
     return rows.join("\n");
 }
 
+const GOAL_DAYS_CSV_COLUMNS = ["date", ...GOAL_DAY_FIELDS, "timezone"] as const;
+
+/**
+ * Build goal_days.csv — one row per calendar day with a stored override.
+ * Header-only when there are none. Dates are calendar days (YYYY-MM-DD); each
+ * row carries `timezone` beside them the same way timestamped files do.
+ */
+export function buildGoalDaysCsv(rows: GoalDayOverride[], tz: string): string {
+    const out = [GOAL_DAYS_CSV_COLUMNS.join(",")];
+    const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+    for (const row of sorted) {
+        out.push(
+            [
+                csvEscape(row.date),
+                ...GOAL_DAY_FIELDS.map((field) => csvEscape(row[field])),
+                csvEscape(tz),
+            ].join(","),
+        );
+    }
+    return out.join("\n");
+}
+
 /**
  * Column order for profile.csv. Parallel array with the row builder below.
  */
@@ -374,6 +398,7 @@ export const EXPORT_ARCHIVE_FILES = [
     "water.csv",
     "weight.csv",
     "goals.csv",
+    "goal_days.csv",
     "profile.csv",
     "README.txt",
 ] as const;
@@ -396,6 +421,7 @@ export function buildExportReadme(opts: {
         water: number;
         weight: number;
         meal_items: number;
+        goal_days: number;
     };
 }): string {
     const { generatedAt, tz, tzConfigured, weightUnit, counts } = opts;
@@ -419,13 +445,14 @@ export function buildExportReadme(opts: {
         "",
         "Files",
         "-----",
-        `meals.csv    ${rows(counts.meals)} — every meal you have logged: time, description, calories and macros.`,
+        `meals.csv     ${rows(counts.meals)} — every meal you have logged: time, description, calories and macros.`,
         `meal_items.csv ${rows(counts.meal_items)} — foods and recipe portions that make up a meal, keyed by meal_id. Empty (header only) when meals were logged as free text. Not re-imported.`,
-        `water.csv    ${rows(counts.water)} — every water entry, in millilitres.`,
-        `weight.csv   ${rows(counts.weight)} — every weigh-in, as stored grams and as ${weightUnit}.`,
-        "goals.csv    your current daily targets — one row, or a header alone if you have never set goals.",
-        "profile.csv  your settings: timezone, preferred units, and display toggles — one row, or a header alone if you have no profile yet.",
-        "README.txt   this file.",
+        `water.csv     ${rows(counts.water)} — every water entry, in millilitres.`,
+        `weight.csv    ${rows(counts.weight)} — every weigh-in, as stored grams and as ${weightUnit}.`,
+        "goals.csv     your current daily targets — one row, or a header alone if you have never set goals.",
+        `goal_days.csv ${rows(counts.goal_days)} — per-day goal overrides, one row per calendar day; header only when you have none.`,
+        "profile.csv   your settings: timezone, preferred units, and display toggles — one row, or a header alone if you have no profile yet.",
+        "README.txt    this file.",
         "",
         "Units",
         "-----",
@@ -440,7 +467,7 @@ export function buildExportReadme(opts: {
         "Re-importing",
         "------------",
         "Only meals.csv can be read back in. Hand it to start_meal_import (which parses it in your browser) or to bulk_import_meals; its column names are exactly the ones the importer expects, and re-importing the same file twice is a no-op rather than a set of duplicates.",
-        "water.csv, weight.csv, goals.csv, profile.csv and meal_items.csv are export-only for now — there is no import path for them, so keep this archive if you want that history back.",
+        "water.csv, weight.csv, goals.csv, goal_days.csv, profile.csv and meal_items.csv are export-only for now — there is no import path for them, so keep this archive if you want that history back.",
         "",
     ].join("\n");
 }
@@ -451,6 +478,7 @@ export interface FullExportResult {
         water: number;
         weight: number;
         meal_items: number;
+        goal_days: number;
     };
     goals: boolean;
     profile: boolean;
@@ -476,22 +504,23 @@ export async function exportAllData(
     // an account with years of history pages through meals, water and weight,
     // and serialising those pushes the tool past the point where a host gives
     // up on it.
-    const [meals, mealItems, water, weight, goals, profile] = await Promise.all(
-        [
+    const [meals, mealItems, water, weight, goals, goalDays, profile] =
+        await Promise.all([
             getAllMeals(userId),
             getAllMealItems(userId),
             getAllWater(userId),
             getAllWeight(userId),
             getNutritionGoals(userId),
+            getAllGoalDays(userId),
             getProfile(userId),
-        ],
-    );
+        ]);
 
     const counts = {
         meals: meals.length,
         water: water.length,
         weight: weight.length,
         meal_items: mealItems.length,
+        goal_days: goalDays.length,
     };
 
     // Both preferences come off the profile row already in hand. The
@@ -515,6 +544,7 @@ export async function exportAllData(
         counts.meals === 0 &&
         counts.water === 0 &&
         counts.weight === 0 &&
+        counts.goal_days === 0 &&
         !goals &&
         !profile
     ) {
@@ -538,6 +568,7 @@ export async function exportAllData(
         "water.csv": buildWaterCsv(water, tz),
         "weight.csv": buildWeightCsv(weight, tz, weightUnit),
         "goals.csv": buildGoalsCsv(goals, tz),
+        "goal_days.csv": buildGoalDaysCsv(goalDays, tz),
         "profile.csv": buildProfileCsv(profile, tz),
         "README.txt": buildExportReadme({
             generatedAt,

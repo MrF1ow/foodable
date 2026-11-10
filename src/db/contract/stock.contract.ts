@@ -50,6 +50,38 @@ export function runStockStoreContract(
             expect(listed[0]!.actorUserId).toBeNull();
         });
 
+        test("listMovements since keeps movements at or after it", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const before = sampleMovement(c, {
+                id: crypto.randomUUID(),
+                createdAt: "2026-01-01T10:00:00+00:00",
+            });
+            const at = sampleMovement(c, {
+                id: crypto.randomUUID(),
+                createdAt: "2026-01-02T00:00:00+00:00",
+            });
+            const after = sampleMovement(c, {
+                id: crypto.randomUUID(),
+                createdAt: "2026-01-03T10:00:00+00:00",
+            });
+            for (const m of [before, at, after]) await store.insertMovement(m);
+            const since = "2026-01-02T00:00:00.000Z";
+            const all = await store.listMovements(
+                c.householdId,
+                undefined,
+                since,
+            );
+            expect(all.map((m) => m.id)).toEqual([after.id, at.id]);
+            const byFood = await store.listMovements(
+                c.householdId,
+                c.foodId,
+                since,
+            );
+            expect(byFood.map((m) => m.id)).toEqual([after.id, at.id]);
+        });
+
         test("household scoping on listMovements", async () => {
             await reset();
             const c = ctx();

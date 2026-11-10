@@ -1,4 +1,5 @@
 import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
+import { recipeMacrosFixture } from "../../test-support/recipe-macros.js";
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -158,18 +159,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
         viewerId: FIXTURE_MEMBERS[0]!.userId,
         filterUserId: FIXTURE_MEMBERS[0]!.userId,
         portionCount: 1,
-        macros: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [],
-            gaps: [],
-        },
+        macros: recipeMacrosFixture({ incomplete: true }),
         isOwner: true,
     });
     expect(recipes).toContain('class="quantity-field"');

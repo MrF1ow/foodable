@@ -1,0 +1,20 @@
+{
+    "code": "4088600072517",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "4088600072517",
+        "product_name": "Baked Beans",
+        "nutriscore_grade": "a",
+        "nova_group": 4,
+        "ecoscore_grade": "a",
+        "additives_tags": ["en:e160c"],
+        "nutrient_levels": {
+            "fat": "low",
+            "salt": "moderate",
+            "saturated-fat": "low",
+            "sugars": "low"
+        },
+        "nutriments": { "sugars_100g": 4.8, "saturated-fat_100g": 0.1 }
+    }
+}

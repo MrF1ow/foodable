@@ -1,0 +1,12 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OFF fixture scores (balanced preset) fixture score table 1`] = `
+"cola: score=9 label=poor parts=3/4
+yoghurt: score=86 label=good parts=4/4
+crisps: score=34 label=poor parts=3/4
+cereal: score=98 label=good parts=4/4
+bread: score=59 label=middling parts=4/4
+chocolate-spread: score=28 label=poor parts=4/4
+beans: score=72 label=good parts=4/4
+ready-meal: score=79 label=good parts=4/4"
+`;

@@ -223,16 +223,6 @@ function wireImport(row: RecipeImport | null) {
 const INSTRUCTIONS_DESCRIPTION =
     'Method steps, one per line. Leave a blank line between steps to write one step over several lines. Numbering ("1.", "Step 2:") is optional and stripped on display.';
 
-const RECIPE_GAP_REASON = z.enum([
-    "no_food",
-    "no_nutrition",
-    "partial_nutrition",
-    "no_amount",
-    "unknown_unit",
-    "missing_grams_per_each",
-    "missing_grams_per_ml",
-]);
-
 function recipeIngredientAmountText(ingredient: {
     quantity: { amount: number; unit: string } | null;
     note: string | null;
@@ -253,22 +243,6 @@ const MACROS_ITEM = z.object({
     sugar_g: z.number().nullable(),
     alcohol_g: z.number().nullable(),
     incomplete: z.boolean(),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it.
-    incompleteReasons: z.array(z.string()),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it.
-    gaps: z.array(
-        z.object({
-            ingredient_id: z.string(),
-            display_name: z.string(),
-            food_id: z.string().nullable(),
-            reason: RECIPE_GAP_REASON,
-            missing_nutrients: z.array(z.string()),
-            usual_product: z
-                .object({ id: z.string(), name: z.string() })
-                .nullable(),
-            message: z.string(),
-        }),
-    ),
 });
 
 export const MACROS_ITEM_OUTPUT_SCHEMA = MACROS_ITEM;
@@ -283,16 +257,6 @@ function wireMacros(macros: ReturnType<typeof macrosForPerson>) {
         sugar_g: macros.sugar_g,
         alcohol_g: macros.alcohol_g,
         incomplete: macros.incomplete,
-        incompleteReasons: macros.incompleteReasons,
-        gaps: macros.gaps.map((gap) => ({
-            ingredient_id: gap.ingredientId,
-            display_name: gap.displayName,
-            food_id: gap.foodId,
-            reason: gap.reason,
-            missing_nutrients: gap.missingNutrients,
-            usual_product: gap.usualProduct,
-            message: gap.message,
-        })),
     };
 }
 
@@ -483,7 +447,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Recipe",
             description:
-                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place. When macros are incomplete, `macros_per_portion.gaps` lists one entry per missing piece (nutrition, unit conversion, and so on).",
+                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place; when macros are incomplete, `macros_per_portion.incomplete` is true.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -1505,6 +1469,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 transaction: (fn) => run(async () => fn()),
                             },
                         );
+                        const importGapRows = result.gaps;
                         const payload = {
                             status: "ok" as const,
                             similar_foods: [],
@@ -1518,7 +1483,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     unit: ingredient.quantity?.unit ?? null,
                                     note: ingredient.note,
                                     missing:
-                                        result.gaps.find(
+                                        importGapRows.find(
                                             (gap) =>
                                                 gap.ingredientId ===
                                                 ingredient.id,

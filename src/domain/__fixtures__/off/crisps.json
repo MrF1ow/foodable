@@ -1,0 +1,20 @@
+{
+    "code": "5053990156009",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "5053990156009",
+        "product_name": "Pringles Original",
+        "nutriscore_grade": "d",
+        "nova_group": 4,
+        "ecoscore_grade": "unknown",
+        "additives_tags": ["en:e160b", "en:e160bii", "en:e471"],
+        "nutrient_levels": {
+            "fat": "high",
+            "salt": "moderate",
+            "saturated-fat": "moderate",
+            "sugars": "low"
+        },
+        "nutriments": { "sugars_100g": 0.9, "saturated-fat_100g": 3 }
+    }
+}

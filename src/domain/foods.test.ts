@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import type { FoodResult } from "../foods.js";
 import {
     catalogNutritionFromOff,
+    offNutrientLevelsFromHit,
     createMemoryFoodsStore,
     findFoodByNameAndBrand,
     findOrCreateFoodByBarcode,
@@ -184,6 +185,19 @@ test("mapOffAllergenTags maps en: tags onto NAMED_ALLERGENS", () => {
     ).toEqual(["milk", "peanut", "sesame"]);
 });
 
+test("catalogNutritionFromOff treats negative saturated fat as unknown", () => {
+    expect(
+        catalogNutritionFromOff(
+            off({
+                name: "Bad data",
+                barcode: "44444444",
+                serving: "100 g",
+                saturated_fat_g: -0.5,
+            }),
+        ).saturatedFatG,
+    ).toBeNull();
+});
+
 test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", () => {
     expect(
         catalogNutritionFromOff(
@@ -192,9 +206,10 @@ test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", 
                 barcode: "070852010016",
                 serving: "100 g",
                 calories: 98,
+                saturated_fat_g: 2.5,
             }),
-        ).calories,
-    ).toBe(98);
+        ),
+    ).toMatchObject({ calories: 98, saturatedFatG: 2.5 });
     expect(
         catalogNutritionFromOff(
             off({
@@ -202,8 +217,30 @@ test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", 
                 barcode: "11111111",
                 serving: "150 g",
                 calories: 140,
+                saturated_fat_g: 1.2,
             }),
-        ).calories,
+        ),
+    ).toMatchObject({ calories: null, saturatedFatG: null });
+});
+
+test("offNutrientLevelsFromHit keeps low moderate high only", () => {
+    expect(
+        offNutrientLevelsFromHit(
+            off({
+                name: "Snack",
+                barcode: "22222222",
+                nutrient_levels: {
+                    sugars: "low",
+                    "saturated-fat": "HIGH",
+                    salt: "unknown",
+                },
+            }),
+        ),
+    ).toEqual({ sugars: "low", "saturated-fat": "high" });
+    expect(
+        offNutrientLevelsFromHit(
+            off({ name: "Plain", barcode: "33333333", nutrient_levels: {} }),
+        ),
     ).toBeNull();
 });
 

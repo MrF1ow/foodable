@@ -1,0 +1,20 @@
+{
+    "code": "5449000000996",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "5449000000996",
+        "product_name": "Coca-Cola Original",
+        "nutriscore_grade": "e",
+        "nova_group": 4,
+        "ecoscore_grade": "not-applicable",
+        "additives_tags": ["en:e150d", "en:e338"],
+        "nutrient_levels": {
+            "fat": "low",
+            "salt": "low",
+            "saturated-fat": "low",
+            "sugars": "high"
+        },
+        "nutriments": { "sugars_100g": 10.6, "saturated-fat_100g": 0 }
+    }
+}

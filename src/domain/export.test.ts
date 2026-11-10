@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import {
     buildExportReadme,
+    buildGoalDaysCsv,
     buildGoalsCsv,
     buildMealItemsCsv,
     buildMealsCsv,
@@ -9,6 +10,7 @@ import {
     buildWeightCsv,
     EXPORT_ARCHIVE_FILES,
 } from "./export.js";
+import { type GoalDayOverride } from "./insights.js";
 import type {
     Meal,
     MealItem,
@@ -417,6 +419,27 @@ const WEIGHT_HEADER =
     "id,logged_at,timezone,weight_g,weight_display,weight_unit,notes";
 const GOALS_HEADER =
     "daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,daily_fiber_g,daily_sugar_g,daily_alcohol_g,daily_caffeine_mg,daily_water_ml,target_weight_g,updated_at,timezone";
+const GOAL_DAYS_HEADER =
+    "date,daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,daily_fiber_g,daily_sugar_g,daily_alcohol_g,daily_caffeine_mg,daily_water_ml,timezone";
+
+function goalDay(overrides: Partial<GoalDayOverride> = {}): GoalDayOverride {
+    return {
+        user_id: "user-1",
+        date: "2026-06-20",
+        updated_at: "2026-06-20T14:30:00.000Z",
+        daily_calories: 2800,
+        daily_protein_g: 150,
+        daily_carbs_g: 220,
+        daily_fat_g: 70,
+        daily_fiber_g: 30,
+        daily_sugar_g: 40,
+        daily_alcohol_g: 14,
+        daily_caffeine_mg: 400,
+        daily_water_ml: 2500,
+        ...overrides,
+    };
+}
+
 const PROFILE_HEADER =
     "timezone,preferred_weight_unit,preferred_drink_unit,alcohol_tracking_enabled,widgets_enabled,created_at,updated_at";
 
@@ -607,6 +630,80 @@ test("goals.csv exports the alcohol target regardless of the display opt-in", ()
     expect(f.daily_alcohol_g).toBe("14");
 });
 
+test("goal_days.csv is header-only when there are no overrides", () => {
+    expect(buildGoalDaysCsv([], "UTC")).toBe(GOAL_DAYS_HEADER);
+});
+
+test("goal_days.csv header and data rows have identical field counts", () => {
+    const rows = parseCsv(
+        buildGoalDaysCsv([goalDay(), goalDay({ date: "2026-06-21" })], "UTC"),
+    );
+    expect(rows[0]!.length).toBe(GOAL_DAYS_HEADER.split(",").length);
+    expect(rows).toHaveLength(3);
+    for (const row of rows.slice(1)) {
+        expect(row.length).toBe(rows[0]!.length);
+    }
+});
+
+test("goal_days.csv rows are sorted by date", () => {
+    const csv = buildGoalDaysCsv(
+        [
+            goalDay({ date: "2026-06-22" }),
+            goalDay({ date: "2026-06-20" }),
+            goalDay({ date: "2026-06-21" }),
+        ],
+        "UTC",
+    );
+    const rows = parseCsv(csv).slice(1);
+    expect(rows.map((r) => r[0])).toEqual([
+        "2026-06-20",
+        "2026-06-21",
+        "2026-06-22",
+    ]);
+});
+
+test("every goal day value lands under its own header name", () => {
+    const f = fieldsByName(buildGoalDaysCsv([goalDay()], "Europe/Berlin"));
+    expect(f).toEqual({
+        date: "2026-06-20",
+        daily_calories: "2800",
+        daily_protein_g: "150",
+        daily_carbs_g: "220",
+        daily_fat_g: "70",
+        daily_fiber_g: "30",
+        daily_sugar_g: "40",
+        daily_alcohol_g: "14",
+        daily_caffeine_mg: "400",
+        daily_water_ml: "2500",
+        timezone: "Europe/Berlin",
+    });
+});
+
+test("goal_days.csv leaves unset overrides as empty fields", () => {
+    const csv = buildGoalDaysCsv(
+        [
+            goalDay({
+                daily_calories: null,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            }),
+        ],
+        "UTC",
+    );
+    const f = fieldsByName(csv);
+    for (const name of GOAL_DAYS_HEADER.split(",")) {
+        if (name === "date" || name === "timezone") continue;
+        expect(f[name]).toBe("");
+    }
+    expect(csv).not.toContain("null");
+});
+
 test("goals.csv leaves unset targets as empty fields", () => {
     const csv = buildGoalsCsv(
         goals({
@@ -686,7 +783,7 @@ const README_OPTS = {
     tz: "Europe/Berlin",
     tzConfigured: true,
     weightUnit: "kg" as const,
-    counts: { meals: 120, water: 45, weight: 12, meal_items: 0 },
+    counts: { meals: 120, water: 45, weight: 12, meal_items: 0, goal_days: 3 },
 };
 
 test("the README names every file in the archive", () => {
@@ -789,6 +886,7 @@ test("EXPORT_ARCHIVE_FILES is the archive's real, ordered file list", () => {
         "water.csv",
         "weight.csv",
         "goals.csv",
+        "goal_days.csv",
         "profile.csv",
         "README.txt",
     ]);
@@ -805,6 +903,7 @@ test("an archive assembled from the builders reads back file for file", () => {
         "water.csv": buildWaterCsv([water()], tz),
         "weight.csv": buildWeightCsv([weight()], tz, "kg"),
         "goals.csv": buildGoalsCsv(goals(), tz),
+        "goal_days.csv": buildGoalDaysCsv([goalDay()], tz),
         "profile.csv": buildProfileCsv(profile(), tz),
         "README.txt": buildExportReadme(README_OPTS),
     };

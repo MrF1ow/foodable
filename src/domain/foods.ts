@@ -1,6 +1,8 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
 import { additiveRisk, type AdditiveRisk } from "./additive-risk.js";
+import { filterOffNutrientLevels } from "./off-nutrient-levels.js";
+import type { NutrientLevel } from "./product-score.js";
 import { isQuantityUnit } from "./quantity.js";
 import {
     cleanupDismissalsForFood,
@@ -45,9 +47,11 @@ export type Food = {
     fatG: number | null;
     fiberG: number | null;
     sugarG: number | null;
+    saturatedFatG: number | null;
     alcoholG: number | null;
     caffeineMg: number | null;
     nutritionSource: NutritionSource | null;
+    offNutrientLevels: Record<string, NutrientLevel> | null;
     allergens: string[];
     offSourceId: string | null;
     genericFoodId: string | null;
@@ -151,6 +155,17 @@ export type FoodsStore = {
         quality: FoodQuality,
         opts?: { onlyIfUnset?: boolean },
     ): Promise<Food | null>;
+    /** Write only `saturated_fat_g` and `off_nutrient_levels` from an OFF refresh. */
+    setFoodOffNutrition(
+        householdId: string,
+        foodId: string,
+        patch: FoodOffNutritionPatch,
+    ): Promise<Food | null>;
+};
+
+export type FoodOffNutritionPatch = {
+    saturatedFatG?: number;
+    offNutrientLevels?: Record<string, NutrientLevel>;
 };
 
 export class FoodsInputError extends Error {
@@ -305,6 +320,7 @@ export function catalogNutritionFromOff(food: FoodResult): {
     fatG: number | null;
     fiberG: number | null;
     sugarG: number | null;
+    saturatedFatG: number | null;
     alcoholG: number | null;
 } {
     const serving = (food.serving ?? "")
@@ -312,6 +328,9 @@ export function catalogNutritionFromOff(food: FoodResult): {
         .toLowerCase()
         .replace(/\s+/g, "");
     if (serving === "100g") {
+        const saturatedRaw = food.saturated_fat_g ?? null;
+        const saturatedFatG =
+            saturatedRaw != null && saturatedRaw < 0 ? null : saturatedRaw;
         return {
             calories: food.calories,
             proteinG: food.protein_g,
@@ -319,6 +338,7 @@ export function catalogNutritionFromOff(food: FoodResult): {
             fatG: food.fat_g,
             fiberG: food.fiber_g,
             sugarG: food.sugar_g,
+            saturatedFatG,
             alcoholG: food.alcohol_g,
         };
     }
@@ -329,8 +349,40 @@ export function catalogNutritionFromOff(food: FoodResult): {
         fatG: null,
         fiberG: null,
         sugarG: null,
+        saturatedFatG: null,
         alcoholG: null,
     };
+}
+
+export function offNutrientLevelsFromHit(
+    hit: FoodResult,
+): Record<string, NutrientLevel> | null {
+    return filterOffNutrientLevels(hit.nutrient_levels);
+}
+
+function offNutrientLevelsFromRow(
+    value: unknown,
+): Record<string, NutrientLevel> | null {
+    return filterOffNutrientLevels(value);
+}
+
+export function offNutritionPatchFromHit(
+    food: Food,
+    hit: FoodResult,
+): FoodOffNutritionPatch | null {
+    const patch: FoodOffNutritionPatch = {};
+    const nutrition = catalogNutritionFromOff(hit);
+    if (food.saturatedFatG == null && nutrition.saturatedFatG != null) {
+        patch.saturatedFatG = nutrition.saturatedFatG;
+    }
+    const levels = offNutrientLevelsFromHit(hit);
+    if (
+        levels != null &&
+        (food.offNutrientLevels == null || hitQualityIsNewer(food, hit))
+    ) {
+        patch.offNutrientLevels = levels;
+    }
+    return Object.keys(patch).length > 0 ? patch : null;
 }
 
 export function foodQualityFromHit(hit: FoodResult): FoodQuality | null {
@@ -383,20 +435,48 @@ export function offQualityMissStamp(fetchedAt: string): FoodQuality {
     };
 }
 
+/** Stored when OFF confirmed the barcode but returned no product-quality fields. */
+export function offQualityIsEmptyMiss(quality: FoodQuality): boolean {
+    return (
+        quality.nutriscoreGrade == null &&
+        quality.novaGroup == null &&
+        quality.ecoscoreGrade == null &&
+        quality.additives == null &&
+        quality.allergensTags == null &&
+        quality.tracesTags == null &&
+        quality.ingredientsAnalysisTags == null &&
+        quality.labelsTags == null
+    );
+}
+
 export async function applyHitQualityToFood(
     store: FoodsStore,
     food: Food,
     hit: FoodResult,
 ): Promise<Food> {
-    if (!hitQualityIsNewer(food, hit)) return food;
+    let current = food;
+    const offPatch = offNutritionPatchFromHit(current, hit);
+    if (offPatch) {
+        const patched = await store.setFoodOffNutrition(
+            current.householdId,
+            current.id,
+            offPatch,
+        );
+        if (patched) current = patched;
+    }
+    if (!hitQualityIsNewer(current, hit)) return current;
     const offQuality = foodQualityFromHit(hit);
-    if (offQuality == null) return food;
+    if (offQuality == null) return current;
     const updated = await store.setFoodQuality(
-        food.householdId,
-        food.id,
+        current.householdId,
+        current.id,
         offQuality,
     );
-    return updated ?? (await store.getFood(food.householdId, food.id)) ?? food;
+    return (
+        updated ??
+        (await store.getFood(current.householdId, current.id)) ??
+        current
+    );
 }
 
 export async function refreshFoodQualityByBarcode(
@@ -512,6 +592,8 @@ function copyFood(row: Food): Food {
                       unit: row.usualAmount.unit,
                   },
         offQuality: row.offQuality == null ? null : copyQuality(row.offQuality),
+        offNutrientLevels:
+            row.offNutrientLevels == null ? null : { ...row.offNutrientLevels },
     };
 }
 
@@ -653,6 +735,33 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             const next = copyFood(row);
             next.offQuality = copyQuality(quality);
+            next.updatedAt = nowIso();
+            foods[idx] = next;
+            return copyFood(next);
+        },
+        async setFoodOffNutrition(householdId, foodId, patch) {
+            const idx = foods.findIndex(
+                (food) =>
+                    food.householdId === householdId && food.id === foodId,
+            );
+            if (idx < 0) return null;
+            const row = foods[idx]!;
+            if (row.archivedAt != null) return null;
+            let changed = false;
+            const next = copyFood(row);
+            if (
+                patch.saturatedFatG != null &&
+                patch.saturatedFatG >= 0 &&
+                next.saturatedFatG == null
+            ) {
+                next.saturatedFatG = patch.saturatedFatG;
+                changed = true;
+            }
+            if (patch.offNutrientLevels != null) {
+                next.offNutrientLevels = { ...patch.offNutrientLevels };
+                changed = true;
+            }
+            if (!changed) return null;
             next.updatedAt = nowIso();
             foods[idx] = next;
             return copyFood(next);
@@ -908,9 +1017,11 @@ export function newFood(input: {
     fatG?: number | null;
     fiberG?: number | null;
     sugarG?: number | null;
+    saturatedFatG?: number | null;
     alcoholG?: number | null;
     caffeineMg?: number | null;
     nutritionSource?: NutritionSource | null;
+    offNutrientLevels?: Record<string, NutrientLevel> | null;
     allergens?: string[];
     offSourceId?: string | null;
     genericFoodId?: string | null;
@@ -938,9 +1049,14 @@ export function newFood(input: {
         fatG: input.fatG ?? null,
         fiberG: input.fiberG ?? null,
         sugarG: input.sugarG ?? null,
+        saturatedFatG: input.saturatedFatG ?? null,
         alcoholG: input.alcoholG ?? null,
         caffeineMg: input.caffeineMg ?? null,
         nutritionSource: input.nutritionSource ?? null,
+        offNutrientLevels:
+            input.offNutrientLevels == null
+                ? null
+                : { ...input.offNutrientLevels },
         allergens: [...(input.allergens ?? [])],
         offSourceId: input.offSourceId ?? null,
         genericFoodId: input.genericFoodId ?? null,
@@ -1203,6 +1319,7 @@ export async function findOrCreateFoodByBarcodeFromHit(
             name: hit.name,
             brand: hit.brand,
             ...nutrition,
+            offNutrientLevels: offNutrientLevelsFromHit(hit),
             gramsPerEach: gramsPerEachFromOff(hit),
             nutritionSource: "openfoodfacts",
             allergens: hit.allergens ?? mapOffAllergenTags(hit.allergens_tags),
@@ -1226,7 +1343,15 @@ export async function findOrCreateFoodByBarcodeResult(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
-            if (existing.offQuality == null) {
+            const needsNutritionFill =
+                existing.offNutrientLevels == null ||
+                existing.saturatedFatG == null;
+            const needsOffLookup =
+                existing.offQuality == null ||
+                (needsNutritionFill &&
+                    existing.offQuality != null &&
+                    !offQualityIsEmptyMiss(existing.offQuality));
+            if (needsOffLookup) {
                 try {
                     const hit = await lookup(normalized);
                     if (hit) {
@@ -1237,17 +1362,20 @@ export async function findOrCreateFoodByBarcodeResult(
                         );
                         return { food, created: false };
                     }
-                    const stamped = await store.setFoodQuality(
-                        householdId,
-                        existing.id,
-                        offQualityMissStamp(nowIso()),
-                        { onlyIfUnset: true },
-                    );
-                    const food =
-                        stamped ??
-                        (await store.getFood(householdId, existing.id)) ??
-                        existing;
-                    return { food, created: false };
+                    if (existing.offQuality == null) {
+                        const stamped = await store.setFoodQuality(
+                            householdId,
+                            existing.id,
+                            offQualityMissStamp(nowIso()),
+                            { onlyIfUnset: true },
+                        );
+                        const food =
+                            stamped ??
+                            (await store.getFood(householdId, existing.id)) ??
+                            existing;
+                        return { food, created: false };
+                    }
+                    return { food: existing, created: false };
                 } catch {
                     const food =
                         (await store.getFood(householdId, existing.id)) ??
@@ -1455,9 +1583,12 @@ export function mergeAllergens(plain: string[], usual: string[]): string[] {
     return out;
 }
 
-function nutritionBlockFrom(
-    source: Food,
-): Pick<Food, (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource"> {
+type NutritionBlockPick = Pick<
+    Food,
+    (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource" | "saturatedFatG"
+>;
+
+function nutritionBlockFrom(source: Food): NutritionBlockPick {
     return {
         calories: source.calories,
         proteinG: source.proteinG,
@@ -1465,6 +1596,7 @@ function nutritionBlockFrom(
         fatG: source.fatG,
         fiberG: source.fiberG,
         sugarG: source.sugarG,
+        saturatedFatG: source.saturatedFatG,
         alcoholG: source.alcoholG,
         caffeineMg: source.caffeineMg,
         nutritionSource: source.nutritionSource,
@@ -1513,6 +1645,7 @@ export type MergedFoodFieldPick = Pick<
     Food,
     | (typeof NUTRITION_BLOCK_KEYS)[number]
     | "nutritionSource"
+    | "saturatedFatG"
     | "gramsPerEach"
     | "gramsPerMl"
     | "defaultUnit"
@@ -1520,6 +1653,7 @@ export type MergedFoodFieldPick = Pick<
     | "usualStoreId"
     | "usualAmount"
     | "offQuality"
+    | "offNutrientLevels"
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
@@ -1529,8 +1663,11 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
           ? nutritionBlockFrom(drop)
           : nutritionBlockFrom(keep);
 
+    const saturatedFatG = keep.saturatedFatG ?? drop.saturatedFatG ?? null;
+
     return {
         ...nutritionBlock,
+        saturatedFatG,
         gramsPerEach: keep.gramsPerEach ?? drop.gramsPerEach,
         gramsPerMl: keep.gramsPerMl ?? drop.gramsPerMl,
         defaultUnit: keep.defaultUnit.trim()
@@ -1545,6 +1682,7 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                   ? { ...drop.usualAmount }
                   : null,
         offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
+        offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
 }
 
@@ -1571,6 +1709,8 @@ export function effectiveFood(
     };
     const nutritionFrom = usualHasAnyNutrient(u) ? u : food;
     const block = nutritionBlockFrom(nutritionFrom);
+    const saturatedFatG =
+        block.saturatedFatG ?? u.saturatedFatG ?? food.saturatedFatG ?? null;
     const usualStoreId = u.usualStoreId ?? food.usualStoreId;
     const usualAmount =
         u.usualAmount != null
@@ -1581,6 +1721,7 @@ export function effectiveFood(
     return {
         ...base,
         ...block,
+        saturatedFatG,
         gramsPerEach: u.gramsPerEach ?? food.gramsPerEach,
         gramsPerMl: u.gramsPerMl ?? food.gramsPerMl,
         allergens: mergeAllergens(food.allergens, u.allergens),
@@ -2047,6 +2188,18 @@ export function linkProductPromptPath(
     return `${returnPath}${sep}link_product=${encodeURIComponent(product.id)}`;
 }
 
+/** Build effective foods from an already-listed household catalog (no per-id loads). */
+export function effectiveFoodsFromListed(
+    listed: readonly Food[],
+): Map<string, EffectiveFood> {
+    const catalog = new Map(listed.map((food) => [food.id, food]));
+    const out = new Map<string, EffectiveFood>();
+    for (const food of listed) {
+        out.set(food.id, effectiveFood(food, catalog));
+    }
+    return out;
+}
+
 export async function effectiveFoodsByIds(
     store: FoodsStore,
     householdId: string,
@@ -2344,6 +2497,7 @@ export async function createProduct(
         fatG: parseOptionalNutrient(input.fatG),
         fiberG: parseOptionalNutrient(input.fiberG),
         sugarG: parseOptionalNutrient(input.sugarG),
+        saturatedFatG: null as number | null,
         alcoholG: parseOptionalNutrient(input.alcoholG),
         caffeineMg: parseOptionalNutrient(input.caffeineMg),
     };
@@ -2821,6 +2975,7 @@ const FIELDS_FILLED_KEY_ORDER: (
     "fatG",
     "fiberG",
     "sugarG",
+    "saturatedFatG",
     "alcoholG",
     "caffeineMg",
     "nutritionSource",
@@ -3798,9 +3953,11 @@ export function foodFromRow(row: {
     fat_g: unknown;
     fiber_g: unknown;
     sugar_g: unknown;
+    saturated_fat_g?: unknown;
     alcohol_g: unknown;
     caffeine_mg: unknown;
     nutrition_source: unknown;
+    off_nutrient_levels?: unknown;
     allergens: unknown;
     off_source_id: unknown;
     generic_food_id: unknown;
@@ -3865,9 +4022,12 @@ export function foodFromRow(row: {
         fatG: row.fat_g == null ? null : Number(row.fat_g),
         fiberG: row.fiber_g == null ? null : Number(row.fiber_g),
         sugarG: row.sugar_g == null ? null : Number(row.sugar_g),
+        saturatedFatG:
+            row.saturated_fat_g == null ? null : Number(row.saturated_fat_g),
         alcoholG: row.alcohol_g == null ? null : Number(row.alcohol_g),
         caffeineMg: row.caffeine_mg == null ? null : Number(row.caffeine_mg),
         nutritionSource,
+        offNutrientLevels: offNutrientLevelsFromRow(row.off_nutrient_levels),
         allergens: Array.isArray(row.allergens)
             ? row.allergens.map((item) => String(item))
             : [],
@@ -3929,9 +4089,11 @@ export function foodToRow(row: Food) {
         fat_g: row.fatG,
         fiber_g: row.fiberG,
         sugar_g: row.sugarG,
+        saturated_fat_g: row.saturatedFatG,
         alcohol_g: row.alcoholG,
         caffeine_mg: row.caffeineMg,
         nutrition_source: row.nutritionSource,
+        off_nutrient_levels: row.offNutrientLevels,
         allergens: row.allergens,
         off_source_id: row.offSourceId,
         generic_food_id: row.genericFoodId,

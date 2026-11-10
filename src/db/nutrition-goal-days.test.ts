@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
+    clearGoalDays,
+    countGoalDays,
+    getAllGoalDays,
     getGoalsForDate,
     getGoalsForRange,
     pgGoalDayStore,
+    upsertGoalDays,
     upsertNutritionGoals,
 } from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
@@ -319,5 +323,217 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
         );
         expect(forDate("2026-12-01")!.daily_calories).toBe(2500);
         expect(forDate("2026-12-02")!.daily_calories).toBe(2000);
+    });
+
+    test("upsertGoalDays sets three days; clearGoalDays removes one", async () => {
+        await upsertNutritionGoals(storeUserId, {
+            daily_calories: 2000,
+            daily_protein_g: 150,
+        });
+        const days = ["2026-11-20", "2026-11-21", "2026-11-22"] as const;
+        const written = await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            [...days],
+            {
+                daily_calories: 2400,
+            },
+        );
+        expect(written.map((r) => r.date).sort()).toEqual([...days].sort());
+        expect(written.every((r) => r.daily_calories === 2400)).toBe(true);
+
+        const removed = await clearGoalDays(storeUserId, storeHouseholdId, [
+            "2026-11-21",
+        ]);
+        expect(removed).toBe(1);
+
+        const { sql } = getCtx();
+        const left = (await sql`
+            select date::text as date
+            from public.nutrition_goal_days
+            where household_id = ${storeHouseholdId} and user_id = ${storeUserId}
+            order by date
+        `) as { date: string }[];
+        expect(left.map((r) => r.date)).toEqual(["2026-11-20", "2026-11-22"]);
+
+        expect(
+            (await getGoalsForDate(storeUserId, "2026-11-20"))!.daily_calories,
+        ).toBe(2400);
+        expect(
+            (await getGoalsForDate(storeUserId, "2026-11-21"))!.daily_calories,
+        ).toBe(2000);
+        expect(
+            (await getGoalsForDate(storeUserId, "2026-11-22"))!.daily_calories,
+        ).toBe(2400);
+    });
+
+    test("upsertGoalDays null clears one field; undefined preserves on update", async () => {
+        await upsertNutritionGoals(storeUserId, {
+            daily_calories: 2000,
+            daily_protein_g: 150,
+        });
+        const date = "2026-11-25";
+        await upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+            daily_calories: 2200,
+            daily_protein_g: 160,
+        });
+        await upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+            daily_protein_g: null,
+        });
+        let row = await pgGoalDayStore.overrideForDate(storeUserId, date);
+        expect(row!.daily_calories).toBe(2200);
+        expect(row!.daily_protein_g).toBeNull();
+        expect(
+            (await getGoalsForDate(storeUserId, date))!.daily_protein_g,
+        ).toBe(150);
+
+        await upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+            daily_calories: 2300,
+        });
+        row = await pgGoalDayStore.overrideForDate(storeUserId, date);
+        expect(row!.daily_calories).toBe(2300);
+        expect(row!.daily_protein_g).toBeNull();
+    });
+
+    test("upsertGoalDays is idempotent", async () => {
+        const date = "2026-11-26";
+        const fields = { daily_calories: 2100, daily_protein_g: 140 };
+        const first = await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            [date],
+            fields,
+        );
+        const second = await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            [date],
+            fields,
+        );
+        expect(second[0]!.daily_calories).toBe(first[0]!.daily_calories);
+        expect(second[0]!.daily_protein_g).toBe(first[0]!.daily_protein_g);
+        expect(second[0]!.date).toBe(first[0]!.date);
+        const { sql } = getCtx();
+        const [count] = (await sql`
+            select count(*)::int as n
+            from public.nutrition_goal_days
+            where
+                household_id = ${storeHouseholdId}
+                and user_id = ${storeUserId}
+                and date = ${date}::date
+        `) as { n: number }[];
+        expect(count!.n).toBe(1);
+    });
+
+    test("upsertGoalDays does not touch another user's rows", async () => {
+        const { sql } = getCtx();
+        const otherId = crypto.randomUUID();
+        await sql`
+            insert into public.users (id, email)
+            values (${otherId}, ${`other-${otherId}@t.test`})
+        `;
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id,
+                user_id,
+                date,
+                daily_calories
+            )
+            values (${storeHouseholdId}, ${otherId}, ${"2026-11-27"}, ${9999})
+        `;
+        await upsertGoalDays(storeUserId, storeHouseholdId, ["2026-11-28"], {
+            daily_calories: 1800,
+        });
+        const other = await pgGoalDayStore.overrideForDate(
+            otherId,
+            "2026-11-27",
+        );
+        expect(other!.daily_calories).toBe(9999);
+    });
+
+    test("upsertGoalDays rejects invalid dates before SQL", async () => {
+        await expect(
+            upsertGoalDays(storeUserId, storeHouseholdId, ["2026-02-31"], {
+                daily_calories: 2000,
+            }),
+        ).rejects.toThrow(/invalid calendar date/);
+        await expect(
+            clearGoalDays(storeUserId, storeHouseholdId, ["not-a-date"]),
+        ).rejects.toThrow(/invalid calendar date/);
+    });
+
+    test("all-null upsert removes the row", async () => {
+        const date = "2026-11-29";
+        await upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+            daily_calories: 2500,
+        });
+        const cleared = await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            [date],
+            {
+                daily_calories: null,
+            },
+        );
+        expect(cleared).toEqual([]);
+        expect(
+            await pgGoalDayStore.overrideForDate(storeUserId, date),
+        ).toBeNull();
+    });
+
+    test("upsertGoalDays keeps both of two overlapping partial updates", async () => {
+        const date = "2026-09-01";
+        await upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+            daily_calories: 2000,
+            daily_protein_g: 100,
+        });
+        await Promise.all([
+            upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+                daily_calories: 2100,
+            }),
+            upsertGoalDays(storeUserId, storeHouseholdId, [date], {
+                daily_protein_g: 180,
+            }),
+        ]);
+        const row = await pgGoalDayStore.overrideForDate(storeUserId, date);
+        expect(row?.daily_calories).toBe(2100);
+        expect(row?.daily_protein_g).toBe(180);
+    });
+
+    test("upsertGoalDays writes a repeated date once", async () => {
+        const written = await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            ["2026-05-01", "2026-05-01", "2026-05-02"],
+            { daily_calories: 1800 },
+        );
+        expect(written.map((r) => r.date)).toEqual([
+            "2026-05-01",
+            "2026-05-02",
+        ]);
+    });
+
+    test("getAllGoalDays is user-scoped and reconciles count", async () => {
+        const { sql } = getCtx();
+        const other = crypto.randomUUID();
+        await sql`
+            insert into public.users (id, email)
+            values (${other}, ${`x-${other}@t.test`})
+        `;
+        await upsertGoalDays(
+            storeUserId,
+            storeHouseholdId,
+            ["2026-06-01", "2026-06-03"],
+            {
+                daily_calories: 2000,
+            },
+        );
+        await upsertGoalDays(other, storeHouseholdId, ["2026-06-02"], {
+            daily_calories: 1900,
+        });
+        expect(await countGoalDays(storeUserId)).toBe(2);
+        const rows = await getAllGoalDays(storeUserId);
+        expect(rows.map((r) => r.date)).toEqual(["2026-06-01", "2026-06-03"]);
+        expect(rows.every((r) => r.user_id === storeUserId)).toBe(true);
     });
 });
