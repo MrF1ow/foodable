@@ -16,6 +16,7 @@ import {
     type MemoryFoodRefHolder,
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
+import { isCalendarDate } from "./insights.js";
 
 export type FridgeKind = "food" | "supply";
 
@@ -550,6 +551,85 @@ export async function updateItemQuantity(
         ...current,
         quantity: { amount, unit },
     });
+}
+
+export function findFreezerLocation(
+    locations: readonly FridgeLocation[],
+): FridgeLocation | null {
+    // Exact "Freezer" first, then any location whose name contains it
+    // ("Chest freezer", "Garage freezer").
+    const name = (loc: FridgeLocation) => loc.name.trim().toLowerCase();
+    return (
+        locations.find((loc) => name(loc) === "freezer") ??
+        locations.find((loc) => name(loc).includes("freezer")) ??
+        null
+    );
+}
+
+/** Default freeze expiry: household today plus three months, day clamped to month end. */
+export function defaultFreezeExpiry(todayIso: string): string {
+    if (!isCalendarDate(todayIso)) {
+        throw new FridgeInputError("Invalid date.");
+    }
+    const y = Number(todayIso.slice(0, 4));
+    const m0 = Number(todayIso.slice(5, 7)) - 1;
+    const d = Number(todayIso.slice(8, 10));
+    let targetYear = y;
+    let targetMonth = m0 + 3;
+    while (targetMonth > 11) {
+        targetMonth -= 12;
+        targetYear += 1;
+    }
+    while (targetMonth < 0) {
+        targetMonth += 12;
+        targetYear -= 1;
+    }
+    const lastDay = new Date(
+        Date.UTC(targetYear, targetMonth + 1, 0),
+    ).getUTCDate();
+    const day = Math.min(d, lastDay);
+    const mm = String(targetMonth + 1).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    return `${targetYear}-${mm}-${dd}`;
+}
+
+export function freezeItem(
+    item: FridgeItem,
+    freezerLocationId: string,
+    newExpiry: string,
+): FridgeItem {
+    return {
+        ...item,
+        locationId: freezerLocationId,
+        expiresOn: newExpiry,
+        purchasedOn: item.purchasedOn ?? null,
+        openedOn: item.openedOn ?? null,
+        quantity: { ...item.quantity },
+    };
+}
+
+export async function freezeFridgeItem(
+    store: FridgeStore,
+    householdId: string,
+    itemId: string,
+    newExpiry: string,
+): Promise<FridgeItem> {
+    if (!isCalendarDate(newExpiry)) {
+        throw new FridgeInputError("Enter a valid expiry date.");
+    }
+    const locations = await store.listLocations(householdId);
+    const freezer = findFreezerLocation(locations);
+    if (!freezer) {
+        throw new FridgeInputError("Add a Freezer location first.");
+    }
+    const items = await store.listItems(householdId);
+    const current = items.find((item) => item.id === itemId);
+    if (!current) throw new FridgeInputError("Unknown fridge item.");
+    const saved = await store.updateItem(
+        freezeItem(current, freezer.id, newExpiry),
+    );
+    if (!saved) throw new FridgeInputError("Unknown fridge item.");
+    return saved;
 }
 
 export async function moveItem(

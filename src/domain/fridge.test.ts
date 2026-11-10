@@ -6,14 +6,24 @@ import {
     addLocation,
     addSupply,
     createMemoryFridgeStore,
+    defaultFreezeExpiry,
     deleteItem,
+    findFreezerLocation,
+    freezeFridgeItem,
+    freezeItem,
     listFridge,
     moveItem,
     updateItemQuantity,
 } from "./fridge.js";
-import { createMemoryFoodsStore } from "./foods.js";
+import { createMemoryFoodsStore, findOrCreateManualFood } from "./foods.js";
 import { renderFridgePage } from "../web/pages/fridge.js";
-import { fridgeNotices, utcTodayFromDate } from "./stock.js";
+import {
+    addFridgeItemAdjust,
+    createMemoryStockStore,
+    fridgeNotices,
+    ledgerMatchesStock,
+    utcTodayFromDate,
+} from "./stock.js";
 
 function addUtcDays(isoDate: string, days: number): string {
     const d = new Date(`${isoDate}T00:00:00.000Z`);
@@ -59,6 +69,67 @@ test("add location Pantry then lists it", async () => {
     const listed = await listFridge(store, HH);
     expect(listed.locations.map((l) => l.name)).toEqual(["Pantry"]);
     expect(listed.items).toEqual([]);
+});
+
+test("defaultFreezeExpiry adds three months with month-end clamp", () => {
+    expect(defaultFreezeExpiry("2026-01-31")).toBe("2026-04-30");
+    expect(defaultFreezeExpiry("2026-05-15")).toBe("2026-08-15");
+    expect(() => defaultFreezeExpiry("2026-02-30")).toThrow();
+    expect(() => defaultFreezeExpiry("2026-13-01")).toThrow();
+});
+
+test("freezeItem keeps purchased and opened dates and amount", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const fridgeLoc = await addLocation(fridge, HH, "Fridge");
+    const freezerLoc = await addLocation(fridge, HH, "Freezer");
+    const berries = await findOrCreateManualFood(foods, HH, "food", "Berries");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: berries.id,
+        amount: 2,
+        unit: "cup",
+        locationId: fridgeLoc.id,
+        purchasedOn: "2026-02-01",
+        openedOn: "2026-02-10",
+        expiresOn: "2026-02-15",
+    });
+    const item = added.item!;
+    const movementsBefore = await stock.listMovements(HH, berries.id);
+    const frozen = await freezeFridgeItem(fridge, HH, item.id, "2026-06-01");
+    expect(frozen).toEqual(freezeItem(item, freezerLoc.id, "2026-06-01"));
+    expect(frozen.purchasedOn).toBe("2026-02-01");
+    expect(frozen.openedOn).toBe("2026-02-10");
+    expect(frozen.quantity).toEqual({ amount: 2, unit: "cup" });
+    const listed = await listFridge(fridge, HH);
+    expect(ledgerMatchesStock(listed.items, movementsBefore, berries)).toBe(
+        true,
+    );
+    expect(await stock.listMovements(HH, berries.id)).toHaveLength(
+        movementsBefore.length,
+    );
+});
+
+test("findFreezerLocation matches Freezer by name", async () => {
+    const store = createMemoryFridgeStore();
+    await addLocation(store, HH, "Fridge");
+    const freezer = await addLocation(store, HH, "Freezer");
+    const locations = await store.listLocations(HH);
+    expect(findFreezerLocation(locations)?.id).toBe(freezer.id);
+});
+
+test("findFreezerLocation falls back to a name containing freezer", async () => {
+    const store = createMemoryFridgeStore();
+    await addLocation(store, HH, "Pantry");
+    const chest = await addLocation(store, HH, "Chest freezer");
+    expect(findFreezerLocation(await store.listLocations(HH))?.id).toBe(
+        chest.id,
+    );
+    const exact = await addLocation(store, HH, "Freezer");
+    expect(findFreezerLocation(await store.listLocations(HH))?.id).toBe(
+        exact.id,
+    );
 });
 
 test("add location refuses a duplicate name", async () => {
