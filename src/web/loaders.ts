@@ -105,7 +105,7 @@ import {
     renderRecipeDetailV2Page,
 } from "./pages/v2/recipes-page.js";
 import { orderCards } from "../domain/layout.js";
-import { validateTz } from "../domain/tz.js";
+import { todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
 import { getLatestWeight } from "../db/nutrition.js";
 import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
@@ -114,6 +114,8 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
+import { loadToday } from "./loaders-today.js";
+import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
     viewerChromeWithAttention,
@@ -142,7 +144,6 @@ import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
 import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
 import { getGoalsForDate } from "../db/nutrition.js";
-import { todayInTz } from "../domain/tz.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
 function alcoholOf(
@@ -254,6 +255,7 @@ export async function renderDashboardPage(
         import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
         "timezone"
     >,
+    requestedDate?: string,
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -283,13 +285,6 @@ export async function renderDashboardPage(
         subjectProfile?.timezone && validateTz(subjectProfile.timezone)
             ? subjectProfile.timezone
             : "UTC";
-    const [summary, goals, trends, weight, weighInPrefill] = await Promise.all([
-        getNutritionSummaryPayload(access.subject.userId, alcohol, 7),
-        getGoalProgressPayload(access.subject.userId, alcohol),
-        getTrendsPayload(access.subject.userId, alcohol),
-        getWeightTrendsPayload(access.subject.userId),
-        weighInPrefillForUser(access.viewer.userId),
-    ]);
 
     const viewMemberId =
         requestedMember && requestedMember !== viewerUserId
@@ -300,15 +295,54 @@ export async function renderDashboardPage(
         viewerProfile,
         access.viewer,
     );
+
+    if (chrome.flags.uiV2) {
+        const weighInPrefill = await weighInPrefillForUser(
+            access.viewer.userId,
+        );
+        const mergedLogSheet =
+            v2LogSheet == null
+                ? { weighIn: weighInPrefill }
+                : {
+                      ...v2LogSheet,
+                      weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
+                  };
+        const calendarToday = todayInTz(subjectTz);
+        const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
+        const view = await loadToday(access.subject, selectedDate);
+        const subjectLabel =
+            access.subject.userId !== access.viewer.userId
+                ? members.find((m) => m.userId === access.subject.userId)
+                      ?.displayName
+                : undefined;
+        return {
+            status: 200,
+            html: renderTodayV2Page({
+                chrome: { ...chrome, subjectLabel },
+                view,
+                today: calendarToday,
+                memberQuery: viewMemberId,
+                logSheet: mergedLogSheet,
+                error,
+            }),
+        };
+    }
+
+    const [summary, goals, trends, weight, weighInPrefill] = await Promise.all([
+        getNutritionSummaryPayload(access.subject.userId, alcohol, 7),
+        getGoalProgressPayload(access.subject.userId, alcohol),
+        getTrendsPayload(access.subject.userId, alcohol),
+        getWeightTrendsPayload(access.subject.userId),
+        weighInPrefillForUser(access.viewer.userId),
+    ]);
+
     const mergedLogSheet =
-        chrome.flags.uiV2 && v2LogSheet == null
+        v2LogSheet == null
             ? { weighIn: weighInPrefill }
-            : chrome.flags.uiV2
-              ? {
-                    ...v2LogSheet,
-                    weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
-                }
-              : v2LogSheet;
+            : {
+                  ...v2LogSheet,
+                  weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
+              };
 
     return {
         status: 200,

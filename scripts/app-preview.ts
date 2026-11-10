@@ -71,6 +71,10 @@ import {
     buildPreviewTrendsPageData,
     renderTrendsV2Page,
 } from "../src/web/pages/v2/trends.js";
+import {
+    buildPreviewTodayPageData,
+    renderTodayV2Page,
+} from "../src/web/pages/v2/today.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
@@ -622,21 +626,25 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const eggProducts = catalog
         .filter((row) => row.genericFoodId === "f-eggs")
         .sort((a, b) => a.name.localeCompare(b.name));
-    const nutrition = await renderNutritionPage({
-        access: { ok: true, mode: "self", viewer: ME, subject: ME },
-        members: [ME, SAM],
-        summary: await widgetSample("nutrition-summary"),
-        goals: await widgetSample("goal-progress"),
-        trends: await widgetSample("trends"),
-        weight: await widgetSample("weight-trends"),
-        chrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    } as never);
+    const nutrition = V2
+        ? renderTodayV2Page(
+              buildPreviewTodayPageData(chrome as never, "2026-11-07"),
+          )
+        : await renderNutritionPage({
+              access: { ok: true, mode: "self", viewer: ME, subject: ME },
+              members: [ME, SAM],
+              summary: await widgetSample("nutrition-summary"),
+              goals: await widgetSample("goal-progress"),
+              trends: await widgetSample("trends"),
+              weight: await widgetSample("weight-trends"),
+              chrome,
+              cardOrder: [
+                  "nutrition-summary",
+                  "goal-progress",
+                  "trends",
+                  "weight-trends",
+              ],
+          } as never);
     const nutritionPeer = await renderNutritionPage({
         access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
         members: [ME, SAM],
@@ -1514,6 +1522,7 @@ if (process.argv.includes("--shots")) {
             const galleryFullPage =
                 shotBase.startsWith("dev-gallery-v2") ||
                 shotBase.startsWith("trends-v2") ||
+                shotBase === "nutrition" ||
                 shotBase === "settings" ||
                 shotBase === "settings-account" ||
                 shotBase === "settings-display" ||

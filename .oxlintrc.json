@@ -113,6 +113,11 @@
                             "src/web/routes/settings.test.ts": [
                                 "src/db/household",
                                 "src/db/profiles"
+                            ],
+                            "src/web/routes/nutrition.test.ts": [
+                                "src/db/household",
+                                "src/db/nutrition",
+                                "src/db/profiles"
                             ]
                         }
                     }

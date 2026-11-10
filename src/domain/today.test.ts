@@ -5,7 +5,7 @@ import { descriptionFromItems } from "./meals.js";
 import {
     annotateWeekDays,
     mealRows,
-    mondayWeekStart,
+    sundayWeekStart,
     weekDates,
     weekDotState,
     weekDots,
@@ -179,34 +179,34 @@ describe("weekDots", () => {
 });
 
 describe("week calendar helpers", () => {
-    test("mondayWeekStart lands on Monday", () => {
-        expect(mondayWeekStart("2026-03-04")).toBe("2026-03-02"); // Wed -> Mon
-        expect(mondayWeekStart("2026-03-08")).toBe("2026-03-02"); // Sun -> Mon
-        expect(mondayWeekStart("2026-03-02")).toBe("2026-03-02"); // Mon
+    test("sundayWeekStart lands on Sunday", () => {
+        expect(sundayWeekStart("2026-03-04")).toBe("2026-03-01"); // Wed -> Sun
+        expect(sundayWeekStart("2026-03-08")).toBe("2026-03-08"); // Sun
+        expect(sundayWeekStart("2026-03-02")).toBe("2026-03-01"); // Mon -> Sun
     });
 
-    test("weekDates is seven Monday-first days", () => {
-        expect(weekDates("2026-03-02")).toEqual([
+    test("weekDates is seven Sunday-first days", () => {
+        expect(weekDates("2026-03-01")).toEqual([
+            "2026-03-01",
             "2026-03-02",
             "2026-03-03",
             "2026-03-04",
             "2026-03-05",
             "2026-03-06",
             "2026-03-07",
-            "2026-03-08",
         ]);
     });
 
     test("annotateWeekDays marks today and selected", () => {
         const out = annotateWeekDays(
-            weekDates("2026-03-02"),
+            weekDates("2026-03-01"),
             "2026-03-04",
             "2026-03-03",
-            { prevWeekStart: "2026-02-23", nextWeekStart: "2026-03-09" },
+            { prevWeekStart: "2026-02-22", nextWeekStart: "2026-03-08" },
         );
-        expect(out.weekStart).toBe("2026-03-02");
-        expect(out.prevWeekStart).toBe("2026-02-23");
-        expect(out.nextWeekStart).toBe("2026-03-09");
+        expect(out.weekStart).toBe("2026-03-01");
+        expect(out.prevWeekStart).toBe("2026-02-22");
+        expect(out.nextWeekStart).toBe("2026-03-08");
         expect(out.days.find((d) => d.date === "2026-03-04")?.isToday).toBe(
             true,
         );
@@ -435,6 +435,42 @@ describe("mealRows", () => {
             "dinner",
             "snack",
         ]);
+    });
+
+    test("single-item meal exposes amount and unit as inline meta", () => {
+        const rows = mealRows([
+            meal({
+                meal_type: "breakfast",
+                description: "Scrambled eggs",
+                items: [
+                    {
+                        id: "i1",
+                        meal_id: "m1",
+                        user_id: "u1",
+                        household_id: "h1",
+                        food_id: "f1",
+                        recipe_id: null,
+                        label: "Eggs",
+                        amount: 3,
+                        unit: "large",
+                        grams: null,
+                        portions: null,
+                        calories: 200,
+                        protein_g: 12,
+                        carbs_g: 2,
+                        fat_g: 14,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sort_order: 0,
+                        created_at: "2026-03-02T12:00:00.000Z",
+                    },
+                ],
+            }),
+        ]);
+        expect(rows[0]!.rows[0]!.inlineMeta).toBe("3 large");
+        expect(rows[0]!.rows[0]!.subtitle).toBeNull();
     });
 
     test("row macros stay null when meal macros are null", () => {

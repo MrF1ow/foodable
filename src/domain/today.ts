@@ -90,27 +90,26 @@ export function weekDots(
     }));
 }
 
-export function mondayWeekStart(date: string): string {
+export function sundayWeekStart(date: string): string {
     const [y, m, d] = date.split("-").map(Number);
     const dt = new Date(Date.UTC(y!, m! - 1, d!));
     const dow = dt.getUTCDay();
-    const daysFromMonday = (dow + 6) % 7;
-    return shiftLocalDate(date, -daysFromMonday);
+    return shiftLocalDate(date, -dow);
 }
 
-export function weekDates(weekStartMonday: string): string[] {
+export function weekDates(weekStartSunday: string): string[] {
     return Array.from({ length: 7 }, (_, i) =>
-        shiftLocalDate(weekStartMonday, i),
+        shiftLocalDate(weekStartSunday, i),
     );
 }
 
-export function adjacentWeekStarts(weekStartMonday: string): {
+export function adjacentWeekStarts(weekStartSunday: string): {
     prevWeekStart: string;
     nextWeekStart: string;
 } {
     return {
-        prevWeekStart: shiftLocalDate(weekStartMonday, -7),
-        nextWeekStart: shiftLocalDate(weekStartMonday, 7),
+        prevWeekStart: shiftLocalDate(weekStartSunday, -7),
+        nextWeekStart: shiftLocalDate(weekStartSunday, 7),
     };
 }
 
@@ -133,11 +132,27 @@ export function annotateWeekDays(
     };
 }
 
+function singleItemInlineMeta(items: MealItem[]): string | null {
+    if (items.length !== 1) return null;
+    const item = mealItemsSorted(items)[0]!;
+    const amount = item.amount;
+    const unit = item.unit?.trim() ?? "";
+    if (amount == null || !Number.isFinite(amount)) return null;
+    const amountText =
+        Math.abs(amount - Math.round(amount)) < 1e-6
+            ? String(Math.round(amount))
+            : String(amount);
+    return unit ? `${amountText} ${unit}` : amountText;
+}
+
 export type MealRow = {
     mealId: string;
     mealType: MealTypeSlot;
     title: string;
+    /** Multi-item item list (fd-row__sub). */
     subtitle: string | null;
+    /** Single-item amount + unit inline after the title (fd-row__meta). */
+    inlineMeta: string | null;
     loggedAt: string;
     calories: number | null;
     protein_g: number | null;
@@ -241,6 +256,8 @@ export function mealRows(meals: readonly Meal[]): MealTypeGroup[] {
         const rows: MealRow[] = typeMeals.map((meal) => {
             const items = meal.items ?? [];
             const subtitle = items.length > 1 ? mealItemSubtitle(items) : null;
+            const inlineMeta =
+                items.length === 1 ? singleItemInlineMeta(items) : null;
             const title =
                 items.length > 1
                     ? multiItemMealTitle(
@@ -255,6 +272,7 @@ export function mealRows(meals: readonly Meal[]): MealTypeGroup[] {
                 mealType,
                 title,
                 subtitle,
+                inlineMeta,
                 loggedAt: meal.logged_at,
                 calories: meal.calories,
                 protein_g: meal.protein_g,

@@ -54,6 +54,10 @@ nutritionRoutes.get("/", requireSiteUser, async (c) => {
     const page = await renderDashboardPage(
         c.get("userId"),
         c.req.query("member"),
+        undefined,
+        undefined,
+        undefined,
+        c.req.query("date"),
     );
     return c.html(page.html, page.status);
 });

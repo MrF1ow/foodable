@@ -40,6 +40,8 @@ import {
 } from "../../rate-limit.js";
 import * as actualAttention from "../attention.js";
 import * as actualDashboardData from "../../dashboard-data.js";
+import * as actualLoadersToday from "../loaders-today.js";
+import { buildPreviewTodayView } from "../pages/v2/today.js";
 
 const realHousehold = { ...actualHousehold };
 const realProfiles = { ...actualProfiles };
@@ -51,6 +53,7 @@ const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
 const realAttention = { ...actualAttention };
 const realDashboardData = { ...actualDashboardData };
+const realLoadersToday = { ...actualLoadersToday };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
@@ -337,9 +340,15 @@ mock.module("../../dashboard-data.js", () => ({
     getWeightTrendsPayload: async () => widgetStub,
 }));
 
+mock.module("../loaders-today.js", () => ({
+    ...realLoadersToday,
+    loadToday: async () => buildPreviewTodayView("2026-11-10"),
+}));
+
 afterAll(() => {
     mock.module("../attention.js", () => realAttention);
     mock.module("../../dashboard-data.js", () => realDashboardData);
+    mock.module("../loaders-today.js", () => realLoadersToday);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/household.js", () => realHousehold);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock

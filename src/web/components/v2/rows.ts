@@ -189,6 +189,7 @@ export function foodRow(
     opts: RowBase & {
         title: Text;
         meta?: Text;
+        subtitle?: Text;
         macros?: Macros;
         trailing?: Text;
         href?: string;
@@ -196,6 +197,9 @@ export function foodRow(
 ): Html {
     const main = join([
         titleLine(opts.title, metaSpan(opts.meta)),
+        opts.subtitle != null && opts.subtitle !== ""
+            ? `<span class="fd-row__sub">${esc(opts.subtitle)}</span>`
+            : "",
         opts.macros ? macroLine(opts.macros) : "",
     ]);
     return rowShell({

@@ -26,7 +26,7 @@ import {
     adjacentWeekStarts,
     annotateWeekDays,
     mealRows,
-    mondayWeekStart,
+    sundayWeekStart,
     todayDayTotals,
     weekDates,
     weekDayTotalsFromBucket,
@@ -171,7 +171,7 @@ export async function loadToday(
     const today = deps.todayInTz(tz);
     const targetDate = date ?? today;
 
-    const weekStart = mondayWeekStart(targetDate);
+    const weekStart = sundayWeekStart(targetDate);
     const weekEnd = shiftLocalDate(weekStart, 6);
     const streakLookbackStart = shiftLocalDate(today, -STREAK_LOOKBACK_DAYS);
     const weightStart = shiftLocalDate(today, -29);

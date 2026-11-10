@@ -52,6 +52,10 @@ import {
     buildPreviewTrendsPageData,
     renderTrendsV2Page,
 } from "../src/web/pages/v2/trends.js";
+import {
+    buildPreviewTodayPageData,
+    renderTodayV2Page,
+} from "../src/web/pages/v2/today.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
@@ -376,21 +380,25 @@ async function pages(
     v2 = false,
 ): Promise<Record<string, string>> {
     const chrome = fixtureChrome(theme, v2);
-    const nutrition = await renderNutritionPage({
-        access: { ok: true, mode: "self", viewer: ME, subject: ME },
-        members: [ME, SAM],
-        summary: await widgetSample("nutrition-summary"),
-        goals: await widgetSample("goal-progress"),
-        trends: await widgetSample("trends"),
-        weight: await widgetSample("weight-trends"),
-        chrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    } as never);
+    const nutrition = v2
+        ? renderTodayV2Page(
+              buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+          )
+        : await renderNutritionPage({
+              access: { ok: true, mode: "self", viewer: ME, subject: ME },
+              members: [ME, SAM],
+              summary: await widgetSample("nutrition-summary"),
+              goals: await widgetSample("goal-progress"),
+              trends: await widgetSample("trends"),
+              weight: await widgetSample("weight-trends"),
+              chrome,
+              cardOrder: [
+                  "nutrition-summary",
+                  "goal-progress",
+                  "trends",
+                  "weight-trends",
+              ],
+          } as never);
     const nutritionPeer = await renderNutritionPage({
         access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
         members: [ME, SAM],
