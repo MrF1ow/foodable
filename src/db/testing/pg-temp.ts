@@ -78,9 +78,35 @@ let exitHookInstalled = false;
 let sharedCluster: Promise<Cluster> | undefined;
 const templates = new Map<string, Promise<void>>();
 
-function stopClusterSync(bin: string, data: string): void {
-    if (!statSyncSafe(join(data, "postmaster.pid"))) return;
-    Bun.spawnSync([`${bin}pg_ctl`, "-D", data, "-m", "immediate", "stop"], {
+/**
+ * Whether `data/postmaster.pid` names a live postgres serving that data
+ * directory. After a crash or reboot the file is stale and its pid may now
+ * belong to an unrelated process, which `pg_ctl stop` would signal.
+ */
+function postmasterIsOurs(data: string): boolean {
+    let pid: string | undefined;
+    try {
+        pid = readFileSync(join(data, "postmaster.pid"), "utf8").split("\n")[0];
+    } catch {
+        return false;
+    }
+    if (!pid || !/^\d+$/.test(pid.trim())) return false;
+    const ps = Bun.spawnSync(["ps", "-o", "command=", "-p", pid.trim()], {
+        stdout: "pipe",
+        stderr: "ignore",
+    });
+    return ps.exitCode === 0 && ps.stdout.toString().includes(data);
+}
+
+// `fast` checkpoints first, so a kept cluster has every commit despite
+// fsync and synchronous_commit being off; `immediate` is for throwing away.
+function stopClusterSync(
+    bin: string,
+    data: string,
+    mode: "fast" | "immediate" = "immediate",
+): void {
+    if (!postmasterIsOurs(data)) return;
+    Bun.spawnSync([`${bin}pg_ctl`, "-D", data, "-m", mode, "stop"], {
         stdout: "ignore",
         stderr: "ignore",
     });
@@ -111,7 +137,10 @@ export function stopAllTempPostgres(): void {
 const REAPER = `trap '' INT TERM HUP
 while kill -0 "$1" 2>/dev/null; do sleep 1; done
 [ -e "$2/${KEEP_FILE}" ] && exit 0
-[ -e "$2/data/postmaster.pid" ] && "$3" -D "$2/data" -m immediate stop
+pid=$(head -n 1 "$2/data/postmaster.pid" 2>/dev/null)
+if [ -n "$pid" ] && ps -o command= -p "$pid" 2>/dev/null | grep -qF -- "$2/data"; then
+    "$3" -D "$2/data" -m immediate stop
+fi
 rm -rf "$2"`;
 
 function startReaper(cluster: Cluster): void {
@@ -146,9 +175,11 @@ function pidAlive(pid: number): boolean {
 /**
  * Stop and remove cluster folders left behind by runs that were killed.
  * Only direct `run-*` children of `root` are considered. A folder is left
- * alone when it is marked KEEP, when its owner pid is still alive, or when it
- * has no owner yet and is younger than an hour (another process may be
- * creating it right now).
+ * alone when it is marked KEEP, when its owner pid is still alive, when it
+ * has neither an owner file nor an initdb'd `data/` (not ours), or when it has
+ * no owner yet and is younger than an hour (another process may be creating
+ * it right now). A server is only stopped when its postmaster.pid still
+ * names a postgres for that folder.
  */
 export function sweepPgTestRoot(
     root: string,
@@ -179,6 +210,10 @@ export function sweepPgTestRoot(
         }
         if (owner === process.pid) continue;
         if (owner !== null && pidAlive(owner)) continue;
+        // Only folders this code made: an owner file, or an initdb'd cluster.
+        if (owner === null && !statSyncSafe(join(dir, "data", "PG_VERSION"))) {
+            continue;
+        }
         if (owner === null && now - st.mtimeMs < staleMs) continue;
         stopClusterSync(bin, join(dir, "data"));
         rmSync(dir, { recursive: true, force: true });
@@ -227,7 +262,8 @@ async function createCluster(port?: number): Promise<Cluster> {
         }
         const serverOpts = [
             `-p ${cluster.port}`,
-            `-k ${dir}`,
+            // pg_ctl hands -o to /bin/sh, so quote the one path in it.
+            `-k '${dir.replace(/'/g, "'\\''")}'`,
             "-h 127.0.0.1",
             ...SERVER_OPTIONS,
         ].join(" ");
@@ -251,7 +287,7 @@ async function createCluster(port?: number): Promise<Cluster> {
 function stopCluster(cluster: Cluster, keep: boolean): void {
     live.delete(cluster);
     cluster.reaper?.kill("SIGKILL");
-    stopClusterSync(cluster.bin, cluster.data);
+    stopClusterSync(cluster.bin, cluster.data, keep ? "fast" : "immediate");
     if (keep) {
         writeFileSync(join(cluster.dir, KEEP_FILE), "");
         console.log(`kept ${cluster.dir}`);
