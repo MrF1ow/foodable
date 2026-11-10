@@ -1388,3 +1388,540 @@ test("v2 weight-trends: no target, one reading, an empty range and no data", asy
         "No weight logged in this range yet.",
     );
 });
+
+// ---- import-meals: v1 and v2 driven through one fake host ------------------
+
+// What start_meal_import sends (the harness's payload).
+const IMPORT_CFG = {
+    tz: "America/Denver",
+    tz_configured: true,
+    today: "2026-11-09",
+    max_rows_per_call: 50,
+    import_tool_name: "bulk_import_meals",
+    known_source_apps: ["myfitnesspal", "cronometer"],
+    drink_unit: null as string | null,
+    user_id: "u1",
+};
+
+type ToolArgs = { meals: Record<string, unknown>[] } & Record<string, unknown>;
+type ToolReply = (args: ToolArgs) => object;
+
+// A bulk_import_meals that accepts every row.
+const acceptAll: ToolReply = (args) => ({
+    structuredContent: {
+        dry_run: args.dry_run,
+        status: "ok",
+        summary: {
+            created: args.dry_run ? 0 : args.meals.length,
+            deduplicated: 0,
+            failed: 0,
+        },
+        results: [],
+        warnings: [],
+    },
+});
+
+const tick = async (n = 40) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+// Mount an import-meals assembly inside a fake strict host: ui/initialize is
+// answered (serverTools on or off), the start_meal_import payload arrives as
+// a tool-result notification, and every tools/call is recorded and answered
+// by `reply`. The DOM is a stub that serves both templates: v1 wires handlers
+// onto elements by id after each render, v2 listens once on #root.
+async function mountImport(
+    html: string,
+    opts: { cfg?: object; canCallTools?: boolean; reply?: ToolReply } = {},
+) {
+    type Fn = (e: unknown) => unknown;
+    const calls: ToolArgs[] = [];
+    const contexts: string[] = [];
+    const listeners: Record<string, Fn[]> = {};
+    const windowListeners: Fn[] = [];
+    const root = {
+        innerHTML: "",
+        appendChild: () => {},
+        addEventListener: (type: string, fn: Fn) =>
+            (listeners[type] ??= []).push(fn),
+    };
+    const els = new Map<string, Record<string, unknown>>();
+    const el = (key: string) => {
+        if (!els.has(key))
+            els.set(key, { classList: { add() {}, remove() {} }, dataset: {} });
+        return els.get(key)!;
+    };
+    const noop = () => {};
+    const document = {
+        getElementById: (id: string) =>
+            id === "root"
+                ? root
+                : root.innerHTML.includes(`id="${id}"`)
+                  ? el(id)
+                  : null,
+        querySelectorAll: (sel: string) =>
+            sel === ".map-sel"
+                ? [
+                      ...root.innerHTML.matchAll(
+                          /map-sel" data-field="(\w+)"/g,
+                      ),
+                  ].map((m) => {
+                      const e = el(`map:${m[1]}`);
+                      (e.dataset as Record<string, string>).field = m[1]!;
+                      return e;
+                  })
+                : [],
+        documentElement: {
+            setAttribute: noop,
+            style: {} as object,
+            getBoundingClientRect: () => ({ height: 100 }),
+        },
+        body: {},
+        addEventListener: noop,
+        createElement: () => ({ style: {} }),
+    };
+    const deliver = (data: object) =>
+        setTimeout(() => {
+            for (const fn of windowListeners) fn({ source: host, data });
+        }, 0);
+    const host = {
+        postMessage(msg: {
+            id?: string;
+            method: string;
+            params: {
+                name?: string;
+                arguments?: ToolArgs;
+                content?: { text: string }[];
+            };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize")
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "dark" },
+                    },
+                });
+            else if (method === "ui/notifications/initialized")
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: {
+                        structuredContent: { ...IMPORT_CFG, ...opts.cfg },
+                    },
+                });
+            else if (method === "tools/call") {
+                const args = structuredClone(params.arguments!);
+                calls.push(args);
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: (opts.reply ?? acceptAll)(structuredClone(args)),
+                });
+            } else if (method === "ui/update-model-context") {
+                contexts.push(params.content![0]!.text);
+                deliver({ jsonrpc: "2.0", id, result: {} });
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        innerWidth: 400,
+        parent: host,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, document);
+    }
+    await tick();
+
+    const v2 = html.includes("--surface-panel");
+    const fire = (type: string, target: object) => {
+        for (const fn of listeners[type] ?? []) fn({ target });
+    };
+    const ctl = (name: string, extra: object) => ({
+        dataset: { ctl: name },
+        closest: () => null,
+        ...extra,
+    });
+    // v1 ids for each v2 data-act.
+    const V1_IDS: Record<string, string> = {
+        preview: "toPreview",
+        import: "doImport",
+        "back-map": "backToMap",
+        "back-file": "backToFile",
+        restart: "restart",
+    };
+    const handler = (id: string, name: string) => {
+        const e = document.getElementById(id) as Record<string, Fn> | null;
+        if (!e || typeof e[name] !== "function")
+            throw new Error(`v1 has no ${name} on #${id}`);
+        return e[name]!;
+    };
+    return {
+        calls,
+        contexts,
+        html: () => root.innerHTML,
+        async chooseFile(name: string, text: string) {
+            const file = {
+                name,
+                arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+            };
+            if (v2) fire("change", ctl("file", { files: [file] }));
+            else handler("file", "onchange")({ target: { files: [file] } });
+            await tick();
+        },
+        async click(act: string) {
+            if (v2) {
+                const button = { dataset: { act } };
+                fire("click", { closest: () => button, dataset: {} });
+            } else handler(V1_IDS[act]!, "onclick")({});
+            await tick();
+        },
+        mapField(field: string, index: number) {
+            if (v2)
+                fire(
+                    "change",
+                    ctl("map", {
+                        dataset: { ctl: "map", field },
+                        value: String(index),
+                    }),
+                );
+            else
+                (el(`map:${field}`).onchange as Fn)({
+                    target: { dataset: { field }, value: String(index) },
+                });
+        },
+        choose(name: "dateFormat" | "energyUnit", value: string) {
+            if (v2) fire("change", ctl(name, { value }));
+            else handler(name, "onchange")({ target: { value } });
+        },
+        sourceApp(value: string) {
+            if (v2) fire("input", ctl("srcapp", { value }));
+            else handler("srcapp", "oninput")({ target: { value } });
+        },
+    };
+}
+
+// Five exports the widget must turn into the same server calls in v1 and v2.
+const mfpCsv = [
+    "Date,Meal,Calories,Fat (g),Saturated Fat,Carbohydrates (g),Protein (g),Note",
+    ...Array.from({ length: 64 }, (_, i) => {
+        const day = String(1 + Math.floor(i / 4)).padStart(2, "0");
+        const meal = ["Breakfast", "Lunch", "Dinner", "Snacks"][i % 4];
+        return `2026-10-${day},${meal},${300 + i},${10 + (i % 7)},2,${40 + (i % 9)},${20 + (i % 5)},${i % 6 === 0 ? '"late, tired"' : ""}`;
+    }),
+    "TOTAL:,,20000,700,128,2800,1400,",
+].join("\r\n");
+
+const cronoKjCsv = [
+    "Day,Time,Group,Food Name,Amount,Energy (kJ),Carbs (g),Fat (g),Protein (g),Fiber (g),Sugars (g),Caffeine (mg),Alcohol (g)",
+    "2026-11-01,9:15 AM,Breakfast,Oats,80 g,1250,54,6,11,8,1.2,,",
+    "2026-11-01,1:05 PM,Lunch,Chicken bowl,1 bowl,3565,76,25,69,8.6,12.8,,",
+    "2026-11-01,,Snacks,Espresso,1 cup,8,0,0,0.1,,,64,",
+    "2026-11-02,7:40 PM,Dinner,Red wine,150 ml,520,4,0,0.1,,0.9,,14",
+];
+
+// Day-first or month-first cannot be told apart; the user picks day-first.
+// It also carries an added-sugar column, a caffeine-in-grams column, an
+// alcohol column with tracking off, and one unreadable date.
+const ambiguousCsv = [
+    "Date,Food,Calories,Added Sugar (g),Caffeine (g),Alcohol",
+    "05/06/2026 08:30,Toast,210,3,,",
+    "06/05/2026 12:00,Soup,340,1,,",
+    "07/06/2026,Cola,140,35,0.03,",
+    "08/06/2026 21:00,Beer,150,,,13",
+    "garbage,Mystery,99,,,",
+];
+
+const ownExportCsv = [
+    "id,logged_at,timezone,meal_type,description,calories,protein_g,carbs_g,fat_g,fiber_g,sugar_g,alcohol_g,caffeine_mg,notes",
+    "6f1c8f3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f,2026-11-03 08:05:00,Europe/Kyiv,breakfast,Overnight oats,432,27,42,17,9.4,18.2,,95,",
+    "7a2d9f4e-3b5c-4d6e-9fa0-1b2c3d4e5f60,2026-11-03 13:10:00,Europe/Kyiv,lunch,Chicken rice bowl,852,69,76,25,8.6,12.8,0,85,with extra rice",
+];
+
+const loseItCsv = [
+    "Date,Name,Type,Quantity,Units,Calories,Fat (g),Protein (g),Carbohydrates (g),Deleted",
+    "11/02/2026,Banana,Breakfast,1,Each,105,0.4,1.3,27,false",
+    "11/02/2026,Pizza,Dinner,2,Slice,570,24,24,66,true",
+    "11/03/2026,Apple,Snacks,1,Each,95,0.3,0.5,25,false",
+];
+
+// "Energy (kJ)" is no calories alias, so the user maps it; the remap re-reads
+// the unit from the header.
+const mapKj = (w: Awaited<ReturnType<typeof mountImport>>) =>
+    w.mapField("calories", 5);
+
+type ImportScenario = {
+    name: string;
+    file: string;
+    text: string;
+    cfg?: object;
+    steps?: (w: Awaited<ReturnType<typeof mountImport>>) => void;
+};
+const IMPORT_SCENARIOS: ImportScenario[] = [
+    {
+        name: "myfitnesspal, 64 rows over 16 days",
+        file: "mfp.csv",
+        text: mfpCsv,
+    },
+    {
+        name: "cronometer in kJ, alcohol tracked",
+        file: "crono.csv",
+        text: cronoKjCsv.join("\n"),
+        cfg: { drink_unit: "us" },
+        steps: mapKj,
+    },
+    {
+        name: "cronometer in kJ, alcohol off",
+        file: "crono.csv",
+        text: cronoKjCsv.join("\n"),
+        steps: mapKj,
+    },
+    {
+        name: "ambiguous dates read day-first, source app typed",
+        file: "diary.csv",
+        text: ambiguousCsv.join("\n"),
+        steps: (w) => {
+            w.choose("dateFormat", "dmy");
+            w.sourceApp("myapp");
+        },
+    },
+    {
+        name: "our own export, by id and timezone",
+        file: "meals.csv",
+        text: ownExportCsv.join("\n"),
+    },
+    {
+        name: "lose it, deleted rows, calories remapped",
+        file: "loseit.csv",
+        text: loseItCsv.join("\n"),
+        steps: (w) => {
+            w.mapField("calories", 5);
+            w.mapField("notes", 4);
+            w.choose("energyUnit", "kj");
+        },
+    },
+];
+
+async function runImportScenario(html: string, s: ImportScenario) {
+    const w = await mountImport(html, { cfg: s.cfg });
+    await w.chooseFile(s.file, s.text);
+    s.steps?.(w);
+    await w.click("preview");
+    await w.click("import");
+    return w;
+}
+
+test.each(IMPORT_SCENARIOS.map((s) => [s.name, s] as const))(
+    "import-meals v2 sends v1's bulk_import_meals arguments: %s",
+    async (_name, s) => {
+        const v1 = await runImportScenario(
+            await getWidgetHtml("import-meals"),
+            s,
+        );
+        const v2 = await runImportScenario(await v2Widget("import-meals"), s);
+        expect(v1.calls.length).toBeGreaterThan(1);
+        expect(JSON.stringify(v2.calls)).toBe(JSON.stringify(v1.calls));
+        expect(v2.contexts).toEqual(v1.contexts);
+    },
+);
+
+test("import-meals v2: a MyFitnessPal export auto-maps and previews its counts", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    expect(w.html()).toContain("Step 1 of 4");
+    expect(w.html()).toContain('data-ctl="file"');
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    const map = w.html();
+    expect(map).toContain("Step 2 of 4");
+    expect(map).toContain("64 rows · 8 columns · utf-8, delimiter ,");
+    // Recognised columns are pre-selected; the source app is guessed.
+    const selected = (field: string) =>
+        new RegExp(
+            `data-field="${field}"><option[^]*?<option value="(\\d+)" selected`,
+        ).exec(map)?.[1];
+    expect(selected("logged_at")).toBe("0");
+    expect(selected("meal_type")).toBe("1");
+    expect(selected("calories")).toBe("2");
+    expect(selected("protein_g")).toBe("6");
+    expect(map).toContain('value="myfitnesspal"');
+    // Alcohol tracking is off, so no alcohol row is offered.
+    expect(map).not.toContain('data-field="alcohol_g"');
+
+    await w.click("preview");
+    const pv = w.html();
+    expect(pv).toContain("Step 3 of 4");
+    expect(pv).toContain("64 meals · Oct 2026<");
+    expect(pv).toContain("Date → Date / time");
+    expect(pv).toContain("1 rows skipped · 2 batches");
+    expect(pv).toContain("Times read in <b>America/Denver</b>");
+    expect(pv).toContain("Showing 30 of 64 rows");
+    expect(pv).toContain(">Import 64 meals<");
+    expect(pv).toContain('<span class="row-s">Oct 1</span>');
+});
+
+test("import-meals v2: ambiguous dates prompt, and day-first is applied once chosen", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile("diary.csv", ambiguousCsv.join("\n"));
+    const map = w.html();
+    expect(map).toContain("could not be determined from this file");
+    // Added sugar, caffeine in grams and alcohol-while-off all say why.
+    expect(map).toContain("added-sugar column (Added Sugar (g))");
+    expect(map).toContain("caffeine column (Caffeine (g)) is in grams");
+    expect(map).toContain(
+        "alcohol column (Alcohol), but alcohol tracking is off",
+    );
+    w.choose("dateFormat", "dmy");
+    expect(w.html()).not.toContain("could not be determined");
+    expect(w.html()).toContain("05/06/2026 08:30 → 2026-06-05 08:30");
+    await w.click("preview");
+    expect(w.html()).toContain(
+        "1 row(s) were skipped because their date could not be read as Day/Month/Year (e.g. line 6: garbage)",
+    );
+    expect(w.html()).toContain("Details for a bug report");
+    await w.click("import");
+    const sent = w.calls[0]!.meals;
+    expect(sent.map((m) => m.logged_at)).toEqual([
+        "2026-06-05 08:30",
+        "2026-05-06 12:00",
+        "2026-06-07",
+        "2026-06-08 21:00",
+    ]);
+    expect(sent.every((m) => m.alcohol_g === undefined)).toBe(true);
+    expect(sent.every((m) => m.caffeine_mg === undefined)).toBe(true);
+});
+
+test("import-meals v2: a kJ column converts to kcal in the example and the rows", async () => {
+    const w = await mountImport(await v2Widget("import-meals"), {
+        cfg: { drink_unit: "us" },
+    });
+    await w.chooseFile("crono.csv", cronoKjCsv.join("\n"));
+    mapKj(w);
+    expect(w.html()).toContain("1250 kJ → 299 kcal");
+    await w.click("preview");
+    expect(w.html()).toContain("energy converted from kJ to kcal");
+    await w.click("import");
+    const sent = w.calls[0]!.meals;
+    expect(sent.map((m) => m.calories)).toEqual([299, 852, 2, 124]);
+    expect(sent.map((m) => m.logged_at)).toEqual([
+        "2026-11-01 09:15",
+        "2026-11-01 13:05",
+        "2026-11-01",
+        "2026-11-02 19:40",
+    ]);
+    expect(sent[3]!.alcohol_g).toBe(14);
+    expect(w.calls[0]!.expected_total_kcal).toBe(1277);
+});
+
+test("import-meals v2: imports, reports the counts, and tells the model", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    await w.click("preview");
+    await w.click("import");
+    // Dry run of the first chunk, then each chunk for real.
+    expect(w.calls.map((c) => c.dry_run)).toEqual([true, false, false]);
+    const done = w.html();
+    expect(done).toContain(">Done<");
+    expect(done).toContain("64 meals imported");
+    expect(done).toContain(
+        '<span class="row-t">Imported</span><span class="row-end">64</span>',
+    );
+    expect(done).not.toContain("Details for a bug report");
+    expect(w.contexts).toEqual([
+        "Bulk meal import finished: 64 meals imported, 0 already logged, 0 failed, 1 rows skipped. Source: mfp-export.csv.",
+    ]);
+});
+
+test("import-meals v2: a failed result shows the per-row report", async () => {
+    const failing: ToolReply = (args) => ({
+        structuredContent: {
+            dry_run: args.dry_run,
+            status: args.dry_run ? "ok" : "partial",
+            summary: { created: 1, deduplicated: 1, failed: 1 },
+            results: [
+                {
+                    source_line: 3,
+                    error: { message: "calories <out of range>" },
+                },
+            ],
+            warnings: ["Timezone not set; times read as UTC."],
+        },
+    });
+    const w = await mountImport(await v2Widget("import-meals"), {
+        reply: failing,
+    });
+    await w.chooseFile("meals.csv", ownExportCsv.join("\n"));
+    await w.click("preview");
+    expect(w.html()).toContain("each row&#39;s own timezone column");
+    await w.click("import");
+    const done = w.html();
+    expect(done).toContain('class="disc warn"');
+    expect(done).toContain(
+        '<span class="row-s">Line 3</span><span class="row-t is-over">calories &lt;out of range&gt;</span>',
+    );
+    expect(done).toContain("Timezone not set; times read as UTC.");
+    expect(done).toContain("Details for a bug report");
+    expect(done).toContain(
+        "first error, line 3: calories &lt;out of range&gt;",
+    );
+
+    // A failed dry run writes nothing and stays on the preview, saying why.
+    const pre = await mountImport(await v2Widget("import-meals"), {
+        reply: (args) => ({
+            structuredContent: {
+                dry_run: args.dry_run,
+                status: "failed",
+                summary: { created: 0, deduplicated: 0, failed: 2 },
+                results: [{ source_line: 2, error: { message: "bad date" } }],
+                warnings: ["expected_row_count mismatch"],
+            },
+        }),
+    });
+    await pre.chooseFile("meals.csv", ownExportCsv.join("\n"));
+    await pre.click("preview");
+    await pre.click("import");
+    expect(pre.calls.map((c) => c.dry_run)).toEqual([true]);
+    expect(pre.html()).toContain("Rows 2–3: expected_row_count mismatch");
+    expect(pre.html()).toContain("1 row(s) would fail, e.g. line 2: bad date");
+    expect(pre.html()).toContain("Step 3 of 4");
+});
+
+test("import-meals v2: without host tool calls it asks for Claude instead", async () => {
+    const w = await mountImport(await v2Widget("import-meals"), {
+        canCallTools: false,
+        cfg: { tz_configured: false },
+    });
+    expect(w.html()).toContain("Ask Claude to import the file instead");
+    expect(w.html()).toContain("Your timezone is not set");
+    await w.chooseFile("mfp-export.csv", mfpCsv);
+    await w.click("preview");
+    expect(w.html()).toMatch(/data-act="import" disabled/);
+    await w.click("import");
+    expect(w.calls).toEqual([]);
+});
+
+test("import-meals v2: file names and cells reach the markup escaped", async () => {
+    const w = await mountImport(await v2Widget("import-meals"));
+    await w.chooseFile(
+        '"><img src=x onerror=alert(1)>.csv',
+        'Date,Food,Calories\n2026-11-01,"<script>x</script>",100\n',
+    );
+    await w.click("preview");
+    await w.click("restart");
+    await w.chooseFile(
+        '"><img src=x onerror=alert(1)>.csv',
+        'Date,"<b onclick=x>",Calories\n2026-11-01,"<script>x</script>",100\n',
+    );
+    const map = w.html();
+    expect(map).not.toContain("<img");
+    expect(map).not.toContain("<b onclick");
+    await w.click("preview");
+    expect(w.html()).not.toContain("<script>");
+    expect(w.html()).not.toContain("<img");
+});
