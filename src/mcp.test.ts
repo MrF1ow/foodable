@@ -4655,6 +4655,74 @@ describe("household config tools", () => {
             });
         });
 
+        test("catalogued per-serving product uses off cache for goal notices", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
+            const barcode = "5449000000996";
+            const colaHit = {
+                name: "Cola",
+                brand: null,
+                serving: "330 ml",
+                serving_quantity: 330,
+                serving_quantity_unit: "ml",
+                calories: 139,
+                protein_g: 0,
+                carbs_g: 35,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 35,
+                saturated_fat_g: 0,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: [],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            db.barcodeFoods[barcode] = colaHit as never;
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Cola",
+                calories: null,
+                proteinG: null,
+                carbsG: null,
+                fatG: null,
+                fiberG: null,
+                sugarG: null,
+                alcoholG: null,
+                offQuality: colaHit.quality as never,
+            });
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            await withRateProductFlag(true, async (call) => {
+                for (const args of [
+                    { barcode },
+                    { food_id: food.id },
+                ] as const) {
+                    const r = await call("rate_product", args);
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    const messages = out.checks[0]!.notices.map(
+                        (n) => n.message,
+                    );
+                    expect(messages).toContain("35 g sugar, 40 g left today");
+                }
+            });
+        });
+
         test("a per-serving barcode in ml still gives goal notices", async () => {
             db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
             const barcode = "5449000000996";

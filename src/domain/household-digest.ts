@@ -218,9 +218,10 @@ function unitKey(foodId: string, unit: string): string {
 }
 
 function movementIsAfter(a: StockMovement, b: StockMovement): boolean {
-    const byTime = a.createdAt.localeCompare(b.createdAt);
-    if (byTime > 0) return true;
-    if (byTime < 0) return false;
+    const ta = Date.parse(a.createdAt);
+    const tb = Date.parse(b.createdAt);
+    if (ta > tb) return true;
+    if (ta < tb) return false;
     return a.id.localeCompare(b.id) > 0;
 }
 
@@ -353,12 +354,7 @@ export function ranOutInWindow(
         }
 
         const prev = lastByFood.get(movement.foodId);
-        if (
-            !prev ||
-            movement.createdAt.localeCompare(prev.createdAt) > 0 ||
-            (movement.createdAt === prev.createdAt &&
-                movement.id.localeCompare(prev.id) > 0)
-        ) {
+        if (!prev || movementIsAfter(movement, prev)) {
             lastByFood.set(movement.foodId, movement);
         }
     }
@@ -418,14 +414,16 @@ function buildMemberNutrition(
     let bestDay: HouseholdDigestMemberNutrition["bestDay"] = null;
     let roughestDay: HouseholdDigestMemberNutrition["roughestDay"] = null;
 
-    if (logged.length > 0) {
-        const perDayTargets = logged.every((b) =>
+    const daysWithMeals = buckets.filter((b) => b.meals.length > 0);
+
+    if (daysWithMeals.length > 0) {
+        const perDayTargets = daysWithMeals.every((b) =>
             floorTargetApplies(
                 goalNumber(member.goalsOn, b.date, "daily_calories"),
             ),
         );
         if (perDayTargets) {
-            const best = logged.reduce((a, b) => {
+            const best = daysWithMeals.reduce((a, b) => {
                 const ta = goalNumber(
                     member.goalsOn,
                     a.date,
@@ -440,7 +438,7 @@ function buildMemberNutrition(
                     ? a
                     : b;
             });
-            const rough = logged.reduce((a, b) => {
+            const rough = daysWithMeals.reduce((a, b) => {
                 const ta = goalNumber(
                     member.goalsOn,
                     a.date,
@@ -474,10 +472,10 @@ function buildMemberNutrition(
                 ),
             };
         } else {
-            const best = logged.reduce((a, b) =>
+            const best = daysWithMeals.reduce((a, b) =>
                 a.calories < b.calories ? a : b,
             );
-            const rough = logged.reduce((a, b) =>
+            const rough = daysWithMeals.reduce((a, b) =>
                 a.calories > b.calories ? a : b,
             );
             bestDay = {

@@ -223,6 +223,70 @@ function productCheckFromFood(food: Food, checkId: string): ProductCheckInput {
     };
 }
 
+function scalePer100g(value: number | null | undefined, grams: number) {
+    if (value == null) return null;
+    return (value * grams) / 100;
+}
+
+function catalogFoodLacksServingNutrition(check: ProductCheckInput): boolean {
+    if (check.servingNutrition != null) {
+        return Object.values(check.servingNutrition).every((v) => v == null);
+    }
+    if (
+        check.per100g != null &&
+        check.servingGrams != null &&
+        check.servingGrams > 0
+    ) {
+        const g = check.servingGrams;
+        const p = check.per100g;
+        const scaled = [
+            scalePer100g(p.calories, g),
+            scalePer100g(p.proteinG, g),
+            scalePer100g(p.carbsG, g),
+            scalePer100g(p.fatG, g),
+            scalePer100g(p.fiberG, g),
+            scalePer100g(p.sugarG, g),
+            scalePer100g(p.alcoholG, g),
+            scalePer100g(p.caffeineMg, g),
+        ];
+        return scaled.every((v) => v == null);
+    }
+    return true;
+}
+
+async function productCheckForHouseholdFood(
+    food: Food,
+    foods: ReturnType<typeof liveFoodsStore>,
+    householdId: string,
+    barcode: string | null,
+): Promise<ProductCheckInput> {
+    const base = productCheckFromFood(food, food.id);
+    if (!catalogFoodLacksServingNutrition(base)) return base;
+
+    let lookupBarcodeDigits = barcode;
+    if (lookupBarcodeDigits == null) {
+        const barcodes = await foods.listBarcodes(householdId, food.id);
+        lookupBarcodeDigits = barcodes[0] ?? null;
+    }
+    if (lookupBarcodeDigits == null) return base;
+
+    const normalized = normalizeBarcode(lookupBarcodeDigits);
+    if (!normalized) return base;
+
+    try {
+        const hit = await lookupBarcode(normalized);
+        if (hit == null) return base;
+        const fromHit = productCheckFromHit(hit, food.id);
+        return {
+            ...base,
+            servingNutrition: fromHit.servingNutrition,
+            servingGrams: base.servingGrams ?? fromHit.servingGrams,
+        };
+    } catch {
+        return base;
+    }
+}
+
 function productCheckFromHit(
     hit: FoodResult,
     checkId: string,
@@ -534,6 +598,12 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 ? scoreQualityFromFoodQuality(food.offQuality)
                                 : null;
 
+                        const checkProduct = await productCheckForHouseholdFood(
+                            food,
+                            foods,
+                            householdId,
+                            productBarcode,
+                        );
                         const out = await buildOutputAsync({
                             found: true,
                             product: {
@@ -546,7 +616,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             sugarG: food.sugarG,
                             saturatedFatG: food.saturatedFatG,
                             offNutrientLevels: food.offNutrientLevels,
-                            checkProduct: productCheckFromFood(food, food.id),
+                            checkProduct,
                             members,
                             memberToday,
                             preset,
@@ -587,6 +657,13 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                           food.offQuality,
                                       )
                                     : null;
+                            const checkProduct =
+                                await productCheckForHouseholdFood(
+                                    food,
+                                    foods,
+                                    householdId,
+                                    normalized,
+                                );
                             const out = await buildOutputAsync({
                                 found: true,
                                 product: {
@@ -599,10 +676,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 sugarG: food.sugarG,
                                 saturatedFatG: food.saturatedFatG,
                                 offNutrientLevels: food.offNutrientLevels,
-                                checkProduct: productCheckFromFood(
-                                    food,
-                                    food.id,
-                                ),
+                                checkProduct,
                                 members,
                                 memberToday,
                                 preset,

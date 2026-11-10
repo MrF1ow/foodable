@@ -800,6 +800,70 @@ test("ranOutInWindow counts supplies still in stock", async () => {
     expect(ranOut).toEqual([]);
 });
 
+test("roughest day ignores water-only days", () => {
+    const buckets = buildDailyBuckets(
+        [meal("2026-06-02T12:00:00Z", { calories: 1500 })],
+        [{ logged_at: "2026-06-03T12:00:00Z", amount_ml: 500 }] as never,
+        "2026-06-01",
+        "2026-06-07",
+        TZ,
+    );
+    const digest = buildHouseholdDigest(
+        baseInputs({
+            members: [
+                {
+                    memberId: "u1",
+                    displayName: "A",
+                    buckets,
+                    goalsOn: goalsResolver(goals(), []),
+                },
+            ],
+        }),
+    );
+    expect(digest.members[0]!.roughestDay?.date).toBe("2026-06-02");
+    expect(digest.members[0]!.roughestDay?.calories).toBe(1500);
+});
+
+test("ranOutInWindow lists deplete when eat is fractional second after purchase", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const snack = await findOrCreateManualFood(foods, HH, "food", "Snack");
+    await applyMovement(fridge, stock, foods, {
+        householdId: HH,
+        foodId: snack.id,
+        delta: 1,
+        unit: "each",
+        reason: "purchase",
+        locationId: loc.id,
+        now: new Date("2026-06-03T10:00:00.000Z"),
+    });
+    const itemId = (await fridge.listItems(HH))[0]!.id;
+    await applyMovement(fridge, stock, foods, {
+        householdId: HH,
+        foodId: snack.id,
+        delta: -1,
+        unit: "each",
+        reason: "eat",
+        fridgeItemId: itemId,
+        now: new Date("2026-06-03T10:00:00.500Z"),
+    });
+    const movements = await stock.listMovements(HH);
+    const ranOut = ranOutInWindow(
+        {
+            movements,
+            fridgeItems: await fridge.listItems(HH),
+            displayNameByFoodId: new Map([[snack.id, "Snack"]]),
+        },
+        WINDOW,
+        TZ,
+    );
+    expect(ranOut).toHaveLength(1);
+    expect(ranOut[0]!.foodId).toBe(snack.id);
+    expect(ranOut[0]!.reason).toBe("eat");
+});
+
 test("a day with nothing logged is graded no_data, not under", () => {
     const meals = [
         {

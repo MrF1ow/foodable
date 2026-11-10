@@ -181,7 +181,12 @@ export function createMemoryStockStore(): MemoryStockStore {
                             Date.parse(row.createdAt) >= sinceMs),
                 )
                 .map((row) => ({ ...row }))
-                .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+                .sort((a, b) => {
+                    const diff =
+                        Date.parse(b.createdAt) - Date.parse(a.createdAt);
+                    if (diff !== 0) return diff;
+                    return b.id.localeCompare(a.id);
+                });
         },
     };
 }
