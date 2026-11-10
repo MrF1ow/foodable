@@ -528,12 +528,17 @@ describeDb(pgAvailable !== null, "nutrition_goal_days (live)", (getCtx) => {
                 daily_calories: 2000,
             },
         );
-        // A user outside the household writes their own row as themselves.
-        await asUser(other, () =>
-            upsertGoalDays(other, storeHouseholdId, ["2026-06-02"], {
-                daily_calories: 1900,
-            }),
-        );
+        // Another user's row, seeded on the owner connection (the app may
+        // not stamp the store household on an outsider's row).
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id,
+                user_id,
+                date,
+                daily_calories
+            )
+            values (${storeHouseholdId}, ${other}, ${"2026-06-02"}, ${1900})
+        `;
         expect(await countGoalDays(storeUserId)).toBe(2);
         const rows = await getAllGoalDays(storeUserId);
         expect(rows.map((r) => r.date)).toEqual(["2026-06-01", "2026-06-03"]);

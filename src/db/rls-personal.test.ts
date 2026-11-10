@@ -404,6 +404,33 @@ describeDb(
             ).toEqual({ ok: true, out: "1" });
         });
 
+        test("a person's rows that carry a household cannot be stamped with another household", async () => {
+            const { pg } = ctx();
+            const goalDay = await asApp(
+                pg,
+                memberA,
+                `insert into public.nutrition_goal_days (household_id, user_id, date, daily_calories)
+                 values ('${HH_B}', '${USER_A}', current_date + 1, 111)`,
+            );
+            expect(refusedByRls(goalDay)).toBe(true);
+            const mealItem = await asApp(
+                pg,
+                memberA,
+                `insert into public.meal_items (meal_id, user_id, household_id, label)
+                 values ('${MEAL[USER_A]}', '${USER_A}', '${HH_B}', 'Stamped')`,
+            );
+            expect(refusedByRls(mealItem)).toBe(true);
+            const own = await asApp(
+                pg,
+                memberA,
+                touched(
+                    `insert into public.nutrition_goal_days (household_id, user_id, date, daily_calories)
+                     values ('${HH_A}', '${USER_A}', current_date + 2, 112)`,
+                ),
+            );
+            expect(own).toEqual({ ok: true, out: "1" });
+        });
+
         test("leaving the household ends another member's reach", async () => {
             const { pg } = ctx();
             // Removing a membership is system work (the app only reads

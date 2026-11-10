@@ -46,11 +46,20 @@ begin
                 for all
                 to foodable_app
                 using (user_id = auth.uid() or %3$s)
-                with check (user_id = auth.uid() or %3$s)
+                with check ((user_id = auth.uid() or %3$s) and %4$s)
             $policy$,
             t || '_app_member',
             t,
-            format(member_of_household, t)
+            format(member_of_household, t),
+            -- Rows that also carry a household are written only for the
+            -- household the transaction acts for (or with none, as a
+            -- free-text meal item has), so nobody stamps another
+            -- household's id on them.
+            case
+                when t in ('meal_items', 'nutrition_goal_days') then
+                    $hh$(household_id is null or household_id = nullif(current_setting('app.household_id', true), '')::uuid)$hh$
+                else 'true'
+            end
         );
     end loop;
 
