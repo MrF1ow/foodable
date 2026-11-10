@@ -767,7 +767,10 @@ function widgetRootStub(clickSink?: (fn: (e: unknown) => void) => void) {
             }),
         },
         html: () =>
-            (mountEl ? mountEl.innerHTML : legacyInner) + footerText.join(""),
+            // A real DOM keeps whatever #root held before the mount was
+            // appended (e.g. the bridge's loading text), so the stub does too.
+            (mountEl ? legacyInner + mountEl.innerHTML : legacyInner) +
+            footerText.join(""),
     };
 }
 
@@ -1389,6 +1392,20 @@ test("v2 trends: range toggle keeps the chat settings footer", async () => {
     expect(w.html()).toContain(WIDGET_FOOTER);
 });
 
+test("v2 first paint replaces the loading text instead of sitting beside it", async () => {
+    // A template may paint before the tool result arrives (the importer does
+    // from onReady). #root then still holds the bridge's loading markup, and
+    // the first mount must not leave it standing above the card.
+    const ui = await partialAsInlined("shared/v2/ui.js");
+    const dom = widgetRootStub();
+    dom.root.innerHTML = '<div class="empty">Preparing import…</div>';
+    new Function("document", `${ui}\nv2Paint('<div class="card">Card</div>');`)(
+        dom.document,
+    );
+    expect(dom.html()).toContain("Card");
+    expect(dom.html()).not.toContain("Preparing import");
+});
+
 test("v2 re-rendering widgets drop the loading text and keep one footer per tool result", async () => {
     const count = (h: string, needle: string) => h.split(needle).length - 1;
     for (const [key, payload] of [
@@ -1599,7 +1616,8 @@ async function mountImport(
     let legacyInner = "";
     let mountEl: { id: string; innerHTML: string } | null = null;
     const footerText: string[] = [];
-    const cardHtml = () => (mountEl ? mountEl.innerHTML : legacyInner);
+    const cardHtml = () =>
+        mountEl ? legacyInner + mountEl.innerHTML : legacyInner;
     const root = {
         get innerHTML() {
             return cardHtml();

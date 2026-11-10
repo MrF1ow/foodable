@@ -268,6 +268,10 @@ function v2Mount() {
     const root = document.getElementById("root");
     let el = document.getElementById("widget-mount");
     if (!el) {
+        // The first mount takes #root over: anything still there is the
+        // bridge's loading text (a template may paint before the tool result
+        // arrives), and the footer is only appended after a render.
+        root.innerHTML = "";
         el = document.createElement("div");
         el.id = "widget-mount";
         root.appendChild(el);
