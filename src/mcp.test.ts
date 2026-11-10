@@ -353,6 +353,10 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    // Off by default so no test reaches Open Food Facts or depends on
+    // OFF_USER_AGENT; the kill-switch tests turn it on (with fetch stubbed or
+    // the switch off) to exercise the real lookup's gate.
+    realBarcodeLookup: false,
     lookupBarcodeCalls: [] as {
         barcode: string;
         options?: actualFoods.FoodLookupHooks;
@@ -773,6 +777,7 @@ mock.module("./foods.js", () => ({
         if (Object.hasOwn(db.barcodeFoods, barcode)) {
             return db.barcodeFoods[barcode];
         }
+        if (!db.realBarcodeLookup) return null;
         return realFoods.lookupBarcode(barcode, options);
     },
 }));
@@ -887,6 +892,7 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.realBarcodeLookup = false;
     db.lookupBarcodeCalls = [];
     db.foodSearchHits = [];
     db.foodSearchError = null;
@@ -4677,6 +4683,7 @@ describe("household config tools", () => {
             });
             await db.foodsStore.insertFood(bare);
             await db.foodsStore.setBarcode("hh-1", "4000000000048", bare.id);
+            db.realBarcodeLookup = true;
             const offRequests: string[] = [];
             const realFetch = globalThis.fetch;
             const realAgent = process.env.OFF_USER_AGENT;
@@ -8400,6 +8407,7 @@ describe("off-lookups kill switch over HTTP", () => {
         "lookup_barcode surfaces the paused message (%p)",
         async (mode) => {
             setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+            db.realBarcodeLookup = true;
             try {
                 await withHttpClient("u1", mode, async (client) => {
                     const made = await client.callTool({
