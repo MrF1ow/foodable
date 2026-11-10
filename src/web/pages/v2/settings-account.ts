@@ -51,7 +51,7 @@ export function renderSettingsAccountV2Body(
     const widgetsChecked = view.widgetsEnabled ? " checked" : "";
     const alcoholChecked = view.alcoholTrackingEnabled ? " checked" : "";
     const fromField = hiddenFrom(view.backHref);
-    const accountForm = `<form method="POST" action="/settings" class="fd-settings-form" data-turbo="false">
+    const accountForm = `<form method="POST" action="/settings" class="fd-settings-form fd-settings-form--sheet" data-turbo="false">
 <input type="hidden" name="group" value="account" />
 ${fromField}
 ${String(
@@ -63,10 +63,9 @@ ${String(
 )}
 ${settingsPrimarySubmit("Save account")}
 </form>`;
-    const nutritionForm = `<form method="POST" action="/settings" class="fd-settings-form fd-settings-form--prefs">
+    const nutritionForm = `<p class="fd-settings-section-label">Nutrition</p><form method="POST" action="/settings" class="fd-settings-form fd-settings-form--sheet fd-settings-form--prefs" data-turbo="false">
 <input type="hidden" name="group" value="nutrition" />
 ${fromField}
-<h2 class="fd-settings-section-title">Nutrition prefs</h2>
 ${String(
     settingsField({
         id: "timezone",
@@ -92,7 +91,7 @@ ${String(
 )}
 ${settingsPrimarySubmit("Save nutrition prefs")}
 </form>`;
-    const logout = `<p class="fd-settings-session"><a href="/logout" data-turbo="false">Log out</a></p>`;
+    const logout = `<p class="fd-settings-session"><a href="/logout" data-turbo="false">Log out</a></p><p class="fd-settings-footnote">Your data stays on this household&apos;s server. Export it any time from Settings.</p>`;
     return `${String(settingsPageHeader("Account"))}${String(settingsErrorBanner(view.error))}${accountForm}${nutritionForm}${logout}`;
 }
 

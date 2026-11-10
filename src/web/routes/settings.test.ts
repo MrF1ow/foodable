@@ -246,6 +246,26 @@ describe("settings routes ui-v2", () => {
         expect(upsertPatch).toEqual({ theme: "dark" });
     });
 
+    test("POST /settings/display from Settings home returns there", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        for (const [ret, want] of [
+            ["/settings", "/settings"],
+            ["https://evil.example/", "/settings/display"],
+            ["/settings/../x", "/settings/display"],
+        ] as const) {
+            const res = await hono.request("http://test/settings/display", {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({ theme: "light", return: ret }),
+            });
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(want);
+        }
+    });
+
     test("POST /settings/display invalid theme re-renders 400", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const body = new URLSearchParams({ theme: "sepia" });

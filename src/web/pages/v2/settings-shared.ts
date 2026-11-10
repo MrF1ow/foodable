@@ -17,60 +17,221 @@ export type SettingsV2Section =
     | "saved"
     | "export";
 
+type MenuIcon =
+    "user" | "users" | "target" | "bookmark" | "sun" | "download" | "help";
+
 type MenuRow = {
     id: Exclude<SettingsV2Section, "home">;
     label: string;
     href: string;
+    icon: MenuIcon;
 };
 
-const SETTINGS_MENU: readonly MenuRow[] = [
-    { id: "account", label: "Account", href: "/settings/account" },
-    { id: "household", label: "Household", href: APP_PATHS.settingsHousehold },
-    { id: "display", label: "Display", href: "/settings/display" },
-    { id: "goals", label: "Goals", href: "/settings/goals" },
+const MENU_ICON_PATHS: Record<MenuIcon, string> = {
+    user: '<path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"/><path d="M6 19v-1a6 6 0 0 1 12 0v1"/>',
+    users: '<path d="M8 13a3 3 0 1 0-3-3"/><path d="M16 12a3 3 0 1 0-3-3"/><path d="M4 19v-1.2a4 4 0 0 1 4-4"/><path d="M12 19v-1.2a4 4 0 0 1 4-4"/><path d="M20 19v-1.2a4 4 0 0 0-3.15-3.88"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/>',
+    bookmark: '<path d="M8 5h8v14l-4-3-4 3V5Z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    download:
+        '<path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>',
+    help: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.2a2.7 2.7 0 0 1 4.8 1.4c0 2-2.8 2.3-2.8 3.9"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/>',
+};
+
+function settingsMenuIcon(kind: MenuIcon): string {
+    const inner = MENU_ICON_PATHS[kind];
+    return `<svg class="fd-icon fd-settings-menu__icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${inner}</svg>`;
+}
+
+const SETTINGS_MENU_MAIN: readonly MenuRow[] = [
+    {
+        id: "account",
+        label: "Account",
+        href: "/settings/account",
+        icon: "user",
+    },
+    {
+        id: "household",
+        label: "Household & members",
+        href: APP_PATHS.settingsHousehold,
+        icon: "users",
+    },
+    { id: "goals", label: "Goals", href: "/settings/goals", icon: "target" },
     {
         id: "saved",
         label: "Saved foods & recipes",
         href: "/settings/saved",
+        icon: "bookmark",
     },
-    { id: "export", label: "Export data", href: "/settings/export" },
-    { id: "help", label: "Help", href: APP_PATHS.settingsHelp },
 ];
 
-export const SETTINGS_V2_MENU_LABELS = SETTINGS_MENU.map((r) => r.label);
+const SETTINGS_MENU_PREFS: readonly MenuRow[] = [
+    { id: "display", label: "Display", href: "/settings/display", icon: "sun" },
+];
 
-function menuLink(row: MenuRow, active: SettingsV2Section): Html {
+const SETTINGS_MENU_CONNECT: readonly MenuRow[] = [
+    {
+        id: "export",
+        label: "Export data",
+        href: "/settings/export",
+        icon: "download",
+    },
+    { id: "help", label: "Help", href: APP_PATHS.settingsHelp, icon: "help" },
+];
+
+export const SETTINGS_V2_MENU_LABELS = [
+    ...SETTINGS_MENU_MAIN,
+    ...SETTINGS_MENU_PREFS,
+    ...SETTINGS_MENU_CONNECT,
+].map((r) => r.label);
+
+type MenuGroup = {
+    key: string;
+    label?: string;
+    rows: readonly MenuRow[];
+};
+
+const SETTINGS_MENU_GROUPS: readonly MenuGroup[] = [
+    { key: "main", rows: SETTINGS_MENU_MAIN },
+    { key: "prefs", label: "Preferences", rows: SETTINGS_MENU_PREFS },
+    { key: "connect", label: "Connect", rows: SETTINGS_MENU_CONNECT },
+];
+
+const THEME_SEG_OPTIONS = [
+    { value: "system", label: "Auto" },
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+] as const;
+
+export function themeChoiceValue(
+    stored: string | null | undefined,
+): (typeof THEME_SEG_OPTIONS)[number]["value"] {
+    if (stored === "light" || stored === "dark") return stored;
+    return "system";
+}
+
+function settingsThemeSegForm(
+    storedTheme: "light" | "dark" | null | undefined,
+): string {
+    const selected = themeChoiceValue(storedTheme);
+    const buttons = THEME_SEG_OPTIONS.map((opt) => {
+        const on = opt.value === selected ? " fd-settings-theme-btn--on" : "";
+        return `<button type="submit" name="theme" value="${esc(opt.value)}" class="fd-settings-theme-btn${on}">${esc(opt.label)}</button>`;
+    }).join("");
+    return `<form method="POST" action="/settings/display" class="fd-settings-theme-form" data-turbo="false" aria-label="Theme"><input type="hidden" name="return" value="/settings"><div class="fd-settings-theme-seg" role="group">${buttons}</div></form>`;
+}
+
+function settingsDisplayMenuRow(
+    active: SettingsV2Section,
+    storedTheme?: "light" | "dark" | null,
+): Html {
+    const current = active === "display" ? ' aria-current="page"' : "";
+    const themeForm = settingsThemeSegForm(storedTheme);
+    return raw(
+        `<li class="fd-settings-menu__item fd-settings-menu__item--display"><a class="fd-settings-menu__link fd-settings-menu__link--display-nav" href="/settings/display"${current}>${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a><div class="fd-settings-menu__display-row">${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span>${themeForm}</div></li>`,
+    );
+}
+
+function settingsPhoneTopBar(title: string): Html {
+    const backIcon = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
+    return raw(
+        `<header class="fd-settings-phone-top"><a class="fd-settings-phone-back" href="${esc(APP_PATHS.nutrition)}" data-turbo="false" aria-label="Back">${backIcon}</a><h1 class="fd-settings-phone-title">${esc(title)}</h1><span class="fd-settings-phone-top__balance" aria-hidden="true"></span></header>`,
+    );
+}
+
+function menuLink(
+    row: MenuRow,
+    active: SettingsV2Section,
+    opts?: { memberCount?: number },
+): Html {
     const current = row.id === active ? ' aria-current="page"' : "";
+    const badge =
+        row.id === "household" &&
+        opts?.memberCount != null &&
+        opts.memberCount > 0
+            ? `<span class="fd-settings-menu__badge">${esc(String(opts.memberCount))}</span>`
+            : "";
     return raw(
-        `<li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(row.href)}"${current}><span class="fd-settings-menu__label">${esc(row.label)}</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li>`,
+        `<li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(row.href)}"${current}>${settingsMenuIcon(row.icon)}<span class="fd-settings-menu__label">${esc(row.label)}</span>${badge}<span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li>`,
     );
 }
 
-export function settingsMenuNav(active: SettingsV2Section): Html {
-    const items = SETTINGS_MENU.map((row) => menuLink(row, active));
+function menuGroupMarkup(
+    group: MenuGroup,
+    active: SettingsV2Section,
+    opts?: {
+        memberCount?: number;
+        storedTheme?: "light" | "dark" | null;
+        inlineDisplayTheme?: boolean;
+    },
+): string {
+    const items = group.rows.map((row) => {
+        if (row.id === "display" && opts?.inlineDisplayTheme) {
+            return String(settingsDisplayMenuRow(active, opts?.storedTheme));
+        }
+        return String(menuLink(row, active, opts));
+    });
+    const label = group.label
+        ? `<p class="fd-settings-menu__group-label">${esc(group.label)}</p>`
+        : "";
+    return `${label}<ul class="fd-settings-menu__list">${items.join("")}</ul>`;
+}
+
+export function settingsMenuNav(
+    active: SettingsV2Section,
+    opts?: {
+        memberCount?: number;
+        storedTheme?: "light" | "dark" | null;
+        inlineDisplayTheme?: boolean;
+    },
+): Html {
+    const groups = SETTINGS_MENU_GROUPS.map((group) =>
+        menuGroupMarkup(group, active, opts),
+    ).join("");
     return raw(
-        `<nav class="fd-settings-menu" aria-label="Settings sections">${rowListMarkup(items)}</nav>`,
+        `<nav class="fd-settings-menu" aria-label="Settings sections"><div class="fd-settings-menu__groups">${groups}</div></nav>`,
     );
 }
 
-function rowListMarkup(items: readonly Html[]): string {
-    return `<ul class="fd-settings-menu__list">${items.join("")}</ul>`;
-}
-
-export function settingsProfileCard(view: {
+export type SettingsProfile = {
     displayName: string;
     email: string;
-}): Html {
+    roleLabel?: string;
+    householdName?: string;
+    memberCount?: number;
+};
+
+export function settingsProfileCard(view: SettingsProfile): Html {
+    const stats: string[] = [];
+    if (view.householdName) {
+        stats.push(
+            `<div class="fd-settings-profile__stat"><span class="fd-settings-profile__stat-label">Household</span><span class="fd-settings-profile__stat-value">${esc(view.householdName)}</span></div>`,
+        );
+    }
+    if (view.memberCount != null && view.memberCount > 0) {
+        stats.push(
+            `<div class="fd-settings-profile__stat"><span class="fd-settings-profile__stat-label">Members</span><span class="fd-settings-profile__stat-value">${esc(String(view.memberCount))}</span></div>`,
+        );
+    }
+    if (view.roleLabel) {
+        stats.push(
+            `<div class="fd-settings-profile__stat"><span class="fd-settings-profile__stat-label">Role</span><span class="fd-settings-profile__stat-value">${esc(view.roleLabel)}</span></div>`,
+        );
+    }
+    const statsRow =
+        stats.length > 0
+            ? `<div class="fd-settings-profile__stats">${stats.join("")}</div>`
+            : "";
     return raw(
-        `<section class="fd-settings-profile" aria-label="Your profile"><span class="fd-avatar fd-settings-profile__avatar" aria-hidden="true">${esc(initialsOf(view.displayName))}</span><p class="fd-settings-profile__name">${esc(view.displayName)}</p><p class="fd-settings-profile__email">${esc(view.email)}</p></section>`,
+        `<section class="fd-settings-profile" aria-label="Your profile"><div class="fd-settings-profile__row"><div class="fd-settings-profile__text"><p class="fd-settings-profile__name">${esc(view.displayName)}</p><p class="fd-settings-profile__email">${esc(view.email)}</p></div><span class="fd-avatar fd-settings-profile__avatar" aria-hidden="true">${esc(initialsOf(view.displayName))}</span></div>${statsRow}</section>`,
     );
 }
 
-/** Desktop Settings home only: Household card with a Display shortcut (UI-30). */
+/** Desktop Settings home only: Household card with a Display shortcut. */
 export function settingsHouseholdHomeCard(active: SettingsV2Section): Html {
     const displayCurrent = active === "display" ? ' aria-current="page"' : "";
     return raw(
-        `<section class="fd-settings-card fd-settings-card--household" aria-labelledby="fd-settings-household-title">${String(sectionHeader({ title: "Household", level: 2, id: "fd-settings-household-title" }))}<ul class="fd-settings-menu__list fd-settings-menu__list--inset"><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(APP_PATHS.settingsHousehold)}"><span class="fd-settings-menu__label">Members and stores</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="/settings/display"${displayCurrent}><span class="fd-settings-menu__label">Display</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li></ul></section>`,
+        `<section class="fd-settings-card fd-settings-card--household" aria-labelledby="fd-settings-household-title">${String(sectionHeader({ title: "Household", level: 2, id: "fd-settings-household-title" }))}<ul class="fd-settings-menu__list fd-settings-menu__list--inset"><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(APP_PATHS.settingsHousehold)}">${settingsMenuIcon("users")}<span class="fd-settings-menu__label">Members and stores</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li><li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="/settings/display"${displayCurrent}>${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a></li></ul></section>`,
     );
 }
 
@@ -85,29 +246,55 @@ export type SettingsV2Layout = {
     page: SettingsV2Section;
     title: string;
     body: Html | string;
-    profile?: { displayName: string; email: string };
+    profile?: SettingsProfile;
     homeHouseholdCard?: boolean;
+    /** Raw `profiles.theme` (null = Auto) for the home menu theme control. */
+    storedTheme?: "light" | "dark" | null;
 };
+
+function roleLabelFromChrome(chrome: AppChromeBase): string | undefined {
+    const role = chrome.identity?.viewerRole;
+    if (!role) return undefined;
+    return role.charAt(0).toUpperCase() + role.slice(1);
+}
 
 function settingsLayoutMarkup(layout: SettingsV2Layout): string {
     const isHome = layout.page === "home";
-    const menu = settingsMenuNav(isHome ? "home" : layout.page);
+    const memberCount = layout.chrome.identity?.memberCount;
+    const menu = settingsMenuNav(isHome ? "home" : layout.page, {
+        memberCount,
+        storedTheme: layout.storedTheme,
+        inlineDisplayTheme: isHome,
+    });
+    const profileSource =
+        layout.profile ??
+        (isHome
+            ? {
+                  displayName: layout.chrome.identity?.viewerName ?? "Member",
+                  email: "",
+                  roleLabel: roleLabelFromChrome(layout.chrome),
+                  householdName: layout.chrome.identity?.householdName,
+                  memberCount,
+              }
+            : undefined);
     const profileMain =
-        isHome && layout.profile
-            ? settingsProfileCard(layout.profile)
-            : raw("");
+        isHome && profileSource ? settingsProfileCard(profileSource) : raw("");
     const profilePhone =
-        isHome && layout.profile
-            ? `<div class="fd-settings-profile-phone">${String(settingsProfileCard(layout.profile))}</div>`
+        isHome && profileSource
+            ? `<div class="fd-settings-profile-phone">${String(settingsProfileCard(profileSource))}</div>`
             : "";
     const householdCard =
         isHome && layout.homeHouseholdCard
             ? settingsHouseholdHomeCard(layout.page)
             : raw("");
     const back = isHome ? raw("") : settingsBackLink();
+    const phoneTop = isHome ? settingsPhoneTopBar(layout.title) : raw("");
+    const homeMainHeader = isHome
+        ? settingsPageHeader(layout.title, undefined, { desktopOnly: true })
+        : raw("");
     const mainInner =
         typeof layout.body === "string" ? layout.body : String(layout.body);
-    return `<div class="fd-settings" data-fd-settings-page="${esc(layout.page)}"><aside class="fd-settings-aside">${profilePhone}${String(menu)}</aside><div class="fd-settings-main">${String(back)}<div class="fd-settings-content">${String(profileMain)}${mainInner}</div>${isHome ? String(householdCard) : ""}</div></div>`;
+    return `<div class="fd-settings" data-fd-settings-page="${esc(layout.page)}">${String(phoneTop)}<aside class="fd-settings-aside">${profilePhone}${String(menu)}</aside><div class="fd-settings-main">${String(back)}<div class="fd-settings-content">${String(profileMain)}${String(homeMainHeader)}${mainInner}</div>${isHome ? String(householdCard) : ""}</div></div>`;
 }
 
 export function renderSettingsV2Page(layout: SettingsV2Layout): string {
@@ -120,12 +307,17 @@ export function renderSettingsV2Page(layout: SettingsV2Layout): string {
     });
 }
 
-export function settingsPageHeader(title: string, actions?: string): Html {
+export function settingsPageHeader(
+    title: string,
+    actions?: string,
+    opts?: { desktopOnly?: boolean },
+): Html {
     const extra = actions
         ? `<div class="fd-settings-head-actions">${actions}</div>`
         : "";
+    const mod = opts?.desktopOnly ? " fd-settings-head--desktop" : "";
     return raw(
-        `<header class="fd-settings-head"><h1 class="fd-settings-title">${esc(title)}</h1>${extra}</header>`,
+        `<header class="fd-settings-head${mod}"><h1 class="fd-settings-title">${esc(title)}</h1>${extra}</header>`,
     );
 }
 

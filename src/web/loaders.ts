@@ -950,6 +950,10 @@ export async function renderSettingsHomeRoute(
             chrome,
             displayName: gate.viewer.displayName,
             email,
+            storedTheme:
+                profile?.theme === "light" || profile?.theme === "dark"
+                    ? profile.theme
+                    : null,
         }),
     };
 }

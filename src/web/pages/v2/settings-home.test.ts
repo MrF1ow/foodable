@@ -20,6 +20,20 @@ const chrome = {
 };
 
 describe("settings home v2", () => {
+    test("inline theme control marks the stored theme and returns home", () => {
+        const html = renderSettingsHomeV2Page({
+            chrome,
+            displayName: "Ethan Flow",
+            email: "ethan@example.com",
+            storedTheme: "dark",
+        });
+        expect(html).toMatch(
+            /value="dark" class="fd-settings-theme-btn fd-settings-theme-btn--on"/,
+        );
+        expect(html).not.toMatch(/value="system" class="[^"]*--on/);
+        expect(html).toContain('name="return" value="/settings"');
+    });
+
     test("profile card, menu rows, and v2 shell", () => {
         const html = renderSettingsHomeV2Page({
             chrome,
@@ -32,6 +46,13 @@ describe("settings home v2", () => {
         expect(html).toContain("ethan@example.com");
         expect(html).toContain('href="/settings/account"');
         expect(html).toContain('href="/settings/display"');
+        expect(html).toContain("Household &amp; members");
+        expect(html).toContain("fd-settings-menu__icon");
+        expect(html).toContain("fd-settings-profile__row");
+        expect(html).toContain("fd-settings-phone-top");
+        expect(html).toContain('class="fd-settings-phone-back"');
+        expect(html).toContain('action="/settings/display"');
+        expect(html).toContain("fd-settings-theme-seg");
         expect(html).toContain('href="/settings/help"');
         expect(html).toContain('href="/settings/goals"');
         expect(html).toContain('href="/settings/saved"');
@@ -40,7 +61,9 @@ describe("settings home v2", () => {
             const needle =
                 label === "Saved foods & recipes"
                     ? "Saved foods &amp; recipes"
-                    : label;
+                    : label === "Household & members"
+                      ? "Household &amp; members"
+                      : label;
             expect(html).toContain(needle);
         }
         expect(html).not.toContain("nav subnav");

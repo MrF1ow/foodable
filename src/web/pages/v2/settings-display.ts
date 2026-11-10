@@ -5,7 +5,10 @@ import {
     settingsErrorBanner,
     settingsPageHeader,
     settingsPrimarySubmit,
+    themeChoiceValue,
 } from "./settings-shared.js";
+
+export { themeChoiceValue };
 
 export type SettingsDisplayV2View = {
     chrome: AppChromeBase;
@@ -19,11 +22,6 @@ const THEME_OPTIONS = [
     { value: "light", label: "Light" },
     { value: "dark", label: "Dark" },
 ] as const;
-
-export function themeChoiceValue(stored: string | null | undefined): string {
-    if (stored === "light" || stored === "dark") return stored;
-    return "system";
-}
 
 export function renderSettingsDisplayV2Body(
     view: SettingsDisplayV2View,

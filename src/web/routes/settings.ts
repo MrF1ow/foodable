@@ -185,8 +185,14 @@ settingsRoutes.post(
             theme: themeRaw === "system" ? "system" : themeRaw,
         });
         await upsertProfile(userId, appearance);
+        // The inline control on Settings home comes back to it; only that
+        // exact path is honoured.
+        const back =
+            formText(body, "return") === "/settings"
+                ? "/settings"
+                : "/settings/display";
         // toast: none full reload refreshes theme chrome on this page
-        return c.redirect("/settings/display", 303);
+        return c.redirect(back, 303);
     },
 );
 
