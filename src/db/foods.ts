@@ -2,7 +2,12 @@ import {
     foodFromRow,
     foodToRow,
     mergeFoods,
+    mergeFoodPair,
+    offQualityToRowFields,
+    type MergeFoodPairInput,
     type Food,
+    type FoodOffNutritionPatch,
+    type FoodQuality,
     type FoodsStore,
 } from "../domain/foods.js";
 import { cleanupDismissalsForFoodTx } from "./notice-dismissals.js";
@@ -21,7 +26,7 @@ const FOODS = "foods";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, alcohol_g, caffeine_mg, nutrition_source, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",
@@ -36,16 +41,34 @@ function patchKeys(keys: string[]): [string, ...string[]] {
     return keys as [string, ...string[]];
 }
 
+function bindTextArray(
+    tx: Tx,
+    value: string[] | null | undefined,
+): string[] | unknown {
+    if (value == null) return null;
+    return tx.array(value, "text");
+}
+
 function foodRowForWrite(
     tx: Tx,
     row: ReturnType<typeof foodToRow>,
 ): Record<string, unknown> {
+    const levels = row.off_nutrient_levels;
     return {
         ...row,
         allergens: tx.array(
             Array.isArray(row.allergens) ? row.allergens : [],
             "text",
         ),
+        off_nutrient_levels: levels == null ? null : JSON.stringify(levels),
+        additives_tags: bindTextArray(tx, row.additives_tags),
+        allergens_tags: bindTextArray(tx, row.allergens_tags),
+        traces_tags: bindTextArray(tx, row.traces_tags),
+        ingredients_analysis_tags: bindTextArray(
+            tx,
+            row.ingredients_analysis_tags,
+        ),
+        labels_tags: bindTextArray(tx, row.labels_tags),
     };
 }
 
@@ -196,6 +219,101 @@ export function liveFoodsStore(): FoodsStore {
                 }
             });
         },
+        async setFoodQuality(householdId, foodId, quality: FoodQuality, opts) {
+            const onlyIfUnset = opts?.onlyIfUnset === true;
+            return run(async (tx) => {
+                try {
+                    const fields = offQualityToRowFields(quality);
+                    const fetchedAt = quality.fetchedAt;
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FOODS)}
+                            set nutriscore_grade = ${fields.nutriscore_grade},
+                                nova_group = ${fields.nova_group},
+                                ecoscore_grade = ${fields.ecoscore_grade},
+                                additives_tags = ${bindTextArray(
+                                    tx,
+                                    fields.additives_tags,
+                                )},
+                                allergens_tags = ${bindTextArray(
+                                    tx,
+                                    fields.allergens_tags,
+                                )},
+                                traces_tags = ${bindTextArray(
+                                    tx,
+                                    fields.traces_tags,
+                                )},
+                                ingredients_analysis_tags = ${bindTextArray(
+                                    tx,
+                                    fields.ingredients_analysis_tags,
+                                )},
+                                labels_tags = ${bindTextArray(
+                                    tx,
+                                    fields.labels_tags,
+                                )},
+                                off_quality_fetched_at = ${fetchedAt}::timestamptz,
+                                updated_at = now()
+                            where household_id = ${householdId}
+                              and id = ${foodId}
+                              and archived_at is null
+                              and (
+                                  off_quality_fetched_at is null
+                                  or (
+                                      not ${onlyIfUnset}::boolean
+                                      and off_quality_fetched_at < ${fetchedAt}::timestamptz
+                                  )
+                              )
+                            returning ${tx.unsafe(FOOD_COLS)}
+                        `,
+                        "set food quality",
+                    );
+                    return data ? foodFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("set food quality", err);
+                }
+            });
+        },
+        async setFoodOffNutrition(
+            householdId,
+            foodId,
+            patch: FoodOffNutritionPatch,
+        ) {
+            const sat =
+                patch.saturatedFatG != null && patch.saturatedFatG >= 0
+                    ? patch.saturatedFatG
+                    : null;
+            const hasLevels = patch.offNutrientLevels != null;
+            if (sat == null && !hasLevels) return null;
+            const levelsJson = hasLevels
+                ? JSON.stringify(patch.offNutrientLevels)
+                : null;
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(FOODS)}
+                            set saturated_fat_g = coalesce(saturated_fat_g, ${sat}::numeric),
+                                off_nutrient_levels = coalesce(${levelsJson}::jsonb, off_nutrient_levels),
+                                updated_at = now()
+                            where household_id = ${householdId}
+                              and id = ${foodId}
+                              and archived_at is null
+                              and (
+                                  (${sat}::numeric is not null and saturated_fat_g is null)
+                                  or ${levelsJson}::jsonb is not null
+                              )
+                            returning ${tx.unsafe(FOOD_COLS)}
+                        `,
+                        "set food off nutrition",
+                    );
+                    return data ? foodFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("set food off nutrition", err);
+                }
+            });
+        },
         async getByNormalizedName(householdId, kind, normalizedName) {
             return run(async (tx) => {
                 try {
@@ -273,6 +391,67 @@ export function liveFoodsStore(): FoodsStore {
                     return data.map((row) => String(row.barcode));
                 } catch (err) {
                     throw pgError("list barcodes", err);
+                }
+            });
+        },
+        async listBarcodesForFoods(householdId, foodIds) {
+            const ids = [...new Set(foodIds)];
+            if (ids.length === 0) return new Map();
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        food_id: unknown;
+                        barcode: unknown;
+                    }>(
+                        tx,
+                        tx`
+                            select food_id, barcode
+                            from ${tx.unsafe(FOOD_BARCODES)}
+                            where household_id = ${householdId}
+                              and food_id = any(${tx.array(ids, "uuid")})
+                        `,
+                    );
+                    const grouped = new Map<string, string[]>();
+                    for (const row of data) {
+                        const foodId = String(row.food_id);
+                        const barcode = String(row.barcode);
+                        const list = grouped.get(foodId);
+                        if (list) list.push(barcode);
+                        else grouped.set(foodId, [barcode]);
+                    }
+                    return grouped;
+                } catch (err) {
+                    throw pgError("list barcodes for foods", err);
+                }
+            });
+        },
+        async getBarcodeFoodIds(householdId, barcodesIn) {
+            const barcodes = [...new Set(barcodesIn)];
+            if (barcodes.length === 0) return new Map();
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{
+                        barcode: unknown;
+                        food_id: unknown;
+                    }>(
+                        tx,
+                        tx`
+                            select barcode, food_id
+                            from ${tx.unsafe(FOOD_BARCODES)}
+                            where household_id = ${householdId}
+                              and barcode = any(${tx.array(barcodes, "text")})
+                        `,
+                    );
+                    const out = new Map<string, string>();
+                    for (const row of data) {
+                        const barcode = String(row.barcode);
+                        if (!out.has(barcode)) {
+                            out.set(barcode, String(row.food_id));
+                        }
+                    }
+                    return out;
+                } catch (err) {
+                    throw pgError("match barcodes", err);
                 }
             });
         },
@@ -523,4 +702,12 @@ export function mergeLiveFoods(
     store: FoodsStore = liveFoodsStore(),
 ): Promise<Food> {
     return run(() => mergeFoods(store, householdId, keepId, dropId));
+}
+
+export function mergeLiveFoodPair(
+    householdId: string,
+    input: MergeFoodPairInput,
+    store: FoodsStore = liveFoodsStore(),
+): Promise<Food> {
+    return run(() => mergeFoodPair(store, householdId, input));
 }

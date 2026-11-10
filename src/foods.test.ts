@@ -4,8 +4,16 @@ import {
     fetchProductFromOFF,
     fetchProductsByNameFromOFF,
     formatFoodResult,
+    isBarcodeCacheServable,
+    lookupBarcode,
+    ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE,
     type FoodResult,
 } from "./foods.js";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "./flags.js";
 
 const realFetch = globalThis.fetch;
 
@@ -650,5 +658,123 @@ describe("formatFoodResult", () => {
         expect(text).toContain("Coconut Milk\n");
         expect(text).not.toContain("()");
         expect(text).toContain("Calories: n/a");
+    });
+});
+
+describe("lookupBarcode off-lookups", () => {
+    test("makes zero fetch calls when isEnabled returns false", async () => {
+        let fetched = false;
+        mockFetch(() => {
+            fetched = true;
+            return jsonResponse({ status: 0 });
+        });
+        const notice = { message: null as string | null };
+        const hit = await lookupBarcode("737628064502", {
+            householdId: "hh-test",
+            isEnabled: () => false,
+            notice,
+        });
+        expect(fetched).toBe(false);
+        expect(hit).toBeNull();
+        expect(notice.message).toBe(ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE);
+    });
+
+    test("default isEnabled respects off-lookups flag via householdId", async () => {
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+        try {
+            let fetched = false;
+            mockFetch(() => {
+                fetched = true;
+                return jsonResponse({ status: 0 });
+            });
+            await lookupBarcode("737628064502", { householdId: "hh-flags" });
+            expect(fetched).toBe(false);
+        } finally {
+            resetFlagsForTests();
+        }
+    });
+});
+
+describe("fridgeBarcodeLookup kill switch", () => {
+    test("makes zero fetch calls when off-lookups is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+        try {
+            let fetched = false;
+            mockFetch(() => {
+                fetched = true;
+                return jsonResponse({ status: 0 });
+            });
+            const { fridgeBarcodeLookup } =
+                await import("./web/routes/fridge.js");
+            const hit = await fridgeBarcodeLookup("737628064502", "hh-web");
+            expect(fetched).toBe(false);
+            expect(hit).toBeNull();
+        } finally {
+            resetFlagsForTests();
+        }
+    });
+});
+
+describe("isBarcodeCacheServable", () => {
+    const row: FoodResult = {
+        name: "Cola",
+        brand: null,
+        serving: "100 g",
+        calories: 42,
+        protein_g: 0,
+        carbs_g: 10,
+        fat_g: 0,
+        fiber_g: null,
+        sugar_g: 10,
+        alcohol_g: null,
+        nutriscore_grade: "e",
+        nova_group: null,
+        source: "off:1",
+        source_name: "openfoodfacts",
+        barcode: "1",
+    };
+
+    test("null and missing quality are cache misses", () => {
+        expect(isBarcodeCacheServable(null)).toBe(false);
+        expect(isBarcodeCacheServable(row)).toBe(false);
+    });
+
+    test("payload with quality object is servable", () => {
+        expect(
+            isBarcodeCacheServable({
+                ...row,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            }),
+        ).toBe(true);
+    });
+
+    test("legacy cache without nutrient_levels key is not servable", () => {
+        expect(
+            isBarcodeCacheServable({
+                ...row,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            }),
+        ).toBe(false);
     });
 });

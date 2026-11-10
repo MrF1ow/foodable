@@ -4,6 +4,7 @@
     "start_meal_import",
     "bulk_import_meals",
     "lookup_barcode",
+    "rate_product",
     "get_meals",
     "search_meals",
     "get_nutrition_summary",
@@ -71,5 +72,6 @@
     "list_members",
     "get_household_config",
     "update_household_config",
-    "delete_account"
+    "delete_account",
+    "get_household_digest"
 ]

@@ -1,0 +1,766 @@
+/* v2 shared components (UI-5): hairline rows, chips, stepper, stat tiles, score
+ * badge. Server markup lives in src/web/components/v2/; every class here starts
+ * with `fd-`. Colours, radii and the spacing that has a token come only from
+ * tokens.css (light and dark follow it). Only the values the FigCraft variables
+ * do not have are local, defined once just below, each with its FigCraft node.
+ * src/web/components/v2/components-css.test.ts fails on a colour literal or a
+ * class that is not `fd-`. Nothing loads this file yet; UI-3 adds it to /app-v2.css. */
+
+:root {
+    /* Spacing steps the design uses that tokens.css has no variable for. */
+    --fd-s-2: 2px; /* grocery title/sub stack gap (#21947), stat strip gap (#21275) */
+    --fd-s-3: 3px; /* food / search stack gap (#19384, #20322) */
+    --fd-s-4: 4px; /* tile gap (#20600), count gap */
+    --fd-s-5: 5px; /* chip and tile header gap (#20601) */
+    --fd-s-6: 6px; /* chip row gap, tiles row gap, title/meta gap (#19385) */
+    --fd-s-7: 7px; /* section header padding-bottom (#21941), food macro gap */
+    --fd-s-10: 10px; /* tile padding-y (#20600), part row gap */
+    --fd-s-12: 12px; /* chip / tile padding-x, row gap (#21945), swipe action inset */
+    --fd-s-13: 13px; /* stat strip padding-y (#21274) */
+    --fd-s-14: 14px; /* stat strip column inset (#21278) */
+    /* Boxed stat tile radius (#20600): the radius variables have 12 and 16, not 14. */
+    --fd-radius-tile: 14px;
+    /* Width of a swipe action behind a row (#19380 shifts the face by 96). */
+    --fd-action-w: 96px;
+}
+
+/* ---- shared bits ---- */
+
+.fd-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.fd-inline-form {
+    display: contents;
+}
+
+.fd-icon {
+    display: block;
+    flex: none;
+    width: 24px;
+    height: 24px;
+}
+
+.fd-dot {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: var(--text-tertiary);
+}
+.fd-dot--sm {
+    width: 6px;
+    height: 6px;
+}
+.fd-dot--protein {
+    background: var(--macro-protein);
+}
+.fd-dot--carbs {
+    background: var(--macro-carbs);
+}
+.fd-dot--fat {
+    background: var(--macro-fat);
+}
+.fd-dot--calories {
+    background: var(--macro-calories);
+}
+.fd-dot--water {
+    background: var(--nutrient-water);
+}
+.fd-dot--fiber {
+    background: var(--nutrient-fiber);
+}
+.fd-dot--sugar {
+    background: var(--nutrient-sugar);
+}
+.fd-dot--caffeine {
+    background: var(--nutrient-caffeine);
+}
+.fd-dot--good {
+    background: var(--accent-fill);
+}
+.fd-dot--warn {
+    background: var(--status-warn);
+}
+.fd-dot--over {
+    background: var(--status-over);
+}
+
+.fd-icon-btn,
+.fd-check,
+.fd-stepper__btn,
+.fd-swipe-btn {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+}
+
+.fd-icon-btn:focus-visible,
+.fd-check:focus-visible,
+.fd-stepper__btn:focus-visible,
+.fd-swipe-btn:focus-visible,
+.fd-row__body--link:focus-visible,
+.fd-chip:focus-visible,
+.fd-chip__input:focus-visible + .fd-chip__face,
+.fd-stepper__input:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* ---- section header (#21941) ---- */
+
+.fd-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--fd-s-10);
+    padding-bottom: var(--fd-s-7);
+    border-bottom: 1px solid var(--line);
+}
+.fd-section-head__title {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+.fd-section-head__count {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* ---- hairline rows ---- */
+
+.fd-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.fd-row {
+    position: relative;
+    margin: 0;
+    /* No fill: a row takes its container's surface (page bg, or panel in a
+     * sheet as in #20321). Only a swipe row's face is opaque. */
+    background: transparent;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-row__body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    padding: var(--space-row) 0;
+    background: transparent;
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--fd-s-3);
+}
+
+.fd-row__lead {
+    display: flex;
+    flex: none;
+    align-items: center;
+}
+
+.fd-row__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--fd-s-6);
+    max-width: 100%;
+}
+.fd-row__title {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.fd-row__title--done {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+.fd-row__meta {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-row__meta--lg {
+    font-size: 13px;
+    line-height: 17px;
+}
+.fd-row__sub {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-row__subline {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+}
+.fd-row__value {
+    flex: none;
+    font: 400 14px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-row__amount {
+    flex: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-row__date {
+    flex: none;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-macros {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+    font: 400 12px/16px var(--font-body);
+}
+.fd-row--food .fd-macros {
+    gap: var(--fd-s-7);
+}
+.fd-macro--protein {
+    color: var(--macro-protein);
+}
+.fd-macro--carbs {
+    color: var(--macro-carbs);
+}
+.fd-macro--fat {
+    color: var(--macro-fat);
+}
+
+.fd-tag {
+    padding: 1px var(--fd-s-7);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    font: 400 11px/14px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-tone--warn {
+    color: var(--status-warn);
+}
+.fd-tone--accent {
+    color: var(--accent-text);
+}
+.fd-tone--muted {
+    color: var(--text-tertiary);
+}
+
+/* search result: title row centres the score badge; round add button */
+.fd-row--search .fd-row__line {
+    align-items: center;
+    gap: var(--space-gap);
+}
+.fd-icon-btn {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+/* grocery: check circle (#21946 off, #21994 on) */
+.fd-check {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border: 1.5px solid var(--text-tertiary);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--accent-on);
+}
+.fd-check--on {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+}
+.fd-check .fd-icon {
+    position: absolute;
+    top: -1.5px;
+    left: -1.5px;
+    width: 22px;
+    height: 22px;
+}
+
+/* usual: whole row is a link, chevron on the right (#22410) */
+.fd-row__body--link {
+    cursor: pointer;
+}
+.fd-row__chevron {
+    display: flex;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    color: var(--text-tertiary);
+}
+.fd-sep {
+    white-space: pre;
+}
+
+/* part row: fixed label, value fills, status dot (#21113) */
+.fd-row--part .fd-row__main {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--fd-s-10);
+}
+.fd-row__label {
+    flex: none;
+    width: 116px;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+.fd-row__partvalue {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-row__status {
+    display: flex;
+    flex: none;
+}
+
+/* ---- swipe rows (#19380): markup only; gesture JS is separate ----
+ * Touch (default): the actions sit behind the row face. A script (or
+ * [data-swipe-open]) slides the face by --fd-swipe-x; keyboard focus on an
+ * action slides it too, so the buttons are never reachable but unseen.
+ * Mouse (hover + fine pointer): no swipe; the same actions fade in over the
+ * trailing end of the row on hover or focus-within. */
+
+.fd-row--swipe {
+    overflow: hidden;
+    background: var(--surface-raised);
+}
+.fd-row--swipe .fd-row__body {
+    background: var(--surface-bg);
+    transform: translateX(var(--fd-swipe-x, 0));
+    transition: transform 0.2s ease;
+}
+.fd-row--swipe[data-swipe-open="lead"] {
+    --fd-swipe-x: var(--fd-action-w);
+}
+.fd-row--swipe[data-swipe-open="trail"] {
+    --fd-swipe-x: calc(var(--fd-action-w) * -1);
+}
+.fd-row--swipe:has(.fd-row__action--lead :focus-visible) {
+    --fd-swipe-x: var(--fd-action-w);
+}
+.fd-row--swipe:has(.fd-row__action--trail :focus-visible) {
+    --fd-swipe-x: calc(var(--fd-action-w) * -1);
+}
+
+.fd-row__action {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    display: flex;
+    align-items: center;
+    width: var(--fd-action-w);
+}
+.fd-row__action--lead {
+    left: 0;
+    justify-content: flex-start;
+    padding-left: var(--fd-s-12);
+}
+.fd-row__action--trail {
+    right: 0;
+    justify-content: flex-end;
+    padding-right: var(--space-gap);
+}
+.fd-swipe-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-4);
+    background: transparent;
+    font: 600 13px/17px var(--font-body);
+}
+.fd-swipe-btn .fd-icon {
+    width: 16px;
+    height: 16px;
+}
+.fd-swipe-btn--accent {
+    color: var(--accent-text);
+}
+.fd-swipe-btn--danger {
+    color: var(--status-over);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .fd-row--swipe:not([data-swipe-open]) {
+        overflow: visible;
+        background: var(--surface-bg);
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-row__body {
+        transform: none;
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-row__action {
+        top: 50%;
+        bottom: auto;
+        z-index: 2;
+        width: auto;
+        padding: var(--fd-s-6) var(--fd-s-12);
+        border-radius: var(--radius-pill);
+        background: var(--surface-raised);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-50%);
+        transition: opacity 0.15s ease;
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-row__action--trail {
+        right: 0;
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-row__action--lead {
+        left: auto;
+        right: calc(var(--fd-action-w) + var(--space-gap));
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover .fd-row__action,
+    .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__action {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+/* ---- chips (#20313 filter, #21929 store, #20591 unit, meal chips) ---- */
+
+.fd-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--fd-s-6);
+}
+
+.fd-chip:not(.fd-chip--choice),
+.fd-chip__face {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-5);
+    padding: var(--fd-s-7) var(--fd-s-12);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-bg);
+    color: var(--text-primary);
+    font: 400 13px/18px var(--font-body);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.fd-chip__count {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-chip.fd-chip--selected,
+.fd-chip__input:checked + .fd-chip__face {
+    border-color: var(--text-primary);
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.fd-chip.fd-chip--selected .fd-chip__count,
+.fd-chip__input:checked + .fd-chip__face .fd-chip__count {
+    color: var(--surface-bg);
+}
+.fd-chip__input:disabled + .fd-chip__face {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+
+.fd-chip--choice {
+    position: relative;
+    display: inline-flex;
+}
+.fd-chip__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.fd-choice-group {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.fd-choice-group__legend {
+    padding: 0;
+    margin-bottom: var(--space-gap);
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+/* ---- stepper (#20578) ---- */
+
+.fd-stepper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-gap);
+    padding: var(--fd-s-6) 0;
+}
+.fd-stepper__btn {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+.fd-stepper__btn:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+.fd-stepper__value {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--fd-s-6);
+    min-width: 0;
+}
+.fd-stepper__input {
+    box-sizing: content-box;
+    width: calc(var(--fd-chars, 3) * 1ch + var(--fd-s-4));
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font: 600 36px/43px var(--font-display);
+    letter-spacing: -0.7px;
+    text-align: right;
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+@supports (field-sizing: content) {
+    .fd-stepper__input {
+        field-sizing: content;
+        width: auto;
+        min-width: 2ch;
+    }
+}
+.fd-stepper__input::-webkit-outer-spin-button,
+.fd-stepper__input::-webkit-inner-spin-button {
+    appearance: none;
+    -webkit-appearance: none;
+    margin: 0;
+}
+.fd-stepper__unit {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* ---- stat tiles (#20599 boxed, #21274 strip, #21316 delta) ---- */
+
+.fd-tiles {
+    display: flex;
+    gap: var(--fd-s-6);
+    margin: 0;
+    padding: 0;
+}
+.fd-tile {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border: 1px solid var(--line);
+    border-radius: var(--fd-radius-tile);
+}
+.fd-tile__label {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-5);
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-tile__value {
+    margin: 0;
+    font: 600 17px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-strip {
+    display: flex;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+.fd-strip__cell {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    padding: var(--fd-s-13) 0;
+}
+.fd-strip__cell + .fd-strip__cell {
+    padding-left: var(--fd-s-14);
+    border-left: 1px solid var(--line);
+}
+.fd-strip__label {
+    order: 2;
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-strip__value {
+    order: 1;
+    margin: 0;
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-delta-stat {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--fd-s-5);
+    margin: 0;
+}
+.fd-delta-stat__value {
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+.fd-delta-stat__unit,
+.fd-delta-stat__sep,
+.fd-delta-stat__context {
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-delta {
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-delta--good {
+    color: var(--accent-text);
+}
+.fd-delta--bad {
+    color: var(--status-over);
+}
+.fd-delta--neutral {
+    color: var(--text-secondary);
+}
+
+/* ---- score badge (#20367 small, #21105 verdict, #21100 big) ---- */
+
+.fd-score,
+.fd-verdict {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+.fd-score {
+    gap: var(--fd-s-5);
+    padding: 2px var(--space-gap) 2px var(--fd-s-7);
+}
+.fd-score__dot,
+.fd-verdict__dot {
+    flex: none;
+    border-radius: var(--radius-pill);
+    background: var(--fd-band-color);
+}
+.fd-score__dot {
+    width: 7px;
+    height: 7px;
+}
+.fd-score__num {
+    font: 600 12px/16px var(--font-body);
+}
+.fd-verdict {
+    gap: var(--fd-s-6);
+    padding: var(--fd-s-6) var(--fd-s-12) var(--fd-s-6) var(--fd-s-10);
+}
+.fd-verdict__dot {
+    width: 8px;
+    height: 8px;
+}
+.fd-verdict__word {
+    font: 600 15px/20px var(--font-body);
+}
+.fd-score--good,
+.fd-verdict--good,
+.fd-score-big--good {
+    --fd-band-color: var(--accent-fill);
+    --fd-band-text: var(--accent-text);
+}
+.fd-score--middling,
+.fd-verdict--middling,
+.fd-score-big--middling {
+    --fd-band-color: var(--status-warn);
+    --fd-band-text: var(--status-warn);
+}
+.fd-score--poor,
+.fd-verdict--poor,
+.fd-score-big--poor {
+    --fd-band-color: var(--status-over);
+    --fd-band-text: var(--status-over);
+}
+.fd-score-big {
+    display: flex;
+    align-items: baseline;
+    gap: var(--fd-s-6);
+    margin: 0;
+}
+.fd-score-big__num {
+    font: 600 56px/67px var(--font-display);
+    letter-spacing: -0.7px;
+    color: var(--fd-band-text);
+}
+.fd-score-big__max {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-row--swipe .fd-row__body,
+    .fd-row--swipe .fd-row__action {
+        transition: none;
+    }
+}

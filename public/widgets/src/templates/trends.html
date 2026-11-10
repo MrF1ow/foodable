@@ -61,12 +61,23 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            const T = {
+                trends: {
+                    title: "Trends",
+                    empty: "No meals or water logged in this range yet.",
+                    avgUnder: "under",
+                    loggedOfTotal: "{logged}/{total} days logged",
+                    caloriesOverRange:
+                        "Calories per day over the last {range} days",
+                    windowAriaLabel: "Trend window",
+                    rangeDaysAriaLabel: "{n} days",
+                    avgAllDays: "{range}-day avg · all days",
+                },
+            };
 
             const RANGES = [7, 14, 30];
 
@@ -189,7 +200,6 @@
                     data &&
                     Array.isArray(data.days) &&
                     data.days.some(dayHasData);
-                setLocaleFrom(data, __widgetApi);
                 if (!anyLogged) {
                     root.innerHTML = `
             <div class="empty">

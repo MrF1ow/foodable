@@ -18,7 +18,14 @@ export type NoticeCode =
     | "recipe.partial_nutrition"
     | "recipe.unknown_unit"
     | "recipe.missing_grams_per_each"
-    | "recipe.missing_grams_per_ml";
+    | "recipe.missing_grams_per_ml"
+    | "food.possible_duplicate"
+    | "food.product_allergen"
+    | "food.product_trace"
+    | "food.product_gluten"
+    | "food.product_goal"
+    | "food.product_dislike"
+    | "grocery.restocked";
 
 export const NOTICE_CODES: readonly NoticeCode[] = [
     "fridge.expired",
@@ -32,6 +39,13 @@ export const NOTICE_CODES: readonly NoticeCode[] = [
     "recipe.unknown_unit",
     "recipe.missing_grams_per_each",
     "recipe.missing_grams_per_ml",
+    "food.possible_duplicate",
+    "food.product_allergen",
+    "food.product_trace",
+    "food.product_gluten",
+    "food.product_goal",
+    "food.product_dislike",
+    "grocery.restocked",
 ];
 
 export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
@@ -47,6 +61,13 @@ export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
     "recipe.unknown_unit": "warn",
     "recipe.missing_grams_per_each": "warn",
     "recipe.missing_grams_per_ml": "warn",
+    "food.possible_duplicate": "info",
+    "food.product_allergen": "block",
+    "food.product_trace": "warn",
+    "food.product_gluten": "warn",
+    "food.product_goal": "info",
+    "food.product_dislike": "info",
+    "grocery.restocked": "info",
 };
 
 export type NoticeRelated = {

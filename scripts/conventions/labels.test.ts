@@ -52,6 +52,12 @@ describe("LABEL_CATALOG", () => {
     test("no migration-edit-ok label", () => {
         expect(catalogNames().has("migration-edit-ok")).toBe(false);
     });
+
+    test("only the context-budget label is a manual approval label", () => {
+        const names = catalogNames();
+        expect(names.has("agent-context-increase")).toBe(true);
+        expect([...names].filter((n) => n.startsWith("gate:"))).toEqual([]);
+    });
 });
 
 describe("lintPr labels in catalog", () => {

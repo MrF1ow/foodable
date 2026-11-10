@@ -1,6 +1,8 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { Recipe } from "../../domain/recipes.js";
+import { recipeMacrosFixture } from "../../test-support/recipe-macros.js";
 import {
     IMPORT_RECIPE_MODAL_ID,
     recipesListHref,
@@ -33,7 +35,11 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
         ...recipe,
     };
     return {
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipe: mergedRecipe,
         ingredients: [],
         notices: [],
@@ -43,18 +49,7 @@ function detail(recipe: Partial<Recipe>): RecipeDetailView {
         viewerId: VIEWER,
         filterUserId: VIEWER,
         portionCount: 1,
-        macros: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [],
-            gaps: [],
-        },
+        macros: recipeMacrosFixture({ incomplete: true }),
         isOwner: true,
     };
 }
@@ -78,30 +73,8 @@ test("incomplete macros render reasons in recipe-macros-reasons", () => {
     const html = renderRecipeDetailPage({
         ...detail({}),
         notices,
-        macros: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [sentence],
-            gaps: [],
-        },
-        macrosPerPortion: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [sentence],
-            gaps: [],
-        },
+        macros: recipeMacrosFixture({ incomplete: true }),
+        macrosPerPortion: recipeMacrosFixture({ incomplete: true }),
     });
     expect(html).toContain("recipe-macros-reasons");
     expect(html).toContain(sentence);
@@ -141,24 +114,35 @@ test("recipe.no_nutrition renders usual-product link from notices", () => {
                 personAmount: 20,
             },
         ],
-        macros: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [
-                "Buttermilk: no nutrition — add it, or pick a usual product",
-            ],
-            gaps: [],
-        },
+        macros: recipeMacrosFixture({ incomplete: true }),
     });
     expect(html).toContain(
-        '<p class="recipe-ingredient-usual"><a href="/household/usual-products/f-buttermilk?from=%2Frecipes%2Fr1">Pick usual product</a></p>',
+        '<p class="recipe-ingredient-usual"><a href="/kitchen/usuals/f-buttermilk?from=%2Frecipes%2Fr1">Pick usual product</a></p>',
     );
+});
+
+test("incomplete macros show missing grams per ml from notices", () => {
+    const sentence = "Milk: set grams per millilitre";
+    const notices = [
+        {
+            code: "recipe.missing_grams_per_ml" as const,
+            severity: "warn" as const,
+            subject: {
+                kind: "recipe_ingredient" as const,
+                id: "ing-milk",
+                recipeId: "r1",
+            },
+            related: [],
+            params: { name: "Milk", foodId: "f-milk" },
+        },
+    ];
+    const html = renderRecipeDetailPage({
+        ...detail({}),
+        notices,
+        macros: recipeMacrosFixture({ incomplete: true }),
+    });
+    expect(html).toContain("recipe-macros-reasons");
+    expect(html).toContain(sentence);
 });
 
 test("a recipe without steps offers to add them", () => {
@@ -235,7 +219,11 @@ test("verification segment links keep list filters", () => {
         `/recipes?tag=dinner&can_make_now=1&safe_for=${encodeURIComponent(VIEWER)}`,
     );
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [{ userId: VIEWER, displayName: "Alice" }],
         viewerId: VIEWER,
@@ -250,7 +238,11 @@ test("verification segment links keep list filters", () => {
 
 test("recipes list shows verification filter and unverified badge", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-open",
@@ -315,7 +307,11 @@ test("unverified recipe detail shows problems panel and check again", () => {
 
 test("import from link modal field and busy submit attributes", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -330,7 +326,11 @@ test("import from link modal field and busy submit attributes", () => {
 
 test("import modal keeps url and shows error on 422 re-render", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -349,7 +349,11 @@ test("import modal keeps url and shows error on 422 re-render", () => {
 
 test("import paste step shows caption field and creator for Instagram", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -370,7 +374,11 @@ test("import paste step shows caption field and creator for Instagram", () => {
 
 test("import paste step for Pinterest lists website link first", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -386,7 +394,11 @@ test("import paste step for Pinterest lists website link first", () => {
 
 test("website failure paste step uses Paste the recipe label", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -404,7 +416,11 @@ test("website failure paste step uses Paste the recipe label", () => {
 
 test("import paste step uses cleaned https link for open post", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -420,7 +436,11 @@ test("import paste step uses cleaned https link for open post", () => {
 
 test("no_recipe_in_text re-render keeps pasted text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -435,7 +455,11 @@ test("no_recipe_in_text re-render keeps pasted text", () => {
 
 test("duplicate import shows open link in modal", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,
@@ -448,7 +472,11 @@ test("duplicate import shows open link in modal", () => {
 
 test("recipe list shows source icon when import row exists", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-web",
@@ -510,7 +538,11 @@ test("recipe detail links source with credit", () => {
 
 test("recipe list source icon is labelled and does not capture clicks above the title link", async () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [
             {
                 id: "r-web",
@@ -598,7 +630,11 @@ test("a read import shows its caption and spoken transcript", () => {
 
 test("check again submits the import form on screen with the typed text", () => {
     const html = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: VIEWER,

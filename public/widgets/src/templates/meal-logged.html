@@ -47,17 +47,26 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/date.js@*/
 
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
 
+            const T = {
+                mealLogged: {
+                    titleLogged: "Meal logged",
+                    titleUpdated: "Meal updated",
+                    titleNotLogged: "Not logged yet",
+                    addedKcal: "+{kcal} kcal",
+                },
+            };
+
             // ---- Sample data so the file renders on its own (browser preview) ----
             const SAMPLE = {
+                action: "logged",
+                status: "ok",
+                similar_foods: [],
                 date: "2026-07-11",
                 locale: "en",
                 logged_meal: {
@@ -191,7 +200,6 @@
                     root.innerHTML = "";
                     return;
                 }
-                setLocaleFrom(data, __widgetApi);
 
                 const totals = data.totals || {};
                 // update_meal (and log_meal, via a backdated logged_at) can
@@ -200,8 +208,10 @@
                 // otherwise it names the day, which is also why that day is
                 // now on the header line below.
                 const calLabel = isToday(data.date)
-                    ? T.macros.caloriesToday
-                    : tpl(T.macros.caloriesOn, { date: shortDate(data.date) });
+                    ? MACRO_COPY.caloriesToday
+                    : tpl(MACRO_COPY.caloriesOn, {
+                          date: shortDate(data.date),
+                      });
                 const panel = macroPanel(
                     totals,
                     data.goals,
@@ -235,9 +245,11 @@
                 // Same widget for log_meal and update_meal — the action only
                 // changes the header wording.
                 const title =
-                    data.action === "updated"
-                        ? T.mealLogged.titleUpdated
-                        : T.mealLogged.titleLogged;
+                    data.status === "similar_foods"
+                        ? T.mealLogged.titleNotLogged
+                        : data.action === "updated"
+                          ? T.mealLogged.titleUpdated
+                          : T.mealLogged.titleLogged;
 
                 root.innerHTML = `
           <div class="panel">

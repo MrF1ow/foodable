@@ -1,0 +1,475 @@
+/* The new shell: floating tab nav and account chip on phones, sidebar and top
+ * bar from 1024px. Source of truth: the FigCraft design (Components › Nav bar,
+ * Screens › Today, Desktop › Today). Every measurement below is a design number;
+ * every colour, radius and gap is a token from tokens.css.
+ *
+ * Both layouts are in the markup; the one media query at the bottom of each
+ * block shows one and hides the other with display: none, so only one set of
+ * landmarks is ever exposed. 1024px is the app's one breakpoint.
+ *
+ * The page body inside <main> is still the old, un-redesigned markup styled by
+ * /app.css; only the chrome around it is new.
+ */
+
+/* The page. app.css paints a green glow behind the old pages and docks the old
+   nav with a box-shadow; the new shell is flat --surface-bg. Same specificity
+   as the app.css rules it replaces, and this file loads after it. */
+body.fd-body {
+    background: var(--surface-bg);
+    box-shadow: none;
+}
+body.fd-body::before {
+    content: none;
+}
+html:has(body.fd-body) {
+    background-color: var(--surface-bg);
+}
+
+.fd-shell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.fd-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Phone: the page leaves room for the floating nav (design: 130px under the
+   content). <main> is the positioning context for the account chip. */
+.fd-main.app-main {
+    position: relative;
+    padding-top: calc(6px + env(safe-area-inset-top, 0px));
+    padding-left: max(var(--space-gutter), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-gutter), env(safe-area-inset-right, 0px));
+    padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Account chip, top right over the title row (design: Header > Account chip,
+   38 x 29 at y = 8 in the header). */
+.fd-chip {
+    box-sizing: border-box;
+    position: absolute;
+    z-index: 2;
+    top: calc(14px + env(safe-area-inset-top, 0px));
+    right: max(var(--space-gutter), env(safe-area-inset-right, 0px));
+    display: inline-flex;
+    align-items: center;
+    height: 29px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    font: 400 13px/17px var(--font-body);
+    text-decoration: none;
+}
+/* Keep the title, and any actions beside it, clear of the chip: 38px chip +
+   10px gap. */
+.fd-main > h1,
+.fd-main > .dash-head > h1,
+.fd-main > .dash-head > .dash-head-title-row {
+    padding-right: 48px;
+}
+
+/* Kitchen text tabs under the page header (design: Kitchen tabs). Each tab is
+   35px: 8px, the 18px label, 7px, then a 2px underline; the row has a 1px
+   bottom border. */
+.fd-kitchen-tabs {
+    box-sizing: border-box;
+    display: flex;
+    gap: 18px;
+    margin: 0 0 16px;
+    border-bottom: 1px solid var(--line);
+}
+.fd-kitchen-tab {
+    box-sizing: border-box;
+    height: 35px;
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    color: var(--text-secondary);
+    font: 400 14px/18px var(--font-body);
+    text-decoration: none;
+}
+.fd-kitchen-tab::after {
+    content: "";
+    flex: none;
+    height: 2px;
+    border-radius: 2px;
+    background: transparent;
+}
+.fd-kitchen-tab[aria-current="page"] {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.fd-kitchen-tab[aria-current="page"]::after {
+    background: var(--accent-fill);
+}
+@media (hover: hover) and (pointer: fine) {
+    .fd-kitchen-tab:not([aria-current="page"]):hover {
+        color: var(--text-primary);
+    }
+}
+
+/* Phone nav: a frosted pill, 278 x 58, 24px above the bottom edge (design:
+   Nav bar). Tabs are 48 x 44: a 24px icon over a 4px dot. The search button in
+   the middle is 56 x 44 and green. */
+.fd-tabs {
+    position: fixed;
+    z-index: 50;
+    left: 50%;
+    bottom: max(24px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+    transform: translateX(-50%);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--overlay-glass);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+}
+.fd-tab {
+    box-sizing: border-box;
+    width: 48px;
+    height: 44px;
+    padding-top: 7px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+.fd-tab[aria-current="page"] {
+    color: var(--text-primary);
+}
+.fd-tab-dot {
+    flex: none;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: transparent;
+}
+.fd-tab .fd-tab-dot-attention {
+    background: var(--status-warn);
+}
+.fd-tab[aria-current="page"] .fd-tab-dot {
+    background: var(--accent-fill);
+}
+.fd-log {
+    box-sizing: border-box;
+    width: 56px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+    text-decoration: none;
+}
+.fd-icon {
+    flex: none;
+    display: block;
+}
+
+/* Toasts sit above the floating nav: 24px + 58px + 12px. */
+body.fd-body .toast-region {
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Keyboard focus on every fd- control. */
+:is(
+    .fd-chip,
+    .fd-household,
+    .fd-kitchen-tab,
+    .fd-tab,
+    .fd-log,
+    .fd-sidelink,
+    .fd-account,
+    .fd-search,
+    .fd-scan,
+    .fd-logfood
+):focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .fd-tab:not([aria-current="page"]):hover {
+        color: var(--text-primary);
+    }
+}
+
+/* Desktop chrome is in the markup but hidden below the breakpoint. */
+.fd-sidebar,
+.fd-topbar {
+    display: none;
+}
+
+/* ---- Desktop: 1024px and up -------------------------------------------- */
+@media (min-width: 1024px) {
+    .fd-tabs,
+    .fd-chip,
+    .fd-kitchen-tabs {
+        display: none;
+    }
+    .fd-main > h1,
+    .fd-main > .dash-head > h1,
+    .fd-main > .dash-head > .dash-head-title-row {
+        padding-right: 0;
+    }
+    .fd-shell {
+        flex-direction: row;
+        align-items: flex-start;
+    }
+
+    /* Sidebar: 248 wide, right border, padding 28 / 16 / 24 / 16, gap 2. It
+       stays put while the page scrolls. */
+    .fd-sidebar {
+        position: sticky;
+        top: 0;
+        box-sizing: border-box;
+        flex: none;
+        width: 248px;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 28px 16px 24px;
+        border-right: 1px solid var(--line);
+        font-family: var(--font-body);
+    }
+    .fd-household {
+        color: inherit;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 8px 22px;
+    }
+    .fd-avatar {
+        box-sizing: border-box;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--radius-pill);
+        background: var(--surface-raised);
+        color: var(--text-primary);
+        font: 600 13px/17px var(--font-body);
+    }
+    .fd-household-text,
+    .fd-account-text {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .fd-household-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-primary);
+        font: 600 14px/18px var(--font-body);
+    }
+    .fd-household-meta,
+    .fd-account-role {
+        color: var(--text-secondary);
+        font: 400 12px/16px var(--font-body);
+    }
+
+    .fd-sidenav {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .fd-sidelink {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font: 400 15px/20px var(--font-body);
+        text-decoration: none;
+    }
+    .fd-sidelink-label {
+        flex: 1;
+        min-width: 0;
+    }
+    .fd-sidelink[aria-current] {
+        background: var(--surface-panel);
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+    .fd-side-dot {
+        flex: none;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: transparent;
+    }
+    .fd-sidelink .fd-side-dot-attention {
+        background: var(--status-warn);
+    }
+    .fd-sidelink[aria-current] .fd-side-dot {
+        background: var(--accent-fill);
+    }
+    /* Kitchen sections under the active Kitchen link: 32 high, padding
+       7 / 12 / 7 / 48, Geist 14; the current one Medium text/primary. */
+    .fd-sidesub {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        padding: 7px 12px 7px 48px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font: 400 14px/18px var(--font-body);
+        text-decoration: none;
+    }
+    .fd-sidesub[aria-current="page"] {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+    /* Settings sits at the bottom, above the account row. */
+    .fd-sidelink-settings {
+        margin-top: auto;
+    }
+    .fd-account {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 8px 4px;
+        border-top: 1px solid var(--line);
+        color: var(--text-tertiary);
+        text-decoration: none;
+    }
+    .fd-account .fd-avatar {
+        width: 36px;
+        height: 36px;
+    }
+    .fd-account-text {
+        flex: 1;
+    }
+    .fd-account-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-primary);
+        font: 400 14px/18px var(--font-body);
+    }
+    @media (hover: hover) and (pointer: fine) {
+        .fd-sidelink:not([aria-current]):hover,
+        .fd-sidesub:not([aria-current="page"]):hover {
+            background: var(--surface-raised);
+            color: var(--text-primary);
+        }
+    }
+
+    /* Main: padding 28 / 40 / 48 / 40, gap 24. */
+    .fd-column {
+        box-sizing: border-box;
+        flex: 1;
+        gap: 24px;
+        padding: 28px 40px 48px;
+    }
+    .fd-main.app-main {
+        flex: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* Top bar: search field (520 wide), scan, Log food. */
+    .fd-topbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 28px;
+        font-family: var(--font-body);
+    }
+    .fd-topbar-fill {
+        flex: 1;
+    }
+    .fd-search {
+        box-sizing: border-box;
+        flex: 0 1 520px;
+        min-width: 0;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--surface-panel);
+        color: var(--text-tertiary);
+        font: 400 15px/20px var(--font-body);
+        text-decoration: none;
+    }
+    .fd-search-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .fd-kbd {
+        box-sizing: border-box;
+        flex: none;
+        padding: 2px 7px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font: 400 12px/16px var(--font-body);
+    }
+    .fd-scan {
+        box-sizing: border-box;
+        flex: none;
+        width: 42px;
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        background: var(--surface-panel);
+        color: var(--text-primary);
+        text-decoration: none;
+    }
+    .fd-logfood {
+        box-sizing: border-box;
+        flex: none;
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 18px;
+        border-radius: var(--radius-pill);
+        background: var(--accent-fill);
+        color: var(--accent-on);
+        font: 600 14px/18px var(--font-body);
+        text-decoration: none;
+    }
+
+    body.fd-body .toast-region {
+        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    }
+}

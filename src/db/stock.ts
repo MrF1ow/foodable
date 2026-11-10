@@ -68,27 +68,57 @@ async function listMovementRows(
     tx: Tx,
     householdId: string,
     foodId: string | null | undefined,
+    since: string | null | undefined,
 ): Promise<StockMovement[]> {
-    const data = foodId
-        ? await rows(
-              tx,
-              tx`
-                  select ${tx.unsafe(STOCK_COLS)}
-                  from ${tx.unsafe(STOCK_MOVEMENTS)}
-                  where household_id = ${householdId}
-                    and food_id = ${foodId}
-                  order by created_at desc
-              `,
-          )
-        : await rows(
-              tx,
-              tx`
-                  select ${tx.unsafe(STOCK_COLS)}
-                  from ${tx.unsafe(STOCK_MOVEMENTS)}
-                  where household_id = ${householdId}
-                  order by created_at desc
-              `,
-          );
+    if (foodId != null && since != null) {
+        const data = await rows(
+            tx,
+            tx`
+                select ${tx.unsafe(STOCK_COLS)}
+                from ${tx.unsafe(STOCK_MOVEMENTS)}
+                where household_id = ${householdId}
+                  and food_id = ${foodId}
+                  and created_at >= ${since}
+                order by created_at desc
+            `,
+        );
+        return data.map((row) => movementFromRow(row as never));
+    }
+    if (foodId != null) {
+        const data = await rows(
+            tx,
+            tx`
+                select ${tx.unsafe(STOCK_COLS)}
+                from ${tx.unsafe(STOCK_MOVEMENTS)}
+                where household_id = ${householdId}
+                  and food_id = ${foodId}
+                order by created_at desc
+            `,
+        );
+        return data.map((row) => movementFromRow(row as never));
+    }
+    if (since != null) {
+        const data = await rows(
+            tx,
+            tx`
+                select ${tx.unsafe(STOCK_COLS)}
+                from ${tx.unsafe(STOCK_MOVEMENTS)}
+                where household_id = ${householdId}
+                  and created_at >= ${since}
+                order by created_at desc
+            `,
+        );
+        return data.map((row) => movementFromRow(row as never));
+    }
+    const data = await rows(
+        tx,
+        tx`
+            select ${tx.unsafe(STOCK_COLS)}
+            from ${tx.unsafe(STOCK_MOVEMENTS)}
+            where household_id = ${householdId}
+            order by created_at desc
+        `,
+    );
     return data.map((row) => movementFromRow(row as never));
 }
 
@@ -120,10 +150,15 @@ export function liveStockStore(): StockStore {
                 }
             });
         },
-        async listMovements(householdId, foodId) {
+        async listMovements(householdId, foodId, since) {
             return run(async (tx) => {
                 try {
-                    return await listMovementRows(tx, householdId, foodId);
+                    return await listMovementRows(
+                        tx,
+                        householdId,
+                        foodId,
+                        since,
+                    );
                 } catch (err) {
                     throw pgError("list stock movements", err);
                 }

@@ -6,10 +6,12 @@ import {
     householdMemberRulesModalId,
     renderHouseholdSettingsPage,
 } from "../web/pages/household.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 const alice: HouseholdMember = {
     householdId: "hh-1",
@@ -52,7 +54,7 @@ test("household settings use modals instead of add/edit disclosures", () => {
     );
     expect(html).toContain(`commandfor="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
     expect(html).toContain(`commandfor="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
-    expect(html).toContain('action="/household"');
+    expect(html).toContain('action="/settings/household"');
     expect(html).toContain('class="add-member"');
     expect(html).toContain('commandfor="household-manage"');
     expect(html).not.toContain('commandfor="household-manage-u2"');
@@ -64,7 +66,7 @@ test("household settings use modals instead of add/edit disclosures", () => {
     expect(html).toContain(
         'data-fill-template-member-actions="household-member-actions-u2"',
     );
-    expect(html).toContain("/household/members/u2/remove");
+    expect(html).toContain("/settings/household/members/u2/remove");
     expect(html).toContain('name="confirm" value="yes" required');
     expect(html.match(/name="confirm" value="yes" required/g)?.length).toBe(1);
     const remove = dialogHtml(html, "household-remove");
@@ -212,7 +214,9 @@ test("household modal errors render inside the reopening dialog", () => {
     );
     const manageDialog = dialogHtml(manage, "household-manage");
     expect(manageDialog).toContain(">Manage Bob</h2>");
-    expect(manageDialog).toContain('action="/household/members/u2/role"');
+    expect(manageDialog).toContain(
+        'action="/settings/household/members/u2/role"',
+    );
     expect(manageDialog).toContain('name="role" value="admin"');
     expect(manageDialog).toContain("Make Bob an admin");
     expect(manageDialog).toContain(">Make admin</button>");
@@ -361,4 +365,36 @@ test("recipe settings lists social reader risk text and platforms", () => {
     expect(
         html.match(/recipe-import-terms-2026-11\.md/g)?.length,
     ).toBeGreaterThanOrEqual(2);
+});
+
+test("the Members panel links the owner to invite codes only with ui-v2", () => {
+    const v2Chrome = {
+        ...chrome,
+        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+    };
+    const link = 'href="/settings/household/invites"';
+    const ownerV2 = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        chrome: v2Chrome,
+        unverifiedRecipeExpiryDays: null,
+    } as never);
+    expect(ownerV2).toContain(link);
+    const ownerV1 = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        chrome: {
+            ...chrome,
+            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: false },
+        },
+        unverifiedRecipeExpiryDays: null,
+    } as never);
+    expect(ownerV1).not.toContain(link);
+    const memberV2 = renderHouseholdSettingsPage({
+        ...ownerHouseholdBase,
+        chrome: v2Chrome,
+        isOwner: false,
+        canManage: false,
+        viewerUserId: bob.userId,
+        unverifiedRecipeExpiryDays: null,
+    } as never);
+    expect(memberV2).not.toContain(link);
 });

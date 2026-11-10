@@ -10,6 +10,8 @@ import { VERSION } from "../version.js";
 import { formatClientId } from "../client-id.js";
 import type { Context } from "hono";
 import type { AuthContext } from "../auth-context.js";
+import { currentActor, withActor } from "../db/actor.js";
+import { actorForAuthContext } from "../household-token.js";
 import {
     widgetsEnabledFromProfile,
     alcoholTrackingEnabledFromProfile,
@@ -17,6 +19,9 @@ import {
     getProfile,
 } from "../db/profiles.js";
 import { getNutritionGoals } from "../db/nutrition.js";
+import { getHouseholdMembership } from "../db/household.js";
+import { buildFlagContext } from "../flags.js";
+import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import {
     createToolContext,
     NUTRIENT_COVERAGE,
@@ -35,6 +40,7 @@ import {
     registerSearchFoodTool,
     registerCatalogFoodTools,
 } from "./tools/food.js";
+import { registerRateProductTools } from "./tools/product-score.js";
 import { registerGoalsTools } from "./tools/goals.js";
 import { registerWaterTools } from "./tools/water.js";
 import { registerWeightTools } from "./tools/weight.js";
@@ -47,6 +53,7 @@ import { registerGroceryTools } from "./tools/grocery.js";
 import { registerRecipesTools } from "./tools/recipes.js";
 import { registerRulesTools } from "./tools/rules.js";
 import { registerHouseholdTools } from "./tools/household.js";
+import { registerHouseholdDigestTools } from "./tools/household-digest.js";
 import { registerNoticeTools } from "./tools/notices.js";
 
 // Sent to clients in the initialize response (SDK ServerOptions.instructions).
@@ -61,17 +68,19 @@ All nutrition figures are estimates and this server does not provide medical or 
 
 Five pillars — nutrition (meals, water, weight, goals, trends), fridge (what is in the house), grocery (what to buy), recipes (what we cook), and household (members, stores, items). They share one food catalog. Adding household members (owner or admin), changing a member's role and rotating the household bot token (owner only) happen in the web app under Household › Members; there is no MCP tool for any of them — point the user there instead of guessing.
 
-Foods are the shared identity. Always search_food (or lookup_barcode for a packaged product) and then pass food_id into writes — add_fridge_item, add_grocery_line, add_recipe_ingredient, log_meal items, upsert_food. Do not invent a parallel name for something the catalog already has. get_food reads a catalog row; merge_foods is how duplicates get cleaned up. A plain food (Eggs) can have products (Kirkland Large Eggs) and one usual product, whose nutrition recipes, grocery lines and new meal logs read through. Never pick a brand for the household: ask which one they buy, then call set_usual_product. For a scanned packaged product, add it with upsert_food passing barcode and generic_food_id under the plain food, then set_usual_product.
+Foods are the shared identity. Always search_food (or lookup_barcode for a packaged product) and then pass food_id into writes — add_fridge_item, add_grocery_line, add_recipe_ingredient, log_meal items, upsert_food. Do not invent a parallel name for something the catalog already has. When a write returns status similar_foods, ask the person which food they meant (or whether it is new) and call again with that food_id or new_food: true; never pick between similar foods on the household's behalf, and pass on_similar: "create" only in unattended runs. get_food reads a catalog row; merge_foods is how duplicates get cleaned up. A plain food (Eggs) can have products (Kirkland Large Eggs) and one usual product, whose nutrition recipes, grocery lines and new meal logs read through. Never pick a brand for the household: ask which one they buy, then call set_usual_product. For a scanned packaged product, add it with upsert_food passing barcode and generic_food_id under the plain food, then set_usual_product.
 
-The loop: grocery list → put_away_grocery_lines into the fridge → cook_recipe or eat_fridge_item → meals. Checking a grocery line does not stock the fridge; put-away does. eat_fridge_item deducts stock and can log a meal; cook_recipe deducts recipe ingredients and can log one meal per member. log_meal is the direct nutrition write when stock is not involved. When a fridge notice offers Add to grocery list, call add_grocery_line with only the plain food's food_id, so the usual amount and store apply.
+The loop: grocery list → put_away_grocery_lines into the fridge → cook_recipe or eat_fridge_item → meals. Checking a grocery line does not stock the fridge; put-away does. eat_fridge_item deducts stock and can log a meal; cook_recipe deducts recipe ingredients and can log one meal per member. log_meal is the direct nutrition write when stock is not involved. When a fridge notice offers Add to grocery list, call add_grocery_line with only the plain food's food_id, so the usual amount and store apply. Grocery lines with source restock were added by the household's own restock setting; remove one with delete_grocery_line if the item was used up or isn't wanted.
 
 Imported recipes start unverified until they pass the deterministic check. Unverified recipes cannot go on the grocery list, be cooked, or be logged as portions. Fix them from import data in get_recipe (pasted text, unresolved lines, problems) without opening the original post or inventing amounts, then call verify_recipe. To import a recipe from a link, call import_recipe_from_url with optional text (the pasted caption) and credit. If it returns paste_needed, ask the user to paste the caption; never open the post yourself.
 
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
 
-Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools warn on allergen matches; treat a warning as blocking unless the user overrides it explicitly.
+When get_household_digest is available, call it (or read the household://weekly-digest resource) at the start of a weekly household check-in for expiring fridge stock, what ran out, nutrition by member, and grocery suggestions.
 
-Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them. Use \`list_notices\` to see what needs attention; never dismiss a notice with \`dismiss_notice\` without asking the person first.
+Constraints the agent must honor: call get_household_rules before proposing a grocery line, a recipe, or a meal for someone. Store rules say how that store is shopped (aisle, brand, "dairy is on the back wall"). Person rules, allergens, and dislikes are hard constraints — do not add a disliked food, and never ignore an allergen. Grocery and recipe tools surface allergen matches in \`notices\`; treat a \`block\` notice as blocking unless the user overrides it explicitly. When rate_product is available, call it before recommending a packaged product for someone, with the barcode or food_id to read the quality score and member-specific allergen notices.
+
+Tool results carry \`notices\`: things that need attention, each with a message and a severity; raise \`block\` notices (allergens) with the person before acting on them. Use \`list_notices\` to see what needs attention; never dismiss a notice with \`dismiss_notice\` without asking the person first. After an unattended run (imports, bulk writes), call \`list_notices\` with \`code: "food.possible_duplicate"\` and mention any new possible duplicates to the household; never merge or dismiss a possible duplicate without asking the person first.
 
 Knowing what time it is — some hosts put the current date and time in your context and some do not, but this server always knows both the clock and the user's timezone. Never ask the user what time it is.
 - Logging something that just happened: omit logged_at entirely. The server stamps the entry with the current time, which is more accurate than any time you could reconstruct.
@@ -120,6 +129,7 @@ export function registerTools(
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
     hasGoals = true,
+    flags?: ViewerFlags,
 ) {
     const ctx = createToolContext(
         auth,
@@ -128,11 +138,13 @@ export function registerTools(
         protocolEra,
         baseUrl,
         hasGoals,
+        flags,
     );
     // Original registerTool order is not grouped by domain. Call consecutive
     // runs so tools/list stays byte-identical, including order.
     registerNutritionWriteTools(server, ctx);
     registerLookupBarcodeTool(server, ctx);
+    registerRateProductTools(server, ctx);
     registerNutritionReadTools(server, ctx);
     registerGoalsTools(server, ctx);
     registerNutritionEditTools(server, ctx);
@@ -149,6 +161,8 @@ export function registerTools(
     registerCatalogFoodTools(server, ctx);
     registerNoticeTools(server, ctx);
     registerHouseholdTools(server, ctx);
+    registerHouseholdDigestTools(server, ctx);
+    return ctx;
 }
 
 // The bare server: identity, capabilities and instructions, no tools. Shared
@@ -217,14 +231,19 @@ async function buildMcpServer(
     // Goals are read beside the profile, not after it: they only decide whether
     // the meal-logged widget is linked (see ToolContext.hasGoals). A household
     // token has no single member to read goals for, so it keeps the link.
-    const [profile, goals] =
+    const [profile, goals, member] =
         auth.kind === "user"
             ? await Promise.all([
                   getProfile(auth.userId),
                   getNutritionGoals(auth.userId),
+                  // Membership gives household_id and role for flag context on
+                  // user tokens (same fields buildFlagContext uses on the site).
+                  getHouseholdMembership(auth.userId),
               ])
-            : [null, undefined];
+            : [null, undefined, null];
     const drinkUnit = preferredDrinkUnitFromProfile(profile);
+    const flagCtx = buildFlagContext({ auth, member });
+    const flags = await loadViewerFlags(flagCtx);
 
     registerTools(
         server,
@@ -234,6 +253,7 @@ async function buildMcpServer(
         protocolEra,
         baseUrl,
         goals !== null,
+        flags,
     );
     return server;
 }
@@ -438,17 +458,20 @@ export const handleMcp = async (c: Context) => {
     // either — nothing downstream needs it, and keeping it out of the SDK's
     // context means no handler or error path can echo it.
     const trace: McpEraTrace = {};
-    const response = await mcpHandler.fetch(c.req.raw, {
-        authInfo: {
-            token: "",
-            clientId: "",
-            scopes: [],
-            extra: {
-                auth,
-                trace,
+    const actor = currentActor() ?? (await actorForAuthContext(auth));
+    const response = await withActor(actor, () =>
+        mcpHandler.fetch(c.req.raw, {
+            authInfo: {
+                token: "",
+                clientId: "",
+                scopes: [],
+                extra: {
+                    auth,
+                    trace,
+                },
             },
-        },
-    });
+        }),
+    );
 
     // Published for the access log in src/index.ts, which runs outermost and
     // reads this after next() resolves. Set after fetch resolves, which is

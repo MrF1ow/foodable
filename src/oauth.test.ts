@@ -1,4 +1,5 @@
-import { test, expect, mock, afterAll } from "bun:test";
+import { test, expect, mock, afterAll, beforeAll } from "bun:test";
+import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
 
@@ -39,6 +40,16 @@ const {
     siteLoginReturnPath,
 } = await import("./oauth.js");
 const { _resetBuckets } = await import("./rate-limit.js");
+
+beforeAll(() =>
+    setClientIpConfigForTests({
+        source: "x-forwarded-for",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    }),
+);
+afterAll(() => setClientIpConfigForTests(null));
 
 // createOAuthRouter() refuses to build without these; the values are never
 // exercised by the rate-limit tests below.
@@ -139,6 +150,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
         email: "founder@example.com",
         password: "secret123456",
         authUserCount: async () => 0,
+        householdExists: async () => false,
         signInUser: async () => {
             throw new Error("Invalid login credentials");
         },
@@ -154,10 +166,7 @@ test("first Auth user may sign up after a failed sign-in", async () => {
     expect(signUps).toBe(1);
 });
 
-const MESSAGES = {
-    invalidCredentials: "Wrong email, username or password.",
-    signInUnavailable: "Couldn't sign in right now. Try again in a minute.",
-};
+const { LOGIN_ERRORS: MESSAGES } = await import("./copy/login.js");
 
 // Shaped like SignInError from src/domain/auth.ts (legacy GoTrue status/code).
 function signInError(status: number | undefined, code?: string): Error {
@@ -180,6 +189,7 @@ test("a wrong password after the owner exists says so and never signs up", async
                 email: "stranger@example.com",
                 password: "wrong-password",
                 authUserCount: async () => 1,
+                householdExists: async () => true,
                 signInUser: async () => {
                     throw signInError(400, "invalid_credentials");
                 },
@@ -211,6 +221,7 @@ for (const [label, err] of [
                     email: "founder@example.com",
                     password: "right-password",
                     authUserCount: async () => 1,
+                    householdExists: async () => true,
                     signInUser: async () => {
                         throw err;
                     },
@@ -255,6 +266,7 @@ test("an account-state refusal shows the sign-in error's own message", async () 
                 email: "sam@example.com",
                 password: "right-password",
                 authUserCount: async () => 1,
+                householdExists: async () => true,
                 signInUser: async () => {
                     throw Object.assign(new Error("Email not confirmed"), {
                         status: 400,
@@ -276,6 +288,7 @@ test("existing users still sign in after signup closes", async () => {
         email: "founder@example.com",
         password: "secret123456",
         authUserCount: async () => 1,
+        householdExists: async () => true,
         signInUser: async () => "11111111-1111-4111-8111-111111111111",
         signUpUser: async () => {
             signUps += 1;
@@ -284,6 +297,236 @@ test("existing users still sign in after signup closes", async () => {
         messages: MESSAGES,
     });
     expect(userId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(signUps).toBe(0);
+});
+
+function failedSignIn(): never {
+    throw Object.assign(new Error("Invalid login credentials"), {
+        status: 400,
+        code: "invalid_credentials",
+    });
+}
+
+// A deploy with an owner, where every sign-in attempt fails on credentials.
+function inviteArgs(over: Partial<Parameters<typeof resolveApproveUser>[0]>) {
+    return {
+        email: "newbie@example.com",
+        password: "secret123456",
+        authUserCount: async () => 1,
+        householdExists: async () => true,
+        signupPolicy: "invite" as const,
+        accountExists: async () => false,
+        signInUser: async () => failedSignIn(),
+        signUpUser: async (): Promise<string> => {
+            throw new Error("plain sign-up must not run under invite");
+        },
+        signUpWithInvite: async () => {
+            throw new Error("invite sign-up must not run");
+        },
+        messages: MESSAGES,
+        ...over,
+    };
+}
+
+test("invite policy signs up once with a valid code", async () => {
+    const calls: unknown[] = [];
+    const userId = await resolveApproveUser(
+        inviteArgs({
+            inviteCode: " test-invite-code ",
+            peekInvite: async () => ({ valid: true }),
+            signUpWithInvite: async (args) => {
+                calls.push(args);
+                return {
+                    ok: true,
+                    userId: "22222222-2222-4222-8222-222222222222",
+                    householdId: "hh-invite-1",
+                };
+            },
+        }),
+    );
+    expect(userId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(calls).toEqual([
+        {
+            code: "test-invite-code",
+            email: "newbie@example.com",
+            password: "secret123456",
+            displayName: "newbie",
+        },
+    ]);
+});
+
+test("invite policy: a new email with no code is told a code is needed", async () => {
+    await expect(resolveApproveUser(inviteArgs({}))).rejects.toThrow(
+        MESSAGES.inviteRequired,
+    );
+    await expect(
+        resolveApproveUser(inviteArgs({ inviteCode: "   " })),
+    ).rejects.toThrow(MESSAGES.inviteRequired);
+});
+
+test("invite policy: a new email with a bad, expired or used code is told so", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "nope",
+                peekInvite: async () => ({ valid: false }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidInvite);
+    // Valid when peeked, used by someone else before the claim.
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "raced",
+                peekInvite: async () => ({ valid: true }),
+                signUpWithInvite: async () => ({
+                    ok: false,
+                    reason: "invalid-invite",
+                }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidInvite);
+});
+
+test("invite policy: an existing account with a wrong password gets the plain answer", async () => {
+    let peeks = 0;
+    for (const inviteCode of [undefined, "", "some-code"]) {
+        await expect(
+            resolveApproveUser(
+                inviteArgs({
+                    inviteCode,
+                    accountExists: async () => true,
+                    peekInvite: async () => {
+                        peeks += 1;
+                        return { valid: true };
+                    },
+                }),
+            ),
+        ).rejects.toThrow(MESSAGES.invalidCredentials);
+    }
+    expect(peeks).toBe(0);
+});
+
+test("invite policy: an account created between the checks gets the plain answer", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                inviteCode: "good",
+                peekInvite: async () => ({ valid: true }),
+                signUpWithInvite: async () => ({
+                    ok: false,
+                    reason: "already-registered",
+                }),
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
+});
+
+test("closed policy: known and unknown emails get the same answer, with no lookup, whatever the invite field holds", async () => {
+    for (const inviteCode of [undefined, "", "   ", "x", "junk-code"]) {
+        for (const known of [false, true]) {
+            let lookups = 0;
+            let peeks = 0;
+            await expect(
+                resolveApproveUser(
+                    inviteArgs({
+                        signupPolicy: "closed",
+                        inviteCode,
+                        accountExists: async () => {
+                            lookups += 1;
+                            return known;
+                        },
+                        peekInvite: async () => {
+                            peeks += 1;
+                            return { valid: true };
+                        },
+                    }),
+                ),
+            ).rejects.toThrow(MESSAGES.invalidCredentials);
+            expect(lookups).toBe(0);
+            expect(peeks).toBe(0);
+        }
+    }
+});
+
+test("closed by default: with FOODABLE_SIGNUP_POLICY unset, a junk invite code reveals nothing", async () => {
+    const { resetSignupPolicyCache } = await import("./domain/signup.js");
+    const saved = process.env.FOODABLE_SIGNUP_POLICY;
+    delete process.env.FOODABLE_SIGNUP_POLICY;
+    resetSignupPolicyCache();
+    try {
+        let lookups = 0;
+        for (const known of [false, true]) {
+            await expect(
+                resolveApproveUser(
+                    inviteArgs({
+                        signupPolicy: undefined,
+                        inviteCode: "junk",
+                        accountExists: async () => {
+                            lookups += 1;
+                            return known;
+                        },
+                    }),
+                ),
+            ).rejects.toThrow(MESSAGES.invalidCredentials);
+        }
+        expect(lookups).toBe(0);
+    } finally {
+        if (saved === undefined) delete process.env.FOODABLE_SIGNUP_POLICY;
+        else process.env.FOODABLE_SIGNUP_POLICY = saved;
+        resetSignupPolicyCache();
+    }
+});
+
+test("open policy allows a second sign-up", async () => {
+    let signUps = 0;
+    const userId = await resolveApproveUser(
+        inviteArgs({
+            email: "solo@example.com",
+            signupPolicy: "open",
+            signUpUser: async () => {
+                signUps += 1;
+                return "33333333-3333-4333-8333-333333333333";
+            },
+        }),
+    );
+    expect(userId).toBe("33333333-3333-4333-8333-333333333333");
+    expect(signUps).toBe(1);
+});
+
+test("open policy: an existing account with a wrong password gets the plain answer", async () => {
+    await expect(
+        resolveApproveUser(
+            inviteArgs({
+                signupPolicy: "open",
+                accountExists: async () => true,
+            }),
+        ),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
+});
+
+test("closed policy refuses a second sign-up", async () => {
+    let signUps = 0;
+    await expect(
+        resolveApproveUser({
+            email: "stranger@example.com",
+            password: "secret123456",
+            authUserCount: async () => 1,
+            householdExists: async () => true,
+            signupPolicy: "closed",
+            signInUser: async () => {
+                throw Object.assign(new Error("Invalid login credentials"), {
+                    status: 400,
+                    code: "invalid_credentials",
+                });
+            },
+            signUpUser: async () => {
+                signUps += 1;
+                return "should-not-create";
+            },
+            messages: MESSAGES,
+        }),
+    ).rejects.toThrow(MESSAGES.invalidCredentials);
     expect(signUps).toBe(0);
 });
 
@@ -329,7 +572,7 @@ function fire(app: Hono, method: string, path: string, ip: string) {
 // limit. A structural assertion on OAUTH_PATHS would not have caught this;
 // only actually driving /mcp past the auth limit does.
 test("the OAuth rate limiter does not leak onto /mcp", async () => {
-    _resetBuckets();
+    await _resetBuckets();
     const { app, mcpHits } = buildTestApp();
 
     // Read the per-IP auth limit off a real OAuth response instead of hardcoding
@@ -337,7 +580,7 @@ test("the OAuth rate limiter does not leak onto /mcp", async () => {
     const probe = await fire(app, "GET", "/authorize", "203.0.113.9");
     const authLimit = Number(probe.headers.get("X-RateLimit-Limit"));
     expect(authLimit).toBeGreaterThan(0);
-    _resetBuckets();
+    await _resetBuckets();
 
     const total = authLimit * 3;
     for (let i = 0; i < total; i++) {
@@ -355,7 +598,7 @@ test("the OAuth rate limiter does not leak onto /mcp", async () => {
 // regression, and it is the main risk of scoping the middleware by path.
 test("every OAuth endpoint is still rate-limited", async () => {
     for (const [i, path] of OAUTH_PATHS.entries()) {
-        _resetBuckets();
+        await _resetBuckets();
         const { app } = buildTestApp();
         const method = OAUTH_METHODS[path]!;
         // Distinct IP per path so the buckets can't bleed into each other.

@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foodable is a self-hosted MCP platform for one household, built with Bun and TypeScript. Entry point is `src/index.ts`. It is a fork of `akutishevsky/nutrition-mcp`; the GitHub repo remains [https://github.com/MrF1ow/foodable](https://github.com/MrF1ow/foodable). It is not a public hosted service. The version lives only in `package.json`; `src/version.ts` re-exports it for the MCP `serverInfo`. A release is a PR that bumps it, opened by `bun run release` (`scripts/release.ts`, which suggests patch / minor from the merged PRs' labels): `.github/workflows/release.yml` then tags `v<version>` on main and publishes a GitHub release whose notes are grouped by PR label (`.github/release.yml`). See "Releases" in `CONTRIBUTING.md`.
 
-It runs on MCP TypeScript SDK **v2** (`@modelcontextprotocol/server` at runtime, `@modelcontextprotocol/client` only in tests) with Zod 4 as an explicit dependency; `@modelcontextprotocol/sdk` v1 is gone, so import `McpServer`, `InMemoryTransport`, `createMcpHandler` from `@modelcontextprotocol/server`. Every `inputSchema` / `outputSchema` here is a schema object (`z.object({…})`), never a raw shape: v2 still auto-wraps raw Zod 4 shapes via a deprecated overload, but the explicit form is the supported path, and it lets the exported `*_OUTPUT_SCHEMA` constants be `.parse()`d directly in tests. `/mcp` is a dual-era endpoint built on `createMcpHandler` (`src/mcp/server.ts`): it serves the `2026-07-28` revision (per-request `_meta` envelope, `server/discover`, no protocol-level sessions, `Mcp-Method` / `Mcp-Name` routing headers validated against the body) and, through the default `legacy: "stateless"` fallback, still answers `2025-11-25` clients with the same per-request `initialize` idiom the old hand-rolled transport used — one server factory backs both eras. The factory gets no Hono context: the authenticated actor travels in `authInfo.extra.auth` (`AuthContext`) from `handleMcp`, and the public origin (for the icon URL) is read from `ctx.requestInfo`. When `PUBLIC_ORIGIN` is set, `getBaseUrl` in `src/url.ts` returns it and ignores `X-Forwarded-*`; when unset, the request Host / forwarded headers still win. The "/mcp over HTTP" section of `src/mcp.test.ts` drives both eras in-process by pointing a v2 `Client`'s `fetch` at the Hono route — there is no in-memory transport for the modern era, so that is the only way to test it. It lives inside `mcp.test.ts` deliberately: `mock.module` is process-wide, and a separate file with its own mock/restore of the same db module broke `middleware.test.ts`'s mock on Linux CI (not reproducible on macOS). Two rules follow: stub `./db/*.js` from an existing mock window rather than opening another, and restore from a snapshot taken **before** `mock.module` — Bun patches the namespace in place, so restoring from the live import is a no-op. `listChanged` is advertised `false` on purpose: the endpoint is stateless and refuses GET, so no channel exists to deliver a list-changed notification. Two v2 wire facts worth knowing: advertised schemas are JSON Schema 2020-12 (v1 stamped draft-07), and a POST whose `Content-Type` is not `application/json` is answered `415` before the body is read. The server advertises `public/favicon.ico` plus the light and dark tile SVGs (`/brand/icon-light.svg`, `/brand/icon-dark.svg`, with the icon `theme` field). Tool call analytics (duration, success/failure, error category) are tracked via `src/analytics.ts` and persisted to the `tool_analytics` Postgres table.
+It runs on MCP TypeScript SDK **v2** (`@modelcontextprotocol/server` at runtime, `@modelcontextprotocol/client` only in tests) with Zod 4 as an explicit dependency; `@modelcontextprotocol/sdk` v1 is gone, so import `McpServer`, `InMemoryTransport`, `createMcpHandler` from `@modelcontextprotocol/server`. Every `inputSchema` / `outputSchema` here is a schema object, never a raw shape (`foodable/mcp-schema-object` lints it); that lets the exported `*_OUTPUT_SCHEMA` constants be `.parse()`d directly in tests. `/mcp` is a dual-era endpoint built on `createMcpHandler` (`src/mcp/server.ts`): it serves the `2026-07-28` revision (per-request `_meta` envelope, `server/discover`, no protocol-level sessions, `Mcp-Method` / `Mcp-Name` routing headers validated against the body) and, through the default `legacy: "stateless"` fallback, still answers `2025-11-25` clients with the same per-request `initialize` idiom the old hand-rolled transport used — one server factory backs both eras. The factory gets no Hono context: the authenticated actor travels in `authInfo.extra.auth` (`AuthContext`) from `handleMcp`, and the public origin (for the icon URL) is read from `ctx.requestInfo`. When `PUBLIC_ORIGIN` is set, `getBaseUrl` in `src/url.ts` returns it and ignores `X-Forwarded-*`; when unset, the request Host / forwarded headers still win. The "/mcp over HTTP" section of `src/mcp.test.ts` drives both eras in-process by pointing a v2 `Client`'s `fetch` at the Hono route — there is no in-memory transport for the modern era, so that is the only way to test it. It lives inside `mcp.test.ts` deliberately: `mock.module` is process-wide, and a separate file mocking the same db module broke `middleware.test.ts`'s mock on Linux CI (not reproducible on macOS). `foodable/no-db-mock-outside-windows` and `foodable/no-restore-from-live-import` (`bun run lint`) enforce the two rules that follow: db modules are stubbed only in the files already listed in `.oxlintrc.json`, and a restore uses a snapshot taken before `mock.module`. `listChanged` is advertised `false` on purpose: the endpoint is stateless and refuses GET, so no channel exists to deliver a list-changed notification. Two v2 wire facts worth knowing: advertised schemas are JSON Schema 2020-12 (v1 stamped draft-07), and a POST whose `Content-Type` is not `application/json` is answered `415` before the body is read. The server advertises `public/favicon.ico` plus the light and dark tile SVGs (`/brand/icon-light.svg`, `/brand/icon-dark.svg`, with the icon `theme` field). Tool call analytics (duration, success/failure, error category) are tracked via `src/analytics.ts` and persisted to the `tool_analytics` Postgres table.
 
-**Registered tool set.** `src/mcp/server.ts` holds the server factory and `SERVER_INSTRUCTIONS`, and calls one `registerXTools(server, ctx)` per domain module in `src/mcp/tools/` (`nutrition`, `nutrition-insights`, `water`, `weight`, `goals`, `profile`, `food`, `fridge`, `grocery`, `recipes`, `rules`, `notices`, `household`). `src/mcp/shared.ts` holds `withAnalytics`, actor resolution, `uiMeta` and the shared schemas and formatters. `src/mcp.ts` is a temporary re-export barrel for older imports. There are 73 tools; `src/mcp/tools-list.snapshot.json` pins the `tools/list` names and order and `src/mcp.test.ts` compares against it, so update the snapshot and `TOOLS` in the same PR as any tool change. `src/mcp.test.ts` asserts `TOOLS` names in `src/copy/tools.ts` match `tools/list` and that person-scoped catalog cards include optional `user_id`. Nutrition writes also accept optional `target_member` (MCP only). That file is an identity catalog (names, params, household/oauth splits), not a public `/tools` page.
+**Registered tool set.** `src/mcp/server.ts` holds the server factory and `SERVER_INSTRUCTIONS`, and calls one `registerXTools(server, ctx)` per domain module in `src/mcp/tools/` (`nutrition`, `nutrition-insights`, `water`, `weight`, `goals`, `profile`, `food`, `fridge`, `grocery`, `recipes`, `rules`, `notices`, `household`). `src/mcp/shared.ts` holds `withAnalytics`, actor resolution, `uiMeta` and the shared schemas and formatters. `src/mcp.ts` is a temporary re-export barrel for older imports. There are 73 tools; `src/mcp/tools-list.snapshot.json` pins the `tools/list` names and order (the all-flags-on list) and `src/mcp.test.ts` compares against it, so update the snapshot and `TOOLS` in the same PR as any tool change. Declare a flag-gated tool with `gatedTool` in `src/mcp/gated.ts` so it stays out of `tools/list` while the flag is off. `src/mcp.test.ts` asserts `TOOLS` names in `src/copy/tools.ts` match `tools/list` and that person-scoped catalog cards include optional `user_id`. Nutrition writes also accept optional `target_member` (MCP only). That file is an identity catalog (names, params, household/oauth splits), not a public `/tools` page.
 
 ## Architecture rules
 
@@ -31,9 +31,37 @@ Host-agnostic config: optional `PUBLIC_ORIGIN` (see `.env.example` and `docs/sel
 
 PR titles, blast radius, branch naming, and migration lint live in [`scripts/conventions/`](scripts/conventions/) and [`CONTRIBUTING.md`](CONTRIBUTING.md). Repo-specific agent workflows are in [`.claude/skills/`](.claude/skills/).
 
+**Design source of truth.** `~/Projects/designs/Foodable/Foodable Design.figcraft` (fonts in `~/Projects/designs/Foodable/fonts/`), open in the FigCraft app, holds every screen, the chat widgets and the design tokens. It is **read-only**: read it with the FigCraft MCP tools (`inspect_document`, `get_node`, `screenshot`, read-only `run_command`s such as `variable.list`), and never edit or save it. When the code and the design disagree, change the code or ask the design owner.
+
+**Planning.** Plans and planned work are kept outside this repo. PR bodies, commits and code comments do not reference them.
+
+**Testing and verifying.** The `foodable-test` skill is how to run and verify Foodable: an isolated local stack, which tool fits which change, and what never to touch. Use it before starting the server, the tests, `check:nav`, the previews, the widget harness or e2e. Verify that any dependency version you pin is current and not deprecated.
+
+## Ways to hurt yourself
+
+- **Merging to main deploys.** Railway deploys `main` to the household's live service. Never push to `main`; land through a PR, and put new behaviour behind a flag (`src/flags.ts`).
+- **Touching production data.** Production Postgres is internal-only. Reach it through `bun run db:rehearse` (it works on a copy), or `railway ssh` when the user asks. A dev server, test or migration pointed at it writes to the household's real data; never do that.
+- **Destructive migrations.** Railway's pre-deploy runs `db:migrate` on merge, so a dropped column is gone in production. Expand, backfill, switch, contract: never drop and backfill in the same step. `scripts/migration-safety.ts` (the `migrations` job) catches destructive SQL without a `-- foodable:contract <reason>` line and edits to merged migrations; splitting the steps is on you.
+- **Leaking `.env`.** It may hold real secrets. Never print it, copy it into a fixture, or commit it; use the URL from `bun run db:dev url` locally. Bun auto-loads `.env`, and `bun run db:dev` defaults to the user's own dev database unless `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` are set: read the `foodable-test` skill first.
+- **Editing the design file.** `~/Projects/designs/Foodable/Foodable Design.figcraft` is read-only; a save overwrites the design owner's source of truth (see "Design source of truth").
+- **Bypassing protection.** Never use `gh pr merge --admin`, push to `main`, or create, edit or delete rulesets. `.claude/settings.json` denies these for Claude Code only; other tools are bound by this rule alone.
+
+## Hit every surface
+
+A change may need to reach more than the file you edit. `foodable-test` says which tool verifies which surface.
+
+- **MCP tools:** update `src/mcp/tools-list.snapshot.json` and `TOOLS` in `src/copy/tools.ts` together.
+- **Household web app:** the page, its route, `bun run check:nav`, and a look with `bun run preview:app`.
+- **Chat widgets:** the widget partials, `src/widgets.test.ts`, and `bun run harness`.
+- **Flags:** exercise the change with the flag on and off (gated tools stay out of `tools/list` while it is off).
+- **Both MCP protocol eras:** `2026-07-28` and `2025-11-25`, through the "/mcp over HTTP" tests in `src/mcp.test.ts`.
+- **Migrations:** `bun run db:dryrun`, and the phased workflow in "Migrations".
+- **Data export and import:** the CSV shapes stay round-trippable (`meals.csv` re-imports).
+- **Docs:** `docs/`, `CONTRIBUTING.md` and this file, when behaviour or a command changes.
+
 ## Household data model
 
-Every pillar points at one household `foods` row (`src/domain/foods.ts`). Fridge items, grocery lines and recipe ingredients carry `food_id`. Dislikes are free text: `member_dislikes.food_id` exists but nothing sets it. Barcodes and aliases hang off a food (`food_barcodes`, `food_aliases`). Manual names resolve through `normalizeFoodName`, so "Eggs", "eggs " and "EGGS" are one food, and `mergeFoods` repoints every reference when duplicates slip in. Supplies are foods with `kind = 'supply'`. `foods` holds nutrition **per 100 g**, and null means unknown, never zero. OFF values only reach those columns when OFF reported them per 100 g (`catalogNutritionFromOff`), because the `food_cache` payload is per serving whenever a product lists a serving size.
+Every pillar points at one household `foods` row (`src/domain/foods.ts`). Fridge items, grocery lines and recipe ingredients carry `food_id`. Dislikes are free text: `member_dislikes.food_id` exists but nothing sets it. Barcodes and aliases hang off a food (`food_barcodes`, `food_aliases`). Manual names resolve through `normalizeFoodName`, so "Eggs", "eggs " and "EGGS" are one food, and `mergeFoods` repoints every reference when duplicates slip in. Supplies are foods with `kind = 'supply'`. `foods` holds nutrition **per 100 g**, and null means unknown, never zero. OFF values only reach those columns when OFF reported them per 100 g (`catalogNutritionFromOff`), because the `food_cache` payload is per serving whenever a product lists a serving size. The same row also stores OFF product-quality columns: Nutri-Score, NOVA, Green-Score A+–F (`ecoscore_grade` as `a-plus`…`f`), additive/allergen/trace/analysis/label tags, and `off_quality_fetched_at`. Null means unknown; `[]` means OFF listed none; `offQuality` null means never looked up; an all-null quality with a `fetchedAt` means OFF had nothing for that barcode. Additive risk tiers are derived on read from generated `src/domain/additive-risk.ts` (`bun scripts/gen-additive-risk.ts`). Quality writes go through `setFoodQuality`, which updates only those columns.
 
 - **`food_id` is the identity.** Fridge items, grocery lines and recipe ingredients name their food by `food_id`, which is `not null` since the Phase 8 contract (`20261031180000`). There is no identity JSON and no per-ingredient nutrition: "already have" matching (`sameFood` in `src/domain/linking.ts`) compares `food_id` alone, and recipe macros read the food row.
 - **Units.** Quantities keep their own unit. `toGrams` in `src/domain/food-quantity.ts` is the one conversion path. Volume needs `grams_per_ml` and `each` needs `grams_per_each`, and a missing factor returns null rather than a guess. That null makes a recipe "incomplete", with the missing factor named.
@@ -53,9 +81,12 @@ Schema lives only in `db/migrations/`. Apply them with `bun run db:migrate` (`--
 - `bun run format` - Format code with Prettier (4-space indentation)
 - `bun run format:check` - Verify the tree is prettier-clean (CI runs this on every PR)
 - `bun run db:dryrun` - Apply the pending migrations to a throwaway local Postgres and check the backfill (see "Migrations" below)
+- `bun run db:rehearse` - Dry-run what production has not applied on a copy of its data, through `railway ssh`; deletes the copy afterwards (`--list` only reports; see "Rehearsing migrations on a production copy" in `docs/self-hosting.md`)
 - `bun run db:dev` - Persistent local Postgres for development (`init`, `start`, `stop`, `status`, `url`, `migrate`)
 - `bun run db:import-postgres` - Copy the `public` data of a migrated Postgres (`--from`) into an empty one at the same migration version (`--to`, default: `db:dev` URL; `--check-only` checks preconditions)
-- `bun run typecheck` - Typecheck `src/` (CI runs this on every PR; it is scoped to `src/`, so a type error in a test file or under `scripts/` will not be caught)
+- `bun run check:changed` - Run the checks CI would run for the files you changed (`--list` previews them, `--all` runs everything)
+- `bun run typecheck` - Typecheck the whole project, tests and `scripts/` included (CI runs this on every PR)
+- `bun run lint` - oxlint with the repo's own rules (`scripts/lint-rules/`, enabled in `.oxlintrc.json`); `check:changed` runs it. A suppression needs a reason: `// oxlint-disable-next-line foodable/<rule> -- <why>`
 - `bun run release [patch|minor|major] [--dry-run]` - Open the release PR (see "Releases" in `CONTRIBUTING.md`)
 - `bun run gen:tokens` - Write `public/widgets/src/shared/tokens.css` from `src/tokens.ts`
 
@@ -99,9 +130,9 @@ In-chat UI uses **MCP Apps** (the official 2026-01-26 MCP extension), which rend
 
 A second marker, `/*@inlinets src/domain/csv.ts@*/`, transpiles a TypeScript module from `src/` into the widget as plain JS. It exists so a widget can run **tested** server-side code instead of a hand-copied twin; it only works for modules with no runtime imports, and it strips module syntax because a bare `export` inside a `<script>` is a syntax error.
 
-UI copy is English only. A third assembly marker, `/*@i18n@*/` (`src/widgets.ts`), inlines `WIDGET_STRINGS` (`src/copy/widgets.ts`) as a `JSON.stringify`'d `const` — plain data only. It sits once per template, immediately before `/*@include shared/i18n.js@*/`, because `src/widgets.test.ts` requires every `@include`d partial's full text to appear verbatim in the assembled HTML, and the assembler's marker regexes match plain text. `shared/i18n.js` still calls `pickLocale` / `setLocale`; the server always sends `structuredContent.locale` as `"en"` (`WIDGET_LOCALE` in `src/routes.ts`). There is no `set_language` tool.
+UI copy is English only. Each template carries a small `const T = { … }` with only the strings that widget uses; shared partials embed their own copy (`MACRO_COPY` in `shared/macros.js`, `CHART_COPY` in `shared/trend-chart.js`, `MONTHS` in `shared/date.js`). `shared/util.js` supplies `tpl()` and `plural()` for count-sensitive phrases. Tool `structuredContent` still carries `locale: "en"` (`WIDGET_LOCALE` in `src/routes.ts`); widgets do not branch on it. There is no `set_language` tool.
 
-**Every widget except `component-gallery` (dev-only, unreachable by any client) is fully wired end-to-end.** `nutrition-summary`, `goal-progress`, `meal-logged`, `trends`, `weight-trends`, and `import-meals` each call `setLocale(pickLocale(structuredContent.locale, hostContext.locale))` from `render()` (or, for `import-meals`, from the `initWidget` config's outer `render(data)` callback) and have their own `WidgetStrings` namespace (`goalProgress`, `mealLogged`, `trends`, `weightTrends`, `importMeals`) alongside `macros`/`nutritionSummary`. Two deliberate non-translations, not gaps: `import-meals`'s `diagnosticsBlock()` copy-paste diagnostics dump stays operator-facing English (it carries no support address since #51; a household deploy has no support inbox), and `api.updateModelContext`'s finished-import summary stays English (model-facing text like every tool's `content`, not UI).
+**Every widget except `component-gallery` (dev-only, unreachable by any client) is fully wired end-to-end.** Two deliberate non-translations, not gaps: `import-meals`'s `diagnosticsBlock()` copy-paste diagnostics dump stays operator-facing English (it carries no support address since #51; a household deploy has no support inbox), and `api.updateModelContext`'s finished-import summary stays English (model-facing text like every tool's `content`, not UI).
 
 **`bun run harness`** is the local host simulator (`scripts/widget-harness.ts`). It mimics a strict host — validates the `ui/initialize` shape, withholds the tool result until `ui/notifications/initialized`, starts the iframe at 130px, applies the sandbox CSP — and additionally answers app-initiated `tools/call`, sends host→app requests, and executes the real `bulk_import_meals` against an in-memory store. Query flags reproduce host behaviour: `?serverTools=0`, `?tools=0`, `?delay=3000`, `?maxHeight=600`, `?fail=1`.
 
@@ -119,7 +150,7 @@ UI copy is English only. A third assembly marker, `/*@i18n@*/` (`src/widgets.ts`
 
 Because external scripts and stylesheets are out, reuse happens inline-at-build-time (the `@include` assembler) rather than through a linkable stylesheet or `<script src>`. To use a chart library, inline it the same way; we use hand-built SVG instead (0 KB, follows CSS light/dark vars natively via `currentColor` / `var(--…)`).
 
-**Styling — reuse the shared design language.** All widgets share one look (neutral surfaces, accent tokens, one compact card per widget, a donut gauge, thin metric bars, SVG trend charts). Layout inside the strip is driven by each `MACROS` entry's `role` in `shared/macros.js` (`cal` / `macro` / `limit` / `bar`) — never by a hardcoded key list, so a new nutrient appears exactly where its role says and nowhere else. The tokens and component CSS live as source partials in `public/widgets/src/shared/` and are inlined via `@include`; **`public/widgets/STYLE_GUIDE.md`** is the spec for those partials. Edit a partial once and every widget picks it up on next assembly — do **not** re-inline or fork a shared block into a template. Keep the JS host handshake in `shared/bridge.js` (`initWidget(config)`); a template supplies `{ name, loading, coerce, render, sample }`, plus an optional `onReady(api)` when it needs to call the server. `api` exposes `callTool(name, args, opts)`, `canCallTools` (whether the host advertised `hostCapabilities.serverTools`), `hostContext`, `hostInfo`, and `updateModelContext(text)`. Form controls and the preview table live in `shared/form.css` and `shared/table.css`; `.card` is the shared surface in `shared/base.css`.
+**Styling — reuse the shared design language.** v1 widgets use the NEUTRAL palette (`shared/tokens.css`). v2 partials live under `public/widgets/src/shared/v2/`, starting with the generated Theme tokens (`shared/v2/tokens.css` from `src/tokens.ts`, system font, host `data-theme`). No widget loads web fonts. Layout inside the strip is driven by each `MACROS` entry's `role` in `shared/macros.js` (`cal` / `macro` / `limit` / `bar`) — never by a hardcoded key list, so a new nutrient appears exactly where its role says and nowhere else. The tokens and component CSS live as source partials in `public/widgets/src/shared/` and are inlined via `@include`; **`public/widgets/STYLE_GUIDE.md`** is the spec for those partials. Edit a partial once and every widget picks it up on next assembly — do **not** re-inline or fork a shared block into a template. Keep the JS host handshake in `shared/bridge.js` (`initWidget(config)`); a template supplies `{ name, loading, coerce, render, sample }`, plus an optional `onReady(api)` when it needs to call the server. `api` exposes `callTool(name, args, opts)`, `canCallTools` (whether the host advertised `hostCapabilities.serverTools`), `hostContext`, `hostInfo`, and `updateModelContext(text)`. Form controls and the preview table live in `shared/form.css` and `shared/table.css`; `.card` is the shared surface in `shared/base.css`.
 
 Two bridge invariants that are easy to break: a message is only treated as a response to our request when it has **no** `method` and carries `result`/`error` (the host sends its own requests, with its own id counter — the spec's `ui/resource-teardown` example uses `id: 1`, which is why our ids are namespaced `app-N`), and inbound messages are rejected unless `event.source === host` (`window.parent.frames` is reachable cross-origin, so a sibling iframe could otherwise forge a tool result and repaint a widget).
 
@@ -151,7 +182,7 @@ Non-obvious invariants, each of which was a real bug or nearly one:
 - **Our own export re-imports by `id`, not by content.** The content digest structurally cannot recognize a meal coming back in: `log_meal` writes `auto:<digest>` keys and the importer writes `import:…` ones, and the two hash different renderings of `logged_at` (the export emits second-precision local wall time, which the importer then re-resolves). So every row carries an optional `source_id` — the `id` column of the `meals.csv` our own export writes — and a row naming a meal the user still has is reported `deduplicated` without an insert, on the dry-run path and the real one alike. Rows whose meal was since deleted key on `import:src:<uuid>:<ordinal>` so a second replay is still a no-op. Only uuid-shaped values count: a foreign app's `id` column is dropped rather than rejected, and passing a non-uuid to the uuid-typed `in ("id", …)` lookup would fail the whole batch on a cast error rather than simply not matching. The export's `timezone` column closes the other half of that gap: a row whose meal was since deleted — the actual "restore my data" case — still gets written fresh rather than deduplicated by id, so it also carries an optional `timezone` field (mapped by the widget from the export's own `timezone` column), which `resolveLoggedAt` uses in place of the account's current timezone when present and valid — otherwise an offset-less wall clock silently re-resolves against whatever timezone the account has now, moving the meal to a different local day (#97).
 
 - **The tool never sets `isError`.** Failure is `status: "failed"` inside the `outputSchema`. `isError` short-circuits the SDK's output validation and hosts commonly surface only `content`, which would drop the per-row report that is the whole product. Consequence: `withAnalytics` needs its `outcome` callback, or failed imports log as successes.
-- **`.nullable()` is not optional.** Nullable fields are emitted as _required_ with an `anyOf[type, null]` value, so every result row must be built from a complete literal with explicit `null`s. `src/domain/import.test.ts` validates the serializer against the schema — the only guard, since `bun run typecheck` covers `src/` but not the shape a handler actually returns at runtime.
+- **`.nullable()` is not optional.** Nullable fields are emitted as _required_ with an `anyOf[type, null]` value, so every result row must be built from a complete literal with explicit `null`s. `src/domain/import.test.ts` validates the serializer against the schema — the only guard, since `bun run typecheck` checks types but not the shape a handler actually returns at runtime.
 - **Bounds live in the handler, not in Zod.** A schema-level rejection happens before the handler runs, discarding the structured report, the warnings and the analytics row — for what will be the caller's most common mistake. Numbers use `z.coerce` like `log_meal`.
 - **Timestamps accept a bare date (→ local noon), an offset-less local time (resolved in the profile timezone), or full ISO with an offset.** Offset-less is accepted deliberately: no fitness export carries an offset, so requiring one forces the caller to compute historical DST per row. Every resolved date asserts the `dateInTz` round trip, which turns never-existed local dates (`Pacific/Apia 2011-12-30`) into explicit errors. An unconfigured timezone silently means UTC, so the tool warns — a missing `profiles` row is the only reliable "never set" signal.
 
@@ -161,7 +192,7 @@ Non-obvious invariants, each of which was a real bug or nearly one:
 
 ## Data export
 
-**One tool, `export_all_data`, is the only way out.** It builds a ZIP — `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `profile.csv` and a `README.txt` — upserts it into `public.export_archives` (one row per user, so each export overwrites the last), and returns a 60-minute link to `GET /exports/:token`. The token is an `e1.` HMAC over the user id and expiry (seconds) using a key derived from the session secret; it is not a site-session cookie. The route verifies it and streams `application/zip` with `Cache-Control: no-store`. Invalid, expired, and missing archives all get the same 404. A meals-only `export_meals` used to sit beside it and was removed rather than kept: two overlapping export tools made "export my data" ambiguous for the model, and the meal history is `meals.csv` inside the archive. `sweepStaleExports` deletes rows whose `expires_at` is in the past on the same schedule as before, so nothing outlives its link by more than one sweep; account deletion drops the row through the `public.users` cascade.
+**One tool, `export_all_data`, is the only way out.** It builds a ZIP — `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `goal_days.csv`, `profile.csv` and a `README.txt` — upserts it into `public.export_archives` (one row per user, so each export overwrites the last), and returns a 60-minute link to `GET /exports/:token`. The token is an `e1.` HMAC over the user id and expiry (seconds) using a key derived from the session secret; it is not a site-session cookie. The route verifies it and streams `application/zip` with `Cache-Control: no-store`. Invalid, expired, and missing archives all get the same 404. A meals-only `export_meals` was removed rather than kept: two overlapping export tools made "export my data" ambiguous for the model, and the meal history is `meals.csv` inside the archive. `sweepStaleExports` deletes rows whose `expires_at` is in the past on the same schedule as before, so nothing outlives its link by more than one sweep; account deletion drops the row through the `public.users` cascade.
 
 `src/zip.ts` is a hand-rolled store-only (method 0) ZIP writer — Bun has gzip and zstd but no archive builder, and seven small CSVs do not justify a dependency. Two things in it are load-bearing: every size and offset is a **byte** length from `TextEncoder` (a multi-byte character in a meal description otherwise desyncs every following offset), and the DOS date/time is read in **UTC**, or the same `Date` emits different bytes on different machines and the determinism the tests rest on evaporates.
 
@@ -177,6 +208,8 @@ Invariants worth keeping:
 ---
 
 ## Login HTML and the household app
+
+**Routes.** Canonical app paths live in `src/web/route-map.ts` (`APP_PATHS`). Old paths (`/fridge`, `/grocery`, `/household`, `/household/usual-products`, `/settings/foods`) redirect via app middleware: GET/HEAD → 301, other methods → 308, query string preserved.
 
 Generated public HTML is the OAuth login template: `public/login.html`, written by `scripts/gen-login.ts` from `src/copy/login.ts`. English only. `GET /` without a site session is that login page. `GET /authorize` with a valid OAuth query is the same template. Signed-in `/` is the household web app (nutrition, fridge, grocery, recipes, household). Do not add marketing routes, and do not restore `gen-index.ts`, `gen-tools.ts`, `gen-legal.ts`, `gen-alternatives.ts`, or `gen-sitemap.ts`.
 
@@ -198,7 +231,7 @@ The first-user / closed-household flow is documented in `docs/self-hosting.md` (
 
 ## Household app styling
 
-One shared base, one app brand layer. Colours, type sizes (`--fs-*`) and radii (`--r-*`) live in `src/tokens.ts`; `bun run gen:tokens` writes `public/widgets/src/shared/tokens.css` (the NEUTRAL base) and `public/app/brand.css` (the APP palette and the self-hosted Geist / Bricolage Grotesque fonts). `src/tokens.test.ts` fails if either committed file drifts. The widget partials in `public/widgets/src/shared/` (`tokens.css`, `base.css`, `form.css`, `table.css`, `seg.css`) are the base for the in-chat widgets, the household app and the login page. `public/app/app.css` `@include`s them, then the app-only brand layer: `public/app/brand.css`, `public/app/motion.css` (keyframes and the reduced-motion guard), pill controls, the page glow, the frosted nav, the login hero, and page/login motion. Entrance animations are gated on `html.fx`, which `src/web/client/shell.js` sets inside a frame and never under `prefers-reduced-motion`. App pages emit data attributes, not `<script>` blocks; client behaviour ships once as `/app.js` from `getAppJs()`. Embedded widgets are not animated. Chat widgets never include the brand layer: they render inside someone else's product, so they keep the neutral look, and `src/app-brand.test.ts` fails if a brand marker reaches one. The widgets the app embeds get the brand layer through `public/app/embed.css`, injected as the frame's last `<style>` by `getEmbedWidgetHtml` (the `/app/widgets/:key` document) and by `withWidgetData` when given a `skin` (`getEmbedCss()`). `getWidgetHtml` stays skin-free for MCP. `getAppCss()`, `getEmbedCss()` and `getAppJs()` in `src/widgets.ts` assemble with the widget resolver (app-only partials are `../../app/…`), cache, and warm at boot. Dashboard widgets are separate same-origin documents (content-hashed like `/app.css`, no per-request data) and set their own CSP so the page can frame them; that document needs inline script and style too. Editing a shared partial changes the widgets and the app together; check both (`bun run harness`, `bun run preview:app --shots`). Brand changes go in `brand.css` or `app.css`, never in a shared partial.
+One shared base, one app brand layer. Colours, type sizes (`--fs-*`) and radii (`--r-*`) live in `src/tokens.ts`; `bun run gen:tokens` writes `public/widgets/src/shared/tokens.css` (the NEUTRAL base), `public/widgets/src/shared/v2/tokens.css` (Theme palette for v2 widgets), and `public/app/brand.css` (the APP palette and the self-hosted Geist / Bricolage Grotesque fonts). `src/tokens.test.ts` and `src/tokens-v2.test.ts` fail when a committed file drifts. The v1 widgets build on `public/widgets/src/shared/` (`tokens.css`, `base.css`, `form.css`, `table.css`, `seg.css`). The household app and the login page share only the generated `tokens.css`: `public/app/app.css` `@include`s it, its own copies `public/app/{base,form,table,seg}.css` (free to drift from the widget partials), then the app-only brand layer: `public/app/brand.css`, `public/app/motion.css` (keyframes and the reduced-motion guard), pill controls, the page glow, the frosted nav, the login hero, and page/login motion. Entrance animations are gated on `html.fx`, which `src/web/client/shell.js` sets inside a frame and never under `prefers-reduced-motion`. App pages emit data attributes, not `<script>` blocks; client behaviour ships once as `/app.js` from `getAppJs()`. Embedded widgets are not animated. v1 chat widgets never include the brand layer or web fonts; v2 widgets use the Theme palette and a system font. `src/app-brand.test.ts` fails if Geist, Bricolage or `/fonts/` reach a widget partial or if widget v2 tokens leak into `getAppCss()` / `getEmbedCss()` / `brand.css`. The widgets the app embeds get the brand layer through `public/app/embed.css`, injected as the frame's last `<style>` by `getEmbedWidgetHtml` (the `/app/widgets/:key` document) and by `withWidgetData` when given a `skin` (`getEmbedCss()`). `getWidgetHtml` stays skin-free for MCP. `getAppCss()`, `getEmbedCss()` and `getAppJs()` in `src/widgets.ts` assemble with the widget resolver (app-only partials are `../../app/…`), cache, and warm at boot. Dashboard widgets are separate same-origin documents (content-hashed like `/app.css`, no per-request data) and set their own CSP so the page can frame them; that document needs inline script and style too. A token change reaches the widgets and the app together; check both (`bun run harness`, `bun run preview:app --shots`). Brand changes go in `brand.css` or `app.css`, never in a widget partial.
 
 - **Plain markup inside `.native`.** App pages render inside `<main class="app-main native">`. `form.css` styles native `input` / `select` / `textarea` / `button` there through `:where(.native …)`, which has zero specificity, so a component class on the same element always wins. Never add a bare `.native button` rule: it outranks `.btn-primary`. App-layer rules in `app.css` follow the same convention.
 - **The vocabulary.** Page chrome comes from `src/web/components/ui.ts` (`pageHeader` with optional inline `titleActions` beside the `<h1>` and a `.page-actions` row below, `panel`, `field`, `disclosure`, `errorBanner`, `pageLevelErrorBanner`, `emptyState`, `row`, `modal`, `modalTrigger`, `confirmModal`). A page never hand-writes those. Sections are `.panel` (sub-blocks `.psec`). Lists are `ul.list` of rows: `.row` holding `.row-title` and a right-aligned `.row-meta`, then `.row-actions` (each action is its own POST form, `display: contents`). Secondary forms (add, edit, delete) open in a modal via `modal` / `modalTrigger` / `confirmModal` (`openOnLoad`, `formClass`, `bodyPrefix` for checkbox confirms); `<details class="more">` is only for read-only collapsibles and inline filter / log forms. Destructive one-click actions use `confirmModal`. Buttons: plain = neutral, `.btn-primary` = the one main action, `.btn-danger` = destructive, `.btn-sm` = in-row. A label above its control is `field({ id, label, control })` (the shared `.field` from `form.css`), never a bare `<label for>` beside its control: that pair leaned on a −8px margin against the parent's gap and overlapped wherever the parent was not a gapped grid. `src/web/components/field.test.ts` fails on a visible hand-written `<label for>` (visually hidden in-row labels are exempt) and on that negative margin coming back. Two-column fields: `.field-grid` with `<label>Text<input></label>`. Label + control + button on one line: `.inline-form`. Picker tabs are `.seg` / `.seg-btn` with `aria-selected`. Use `pageLevelErrorBanner` when errors may belong inside a modal (`openModalId`); otherwise the banner sits under the page header. Settings › Help (`/settings/help`) is a short glossary in `src/web/pages/settings-help.ts`, reached from the top-bar gear. Settings pages use the shell's `renderSettingsPage` (bare, back link); create-household and forbidden use `renderBarePage` with Log out in the app bar.
@@ -207,145 +240,3 @@ One shared base, one app brand layer. Colours, type sizes (`--fs-*`) and radii (
 - **Embedded widgets.** `.widget-frame` is pulled out by the widget's own 12–14px gutter so cards line up with page panels. The frame document reads `frameElement.dataset.widgetData` into `window.__WIDGET_DATA__` and stamps `data-theme` from the iframe before its styles apply; `bridge.js` skips its chat-only footer when that seed painted the card.
 - **Turbo (in-app navigation).** Hotwire Turbo 8 is bundled into `/app.js` (not a CDN). The shell advertises morph page refreshes and scroll preservation; `/app.css` and `/app.js` are content-hashed (`?v=…`) and use `data-turbo-track="reload"`. Client modules register through `FoodableApp.onLoad` in `shell.js`, which re-runs on `turbo:load` and `turbo:morph` with per-module `WeakSet` idempotency. Form POST success redirects use **303**; validation errors render **4xx** HTML in place (modals reopen via `data-modal-open-on-load`). Expired-session login on POST is **401** (GET stays **200**) so Turbo renders the login page instead of dropping the response. Flows that opt out of Turbo: the login `/approve` form, the rotate-household-token confirm form (one-time secret on a 200 page), the Settings account form, the Settings gear, the Settings Back link, and the Settings page logo, because iOS Safari only re-tints its toolbar on a page load (Settings uses page theme chrome and tabs use nav chrome, and Turbo's head merge replaces the theme-color meta instead of updating it in place; the account form also opts out because an in-place theme switch left the toolbar stale). The logout link — on the Account page and the gate app bar — keeps `data-turbo="false"`. The login template adds `<meta name="turbo-visit-control" content="reload">`; `shell.js` forces a full reload if login HTML would morph into app chrome. Turbo merges provisional `<head>` nodes (including `meta[name=foodable-theme]`) on visits and morph refreshes but never copies `data-theme` onto `<html>`; `shell.js` syncs `document.documentElement` and the server-rendered `meta[name=theme-color]` tags in place (content/media only, never remove/recreate) from that meta on `turbo:before-render` (after head merge, before body paint), and only when the preference differs. Tabbed pages emit bottom-nav chrome (`THEME_NAV_COLOR`); login and bare pages keep page `--bg`. Regression coverage: `bun run check:nav`.
 - **Test-pinned class names.** Some classes are asserted exactly by tests (see `src/web/components/shared-import.test.ts`, `src/domain/*.test.ts`). Style those by name in `app.css` rather than appending classes in markup.
-
----
-
-# Claude Code Operating Instructions
-
-Other coding agents should follow the architecture rules above and skip this section. Please do not push to `main`, run `gh pr merge --admin`, create, update, or delete GitHub rulesets, or add the `gate:approved` label (it is the code owner's sign-off on gate files, see `CONTRIBUTING.md`); that is a request to contributors, not a guarantee for every tool — [`.claude/settings.json`](.claude/settings.json) binds Claude Code only.
-
-## Core Philosophy
-
-Default to **parallel execution** and **web-verified information**. Sequential execution and offline assumptions are fallback modes, not defaults. When in doubt: parallelize, then search.
-
----
-
-## 1. Parallelization Protocol
-
-### Default Behavior: Parallel-First
-
-**Before starting any multi-step task:**
-
-1. Decompose the full task into atomic subtasks
-2. Build a dependency graph — identify which subtasks have no prerequisite outputs
-3. Dispatch ALL dependency-free subtasks simultaneously using parallel tool calls
-4. Only after their completion, dispatch the next wave of now-unblocked subtasks
-5. Repeat until task is complete
-
-**Rule:** If two tasks do not share an input/output dependency, they MUST run in parallel. Sequential execution of independent tasks is a performance violation.
-
-### Parallel Tool Call Patterns
-
-Prefer batching tool calls in a single response turn rather than sequential turns:
-
-```
-# CORRECT — dispatch independent reads simultaneously
-- Read file A
-- Read file B
-- Search web for library version
-(all in one turn)
-
-# WRONG — needless sequencing
-- Read file A → wait → Read file B → wait → Search web
-```
-
-### Sub-Agent Parallelization (Task Tool)
-
-When using the `Task` tool to spawn sub-agents:
-
-- Spawn all independent sub-agents in a single dispatch batch
-- Maximum **5 concurrent sub-agents** at any time to avoid context exhaustion
-- Each sub-agent must have a clearly scoped, non-overlapping responsibility
-- Define explicit output contracts for each agent before spawning
-- After all agents complete, explicitly synthesize their outputs — do not present raw agent outputs as the final answer
-
-### TodoWrite Protocol
-
-When managing complex tasks with `TodoWrite`:
-
-- Mark tasks as `in_progress` before starting a parallel batch
-- Track each parallel thread separately
-- Never mark a parent task `completed` until all parallel children resolve
-- Flag dependency chains explicitly in todo descriptions
-
-### When Sequential Execution Is Permitted
-
-Sequential execution is only justified when:
-
-- Task B requires Task A's output as direct input
-- Tasks write to the same file or resource (race condition risk)
-- A previous parallel batch returned an error that changes downstream logic
-- User explicitly requests step-by-step confirmation
-
-In all other cases: **parallelize**.
-
----
-
-## 2. Web Search Mandate
-
-### Search-First Triggers
-
-**Always perform a web search before proceeding** when the task involves any of the following:
-
-| Category                     | Examples                                                  |
-| ---------------------------- | --------------------------------------------------------- |
-| Library / framework versions | "What's the latest stable version of X?"                  |
-| API behavior and signatures  | Any external SDK, REST API, or CLI tool                   |
-| Security advisories          | CVEs, deprecated patterns, breaking changes               |
-| Best practices               | Architecture patterns, language idioms updated post-2024  |
-| Configuration options        | Tool flags, environment variables, cloud service settings |
-| Error messages               | Unfamiliar stack traces, runtime errors                   |
-| Compatibility questions      | Node/Python/Rust version support, browser APIs            |
-| Pricing or limits            | Cloud service quotas, rate limits, SLA details            |
-
-### Search Behavior Rules
-
-1. **Search before assuming.** Do not rely on training knowledge for anything that changes over time. External information has a shelf life; always verify.
-
-2. **Prefer official sources.** When web results conflict, prioritize: official docs > GitHub releases > well-known technical blogs > forums.
-
-3. **Deduplicate within session.** If you have already searched for a query in this session and the result was unambiguous, do not re-search the same query. Cache the result mentally and reference it.
-
-4. **Surface what you found.** When you use web search to inform a decision, briefly state the source and key fact. Do not silently use search results without attribution.
-
-5. **Parallelize searches.** When multiple independent facts need to be looked up, dispatch all web searches simultaneously, not sequentially.
-
-6. **Do not search for:** Internal project details, proprietary architecture, code that exists in the repository (read the file instead), or subjective style decisions.
-
-### When Web Search Results Conflict with the Codebase
-
-If web search returns guidance that contradicts patterns already established in the repo:
-
-1. Note the conflict explicitly
-2. Present both the current repo pattern and the web-sourced alternative
-3. Do not silently override existing code with web-sourced patterns without user confirmation
-
----
-
-## 3. Session Start Checklist
-
-At the beginning of every new task or session, run the following in parallel:
-
-- [ ] Read `CLAUDE.md` (this file) to confirm operating rules are loaded
-- [ ] Identify the task's scope and decompose into subtasks
-- [ ] Flag any subtasks that require web verification
-- [ ] Check for existing relevant files in the repo before searching externally
-- [ ] Dispatch first parallel batch
-
----
-
-## 4. Quality and Safety Rules
-
-- **No unverified version pinning.** Never write a dependency version (`package.json`, `pyproject.toml`, `Cargo.toml`, etc.) without confirming via web search that it is current and non-deprecated.
-- **No silent failures in parallel batches.** If one parallel subtask fails, halt dependent tasks immediately and report the failure before proceeding.
-- **Conflict resolution in parallel file edits.** If two parallel sub-agents are asked to modify the same file, serialize those specific edits. All other work continues in parallel.
-- **Do not hallucinate tool flags or API parameters.** If unsure whether a CLI flag exists, search first.
-
----
-
-## 5. Communication Standards
-
-- When executing a parallel batch, briefly state what is running in parallel and why
-- When web search informs a decision, cite source and date if available
-- When sequential execution is chosen over parallel, briefly state the dependency that forced it
-- Keep explanations concise — action over narration

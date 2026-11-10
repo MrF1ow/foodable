@@ -2,6 +2,8 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { householdToday } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
@@ -23,23 +25,47 @@ import {
     type GroceryAmountPickReason,
     type GroceryStorePickReason,
 } from "../../domain/grocery.js";
+import {
+    dismissedKeySet,
+    isDismissedIn,
+} from "../../domain/notice-dismissals.js";
 import { sortNotices } from "../../domain/notices.js";
+import { groceryRestockNotices } from "../../domain/restock.js";
 import {
     NotedGroceryLineAmountRequiredError,
     putAwayGroceryLines,
     StockInputError,
 } from "../../domain/stock.js";
-import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
     groceryLineExtras,
     householdAllergenMembers,
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
-    APP_UI_MIME_TYPE,
-    GROCERY_LIST_WIDGET_URI,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
+    registerWidgetResource,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
+import { GroceryInputError } from "../../domain/grocery.js";
+
+export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    id: z.string().nullable(),
+    display_name: z.string().nullable(),
+    already_have: z.string().nullable(),
+    store_id: z.string().nullable(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+    notices: z.array(NOTICE_SCHEMA),
+});
 
 const groceryLineSchema = z.object({
     id: z.string(),
@@ -94,7 +120,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 openWorldHint: false,
             },
             outputSchema: GROCERY_LIST_OUTPUT_SCHEMA,
-            ...uiMeta(GROCERY_LIST_WIDGET_URI),
+            ...uiMeta("grocery-list"),
         },
         async () =>
             withAnalytics(
@@ -120,6 +146,20 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     );
                     const allergenMembers =
                         await householdAllergenMembers(householdId);
+                    const today = await householdToday(householdId);
+                    const dismissals =
+                        await liveNoticeDismissalsStore().listForHousehold(
+                            householdId,
+                        );
+                    const dismissed = dismissedKeySet(dismissals);
+                    const restockNotices = groceryRestockNotices(
+                        snapshot.lines,
+                        fridge.items,
+                        today,
+                    ).filter((n) => !isDismissedIn(n, dismissed));
+                    const restockByLine = new Map(
+                        restockNotices.map((n) => [n.subject.id, n]),
+                    );
                     const stock = fridge.items.map((item) => ({
                         quantity: item.quantity,
                         foodId: item.foodId,
@@ -138,14 +178,16 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         const eff = line.foodId
                             ? foods.get(line.foodId)
                             : undefined;
-                        const notices = sortNotices(
-                            allergenNotices(
+                        const restock = restockByLine.get(line.id);
+                        const notices = sortNotices([
+                            ...allergenNotices(
                                 { kind: "grocery_line", id: line.id },
                                 line.displayName,
                                 allergenMembers,
                                 eff ? eff.allergens : null,
                             ),
-                        ).map(noticeToWire);
+                            ...(restock ? [restock] : []),
+                        ]).map(noticeToWire);
                         return {
                             id: line.id,
                             store_id: line.storeId,
@@ -214,7 +256,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                                           .filter(
                                                               (n) =>
                                                                   n.severity ===
-                                                                  "block",
+                                                                      "block" ||
+                                                                  n.code ===
+                                                                      "grocery.restocked",
                                                           )
                                                           .map(
                                                               (n) =>
@@ -238,35 +282,20 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    server.registerResource(
-        "grocery-list-widget",
-        GROCERY_LIST_WIDGET_URI,
-        {
-            title: "Grocery List",
-            description:
-                "Interactive UI for list_grocery_lines: stores, sections, and lines with already-have tags and check-off.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("grocery-list"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "grocery-list",
+        resourceName: "grocery-list-widget",
+        title: "Grocery List",
+        description:
+            "Interactive UI for list_grocery_lines: stores, sections, and lines with already-have tags and check-off.",
+    });
 
     server.registerTool(
         "add_grocery_line",
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches, and allergen warnings for household members.",
+                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches. Allergen matches for household members are in this result's `notices`.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -282,17 +311,10 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 food_id: z.string().optional(),
                 unit: z.string().optional(),
                 section_id: z.string().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
-            outputSchema: z.object({
-                id: z.string(),
-                display_name: z.string(),
-                already_have: z.string().nullable(),
-                // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
-                warning: z.string().nullable(),
-                store_id: z.string(),
-                amount: z.number(),
-                unit: z.string(),
-            }),
+            outputSchema: ADD_GROCERY_LINE_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
@@ -302,65 +324,39 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     const grocery = liveGroceryStore();
                     const settings = liveSettingsStore();
                     const foods = liveFoodsStore();
-                    const stores = await settings.listStores(householdId);
-                    const storeNameById = new Map(
-                        stores.map((row) => [row.id, row.name]),
-                    );
-                    let storeReason: GroceryStorePickReason = "chosen";
-                    let amountReason: GroceryAmountPickReason = "chosen";
-                    const onPicked = (pick: {
-                        storeId: string;
-                        storeReason: GroceryStorePickReason;
-                        quantity: { amount: number; unit: string };
-                        amountReason: GroceryAmountPickReason;
-                    }) => {
-                        storeReason = pick.storeReason;
-                        amountReason = pick.amountReason;
+                    const onSimilar = onSimilarFor(args);
+                    const similarNull = {
+                        status: "similar_foods" as const,
+                        similar_foods: [] as z.infer<
+                            typeof SIMILAR_FOODS_ENTRY
+                        >[],
+                        id: null,
+                        display_name: null,
+                        already_have: null,
+                        store_id: null,
+                        amount: null,
+                        unit: null,
+                        notices: [],
                     };
-                    const line =
-                        args.kind === "supply"
-                            ? await addGrocerySupply(grocery, settings, foods, {
-                                  householdId,
-                                  storeId: args.store_id,
-                                  sectionId: args.section_id,
-                                  name: args.name ?? "",
-                                  amount: args.amount,
-                                  unit: args.unit ?? "",
-                                  foodId: args.food_id,
-                                  onPicked,
-                              })
-                            : args.food_id
-                              ? await addGroceryFoodById(
-                                    grocery,
-                                    settings,
-                                    foods,
-                                    {
-                                        householdId,
-                                        storeId: args.store_id,
-                                        sectionId: args.section_id,
-                                        foodId: args.food_id,
-                                        amount: args.amount,
-                                        unit: args.unit,
-                                        onPicked,
-                                    },
-                                )
-                              : args.barcode
-                                ? await addGroceryFoodByBarcode(
-                                      grocery,
-                                      settings,
-                                      foods,
-                                      {
-                                          householdId,
-                                          storeId: args.store_id,
-                                          sectionId: args.section_id,
-                                          barcode: args.barcode,
-                                          amount: args.amount,
-                                          unit: args.unit,
-                                          onPicked,
-                                      },
-                                      { lookup: lookupBarcode },
-                                  )
-                                : await addGroceryManualFood(
+                    try {
+                        const stores = await settings.listStores(householdId);
+                        const storeNameById = new Map(
+                            stores.map((row) => [row.id, row.name]),
+                        );
+                        let storeReason: GroceryStorePickReason = "chosen";
+                        let amountReason: GroceryAmountPickReason = "chosen";
+                        const onPicked = (pick: {
+                            storeId: string;
+                            storeReason: GroceryStorePickReason;
+                            quantity: { amount: number; unit: string };
+                            amountReason: GroceryAmountPickReason;
+                        }) => {
+                            storeReason = pick.storeReason;
+                            amountReason = pick.amountReason;
+                        };
+                        const line =
+                            args.kind === "supply"
+                                ? await addGrocerySupply(
                                       grocery,
                                       settings,
                                       foods,
@@ -370,51 +366,130 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                           sectionId: args.section_id,
                                           name: args.name ?? "",
                                           amount: args.amount,
-                                          unit: args.unit,
+                                          unit: args.unit ?? "",
+                                          foodId: args.food_id,
                                           onPicked,
+                                          onSimilar,
                                       },
-                                  );
-                    const extras = await groceryLineExtras(householdId, line);
-                    const storeName =
-                        storeNameById.get(line.storeId) ?? line.storeId;
-                    const parenthetical: string[] = [];
-                    if (storeReason !== "chosen") {
-                        if (storeReason === "usual") {
-                            parenthetical.push("usual store");
-                        } else if (storeReason === "list") {
-                            parenthetical.push("already on the list there");
-                        } else if (storeReason === "default") {
-                            parenthetical.push("first store");
+                                  )
+                                : args.food_id
+                                  ? await addGroceryFoodById(
+                                        grocery,
+                                        settings,
+                                        foods,
+                                        {
+                                            householdId,
+                                            storeId: args.store_id,
+                                            sectionId: args.section_id,
+                                            foodId: args.food_id,
+                                            amount: args.amount,
+                                            unit: args.unit,
+                                            onPicked,
+                                        },
+                                    )
+                                  : args.barcode
+                                    ? await addGroceryFoodByBarcode(
+                                          grocery,
+                                          settings,
+                                          foods,
+                                          {
+                                              householdId,
+                                              storeId: args.store_id,
+                                              sectionId: args.section_id,
+                                              barcode: args.barcode,
+                                              amount: args.amount,
+                                              unit: args.unit,
+                                              onPicked,
+                                          },
+                                          {
+                                              lookup: (barcode) =>
+                                                  lookupBarcode(barcode, {
+                                                      householdId,
+                                                  }),
+                                          },
+                                      )
+                                    : await addGroceryManualFood(
+                                          grocery,
+                                          settings,
+                                          foods,
+                                          {
+                                              householdId,
+                                              storeId: args.store_id,
+                                              sectionId: args.section_id,
+                                              name: args.name ?? "",
+                                              amount: args.amount,
+                                              unit: args.unit,
+                                              onPicked,
+                                              onSimilar,
+                                          },
+                                      );
+                        const extras = await groceryLineExtras(
+                            householdId,
+                            line,
+                        );
+                        const storeName =
+                            storeNameById.get(line.storeId) ?? line.storeId;
+                        const parenthetical: string[] = [];
+                        if (storeReason !== "chosen") {
+                            if (storeReason === "usual") {
+                                parenthetical.push("usual store");
+                            } else if (storeReason === "list") {
+                                parenthetical.push("already on the list there");
+                            } else if (storeReason === "default") {
+                                parenthetical.push("first store");
+                            }
                         }
-                    }
-                    if (amountReason !== "chosen") {
-                        if (amountReason === "usual") {
-                            parenthetical.push("usual amount");
-                        } else if (amountReason === "default") {
-                            parenthetical.push("default amount");
+                        if (amountReason !== "chosen") {
+                            if (amountReason === "usual") {
+                                parenthetical.push("usual amount");
+                            } else if (amountReason === "default") {
+                                parenthetical.push("default amount");
+                            }
                         }
+                        const pickNote =
+                            parenthetical.length > 0
+                                ? ` (${parenthetical.join(", ")})`
+                                : "";
+                        const bits = [
+                            `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
+                        ];
+                        if (extras.alreadyHave) bits.push(extras.alreadyHave);
+                        if (extras.allergenText) bits.push(extras.allergenText);
+                        return {
+                            content: [{ type: "text", text: bits.join(". ") }],
+                            structuredContent: {
+                                status: "ok" as const,
+                                similar_foods: [],
+                                id: line.id,
+                                display_name: line.displayName,
+                                already_have: extras.alreadyHave,
+                                store_id: line.storeId,
+                                amount: line.quantity.amount,
+                                unit: line.quantity.unit,
+                                notices: extras.notices.map(noticeToWire),
+                            },
+                        };
+                    } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    ...similarNull,
+                                    similar_foods: wire,
+                                },
+                            };
+                        }
+                        if (err instanceof GroceryInputError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
                     }
-                    const pickNote =
-                        parenthetical.length > 0
-                            ? ` (${parenthetical.join(", ")})`
-                            : "";
-                    const bits = [
-                        `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
-                    ];
-                    if (extras.alreadyHave) bits.push(extras.alreadyHave);
-                    if (extras.warning) bits.push(extras.warning);
-                    return {
-                        content: [{ type: "text", text: bits.join(". ") }],
-                        structuredContent: {
-                            id: line.id,
-                            display_name: line.displayName,
-                            already_have: extras.alreadyHave,
-                            warning: extras.warning,
-                            store_id: line.storeId,
-                            amount: line.quantity.amount,
-                            unit: line.quantity.unit,
-                        },
-                    };
                 },
                 analytics,
             ),

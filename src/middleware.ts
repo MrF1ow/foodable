@@ -1,10 +1,20 @@
 import type { Context, Next } from "hono";
 import type { AuthContext } from "./auth-context.js";
 import { rateLimitKey } from "./auth-context.js";
-import { lookupBearer } from "./db/tokens.js";
+import { withActor } from "./db/actor.js";
+import {
+    actorForValidBearer,
+    lookupBearerAsSystem,
+} from "./household-token.js";
 import { maskIp } from "./net.js";
 import { resourceMetadataUrl } from "./discovery.js";
 import { getBaseUrl } from "./url.js";
+import { getConnInfo } from "hono/bun";
+import {
+    getClientIpConfig,
+    rateLimitKeyForIp,
+    resolveClientIp,
+} from "./client-ip.js";
 
 // Declare the context variables this middleware sets. Without it, c.get/c.set on
 // an untyped `new Hono()` app types its keys as `never`, so index.ts cannot read
@@ -14,6 +24,7 @@ declare module "hono" {
         authContext: AuthContext;
         accessToken: string;
         suppressAccessLog: boolean;
+        clientIp: string;
         // The protocol era /mcp actually negotiated for this request, set by
         // handleMcp and read by the access log in index.ts. Optional: requests
         // refused before the SDK builds a server never carry one.
@@ -32,37 +43,77 @@ import {
     getBanState,
 } from "./rate-limit.js";
 
-// Best-effort client IP for rate limiting. Behind Railway's edge the first
-// x-forwarded-for entry is the connecting IP (Railway strips client-supplied
-// values). On a proxy that appends instead, the header is spoofable — treat the
-// first hop accordingly if you move hosts. Fall back to x-real-ip. "unknown"
-// only applies when no proxy header is present (e.g. direct local requests), in
-// which case those callers share a single bucket — acceptable since production
-// always sits behind the proxy.
-function getClientIp(c: Context): string {
-    const forwardedFor = c.req.header("x-forwarded-for");
-    if (forwardedFor) {
-        const first = forwardedFor.split(",")[0]?.trim();
-        if (first) return first;
+// How long a client is asked to wait when the ban store cannot be reached.
+const BAN_STORE_RETRY_AFTER_SECONDS = 5;
+
+// The ban state could not be read or written. Bans fail closed: answering 401
+// would hide the outage and let a banned client through, so the client is told
+// to retry shortly instead. Logged, since nothing else surfaces it.
+function banStoreUnavailable(c: Context, err: unknown) {
+    console.error(
+        `[ban] ban store unavailable on ${c.req.path}:`,
+        err instanceof Error ? err.message : String(err),
+    );
+    c.header("Retry-After", String(BAN_STORE_RETRY_AFTER_SECONDS));
+    return c.json(
+        {
+            error: "temporarily_unavailable",
+            error_description:
+                "Unable to check authentication state, try again",
+        },
+        503,
+    );
+}
+
+function socketIpFromContext(c: Context): string | null {
+    try {
+        return getConnInfo(c).remote.address ?? null;
+    } catch {
+        return null;
     }
-    return c.req.header("x-real-ip")?.trim() || "unknown";
+}
+
+/** Which normalized address rate limits and bans are keyed on (memoized on context). */
+export function clientIp(c: Context): string {
+    const memo = c.get("clientIp");
+    if (memo !== undefined) return memo;
+
+    const config = getClientIpConfig();
+    const resolved = resolveClientIp(
+        {
+            header: (name) => c.req.header(name),
+            socketIp: socketIpFromContext(c),
+        },
+        config,
+    );
+    c.set("clientIp", resolved);
+    return resolved;
+}
+
+function rateLimitIp(c: Context): string {
+    return rateLimitKeyForIp(clientIp(c));
 }
 
 // Shared 401 path. Every rejection also counts a strike against the client IP so
 // a client that never recovers eventually gets shed by banRepeatAuthFailures.
-function rejectUnauthenticated(
+async function rejectUnauthenticated(
     c: Context,
     error: "unauthorized" | "invalid_token",
     description: string,
 ) {
-    const ip = getClientIp(c);
-    const ban = noteAuthFailure(ip);
+    const ip = rateLimitIp(c);
+    let ban;
+    try {
+        ban = await noteAuthFailure(ip);
+    } catch (err) {
+        return banStoreUnavailable(c, err);
+    }
     // Reaching here means the ban guard let the request through, so a banned
     // result is necessarily a *newly* tripped ban — log the transition once
     // rather than on every suppressed request that follows.
     if (ban.banned) {
         console.log(
-            `[ban] ${maskIp(c.req.header("x-forwarded-for"))} repeated auth failures on ${c.req.path} — shedding for ${ban.retryAfterSeconds}s`,
+            `[ban] ${maskIp(clientIp(c))} repeated auth failures on ${c.req.path} — shedding for ${ban.retryAfterSeconds}s`,
         );
     }
 
@@ -77,7 +128,7 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     const authHeader = c.req.header("Authorization");
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return rejectUnauthenticated(
+        return await rejectUnauthenticated(
             c,
             "unauthorized",
             "Bearer token required",
@@ -85,7 +136,7 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     }
 
     const token = authHeader.substring(7);
-    const lookup = await lookupBearer(token);
+    const lookup = await lookupBearerAsSystem(token);
 
     if (lookup.status === "unavailable") {
         // We could not verify the token, so this is not the client's fault:
@@ -105,7 +156,7 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     }
 
     if (lookup.status === "invalid") {
-        return rejectUnauthenticated(
+        return await rejectUnauthenticated(
             c,
             "invalid_token",
             "Token is invalid or expired",
@@ -115,26 +166,31 @@ export const authenticateBearer = async (c: Context, next: Next) => {
     // A success clears the IP's strike count. This is what keeps a shared egress
     // IP — one broken client alongside working ones — from ever accumulating the
     // consecutive failures a ban requires.
-    clearAuthFailures(getClientIp(c));
+    await clearAuthFailures(rateLimitIp(c));
 
     c.set("accessToken", token);
-    c.set(
-        "authContext",
+    const authContext: AuthContext =
         lookup.kind === "user"
             ? { kind: "user", userId: lookup.userId }
-            : { kind: "household", householdId: lookup.householdId },
-    );
-    await next();
+            : { kind: "household", householdId: lookup.householdId };
+    c.set("authContext", authContext);
+    const actor = await actorForValidBearer(lookup);
+    return withActor(actor, () => next());
 };
 
 // Sheds clients that have failed authentication many times in a row — in
 // practice an abandoned MCP client retrying a dead token indefinitely. Runs
-// ahead of authenticateBearer so a banned IP costs one Map lookup instead of a
-// token verification, and marks the request so the access log skips it: a single
-// stuck client can otherwise outnumber real traffic in the logs by an order of
-// magnitude and hide everything worth seeing.
+// ahead of authenticateBearer so a banned IP costs one ban-store read instead of
+// a token verification, and marks the request so the access log skips it: a
+// single stuck client can otherwise outnumber real traffic in the logs by an
+// order of magnitude and hide everything worth seeing.
 export const banRepeatAuthFailures = async (c: Context, next: Next) => {
-    const ban = getBanState(getClientIp(c));
+    let ban;
+    try {
+        ban = await getBanState(rateLimitIp(c));
+    } catch (err) {
+        return banStoreUnavailable(c, err);
+    }
     if (ban.banned) {
         c.set("suppressAccessLog", true);
         c.header("Retry-After", String(ban.retryAfterSeconds ?? 60));
@@ -152,7 +208,7 @@ export const banRepeatAuthFailures = async (c: Context, next: Next) => {
 // Per-IP rate limiter for the unauthenticated OAuth endpoints, where there is
 // no user id yet. Guards against bulk signups and credential stuffing.
 export const rateLimitAuth = async (c: Context, next: Next) => {
-    const result = checkAuthRateLimit(getClientIp(c));
+    const result = await checkAuthRateLimit(rateLimitIp(c));
     c.header("X-RateLimit-Limit", String(result.limit));
     c.header("X-RateLimit-Remaining", String(result.remaining));
     if (!result.allowed) {
@@ -174,7 +230,7 @@ export const rateLimit = async (c: Context, next: Next) => {
         await next();
         return;
     }
-    const result = checkRateLimit(rateLimitKey(auth));
+    const result = await checkRateLimit(rateLimitKey(auth));
     c.header("X-RateLimit-Limit", String(result.limit));
     c.header("X-RateLimit-Remaining", String(result.remaining));
     if (!result.allowed) {

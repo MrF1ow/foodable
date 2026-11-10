@@ -32,7 +32,7 @@ describeDb(pgAvailable !== null, "nutrition log db", (getCtx) => {
         ({ userId } = await seedHousehold(sql));
         otherUserId = crypto.randomUUID();
         await sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
         `;
     });

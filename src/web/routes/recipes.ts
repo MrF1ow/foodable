@@ -57,6 +57,13 @@ import {
     cookRecipeToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
+import {
+    recipeIngredientRetryFields,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
@@ -72,8 +79,11 @@ import {
     validateRecipeLink,
 } from "../../domain/recipe-link.js";
 import {
+    RECIPE_LINK_READER_PAUSED_WEB_MESSAGE,
     recipeFetchMemory,
     recipeImportFetcher,
+    linkImportPaused,
+    recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
@@ -91,7 +101,7 @@ async function recipeImportDeps(householdId: string) {
     return {
         recipes: liveRecipesStore(),
         foods: liveFoodsStore(),
-        fetcher: recipeImportFetcher(),
+        fetcher: await recipeImportFetcher({ householdId }),
         memory: recipeFetchMemory(),
         transaction: <T>(fn: () => Promise<T>) => run(async () => fn()),
         readers: config.preferences.socialReaders,
@@ -282,6 +292,34 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             ...importOriginPrefill(textOrigin),
             importSourceKind: "text",
             importSourceLabel: "Recipe text",
+        });
+        return c.html(page.html, 422);
+    }
+
+    if (
+        importUrl.trim() !== "" &&
+        linkImportPaused({
+            text,
+            readerEnabled: await recipeLinkReaderEnabled(member.householdId),
+        })
+    ) {
+        const importLinkValidated = validateRecipeLink(importUrl);
+        const pausedUrl = importLinkValidated.ok
+            ? cleanRecipeLink(importLinkValidated.url)
+            : pinOrPageUrl;
+        const linkInfo = importLinkValidated.ok
+            ? recipeSource(importLinkValidated.url)
+            : null;
+        const page = await renderRecipesListPage(userId, {
+            openModalId: IMPORT_RECIPE_MODAL_ID,
+            importUrl: pausedUrl,
+            importError: RECIPE_LINK_READER_PAUSED_WEB_MESSAGE,
+            importPasteStep: true,
+            importPasteText: text.trim() !== "" ? text : undefined,
+            importCredit: credit,
+            importSourceKind: linkInfo?.kind,
+            importSourceLabel: linkInfo?.label,
+            ...importOriginPrefill(textOrigin),
         });
         return c.html(page.html, 422);
     }
@@ -778,16 +816,23 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
     const amount = formRecipeIngredientAmount(body, "qty_amount");
     try {
         if (formText(body, "food_id")) {
+            const foodId = formText(body, "food_id");
             await addRecipeIngredientById(
                 liveRecipesStore(),
                 liveFoodsStore(),
                 {
                     householdId: member.householdId,
                     recipeId,
-                    foodId: formText(body, "food_id"),
+                    foodId,
                     amount,
                     unit: formText(body, "qty_unit"),
                 },
+            );
+            await rememberAliasIfRequested(
+                liveFoodsStore(),
+                member.householdId,
+                body,
+                foodId,
             );
         } else if (formText(body, "barcode")) {
             const foods = liveFoodsStore();
@@ -795,7 +840,7 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                 foods,
                 member.householdId,
                 formText(body, "barcode"),
-                fridgeBarcodeLookup,
+                (barcode) => fridgeBarcodeLookup(barcode, member.householdId),
             );
             await addRecipeIngredientById(liveRecipesStore(), foods, {
                 householdId: member.householdId,
@@ -826,10 +871,27 @@ recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
                     name: formText(body, "food_name"),
                     amount,
                     unit: formText(body, "qty_unit"),
+                    onSimilar: manualOnSimilar(body),
                 },
             );
         }
     } catch (err) {
+        if (isSimilarFoodsError(err)) {
+            const modalId = `recipe-add-ingredient-${recipeId}`;
+            const didYouMean = buildDidYouMeanModal(
+                err,
+                recipeIngredientRetryFields(body),
+                modalId,
+                `/recipes/${recipeId}/ingredients`,
+            );
+            if (didYouMean) {
+                const page = await renderRecipeDetailRoute(userId, recipeId, {
+                    openModalId: modalId,
+                    didYouMean,
+                });
+                return c.html(page.html, 409);
+            }
+        }
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-add-ingredient-${recipeId}`,
         });
@@ -918,7 +980,12 @@ recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
             foods: liveFoodsStore(),
         });
         const flash = addRecipeToGroceryToastFlash(added.added.length);
-        return redirectWithToast(c, "/grocery", flash.key, flash.params);
+        return redirectWithToast(
+            c,
+            "/kitchen/groceries",
+            flash.key,
+            flash.params,
+        );
     } catch (err) {
         const blocked = redirectIfUnverified(c, recipeId, err);
         if (blocked) return blocked;

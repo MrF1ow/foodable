@@ -19,6 +19,7 @@ import {
     panel,
     row,
 } from "../components/ui.js";
+import type { ViewerFlags } from "../../viewer-flags.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 import { timezoneSelectHtml } from "../components/timezone-select.js";
 
@@ -37,6 +38,9 @@ const RESTOCK_HELP =
 
 export type HouseholdSettingsPageView = {
     chrome: ViewerChrome;
+    /** The viewer's flags, from the route. `ui-v2` adds the Members link to
+     *  the Settings sub-nav. Absent means off. */
+    flags?: ViewerFlags;
     backHref: string;
     member: HouseholdMember;
     preferences: HouseholdPreferences;
@@ -114,7 +118,9 @@ function readOnlyBody(
         : "";
     return `
         ${pageHeader({ title: "Household" })}
-        ${renderSettingsNav("household", view.backHref)}
+        ${renderSettingsNav("household", view.backHref, {
+            v2: view.flags?.uiV2 === true,
+        })}
         ${panel({
             title: "Timezone",
             body: row({ title: "Timezone", meta: tz }),
@@ -144,7 +150,9 @@ function editableBody(
     return `
         ${pageHeader({ title: "Household" })}
         ${errorBanner(view.error)}
-        ${renderSettingsNav("household", view.backHref)}
+        ${renderSettingsNav("household", view.backHref, {
+            v2: view.flags?.uiV2 === true,
+        })}
         <form method="POST" action="/settings/household-settings">
             ${hiddenFrom(view.backHref)}
             ${panel({

@@ -1,0 +1,34 @@
+# Flow autonomy profile. Read by every flow skill; never asked per task.
+# profile: hands-off | standard | collaborative | local-only   gates: auto | ask | never
+# Corrections from the user are written here, with a history line saying when and why.
+profile: standard
+spec: auto # auto = write the spec and carry on; review = show it and wait
+max_leads: 5 # leads per conductor running at once
+gates:
+    commit: auto
+    push: auto
+    open_pr: auto
+    merge: auto # CI is the merge gate; set ask to be asked on every PR
+    tag: never
+delivery: pr # one PR per request, one commit per phase
+risk:
+    # Prints low | medium | high from the blast-radius classifier. It sets
+    # rigor (high: a council, and db:rehearse for migrations); it never adds a
+    # human gate.
+    command: "bun run scripts/conventions/blast.ts --base origin/main"
+check_changed: "bun run check:changed"
+testing_skill: .claude/skills/foodable-test/SKILL.md
+checks:
+    - "bun run typecheck"
+    - "bun run format:check"
+    - "bun run lint"
+    - "bun run test"
+rules: # repo rules every delegate brief carries; anything tooling enforces is not repeated here
+    - "New or changed SQL needs describeDb tests against real Postgres; in-memory store tests have hidden real jsonb bugs."
+    - "A green PR that shows BLOCKED usually has an unresolved review thread (often CodeQL): list reviewThreads and fix or resolve them before anything else."
+    - "Fold Dependabot PRs into one tested chore/deps PR instead of merging them one by one."
+    - "Production Postgres is internal-only: reach it with railway ssh, never expose it."
+history:
+    - "2026-11-08: inferred standard (default branch requires review, so the user merges)"
+    - "2026-11-08: delivery stack (multi-phase work ships as one gh stack, from postgres-phase-workflow); rules migrated from Claude memories (composer-gate-reports, pr-blocked-unresolved-threads, gate-label-stripped-on-update, dependabot-roundup, prod-db-via-railway-ssh, kaneo-roadmap)"
+    - "2026-11-09: one-PR flow (plans/foodable/flow-alignment.md): delivery pr, merge auto (no review or label is required; the user steps in only on full stop), risk/check_changed/testing_skill added; dropped rules now enforced by tooling (unmapped files: conventions test; PR body sections: pr:check and the policy check) or obsolete (the approval label is gone, and pr:check no longer checks the Planner section)"

@@ -13,6 +13,15 @@ import {
     upsertFoodCacheRow,
 } from "./db/food-cache.js";
 import { gramsFromDrink, formatAlcohol, type DrinkUnit } from "./alcohol.js";
+import {
+    normalizeNovaGroup,
+    normalizeNutriscoreGrade,
+    qualityFromOff,
+    type OffProductQuality,
+} from "./domain/off-quality.js";
+import { filterOffNutrientLevels } from "./domain/off-nutrient-levels.js";
+import { buildBackgroundFlagContext, buildFlagContext } from "./flags.js";
+import { killSwitchOn, type FlagCheck } from "./flag-pins.js";
 
 const OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
 // v2 /api/v2/search is filter-only (no full-text). Name search still needs the
@@ -22,6 +31,30 @@ const OFF_SEARCH_PAGE_SIZE = 20;
 const REQUEST_TIMEOUT_MS = 8_000;
 
 export const SOURCE_OFF = "openfoodfacts" as const;
+
+export const ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE =
+    "Online food lookups are paused; showing your saved foods.";
+
+export type FoodLookupOptions = {
+    householdId?: string;
+    isEnabled?: FlagCheck;
+    notice?: { message: string | null };
+};
+
+export type FoodLookupHooks = FoodLookupOptions;
+
+export async function foodLookupsOnline(
+    hooks: FoodLookupOptions,
+): Promise<boolean> {
+    const check = hooks.isEnabled ?? killSwitchOn;
+    const ctx =
+        hooks.householdId !== undefined
+            ? buildBackgroundFlagContext(hooks.householdId)
+            : buildFlagContext({
+                  auth: { kind: "user", userId: "__food_lookup__" },
+              });
+    return check("off-lookups", ctx);
+}
 // Open Food Facts is community-edited and changes often; refresh weekly.
 const OFF_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -52,6 +85,8 @@ export interface FoodResult {
     fat_g: number | null;
     fiber_g: number | null;
     sugar_g: number | null; // TOTAL sugars, incl. naturally occurring
+    saturated_fat_g?: number | null;
+    nutrient_levels?: Record<string, string> | null;
     alcohol_g: number | null; // pure ethanol; often null — see resolveAlcoholGrams
     // Open Food Facts' own quality scores. Both are null when OFF hasn't
     // computed one — a real gap (missing category or nutrition data on OFF's
@@ -59,6 +94,7 @@ export interface FoodResult {
     // fiber/sugar we don't advise the caller to estimate a replacement.
     nutriscore_grade: "a" | "b" | "c" | "d" | "e" | null;
     nova_group: 1 | 2 | 3 | 4 | null; // processing classification, 1=least to 4=ultra-processed
+    quality?: OffProductQuality;
     source: string; // stable id, e.g. "off:737628064502"
     source_name: typeof SOURCE_OFF;
     barcode: string;
@@ -93,27 +129,14 @@ interface OFFProduct {
     // "a"-"e", or "not-applicable" / "unknown" when OFF hasn't computed one.
     nutriscore_grade?: unknown;
     nova_group?: unknown;
+    ecoscore_grade?: unknown;
+    environmental_score_grade?: unknown;
+    additives_tags?: unknown;
     allergens_tags?: unknown;
-}
-
-const NUTRISCORE_GRADES = ["a", "b", "c", "d", "e"] as const;
-
-function normalizeNutriscoreGrade(
-    value: unknown,
-): FoodResult["nutriscore_grade"] {
-    const grade = String(value ?? "")
-        .trim()
-        .toLowerCase();
-    return (NUTRISCORE_GRADES as readonly string[]).includes(grade)
-        ? (grade as FoodResult["nutriscore_grade"])
-        : null;
-}
-
-function normalizeNovaGroup(value: unknown): FoodResult["nova_group"] {
-    const group = typeof value === "string" ? parseFloat(value) : value;
-    return group === 1 || group === 2 || group === 3 || group === 4
-        ? group
-        : null;
+    traces_tags?: unknown;
+    ingredients_analysis_tags?: unknown;
+    labels_tags?: unknown;
+    nutrient_levels?: unknown;
 }
 
 // The only alcohol unit Open Food Facts actually emits (see below).
@@ -190,7 +213,11 @@ function resolveAlcoholGrams(
 // Normalize an OFF product into our shape. Prefer per-serving values when the
 // product declares a serving size and a per-serving energy; otherwise fall back
 // to the always-present per-100g basis and label it as such.
-function normalizeOFFProduct(product: OFFProduct, barcode: string): FoodResult {
+function normalizeOFFProduct(
+    product: OFFProduct,
+    barcode: string,
+    fetchedAt: string,
+): FoodResult {
     const n = product.nutriments ?? {};
     const hasServing =
         !!product.serving_size && n["energy-kcal_serving"] != null;
@@ -217,9 +244,12 @@ function normalizeOFFProduct(product: OFFProduct, barcode: string): FoodResult {
         // `added-sugars_*`; we deliberately do not read it — the canonical
         // stored field is total sugar.
         sugar_g: pick("sugars_serving", "sugars_100g"),
+        saturated_fat_g: pick("saturated-fat_serving", "saturated-fat_100g"),
+        nutrient_levels: filterOffNutrientLevels(product.nutrient_levels),
         alcohol_g: resolveAlcoholGrams(product, n, hasServing),
         nutriscore_grade: normalizeNutriscoreGrade(product.nutriscore_grade),
         nova_group: normalizeNovaGroup(product.nova_group),
+        quality: qualityFromOff(product, fetchedAt),
         source: `off:${barcode}`,
         source_name: SOURCE_OFF,
         barcode,
@@ -275,7 +305,8 @@ export async function fetchProductFromOFF(
     };
     if (!body || body.status === 0 || !body.product) return null;
 
-    return usableFood(normalizeOFFProduct(body.product, barcode));
+    const fetchedAt = new Date().toISOString();
+    return usableFood(normalizeOFFProduct(body.product, barcode, fetchedAt));
 }
 
 type OFFSearchProduct = OFFProduct & {
@@ -319,7 +350,10 @@ export async function fetchProductsByNameFromOFF(
     for (const product of products) {
         const barcode = barcodeOfSearchProduct(product);
         if (!barcode) continue;
-        const food = usableFood(normalizeOFFProduct(product, barcode));
+        const fetchedAt = new Date().toISOString();
+        const food = usableFood(
+            normalizeOFFProduct(product, barcode, fetchedAt),
+        );
         if (food) hits.push(food);
     }
     return hits;
@@ -332,7 +366,8 @@ export async function fetchProductsByNameFromOFF(
 
 function hydrateCachedPayload(payload: FoodResult): FoodResult {
     // Rows cached before fiber/sugar/alcohol/nutriscore/nova shipped have no
-    // such keys, and stay servable for the whole TTL after deploy.
+    // such keys; name search still serves them, but barcode lookups require
+    // a `quality` block and treat payloads without one as a cache miss.
     // Deserialized they would be `undefined`, not `null` — and an undefined
     // field is an ABSENT one once it reaches a structuredContent literal,
     // which for a .nullable() (hence *required*) schema field is a
@@ -404,18 +439,65 @@ export async function searchCachedFoodsByName(
     }
 }
 
+function stampLegacyCacheNutrientLevels(
+    barcode: string,
+    cached: FoodResult,
+): FoodResult {
+    if (Object.prototype.hasOwnProperty.call(cached, "nutrient_levels")) {
+        return cached;
+    }
+    const stamped: FoodResult = { ...cached, nutrient_levels: null };
+    void putCachedFood(SOURCE_OFF, barcode, stamped);
+    return stamped;
+}
+
+/** Barcode cache hits need a `quality` block; search hits may omit it. */
+export function isBarcodeCacheServable(
+    cached: FoodResult | null,
+): cached is FoodResult {
+    return (
+        cached != null &&
+        cached.quality !== undefined &&
+        Object.prototype.hasOwnProperty.call(cached, "nutrient_levels")
+    );
+}
+
 // Cache-first barcode lookup. `barcode` must already be normalized
 // (see normalizeBarcode). Returns null when the product is unknown; throws only
 // when Open Food Facts itself is unreachable.
 export async function lookupBarcode(
     barcode: string,
+    hooks: FoodLookupHooks = {},
 ): Promise<FoodResult | null> {
+    const online = await foodLookupsOnline(hooks);
     const cached = await getCachedFood(SOURCE_OFF, barcode, OFF_TTL_MS);
-    if (cached) return cached;
+    if (!online) {
+        if (hooks.notice) {
+            hooks.notice.message = ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;
+        }
+        if (isBarcodeCacheServable(cached)) return cached;
+        if (cached) return cached;
+        return null;
+    }
+    if (isBarcodeCacheServable(cached)) return cached;
 
-    const food = await fetchProductFromOFF(barcode);
+    // A fresh row cached before quality data existed is refetched once so the
+    // quality fills in, but it stays the fallback: an outage or a miss on the
+    // refetch must not turn a working lookup into a failure.
+    let food: FoodResult | null;
+    try {
+        food = await fetchProductFromOFF(barcode);
+    } catch (err) {
+        // An outage is not an answer: serve the old row but leave it
+        // unstamped, so the next lookup tries Open Food Facts again.
+        if (cached) return cached;
+        throw err;
+    }
     if (food) await putCachedFood(SOURCE_OFF, barcode, food);
-    return food;
+    if (!food && cached) {
+        return stampLegacyCacheNutrientLevels(barcode, cached);
+    }
+    return food ?? cached;
 }
 
 // ---------- Formatting ----------

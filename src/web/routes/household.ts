@@ -44,13 +44,22 @@ import {
     rotateHouseholdMcpToken,
     setHouseholdMemberRole,
     transferHouseholdOwnership,
+    removeHouseholdMemberAccount,
     updateHouseholdConfig,
     updateSocialReaderEnabled,
 } from "../../db/household.js";
-import { deleteAllUserData } from "../../db/nutrition.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
-import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
+import {
+    liveFoodsStore,
+    mergeLiveFoodPair,
+    mergeLiveFoods,
+} from "../../db/foods.js";
+import { liveFridgeStore } from "../../db/fridge.js";
+import { liveRecipesStore } from "../../db/recipes.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { liveGroceryStore } from "../../db/grocery.js";
+import { householdToday } from "../../db/restock.js";
 import {
     buildFoodUpdate,
     addProduct,
@@ -58,6 +67,8 @@ import {
     findFoodById,
     findOrCreateFoodByBarcode,
     FoodsInputError,
+    MERGE_PAIR_PICK_FIELDS,
+    type MergePairPickField,
     linkProduct,
     parseUsualPurchase,
     removeProduct,
@@ -72,11 +83,18 @@ import {
     renderSettingsFoodsPage,
     renderUsualProductsListPage,
     renderUsualProductsPickerPage,
+    renderPossibleDuplicatesRoute,
 } from "../loaders.js";
+import {
+    dismissNotice,
+    type NoticesForDeps,
+} from "../../domain/notices-for.js";
+import { NoticeDismissError } from "../../domain/notice-dismissals.js";
 import {
     safeReturnPath,
     usualProductsPickerHref,
 } from "../usual-products-path.js";
+import { canonicalAppPath } from "../route-map.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
@@ -85,6 +103,7 @@ import {
 } from "../pages/household.js";
 import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
+import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import {
@@ -93,41 +112,23 @@ import {
 } from "../../domain/fetch-memory.js";
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
+import { gatedRoute } from "../gated.js";
+import {
+    createHouseholdInvite,
+    listHouseholdInvites,
+    isInviteId,
+    revokeHouseholdInvite,
+} from "../../db/invites.js";
+import { renderHouseholdInvitesPage } from "../pages/v2/settings-household-invites.js";
+import { getProfile } from "../../db/profiles.js";
+import { viewerChromeWithAttention, viewerFlagsFor } from "../attention.js";
+import { settingsBackHref } from "../settings-back.js";
+import { getBaseUrl } from "../../url.js";
+import { forbiddenDashboardHtml } from "../loaders.js";
 
 // TOAST_KEYS: "household.fetch-refusal.cleared"
 
-export function legacyHouseholdPath(path: string): string | null {
-    const q = path.indexOf("?");
-    const pathname = q >= 0 ? path.slice(0, q) : path;
-    const query = q >= 0 ? path.slice(q) : "";
-    if (
-        pathname === "/settings/household" ||
-        pathname.startsWith("/settings/household/")
-    ) {
-        const rest = pathname.slice("/settings/household".length);
-        return `/household${rest}${query}`;
-    }
-    if (
-        pathname === "/settings/foods" ||
-        pathname.startsWith("/settings/foods/")
-    ) {
-        const rest = pathname.slice("/settings/foods".length);
-        return `/household/items${rest}${query}`;
-    }
-    return null;
-}
-
 export const householdRoutes = new Hono();
-
-householdRoutes.use("*", async (c, next) => {
-    const url = new URL(c.req.url);
-    const target = legacyHouseholdPath(url.pathname + url.search);
-    if (target == null) return next();
-    const method = c.req.method;
-    const status = method === "GET" || method === "HEAD" ? 301 : 308;
-    // toast: none (legacy redirect; status is 301 or 308)
-    return c.redirect(target, status);
-});
 
 async function householdFormError(
     userId: string,
@@ -147,7 +148,7 @@ async function householdFormError(
     return { html: page.html, status: 400 as const };
 }
 
-householdRoutes.get("/household", requireSiteUser, async (c) => {
+householdRoutes.get("/settings/household", requireSiteUser, async (c) => {
     const page = await renderHouseholdSettingsRoute(c.get("userId"), {
         refusalsAfter: c.req.query("refusals_after") ?? undefined,
     });
@@ -155,7 +156,7 @@ householdRoutes.get("/household", requireSiteUser, async (c) => {
 });
 
 householdRoutes.post(
-    "/household/fetch-refusals/clear",
+    "/settings/household/fetch-refusals/clear",
     requireManager,
     async (c) => {
         const member = siteMember(c);
@@ -169,26 +170,28 @@ householdRoutes.post(
         await memory.clearRefusal(member.householdId, host);
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "household.fetch-refusal.cleared",
             { host: truncateToastParam(host) },
         );
     },
 );
 
-householdRoutes.get("/household/items", requireSiteUser, async (c) => {
+householdRoutes.get("/settings/household/items", requireSiteUser, async (c) => {
     const page = await renderSettingsFoodsPage(c.get("userId"), {
         linkProductId: c.req.query("link_product"),
-        from: c.req.query("from") ?? "/household/items",
+        from: c.req.query("from") ?? "/settings/household/items",
     });
     return c.html(page.html, page.status);
 });
 
-householdRoutes.get("/household/usual-products", requireSiteUser, async (c) => {
+householdRoutes.get("/kitchen/usuals", requireSiteUser, async (c) => {
     const food = c.req.query("food");
     if (food) {
-        const from = c.req.query("from");
-        const target = `/household/usual-products/${encodeURIComponent(food)}${from ? `?from=${encodeURIComponent(from)}` : ""}`;
+        const raw = c.req.query("from");
+        const from = raw ? canonicalAppPath(raw) : raw;
+        const target = `/kitchen/usuals/${encodeURIComponent(food)}${from ? `?from=${encodeURIComponent(from)}` : ""}`;
+        // toast: none (picker shortcut)
         return c.redirect(target, 302);
     }
     const page = await renderUsualProductsListPage(c.get("userId"), {
@@ -198,18 +201,14 @@ householdRoutes.get("/household/usual-products", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-householdRoutes.get(
-    "/household/usual-products/:foodId",
-    requireSiteUser,
-    async (c) => {
-        const page = await renderUsualProductsPickerPage(
-            c.get("userId"),
-            c.req.param("foodId"),
-            { from: c.req.query("from") },
-        );
-        return c.html(page.html, page.status);
-    },
-);
+householdRoutes.get("/kitchen/usuals/:foodId", requireSiteUser, async (c) => {
+    const page = await renderUsualProductsPickerPage(
+        c.get("userId"),
+        c.req.param("foodId"),
+        { from: c.req.query("from") },
+    );
+    return c.html(page.html, page.status);
+});
 
 async function usualPickerFormError(
     userId: string,
@@ -230,58 +229,49 @@ async function usualPickerFormError(
     return { html: page.html, status: 400 as const };
 }
 
-householdRoutes.post(
-    "/household/usual-products/:foodId",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const foodId = c.req.param("foodId");
-        const body = await c.req.parseBody();
-        const from = formText(body, "from");
-        const productRaw = formText(body, "product_food_id");
-        const productId = productRaw.trim() === "" ? null : productRaw.trim();
-        const usualAmountRaw = formText(body, "usual_amount").trim();
-        const usualUnitRaw = formText(body, "usual_unit").trim();
-        const usualStoreRaw = formText(body, "usual_store_id").trim();
-        const purchase = {
-            usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
-            usualAmount:
-                usualAmountRaw === "" && usualUnitRaw === ""
-                    ? null
-                    : {
-                          amount:
-                              usualAmountRaw === ""
-                                  ? null
-                                  : Number(usualAmountRaw),
-                          unit: usualUnitRaw === "" ? null : usualUnitRaw,
-                      },
-        };
-        try {
-            await setUsualProduct(
-                liveFoodsStore(),
-                member.householdId,
-                foodId,
-                productId,
-                {
-                    purchase,
-                    stores: liveSettingsStore(),
-                },
-            );
-        } catch (err) {
-            const page = await usualPickerFormError(userId, foodId, err, from);
-            return c.html(page.html, page.status);
-        }
-        // toast: none (return path after pick)
-        return c.redirect(
-            safeReturnPath(from, "/household/usual-products"),
-            303,
+householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const foodId = c.req.param("foodId");
+    const body = await c.req.parseBody();
+    const from = formText(body, "from");
+    const productRaw = formText(body, "product_food_id");
+    const productId = productRaw.trim() === "" ? null : productRaw.trim();
+    const usualAmountRaw = formText(body, "usual_amount").trim();
+    const usualUnitRaw = formText(body, "usual_unit").trim();
+    const usualStoreRaw = formText(body, "usual_store_id").trim();
+    const purchase = {
+        usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
+        usualAmount:
+            usualAmountRaw === "" && usualUnitRaw === ""
+                ? null
+                : {
+                      amount:
+                          usualAmountRaw === "" ? null : Number(usualAmountRaw),
+                      unit: usualUnitRaw === "" ? null : usualUnitRaw,
+                  },
+    };
+    try {
+        await setUsualProduct(
+            liveFoodsStore(),
+            member.householdId,
+            foodId,
+            productId,
+            {
+                purchase,
+                stores: liveSettingsStore(),
+            },
         );
-    },
-);
+    } catch (err) {
+        const page = await usualPickerFormError(userId, foodId, err, from);
+        return c.html(page.html, page.status);
+    }
+    // toast: none (return path after pick)
+    return c.redirect(safeReturnPath(from, "/kitchen/usuals"), 303);
+});
 
 householdRoutes.post(
-    "/household/usual-products/:foodId/pick",
+    "/kitchen/usuals/:foodId/pick",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -299,7 +289,8 @@ householdRoutes.post(
                         store,
                         member.householdId,
                         formText(body, "barcode"),
-                        fridgeBarcodeLookup,
+                        (barcode) =>
+                            fridgeBarcodeLookup(barcode, member.householdId),
                     )
                   : null;
             if (!picked) {
@@ -316,7 +307,7 @@ householdRoutes.post(
 );
 
 householdRoutes.post(
-    "/household/usual-products/:foodId/products",
+    "/kitchen/usuals/:foodId/products",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -355,7 +346,7 @@ householdRoutes.post(
 );
 
 householdRoutes.post(
-    "/household/usual-products/:foodId/products/:productId/remove",
+    "/kitchen/usuals/:foodId/products/:productId/remove",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -391,15 +382,15 @@ async function linkProductFormError(
             : err instanceof Error
               ? err.message
               : "Could not link that food.";
-    const back = safeReturnPath(from, "/household/items");
-    if (back.startsWith("/grocery")) {
+    const back = safeReturnPath(from, "/settings/household/items");
+    if (back.startsWith("/kitchen/groceries")) {
         const page = await renderGroceryListPage(userId, {
             error: message,
             linkProductId: productId,
         });
         return { html: page.html, status: 400 as const };
     }
-    if (back.startsWith("/fridge")) {
+    if (back.startsWith("/kitchen/fridge")) {
         const page = await renderFridgeInventoryPage(
             userId,
             message,
@@ -425,36 +416,48 @@ async function linkProductFormError(
     return { html: page.html, status: 400 as const };
 }
 
-householdRoutes.post("/household/items/:id/link", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const productId = c.req.param("id");
-    const body = await c.req.parseBody();
-    const from = formText(body, "from");
-    const plainRaw = formText(body, "food_id");
-    const plainId = plainRaw.trim() === "" ? null : plainRaw.trim();
-    const makeUsual = formText(body, "make_usual") === "1";
-    const store = liveFoodsStore();
-    try {
-        await linkProduct(store, member.householdId, productId, plainId);
-        if (makeUsual && plainId) {
-            await setUsualProduct(
-                store,
-                member.householdId,
-                plainId,
+householdRoutes.post(
+    "/settings/household/items/:id/link",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const productId = c.req.param("id");
+        const body = await c.req.parseBody();
+        const from = formText(body, "from");
+        const plainRaw = formText(body, "food_id");
+        const plainId = plainRaw.trim() === "" ? null : plainRaw.trim();
+        const makeUsual = formText(body, "make_usual") === "1";
+        const store = liveFoodsStore();
+        try {
+            await linkProduct(store, member.householdId, productId, plainId);
+            if (makeUsual && plainId) {
+                await setUsualProduct(
+                    store,
+                    member.householdId,
+                    plainId,
+                    productId,
+                    { stores: liveSettingsStore() },
+                );
+            }
+        } catch (err) {
+            const page = await linkProductFormError(
+                userId,
                 productId,
-                { stores: liveSettingsStore() },
+                from,
+                err,
             );
+            return c.html(page.html, page.status);
         }
-    } catch (err) {
-        const page = await linkProductFormError(userId, productId, from, err);
-        return c.html(page.html, page.status);
-    }
-    // toast: none (return path after link)
-    return c.redirect(safeReturnPath(from, "/household/items"), 303);
-});
+        // toast: none (return path after link)
+        return c.redirect(
+            safeReturnPath(from, "/settings/household/items"),
+            303,
+        );
+    },
+);
 
-householdRoutes.post("/household", requireManager, async (c) => {
+householdRoutes.post("/settings/household", requireManager, async (c) => {
     const userId = c.get("userId");
     const manager = siteMember(c);
     const body = await c.req.parseBody();
@@ -485,12 +488,12 @@ householdRoutes.post("/household", requireManager, async (c) => {
     }
     return redirectWithToast(
         c,
-        "/household",
+        "/settings/household",
         "settings.household.member.added",
     );
 });
 
-householdRoutes.post("/household/name", requireManager, async (c) => {
+householdRoutes.post("/settings/household/name", requireManager, async (c) => {
     const userId = c.get("userId");
     const manager = siteMember(c);
     const body = await c.req.parseBody();
@@ -503,48 +506,60 @@ householdRoutes.post("/household/name", requireManager, async (c) => {
     }
     const config = await getHouseholdConfig(manager.householdId);
     await updateHouseholdConfig(manager.householdId, { ...config, name });
-    return redirectWithToast(c, "/household", "settings.household.name.saved");
-});
-
-householdRoutes.post("/household/social-readers", requireOwner, async (c) => {
-    const userId = c.get("userId");
-    const owner = siteMember(c);
-    const body = await c.req.parseBody();
-    const readerRaw = formText(body, "reader").trim();
-    const enabledRaw = formText(body, "enabled").trim();
-    const reader =
-        readerRaw === "tiktok" || readerRaw === "facebook" ? readerRaw : null;
-    const enabled = enabledRaw === "1";
-    const modalId =
-        reader === "tiktok"
-            ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
-            : reader === "facebook"
-              ? HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID
-              : undefined;
-    if (!reader || (enabledRaw !== "1" && enabledRaw !== "0")) {
-        const page = await renderHouseholdSettingsRoute(userId, {
-            error: "Unknown reader.",
-        });
-        return c.html(page.html, 400);
-    }
-    if (enabled && formText(body, "confirm").trim() !== "1") {
-        const page = await renderHouseholdSettingsRoute(userId, {
-            error: "Confirm you understand the terms before turning this on.",
-            openModalId: modalId,
-        });
-        return c.html(page.html, 400);
-    }
-    await updateSocialReaderEnabled(owner.householdId, reader, enabled);
     return redirectWithToast(
         c,
-        "/household",
-        enabled ? "household.social-reader.on" : "household.social-reader.off",
-        { platform: SOCIAL_READER_LABELS[reader] },
+        "/settings/household",
+        "settings.household.name.saved",
     );
 });
 
 householdRoutes.post(
-    "/household/recipe-settings",
+    "/settings/household/social-readers",
+    requireOwner,
+    async (c) => {
+        const userId = c.get("userId");
+        const owner = siteMember(c);
+        const body = await c.req.parseBody();
+        const readerRaw = formText(body, "reader").trim();
+        const enabledRaw = formText(body, "enabled").trim();
+        const reader =
+            readerRaw === "tiktok" || readerRaw === "facebook"
+                ? readerRaw
+                : null;
+        const enabled = enabledRaw === "1";
+        const modalId =
+            reader === "tiktok"
+                ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
+                : reader === "facebook"
+                  ? HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID
+                  : undefined;
+        if (!reader || (enabledRaw !== "1" && enabledRaw !== "0")) {
+            const page = await renderHouseholdSettingsRoute(userId, {
+                error: "Unknown reader.",
+            });
+            return c.html(page.html, 400);
+        }
+        if (enabled && formText(body, "confirm").trim() !== "1") {
+            const page = await renderHouseholdSettingsRoute(userId, {
+                error: "Confirm you understand the terms before turning this on.",
+                openModalId: modalId,
+            });
+            return c.html(page.html, 400);
+        }
+        await updateSocialReaderEnabled(owner.householdId, reader, enabled);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            enabled
+                ? "household.social-reader.on"
+                : "household.social-reader.off",
+            { platform: SOCIAL_READER_LABELS[reader] },
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/recipe-settings",
     requireManager,
     async (c) => {
         const userId = c.get("userId");
@@ -570,44 +585,52 @@ householdRoutes.post(
         );
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "household.recipe-settings.saved",
         );
     },
 );
 
-householdRoutes.post("/household/location", requireManager, async (c) => {
-    const manager = siteMember(c);
-    const body = await c.req.parseBody();
-    await setHouseholdLocation(
-        liveSettingsStore(),
-        manager.householdId,
-        formText(body, "location"),
-    );
-    return redirectWithToast(
-        c,
-        "/household",
-        "settings.household.location.saved",
-    );
-});
-
-householdRoutes.post("/household/rotate-token", requireOwner, async (c) => {
-    const userId = c.get("userId");
-    const owner = siteMember(c);
-    const token = generateHouseholdToken();
-    await rotateHouseholdMcpToken({
-        householdId: owner.householdId,
-        tokenHashHex: householdTokenHashHex(hashHouseholdToken(token)),
-        issuedBy: owner.userId,
-    });
-    const page = await renderHouseholdSettingsRoute(userId, {
-        issuedToken: token,
-    });
-    return c.html(page.html, 200);
-});
+householdRoutes.post(
+    "/settings/household/location",
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        await setHouseholdLocation(
+            liveSettingsStore(),
+            manager.householdId,
+            formText(body, "location"),
+        );
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.location.saved",
+        );
+    },
+);
 
 householdRoutes.post(
-    "/household/members/:userId/make-owner",
+    "/settings/household/rotate-token",
+    requireOwner,
+    async (c) => {
+        const userId = c.get("userId");
+        const owner = siteMember(c);
+        const token = generateHouseholdToken();
+        await rotateHouseholdMcpToken({
+            householdId: owner.householdId,
+            tokenHashHex: householdTokenHashHex(hashHouseholdToken(token)),
+            issuedBy: owner.userId,
+        });
+        const page = await renderHouseholdSettingsRoute(userId, {
+            issuedToken: token,
+        });
+        return c.html(page.html, 200);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/members/:userId/make-owner",
     requireOwner,
     async (c) => {
         const userId = c.get("userId");
@@ -639,7 +662,7 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.ownership.transferred",
         );
     },
@@ -649,7 +672,7 @@ householdRoutes.post(
 // through the same path as delete_account. Shared household data (fridge,
 // grocery, recipes, foods) stays.
 householdRoutes.post(
-    "/household/members/:userId/remove",
+    "/settings/household/members/:userId/remove",
     requireOwner,
     async (c) => {
         const userId = c.get("userId");
@@ -681,64 +704,79 @@ householdRoutes.post(
             return c.html(page.html, page.status);
         }
         try {
-            await deleteAllUserData(check.target.userId);
+            await removeHouseholdMemberAccount(
+                owner.householdId,
+                check.target.userId,
+            );
         } catch (err) {
             const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.member.removed",
         );
     },
 );
 
-householdRoutes.post("/household/stores", requireManager, async (c) => {
-    const userId = c.get("userId");
-    const manager = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        await createGroceryStore(
-            liveSettingsStore(),
-            manager.householdId,
-            formText(body, "name"),
+householdRoutes.post(
+    "/settings/household/stores",
+    requireManager,
+    async (c) => {
+        const userId = c.get("userId");
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            await createGroceryStore(
+                liveSettingsStore(),
+                manager.householdId,
+                formText(body, "name"),
+            );
+        } catch (err) {
+            const page = await householdFormError(
+                userId,
+                err,
+                HOUSEHOLD_ADD_STORE_MODAL_ID,
+            );
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.store.added",
         );
-    } catch (err) {
-        const page = await householdFormError(
-            userId,
-            err,
-            HOUSEHOLD_ADD_STORE_MODAL_ID,
-        );
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/household", "settings.household.store.added");
-});
-
-householdRoutes.post("/household/sections/:id", requireManager, async (c) => {
-    const userId = c.get("userId");
-    const manager = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        await renameSection(
-            liveSettingsStore(),
-            manager.householdId,
-            c.req.param("id"),
-            formText(body, "name"),
-        );
-    } catch (err) {
-        const page = await householdFormError(userId, err);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(
-        c,
-        "/household",
-        "settings.household.section.renamed",
-    );
-});
+    },
+);
 
 householdRoutes.post(
-    "/household/stores/:id/rules",
+    "/settings/household/sections/:id",
+    requireManager,
+    async (c) => {
+        const userId = c.get("userId");
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            await renameSection(
+                liveSettingsStore(),
+                manager.householdId,
+                c.req.param("id"),
+                formText(body, "name"),
+            );
+        } catch (err) {
+            const page = await householdFormError(userId, err);
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "settings.household.section.renamed",
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/stores/:id/rules",
     requireManager,
     async (c) => {
         const userId = c.get("userId");
@@ -761,14 +799,14 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.store-rule.added",
         );
     },
 );
 
 householdRoutes.post(
-    "/household/members/:userId/allergens",
+    "/settings/household/members/:userId/allergens",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -791,14 +829,14 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.allergen.added",
         );
     },
 );
 
 householdRoutes.post(
-    "/household/members/:userId/dislikes",
+    "/settings/household/members/:userId/dislikes",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -820,14 +858,14 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.dislike.added",
         );
     },
 );
 
 householdRoutes.post(
-    "/household/members/:userId/rules",
+    "/settings/household/members/:userId/rules",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -849,7 +887,7 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.rule.added",
         );
     },
@@ -896,7 +934,7 @@ const PERSON_RULE_KINDS: Record<string, PersonRuleKind> = {
 };
 
 householdRoutes.post(
-    "/household/members/:userId/:kind/:id/remove",
+    "/settings/household/members/:userId/:kind/:id/remove",
     requireMember,
     async (c) => {
         const userId = c.get("userId");
@@ -920,7 +958,7 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             householdPersonRuleRemovedKey(kind),
         );
     },
@@ -929,7 +967,7 @@ householdRoutes.post(
 // The owner raises a member to admin or lowers an admin back to member. The
 // owner keeps ownership either way.
 householdRoutes.post(
-    "/household/members/:userId/role",
+    "/settings/household/members/:userId/role",
     requireOwner,
     async (c) => {
         const userId = c.get("userId");
@@ -963,7 +1001,7 @@ householdRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/household",
+            "/settings/household",
             "settings.household.role.updated",
         );
     },
@@ -1009,65 +1047,93 @@ async function foodsFormError(
     return { html: page.html, status: 400 as const };
 }
 
-householdRoutes.post("/household/items/merge", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        await mergeLiveFoods(
-            member.householdId,
-            formText(body, "keep_id"),
-            formText(body, "drop_id"),
-            liveFoodsStore(),
-        );
-    } catch (err) {
-        const page = await foodsFormError(userId, err, FOODS_MERGE_MODAL_ID);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/household/items", "settings.foods.merged");
-});
-
-householdRoutes.post("/household/items/:id", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const foodId = c.req.param("id");
-    const body = await c.req.parseBody({ all: true });
-    const asText = body as Record<string, string | File>;
-    const store = liveFoodsStore();
-    const patch = {
-        name: formText(asText, "name"),
-        brand: formText(asText, "brand"),
-        aliases: formText(asText, "aliases")
-            .split(",")
-            .map((part) => part.trim())
-            .filter(Boolean),
-        defaultUnit: formText(asText, "default_unit"),
-        gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
-        gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
-        calories: formOptionalNutrient(asText, "calories"),
-        proteinG: formOptionalNutrient(asText, "protein_g"),
-        carbsG: formOptionalNutrient(asText, "carbs_g"),
-        fatG: formOptionalNutrient(asText, "fat_g"),
-        fiberG: formOptionalNutrient(asText, "fiber_g"),
-        sugarG: formOptionalNutrient(asText, "sugar_g"),
-        alcoholG: formOptionalNutrient(asText, "alcohol_g"),
-        caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
-        allergens: formAllergens(body),
-        archived: formText(asText, "archived") === "1",
-    };
-    const settings = liveSettingsStore();
-    try {
-        if (
-            "usual_amount" in asText ||
-            "usual_unit" in asText ||
-            "usual_store_id" in asText
-        ) {
-            const usualAmountRaw = formText(asText, "usual_amount").trim();
-            const usualUnitRaw = formText(asText, "usual_unit").trim();
-            const usualStoreRaw = formText(asText, "usual_store_id").trim();
-            await parseUsualPurchase(
+householdRoutes.post(
+    "/settings/household/items/merge",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            await mergeLiveFoods(
                 member.householdId,
-                {
+                formText(body, "keep_id"),
+                formText(body, "drop_id"),
+                liveFoodsStore(),
+            );
+        } catch (err) {
+            const page = await foodsFormError(
+                userId,
+                err,
+                FOODS_MERGE_MODAL_ID,
+            );
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/settings/household/items",
+            "settings.foods.merged",
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/items/:id",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const foodId = c.req.param("id");
+        const body = await c.req.parseBody({ all: true });
+        const asText = body as Record<string, string | File>;
+        const store = liveFoodsStore();
+        const patch = {
+            name: formText(asText, "name"),
+            brand: formText(asText, "brand"),
+            aliases: formText(asText, "aliases")
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean),
+            defaultUnit: formText(asText, "default_unit"),
+            gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
+            gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
+            calories: formOptionalNutrient(asText, "calories"),
+            proteinG: formOptionalNutrient(asText, "protein_g"),
+            carbsG: formOptionalNutrient(asText, "carbs_g"),
+            fatG: formOptionalNutrient(asText, "fat_g"),
+            fiberG: formOptionalNutrient(asText, "fiber_g"),
+            sugarG: formOptionalNutrient(asText, "sugar_g"),
+            alcoholG: formOptionalNutrient(asText, "alcohol_g"),
+            caffeineMg: formOptionalNutrient(asText, "caffeine_mg"),
+            allergens: formAllergens(body),
+            archived: formText(asText, "archived") === "1",
+        };
+        const settings = liveSettingsStore();
+        try {
+            if (
+                "usual_amount" in asText ||
+                "usual_unit" in asText ||
+                "usual_store_id" in asText
+            ) {
+                const usualAmountRaw = formText(asText, "usual_amount").trim();
+                const usualUnitRaw = formText(asText, "usual_unit").trim();
+                const usualStoreRaw = formText(asText, "usual_store_id").trim();
+                await parseUsualPurchase(
+                    member.householdId,
+                    {
+                        usualStoreId:
+                            usualStoreRaw === "" ? null : usualStoreRaw,
+                        usualAmount: {
+                            amount:
+                                usualAmountRaw === ""
+                                    ? null
+                                    : Number(usualAmountRaw),
+                            unit: usualUnitRaw === "" ? null : usualUnitRaw,
+                        },
+                    },
+                    settings,
+                );
+                Object.assign(patch, {
                     usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
                     usualAmount: {
                         amount:
@@ -1076,46 +1142,264 @@ householdRoutes.post("/household/items/:id", requireMember, async (c) => {
                                 : Number(usualAmountRaw),
                         unit: usualUnitRaw === "" ? null : usualUnitRaw,
                     },
-                },
-                settings,
-            );
-            Object.assign(patch, {
-                usualStoreId: usualStoreRaw === "" ? null : usualStoreRaw,
-                usualAmount: {
-                    amount:
-                        usualAmountRaw === "" ? null : Number(usualAmountRaw),
-                    unit: usualUnitRaw === "" ? null : usualUnitRaw,
-                },
+                });
+            }
+            await buildFoodUpdate(store, member.householdId, foodId, patch, {
+                stores: settings,
             });
-        }
-        await buildFoodUpdate(store, member.householdId, foodId, patch, {
-            stores: settings,
-        });
-        if ("generic_food_id" in asText) {
-            const raw = formText(asText, "generic_food_id");
-            await linkProduct(
-                store,
-                member.householdId,
-                foodId,
-                raw.trim() === "" ? null : raw.trim(),
+            if ("generic_food_id" in asText) {
+                const raw = formText(asText, "generic_food_id");
+                await linkProduct(
+                    store,
+                    member.householdId,
+                    foodId,
+                    raw.trim() === "" ? null : raw.trim(),
+                );
+            }
+            if ("usual_product_id" in asText) {
+                const raw = formText(asText, "usual_product_id");
+                await setUsualProduct(
+                    store,
+                    member.householdId,
+                    foodId,
+                    raw.trim() === "" ? null : raw.trim(),
+                    { stores: settings },
+                );
+            }
+            await updateFood(store, member.householdId, foodId, patch, {
+                stores: settings,
+            });
+        } catch (err) {
+            const page = await foodsFormError(
+                userId,
+                err,
+                `food-edit-${foodId}`,
             );
+            return c.html(page.html, page.status);
         }
-        if ("usual_product_id" in asText) {
-            const raw = formText(asText, "usual_product_id");
-            await setUsualProduct(
-                store,
-                member.householdId,
-                foodId,
-                raw.trim() === "" ? null : raw.trim(),
-                { stores: settings },
-            );
-        }
-        await updateFood(store, member.householdId, foodId, patch, {
-            stores: settings,
-        });
-    } catch (err) {
-        const page = await foodsFormError(userId, err, `food-edit-${foodId}`);
+        return redirectWithToast(
+            c,
+            "/settings/household/items",
+            "settings.foods.updated",
+        );
+    },
+);
+
+function noticeDeps(): NoticesForDeps {
+    return {
+        foods: liveFoodsStore(),
+        fridge: liveFridgeStore(),
+        recipes: liveRecipesStore(),
+        dismissals: liveNoticeDismissalsStore(),
+        grocery: liveGroceryStore(),
+    };
+}
+
+householdRoutes.get(
+    "/settings/household/possible-duplicates",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderPossibleDuplicatesRoute(c.get("userId"));
         return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/possible-duplicates/keep-separate",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            const today = await householdToday(member.householdId);
+            await dismissNotice(
+                noticeDeps(),
+                member.householdId,
+                userId,
+                {
+                    code: "food.possible_duplicate",
+                    subjectKind: "food",
+                    subjectId: formText(body, "subject_id"),
+                    relatedId: formText(body, "related_id"),
+                },
+                { today },
+            );
+        } catch (err) {
+            const message =
+                err instanceof NoticeDismissError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not keep foods separate.";
+            const page = await renderPossibleDuplicatesRoute(userId, {
+                error: message,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect("/settings/household/possible-duplicates", 303);
+    },
+);
+
+function parseMergePicks(
+    body: Record<string, string | File>,
+): Partial<Record<MergePairPickField, string>> {
+    const picks: Partial<Record<MergePairPickField, string>> = {};
+    for (const wire of MERGE_PAIR_PICK_FIELDS) {
+        const key = `pick_${wire}`;
+        if (key in body) {
+            picks[wire] = formText(body, key);
+        }
     }
-    return redirectWithToast(c, "/household/items", "settings.foods.updated");
-});
+    return picks;
+}
+
+householdRoutes.post(
+    "/settings/household/possible-duplicates/merge",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody({ all: true });
+        const asText = body as Record<string, string | File>;
+        const foodA = formText(asText, "food_a");
+        const foodB = formText(asText, "food_b");
+        const keepId = formText(asText, "keep_id");
+        const mergePost = {
+            foodA,
+            foodB,
+            keepId,
+            picks: parseMergePicks(asText),
+        };
+        try {
+            if (keepId !== foodA && keepId !== foodB) {
+                throw new FoodsInputError(
+                    "Keep must be one of the two foods in this pair.",
+                );
+            }
+            const dropId = keepId === foodA ? foodB : foodA;
+            await mergeLiveFoodPair(member.householdId, {
+                keepId,
+                dropId,
+                picks: mergePost.picks,
+            });
+        } catch (err) {
+            const message =
+                err instanceof FoodsInputError
+                    ? err.message
+                    : err instanceof Error
+                      ? err.message
+                      : "Could not merge foods.";
+            const page = await renderPossibleDuplicatesRoute(userId, {
+                error: message,
+                openModalId: DUP_MERGE_MODAL_ID,
+                mergePost,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect("/settings/household/possible-duplicates", 303);
+    },
+);
+
+function invitesBackHref(c: Context, from?: string) {
+    return settingsBackHref({
+        from,
+        referer: c.req.header("referer"),
+        origin: getBaseUrl(c),
+    });
+}
+
+async function renderInvitesRoute(
+    userId: string,
+    backHref: string,
+    opts?: { createdCode?: string; error?: string },
+) {
+    const member = await getHouseholdMembership(userId);
+    if (!member) {
+        return { status: 403 as const, html: forbiddenDashboardHtml() };
+    }
+    if (member.role !== "owner") {
+        return { status: 403 as const, html: forbiddenDashboardHtml() };
+    }
+    const profile = await getProfile(userId);
+    const [chrome, invites, flags] = await Promise.all([
+        viewerChromeWithAttention(profile, member),
+        listHouseholdInvites(member.householdId),
+        viewerFlagsFor(member),
+    ]);
+    return {
+        status: 200 as const,
+        html: renderHouseholdInvitesPage({
+            chrome,
+            flags,
+            backHref,
+            member,
+            invites,
+            createdCode: opts?.createdCode,
+            error: opts?.error,
+        }),
+    };
+}
+
+householdRoutes.get(
+    "/settings/household/invites",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderInvitesRoute(
+            c.get("userId"),
+            invitesBackHref(c, c.req.query("from")),
+        );
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/invites",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backHref = invitesBackHref(c, formText(body, "from"));
+        try {
+            const { code } = await createHouseholdInvite(
+                member.householdId,
+                member.userId,
+            );
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                createdCode: code,
+            });
+            return c.html(page.html, page.status);
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Could not create invite.";
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                error: message,
+            });
+            return c.html(page.html, 400);
+        }
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/invites/revoke",
+    requireOwner,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backHref = invitesBackHref(c, formText(body, "from"));
+        const inviteId = formText(body, "invite_id");
+        if (!inviteId || !isInviteId(inviteId)) {
+            return c.text("Bad Request", 400);
+        }
+        await revokeHouseholdInvite(member.householdId, inviteId);
+        return c.redirect(
+            `/settings/household/invites${backHref !== "/" ? `?from=${encodeURIComponent(backHref)}` : ""}`,
+            303,
+        );
+    },
+);

@@ -110,6 +110,7 @@ ${generatedBanner("scripts/gen-login.ts")}
                     <input type="text" id="email" name="email" required autocomplete="username" autocapitalize="none" spellcheck="false" />
                     <label for="password">${esc(doc.passwordLabel)}</label>
                     <input type="password" id="password" name="password" required minlength="6" autocomplete="current-password" />
+                    {{INVITE_FIELDS}}
                     <button type="submit" name="action" value="login" class="btn-primary">${esc(doc.continueButton)}</button>
                     <p class="auth-note">${consent}</p>
                     <p class="auth-note">${esc(doc.newHereNote)}</p>

@@ -64,6 +64,7 @@ export type StockStore = {
     listMovements(
         householdId: string,
         foodId?: string,
+        since?: string,
     ): Promise<StockMovement[]>;
 };
 
@@ -167,15 +168,25 @@ export function createMemoryStockStore(): MemoryStockStore {
             );
             if (row) row.mealId = mealId;
         },
-        async listMovements(householdId, foodId) {
+        async listMovements(householdId, foodId, since) {
+            // Compare instants, not strings: "…+00:00" and "…Z" spell the
+            // same time but do not sort alike.
+            const sinceMs = since == null ? null : Date.parse(since);
             return movements
                 .filter(
                     (row) =>
                         row.householdId === householdId &&
-                        (foodId == null || row.foodId === foodId),
+                        (foodId == null || row.foodId === foodId) &&
+                        (sinceMs == null ||
+                            Date.parse(row.createdAt) >= sinceMs),
                 )
                 .map((row) => ({ ...row }))
-                .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+                .sort((a, b) => {
+                    const diff =
+                        Date.parse(b.createdAt) - Date.parse(a.createdAt);
+                    if (diff !== 0) return diff;
+                    return b.id.localeCompare(a.id);
+                });
         },
     };
 }
@@ -692,6 +703,7 @@ export async function applyMovement(
 
 export type ExpiryLevel = "expired" | "high" | "medium" | "low";
 
+/** UTC calendar date; production expiry/notice "today" uses `householdToday` / `householdTodayAt`. */
 export function utcTodayFromDate(now = new Date()): string {
     return new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -706,7 +718,7 @@ function utcDayIndex(isoDate: string): number {
 }
 
 /** Days from `today` until `expiresOn` (0 = expires today). */
-function daysUntilExpiry(today: string, expiresOn: string): number {
+export function daysUntilExpiry(today: string, expiresOn: string): number {
     return utcDayIndex(expiresOn) - utcDayIndex(today);
 }
 
@@ -725,14 +737,13 @@ export function expiryLevel(
 
 export function listExpiring(
     items: readonly FridgeItem[],
+    today: string,
     days = 3,
-    now = new Date(),
 ): FridgeItem[] {
-    const horizon = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
-    horizon.setUTCDate(horizon.getUTCDate() + days);
-    const latest = horizon.toISOString().slice(0, 10);
+    const [y, m, d] = today.split("-").map(Number);
+    const latest = new Date(Date.UTC(y!, m! - 1, d! + days))
+        .toISOString()
+        .slice(0, 10);
     return items
         .filter((item) => item.expiresOn && item.expiresOn <= latest)
         .slice()

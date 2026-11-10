@@ -42,7 +42,6 @@ The app is set up to run on [Railway](docs/self-hosting.md#railway) with Railway
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | [docs/self-hosting.md](docs/self-hosting.md)         | Environment, Postgres and migrations, Railway, Cloudflare, and the first-user flow |
 | [docs/deploy-checklist.md](docs/deploy-checklist.md) | Ordered go-live list                                                               |
-| [docs/roadmap.md](docs/roadmap.md)                   | What comes next: row-level security, sharing, and smaller features                 |
 | [CONTRIBUTING.md](CONTRIBUTING.md)                   | What fits in the repo, and how to open a pull request                              |
 
 ## Connecting an agent
@@ -56,7 +55,9 @@ The login page is the OAuth screen at `/authorize` (and `/` when you are signed 
 ```bash
 bun run dev             # regenerates login HTML, then watches src/
 bun test                # test suite
-bun run typecheck       # typecheck src/
+bun run check:changed   # the CI checks for what you changed (--all for everything)
+bun run typecheck       # typecheck the whole project, tests and scripts included
+bun run lint            # oxlint with the repo's own rules
 bun run format          # Prettier, 4-space indent
 ```
 

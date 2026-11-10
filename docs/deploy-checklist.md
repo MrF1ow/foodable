@@ -58,14 +58,14 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 Run this on the live site with two members.
 
-- [ ] **Foods.** On `/household/items`, save **Eggs** with grams per each and calories per 100 g. Save **Toast** the same way.
+- [ ] **Foods.** On `/settings/household/items`, save **Eggs** with grams per each and calories per 100 g. Save **Toast** the same way.
 - [ ] **Food-backed meal.** On `/`, set Meal type to Breakfast. Add Eggs: amount 2, unit each. Use **Add another food** for Toast: amount 1, unit each. Submit **Log meal**. Expect the meal total to equal the sum of the item snapshots.
-- [ ] **Snapshot.** Change the egg calories on `/household/items`. Expect the logged breakfast to keep the old total.
+- [ ] **Snapshot.** Change the egg calories on `/settings/household/items`. Expect the logged breakfast to keep the old total.
 - [ ] **Recipe to grocery.** On `/recipes`, save a recipe that uses eggs. Put a note on an ingredient and a tag on the recipe. Submit **Add to grocery**. Expect only what is not already stocked to be added.
-- [ ] **Put away.** On `/grocery`, check that line and submit **Put away**. Expect `/fridge` to show the new stock. **Clear checked** does not stock the fridge.
+- [ ] **Put away.** On `/kitchen/groceries`, check that line and submit **Put away**. Expect `/kitchen/fridge` to show the new stock. **Clear checked** does not stock the fridge.
 - [ ] **Cook.** On the recipe, submit **Cooked it** with **Log meals** checked, for both members. Expect the fridge count to drop and two meals to appear, one per member. If stock is short, the shortfall is reported and the fridge does not go negative. With two lots of the same food, the earlier expiry is used first.
-- [ ] **Eat and toss.** On `/fridge`, submit **Ate it** on one item and **Toss** on another. Expect **Ate it** to also log a meal.
-- [ ] **Export.** Run `export_all_data`. Expect the ZIP to hold `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `profile.csv`, and `README.txt`. `meal_items.csv` is keyed by `meal_id`, has a `timezone` column, and keeps its header with zero rows.
+- [ ] **Eat and toss.** On `/kitchen/fridge`, submit **Ate it** on one item and **Toss** on another. Expect **Ate it** to also log a meal.
+- [ ] **Export.** Run `export_all_data`. Expect the ZIP to hold `meals.csv`, `meal_items.csv`, `water.csv`, `weight.csv`, `goals.csv`, `goal_days.csv`, `profile.csv`, and `README.txt`. `meal_items.csv` is keyed by `meal_id`, has a `timezone` column, and keeps its header with zero rows.
 - [ ] **Agent surface.** `tools/list` returns 71 tools. `get_meals`, `get_water`, `get_weight`, `get_fridge`, `get_household_rules`, and `set_household_rules` exist. `list_grocery_lines` and `get_fridge` render their cards in a widget-capable client.
 - [ ] **Barcode.** `lookup_barcode` on a real product returns data, which proves `OFF_USER_AGENT` is set.
 

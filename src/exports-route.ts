@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { runAsSystem } from "./db/actor.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import {
     liveExportArchiveStore,
@@ -29,7 +30,11 @@ export function createExportsRouter(
             return c.body(EXPORT_DOWNLOAD_NOT_FOUND, 404, NOT_FOUND_HEADERS);
         }
 
-        const archive = await store.read(userId);
+        // No session here: the signed link is the only credential, so the
+        // read runs as the system once the token has named its user.
+        const archive = await runAsSystem("export download", () =>
+            store.read(userId),
+        );
         if (!archive) {
             return c.body(EXPORT_DOWNLOAD_NOT_FOUND, 404, NOT_FOUND_HEADERS);
         }

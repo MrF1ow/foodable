@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 import type { Notice } from "../../domain/notices.js";
 import type { NoticeDismissal } from "../../domain/notice-dismissals.js";
 import { renderNeedsAttentionPage } from "./needs-attention.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 3, tabs: { fridge: true, recipes: true } },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 function expiring(id: string): Notice {
@@ -99,6 +101,6 @@ test("a food group links to the household items page", () => {
     const n = expiring("f1");
     n.subject = { kind: "food", id: "f1" };
     const html = render([n], [["food:f1", "Eggs"]], []);
-    expect(html).toContain('href="/household/items"');
-    expect(html).not.toContain("/settings/foods");
+    expect(html).toContain('href="/settings/household/items"');
+    expect(html).not.toContain('href="/household');
 });

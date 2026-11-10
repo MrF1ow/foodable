@@ -130,6 +130,18 @@ begin
         raise exception 'public.users does not mirror auth.users';
     end if;
 
+    if exists (
+        select 1
+        from pg_trigger
+        where tgname = 'sync_auth_users_to_public_users'
+    ) then
+        raise exception 'sync_auth_users_to_public_users trigger still exists';
+    end if;
+
+    if to_regprocedure('public.sync_auth_user_to_public_users()') is not null then
+        raise exception 'sync_auth_user_to_public_users() still exists';
+    end if;
+
     if has_function_privilege('anon', 'public.add_household_member(uuid,uuid,text)', 'execute')
        or has_function_privilege('authenticated', 'public.add_household_member(uuid,uuid,text)', 'execute') then
         raise exception 'household RPCs are still executable by client roles';
@@ -169,12 +181,12 @@ begin
     end;
 
     begin
-        -- C joined last but holds the oldest Auth account, so C inherits.
-        insert into auth.users (id, email, created_at) values
+        -- C joined last but holds the oldest account (public.users.created_at), so C inherits.
+        insert into public.users (id, email, created_at) values
             ('00000000-0000-0000-0000-0000000000c3', 'c@example.com', now() - interval '1 year');
         insert into public.household_members (household_id, user_id, role, display_name) values
             ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-0000000000c3', 'member', 'C');
-        delete from auth.users where id = '00000000-0000-0000-0000-0000000000a1';
+        delete from public.users where id = '00000000-0000-0000-0000-0000000000a1';
         if (select display_name from public.household_members where role = 'owner') is distinct from 'C' then
             raise exception 'owner leaving did not promote the oldest account: %',
                 (select display_name from public.household_members where role = 'owner');
@@ -651,6 +663,172 @@ begin
               and subject_kind = 'fridge_item'
               and subject_id = '22222222-2222-2222-2222-222222222222';
         end;
+    end;
+
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'profiles'
+          and column_name = 'locale'
+    ) then
+        raise exception 'profiles.locale still exists';
+    end if;
+
+    if to_regclass('public.idx_meals_user_id') is not null then
+        raise exception 'idx_meals_user_id still exists';
+    end if;
+    if to_regclass('public.idx_water_log_user_id') is not null then
+        raise exception 'idx_water_log_user_id still exists';
+    end if;
+    if to_regclass('public.idx_weight_log_user_id') is not null then
+        raise exception 'idx_weight_log_user_id still exists';
+    end if;
+
+    if to_regclass('public.meals_user_logged_idx') is null then
+        raise exception 'meals_user_logged_idx missing';
+    end if;
+    if to_regclass('public.water_log_user_logged_idx') is null then
+        raise exception 'water_log_user_logged_idx missing';
+    end if;
+    if to_regclass('public.weight_log_user_logged_idx') is null then
+        raise exception 'weight_log_user_logged_idx missing';
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'foodable_app') then
+        raise exception 'foodable_app role missing';
+    end if;
+
+    if exists (
+        select 1
+        from pg_roles
+        where rolname = 'foodable_app'
+          and (rolsuper or rolbypassrls)
+    ) then
+        raise exception 'foodable_app must not be superuser or bypass RLS';
+    end if;
+
+    if exists (
+        select 1
+        from pg_auth_members m
+        join pg_roles member on member.oid = m.member
+        join pg_roles granted on granted.oid = m.roleid
+        where member.rolname = 'foodable_app'
+          and granted.rolbypassrls
+    ) then
+        raise exception 'foodable_app is a member of a bypassrls role';
+    end if;
+
+    if not has_table_privilege(
+        'foodable_app', 'public.profiles', 'SELECT, INSERT, UPDATE, DELETE'
+    ) then
+        raise exception 'foodable_app missing DML on profiles';
+    end if;
+
+    if exists (
+        select 1
+        from pg_namespace n
+        where n.nspname = 'foodable_migrations'
+          and has_schema_privilege('foodable_app', n.oid, 'USAGE')
+    ) then
+        raise exception 'foodable_app must not use foodable_migrations schema';
+    end if;
+
+    -- Security definer functions take a household id and act as their owner:
+    -- the app calls them as the system, never as foodable_app.
+    if exists (
+        select 1
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.prosecdef
+          and has_function_privilege('foodable_app', p.oid, 'execute')
+    ) then
+        raise exception 'foodable_app can execute a security definer function: %', (
+            select string_agg(p.proname, ', ')
+            from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public'
+              and p.prosecdef
+              and has_function_privilege('foodable_app', p.oid, 'execute')
+        );
+    end if;
+
+    if exists (
+        select 1
+        from pg_policies
+        where schemaname = 'public'
+          and tablename = 'household_members'
+          and 'foodable_app' = any (roles)
+          and cmd <> 'SELECT'
+    ) then
+        raise exception 'foodable_app may only read household_members';
+    end if;
+
+    -- Every table with a household_id gives foodable_app a policy, except the
+    -- system-only ones named here on purpose. A listed table that gains a
+    -- policy must leave the list.
+    declare
+        missing text;
+        stale text;
+        exempt text[] := array[
+            'flag_assignments',
+            'household_mcp_tokens'
+        ];
+    begin
+        select string_agg(c.relname, ', ' order by c.relname) into missing
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_attribute a
+          on a.attrelid = c.oid and a.attname = 'household_id' and not a.attisdropped
+        where n.nspname = 'public'
+          and c.relkind in ('r', 'p')
+          and c.relname <> all (exempt)
+          and not exists (
+              select 1 from pg_policies p
+              where p.schemaname = 'public'
+                and p.tablename = c.relname
+                and 'foodable_app' = any (p.roles)
+          );
+        if missing is not null then
+            raise exception 'tables with household_id but no foodable_app policy: %', missing;
+        end if;
+
+        select string_agg(p.tablename, ', ' order by p.tablename) into stale
+        from (
+            select distinct tablename from pg_policies
+            where schemaname = 'public' and 'foodable_app' = any (roles)
+        ) p
+        where p.tablename = any (exempt);
+        if stale is not null then
+            raise exception 'exempt from the household policy check but has a foodable_app policy: %', stale;
+        end if;
+    end;
+
+    -- A person's own data: foodable_app reaches it through policies on the
+    -- user and the household's members, never without one.
+    declare
+        missing text;
+    begin
+        select string_agg(t, ', ' order by t) into missing
+        from unnest(array[
+            'meal_items',
+            'meals',
+            'nutrition_goal_days',
+            'nutrition_goals',
+            'profiles',
+            'water_log',
+            'weight_log'
+        ]) as t
+        where not exists (
+            select 1 from pg_policies p
+            where p.schemaname = 'public'
+              and p.tablename = t
+              and 'foodable_app' = any (p.roles)
+        );
+        if missing is not null then
+            raise exception 'personal tables with no foodable_app policy: %', missing;
+        end if;
     end;
 
 end;

@@ -1,0 +1,1647 @@
+<!doctype html>
+<!--
+  Bulk meal import widget, v2 look (MCP Apps). Served for start_meal_import to
+  callers with the mcp-widgets-v2 flag on; the v1 template stays the default.
+
+  Same contract as v1: the MODEL never handles row data. The widget parses the
+  export in-browser, shows a mapping and a preview to confirm, then calls
+  bulk_import_meals itself through api.callTool, and pushes back only a short
+  summary through api.updateModelContext. The rows it sends are built by the
+  same code as v1, so the server sees byte-identical arguments for the same
+  file and the same choices (src/widgets.test.ts compares them).
+
+  Four steps: file -> map columns -> preview -> done. One card, as the design
+  draws pick, preview and done; the map step has no design node and borrows
+  the preview's rows and labels.
+
+  Alcohol is opt-in and the opt-in reaches this far: with drink_unit null the
+  widget neither maps, previews nor sends an alcohol column (see gatedField).
+
+  The CSV parser and the row chunker are the tested modules, inlined:
+  src/domain/csv.ts and src/chunk.ts.
+
+  Degrades on purpose:
+    - api.canCallTools false  -> tells the user to ask Claude to import instead
+    - host never answers      -> per-call timeout, reported, retry offered
+    - a chunk fails           -> other chunks still land; re-running is a no-op
+                                 server-side, so "retry failed rows" is safe
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Import Meals</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            /* Drop zone: a dashed hairline box around the icon and two lines. */
+            .drop {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 6px;
+                padding: 20px;
+                border: 1px dashed var(--line);
+                border-radius: var(--radius-md);
+                text-align: center;
+            }
+            .drop.over {
+                border-color: var(--accent-fill);
+            }
+            .drop svg {
+                fill: none;
+                stroke: var(--text-secondary);
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            .drop-t {
+                font-size: 15px;
+                line-height: 18px;
+                font-weight: 500;
+            }
+            .sub {
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-secondary);
+            }
+            /* A <label> styled as the button opens the picker natively; the
+               input stays focusable but out of sight. */
+            /* flex: none, or the card's column flex squeezes its height. */
+            label.btn {
+                flex: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+            }
+            .btn:disabled {
+                opacity: 0.5;
+                cursor: default;
+            }
+            .vh {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                opacity: 0;
+                overflow: hidden;
+            }
+            label.btn:focus-within {
+                outline: 2px solid var(--accent-fill);
+                outline-offset: 2px;
+            }
+            /* File line: name left, counts right. */
+            .fl {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+                min-width: 0;
+            }
+            .fl b {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-weight: 400;
+            }
+            .fl .sub {
+                margin-left: auto;
+                white-space: nowrap;
+            }
+            /* Notices: a toned dot and a sentence. */
+            .ntc {
+                display: flex;
+                gap: 8px;
+                font-size: 12px;
+                line-height: 16px;
+                color: var(--text-secondary);
+            }
+            .ntc .dot {
+                margin-top: 5px;
+            }
+            .ntc.over {
+                color: var(--status-over);
+            }
+            /* Column mapping: field left, picker right, hairline between. */
+            .mrow {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                gap: 10px;
+                align-items: center;
+                padding: 7px 0;
+                border-bottom: 1px solid var(--line);
+            }
+            .mrow:last-child {
+                border-bottom: 0;
+            }
+            .mrow > div {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .req {
+                color: var(--status-over);
+            }
+            .fld {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .sel {
+                width: 100%;
+                height: 32px;
+                padding: 0 10px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-sm);
+                background: var(--surface-bg);
+                color: var(--text-primary);
+                font: inherit;
+                font-size: 12px;
+                min-width: 0;
+            }
+            .sel:focus-visible {
+                outline: 2px solid var(--accent-fill);
+                outline-offset: 1px;
+            }
+            span.chip {
+                cursor: default;
+            }
+            .chip.on {
+                border-color: var(--text-primary);
+                background: var(--text-primary);
+                color: var(--surface-bg);
+            }
+            /* Preview rows: date, meal, food, kcal. */
+            .pv {
+                max-height: 216px;
+                overflow-y: auto;
+            }
+            .pv .row-s:first-child {
+                width: 76px;
+            }
+            .pv .row-s + .row-s {
+                width: 64px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .tz b {
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .bar > i {
+                --c: var(--accent-fill);
+            }
+            /* Done: the result disc beside two lines. */
+            .res {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+            .disc {
+                flex: none;
+                display: grid;
+                place-items: center;
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                background: var(--accent-fill);
+                color: var(--accent-on);
+                font-weight: 700;
+            }
+            .disc path {
+                fill: none;
+                stroke: var(--accent-on);
+                stroke-width: 2.4;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            .disc.warn {
+                background: var(--status-warn);
+                color: var(--surface-panel);
+            }
+            .res-t {
+                font-size: 15px;
+                line-height: 18px;
+                font-weight: 600;
+            }
+            .diag summary {
+                cursor: pointer;
+                font-size: 11px;
+                color: var(--text-tertiary);
+            }
+            .diag pre {
+                margin: 6px 0 0;
+                padding: 8px 10px;
+                border-radius: var(--radius-sm);
+                background: var(--surface-bg);
+                font:
+                    10.5px/1.5 ui-monospace,
+                    Menlo,
+                    monospace;
+                white-space: pre-wrap;
+                user-select: all;
+                color: var(--text-secondary);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Import meals",
+                step: "Step {n} of 4",
+                stepDone: "Done",
+                fieldLabels: {
+                    logged_at: "Date / time",
+                    description: "Food name",
+                    meal_type: "Meal",
+                    calories: "Calories",
+                    protein_g: "Protein (g)",
+                    carbs_g: "Carbs (g)",
+                    fat_g: "Fat (g)",
+                    fiber_g: "Fiber (g)",
+                    sugar_g: "Sugar, total (g)",
+                    alcohol_g: "Alcohol (g)",
+                    caffeine_mg: "Caffeine (mg)",
+                    notes: "Notes",
+                    time: "Time (separate column)",
+                    deleted: "Deleted flag",
+                    source_id: "Meal id (from our export)",
+                    timezone: "Timezone (from our export)",
+                },
+                noToolsWarning:
+                    "This host does not let this view write to your log. Ask Claude to import the file instead — it can do it directly.",
+                tzWarning:
+                    "Your timezone is not set, so times will be read as UTC and may land on the wrong day. Ask Claude to set your timezone first.",
+                dropTitle: "Choose a CSV export",
+                dropHint:
+                    "MyFitnessPal, Cronometer, Lose It, MacroFactor or a Foodable export. It's read here and never sent to the chat. Nothing is saved until you confirm.",
+                chooseFile: "Choose file",
+                dateMapHint:
+                    "Map a date column above to see how a value from your file converts.",
+                dateNoneHint: "That column has no dates in it.",
+                dateUnreadable:
+                    "{raw} → cannot be read as {format}, so rows like it will be skipped",
+                energyMapHint:
+                    "Map a calories column above to see how a value from your file converts.",
+                energyNoneHint: "That column has no numbers in it.",
+                dateAmbiguousWarning:
+                    "The date format could not be determined from this file — its dates read equally well as day-first or month-first. Please confirm which one your app exports: the wrong choice files meals on the wrong day with no error.",
+                dateFormatLabel: "Date format in this file",
+                energyUnitLabel: "Energy unit of the calories column",
+                rowsCount: { one: "{n} row", other: "{n} rows" },
+                columnsCount: { one: "{n} column", other: "{n} columns" },
+                columns: "Columns",
+                format: "Format",
+                notInFile: "(not in this file)",
+                columnFallback: "column {n}",
+                addedSugarNotice:
+                    "This file has an added-sugar column ({column}) but no total-sugar column, so Sugar was left unmapped. Sugar is stored as TOTAL sugars, including what occurs naturally in fruit and milk, so mapping added sugar into it would under-report every row.",
+                caffeineGramsNotice:
+                    "This file's caffeine column ({column}) is in grams, but caffeine is stored in milligrams, so Caffeine was left unmapped. Mapping it would record 0.18 where the label says 180 mg. Re-importing the same file later will not fill it in — those rows will already be logged and will be skipped as duplicates. If the header is mislabelled and the values really are milligrams, pick it above; if they really are grams, multiply them by 1000 in the file before importing, not after.",
+                alcoholNotice:
+                    "This file has an alcohol column ({column}), but alcohol tracking is off for this account, so it will not be imported. Re-importing the same file later will not fill it in — those rows will already be logged and will be skipped as duplicates. To keep this data, ask Claude to turn on alcohol tracking (set_alcohol_tracking) before importing.",
+                sampleValue: "e.g. {sample}",
+                sourceAppLabel: "Source app (optional)",
+                sourceAppHint:
+                    "Used to label rows that have no food name of their own.",
+                previewButton: "Preview import",
+                chooseAnotherButton: "Choose another file",
+                mealsCount: { one: "{n} meal", other: "{n} meals" },
+                totals: "{kcal} kcal total",
+                rowsSkipped: "{n} rows skipped",
+                batchCount: { one: "{n} batch", other: "{n} batches" },
+                datesReadAs: "Dates read as {format}; energy {conversion}.",
+                energyConvertedNote: "converted from kJ to kcal",
+                energyReadAsKcal: "read as kcal",
+                timesIn: "Times read in",
+                timesInFile: "each row's own timezone column",
+                badDatesWarning:
+                    "{n} row(s) were skipped because their date could not be read as {format}{sample}. Go back and set the date format that matches your file.",
+                badDateSample: " (e.g. line {line}: {value})",
+                noTimeWarning:
+                    "{n} row(s) have a date but no time — they will be logged at midday.",
+                splitDatesCount: {
+                    one: "{n} date has",
+                    other: "{n} dates have",
+                },
+                splitDatesWarning:
+                    " more than {max} meals (e.g. {date}) and had to be split across separate import batches. If that date contains two entries with the exact same food, meal type and macros, one of them may be skipped as a duplicate instead of imported.",
+                noNameFallback: "(no name — will be labelled by meal)",
+                showingRows: "Showing {shown} of {total} rows",
+                checkingRows: "Checking {n} rows…",
+                importingRows: "Importing {n} rows…",
+                batchProgress: "{label} (batch {done} of {total})",
+                rowsRange: "Rows {a}–{b}: {msg}",
+                preflightFailed: "Preflight check failed.",
+                rowsWouldFail:
+                    "{n} row(s) would fail, e.g. line {line}: {message}",
+                importingEllipsis: "Importing…",
+                importButton: "Import {n} meals",
+                backToMapping: "Back to mapping",
+                mealsImported: "{n} meals imported",
+                imported: "Imported",
+                alreadyThere: "Already there, skipped",
+                failed: "Failed",
+                skippedRows: "Rows skipped in the file",
+                problems: "Problems",
+                line: "Line {n}",
+                restartButton: "Import another file",
+                couldNotReadFile: "Could not read that file: {msg}",
+                noDataRows: "No data rows found in that file.",
+                diagnostics: "Details for a bug report",
+            };
+
+            // The real, unit-tested CSV parser (src/domain/csv.ts + src/domain/csv.test.ts).
+            /*@inlinets src/domain/csv.ts@*/
+
+            // ---- config from start_meal_import -------------------------------
+            //
+            // drink_unit is the alcohol opt-in: "us" / "uk" when the user tracks
+            // alcohol, null when they do not. It DEFAULTS to null, so a payload
+            // with no drink_unit reads as tracking-off: failing closed costs a
+            // column; failing open costs the thing the gate is for.
+            let CFG = {
+                tz: "UTC",
+                today: "",
+                max_rows_per_call: 50,
+                import_tool_name: "bulk_import_meals",
+                tz_configured: true,
+                drink_unit: null,
+            };
+            let API = null;
+
+            // Strict allowlist, not truthiness: only the two values the server's
+            // schema can emit turn alcohol on.
+            function alcoholTracked() {
+                return CFG.drink_unit === "us" || CFG.drink_unit === "uk";
+            }
+
+            // ---- state -------------------------------------------------------
+            const FIELDS = [
+                { key: "logged_at", required: true },
+                { key: "description" },
+                { key: "meal_type" },
+                { key: "calories" },
+                { key: "protein_g" },
+                { key: "carbs_g" },
+                { key: "fat_g" },
+                { key: "fiber_g" },
+                { key: "sugar_g" },
+                // Only offered when the user tracks alcohol — see gatedField.
+                { key: "alcohol_g", alcoholOnly: true },
+                // Milligrams; no opt-in of any kind.
+                { key: "caffeine_mg" },
+                { key: "notes" },
+                { key: "time" },
+                { key: "deleted" },
+                // Only meaningful in this app's own export: the meal's id lets
+                // a restored backup be recognized instead of duplicated. A
+                // foreign id maps here harmlessly; the server ignores anything
+                // that is not one of this user's meal ids.
+                { key: "source_id" },
+                // Same: our own export's per-row zone.
+                { key: "timezone" },
+            ];
+            // Header aliases for the exports surveyed, matched with
+            // normalizeHeader from csv.ts, so "Fat (g)" and "fat_g" both hit.
+            // Every FIELDS key has an entry.
+            const ALIASES = {
+                logged_at: ["date", "day", "logged_at", "datum", "timestamp"],
+                time: ["time", "uhrzeit"],
+                description: [
+                    "food_name",
+                    "description",
+                    "name",
+                    "food",
+                    "item",
+                    "lebensmittel",
+                ],
+                meal_type: ["meal", "meal_type", "type", "group", "mahlzeit"],
+                calories: [
+                    "calories",
+                    "energy_kcal",
+                    "energy",
+                    "kcal",
+                    "calories_kcal",
+                    "kalorien",
+                ],
+                protein_g: ["protein_g", "protein", "eiweiss"],
+                carbs_g: [
+                    "carbs_g",
+                    "carbohydrates_g",
+                    "carbs",
+                    "carbohydrates",
+                    "net_carbs_g",
+                    "kohlenhydrate",
+                ],
+                fat_g: ["fat_g", "fat", "total_fat", "fett"],
+                fiber_g: [
+                    "fiber_g",
+                    "fiber",
+                    "fibre_g",
+                    "fibre",
+                    "dietary_fiber",
+                    "dietary_fibre",
+                    "total_fiber",
+                    "total_fibre",
+                    "ballaststoffe",
+                    "ballaststoffe_g",
+                    "fibra",
+                    "fibres",
+                ],
+                // TOTAL sugars only: "added sugar" is a different quantity (see
+                // ADDED_SUGAR_RE), and exact matching keeps Cronometer's "Sugar
+                // Alcohols (g)" out.
+                sugar_g: [
+                    "sugar_g",
+                    "sugar",
+                    "sugars_g",
+                    "sugars",
+                    "total_sugar",
+                    "total_sugars",
+                    "total_sugars_g",
+                    "zucker",
+                    "zucker_g",
+                    "azucar",
+                    "azucares",
+                    "sucres",
+                    "zuccheri",
+                    "suikers",
+                ],
+                // Grams of pure ethanol; never ABV or sugar alcohols.
+                alcohol_g: [
+                    "alcohol_g",
+                    "alcohol",
+                    "alcohol_ethyl",
+                    "ethanol",
+                    "ethanol_g",
+                    "alkohol",
+                    "alkohol_g",
+                ],
+                // MILLIGRAMS. No *_g spelling on purpose: "Caffeine (g)" must
+                // not land here (caffeineGramsColumns says so out loud).
+                caffeine_mg: [
+                    "caffeine_mg",
+                    "caffeine",
+                    "koffein",
+                    "koffein_mg",
+                    "cafeina",
+                    "cafeina_mg",
+                    "caffeina",
+                    "caffeina_mg",
+                    "cafeine",
+                    "cafeine_mg",
+                ],
+                notes: ["note", "notes", "comment", "kommentar"],
+                deleted: ["deleted"],
+                // Deliberately narrow: our own export writes exactly "id" and
+                // "timezone".
+                source_id: ["id"],
+                timezone: ["timezone"],
+            };
+
+            // Columns that hold ADDED sugar. Sugar is stored as total sugars, so
+            // an added-sugar column never auto-maps; the map step says why.
+            const ADDED_SUGAR_RE =
+                /added_sugar|sugar_added|free_sugar|zugesetzt|zusatz/;
+            // Caffeine headed in GRAMS: mapping it would record 0.18 where the
+            // user meant 180 mg, so it is named and refused, never scaled.
+            const CAFFEINE_GRAMS_RE =
+                /^(caffeine|koffein|cafeina|caffeina|cafeine)_(g|gram|grams|gramm)$/;
+            function headersMatching(re) {
+                return S.table
+                    ? S.table.headers.filter((h) => re.test(normalizeHeader(h)))
+                    : [];
+            }
+
+            // Alcohol is opt-in. With tracking off this widget does not map,
+            // offer, preview or SEND an alcohol column: writing it would put a
+            // number in the log that never appeared in the preview the user
+            // confirmed. Turning tracking on first is the supported path.
+            function gatedField(f) {
+                return f.alcoholOnly && !alcoholTracked();
+            }
+            // The gate is silent, and alcohol_g is outside the import digest,
+            // so a later re-run back-fills nothing: say so once, by header
+            // name only, never by reading a cell.
+            function alcoholColumn() {
+                if (!S.table) return "";
+                const i = findColumn(S.table.headers, ALIASES.alcohol_g);
+                return i >= 0 ? S.table.headers[i] : "";
+            }
+
+            const S = {
+                step: "file", // file | map | preview | done
+                fileName: "",
+                table: null, // ParsedTable from csv.ts
+                mapping: {}, // field key -> column index (-1 = unmapped)
+                sourceApp: "",
+                dateFormat: "iso", // iso | dmy | mdy — sniffed, user-confirmable
+                dateAmbiguous: false,
+                energyUnit: "kcal", // kcal | kj — unit of the calories column
+                rows: [],
+                skipped: 0,
+                badDates: 0,
+                badDateSample: null, // { line, value } of the first such row
+                errors: [],
+                busy: false,
+                progress: null, // { done, total, label }
+                result: null, // aggregate of every chunk
+            };
+
+            // ---- step 1: file ------------------------------------------------
+            async function loadFile(file) {
+                S.fileName = file.name;
+                try {
+                    const buf = new Uint8Array(await file.arrayBuffer());
+                    S.table = parseCsv(buf);
+                } catch (e) {
+                    S.errors = [tpl(T.couldNotReadFile, { msg: e.message })];
+                    render();
+                    return;
+                }
+                if (!S.table.rows.length) {
+                    S.errors = [
+                        T.noDataRows +
+                            (S.table.warnings[0]
+                                ? " " + S.table.warnings[0]
+                                : ""),
+                    ];
+                    render();
+                    return;
+                }
+                S.errors = [];
+                autoMap();
+                guessSourceApp();
+                resniffDateFormat();
+                resniffEnergyUnit();
+                S.step = "map";
+                render();
+            }
+
+            function autoMap() {
+                S.mapping = {};
+                for (const f of FIELDS) {
+                    // A gated field is pinned to -1 rather than skipped: every
+                    // key must exist, because buildRows' num() only treats a
+                    // real negative index as "not in this file".
+                    S.mapping[f.key] = gatedField(f)
+                        ? -1
+                        : findColumn(S.table.headers, ALIASES[f.key]);
+                }
+            }
+            // A MyFitnessPal export has a Meal column but no food name; knowing
+            // which app it came from lets the server label those rows.
+            function guessSourceApp() {
+                const h = S.table.headers.map(normalizeHeader).join("|");
+                if (h.includes("food_name") && h.includes("amount"))
+                    S.sourceApp = "cronometer";
+                else if (
+                    S.mapping.description === -1 &&
+                    S.mapping.meal_type >= 0
+                )
+                    S.sourceApp = "myfitnesspal";
+                else if (h.includes("deleted")) S.sourceApp = "loseit";
+                else if (h.includes("serving_size"))
+                    S.sourceApp = "macrofactor";
+                else S.sourceApp = "";
+            }
+
+            // ---- date format & energy unit -----------------------------------
+            //
+            // The server accepts ISO dates and kcal only, so a DD/MM/YYYY or
+            // kilojoule export is converted here. Both settings are sniffed and
+            // stay editable beside a worked example from the user's own file,
+            // because both failure modes are silent.
+            const DATE_FORMATS = [
+                ["iso", "Year-Month-Day", "2026-07-18"],
+                ["dmy", "Day/Month/Year", "18/07/2026"],
+                ["mdy", "Month/Day/Year", "07/18/2026"],
+            ];
+            const ENERGY_UNITS = [
+                ["kcal", "Calories", "kcal"],
+                ["kj", "Kilojoules", "kJ"],
+            ];
+            function dateFormatLabel(fmt) {
+                const o = DATE_FORMATS.find((x) => x[0] === fmt);
+                return o ? o[1] : String(fmt);
+            }
+
+            // Some exports put the whole timestamp in the date column. toIsoDate
+            // returns the date alone, so the time is captured here and
+            // re-appended. Mirrors csv.ts's TRAILING_TIME_RE.
+            const CELL_TIME_RE =
+                /[T ]\s*(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\s*[ap]?\.?m?\.?)$/i;
+            function timeInDateCell(raw) {
+                const m = CELL_TIME_RE.exec(
+                    String(raw == null ? "" : raw).trim(),
+                );
+                return m ? m[1].trim() : "";
+            }
+
+            // Cells / numbers of the column mapped to `fieldKey` (limit 0 = all).
+            function columnCells(fieldKey, limit) {
+                const t = S.table;
+                const idx = S.mapping[fieldKey];
+                const out = [];
+                if (!t || !(idx >= 0)) return out;
+                for (const r of t.rows) {
+                    if (isBlankCell(r[idx])) continue;
+                    out.push(r[idx].trim());
+                    if (limit && out.length >= limit) break;
+                }
+                return out;
+            }
+            function columnNumbers(fieldKey, limit) {
+                const t = S.table;
+                const idx = S.mapping[fieldKey];
+                const out = [];
+                if (!t || !(idx >= 0)) return out;
+                for (const r of t.rows) {
+                    const v = parseNumber(r[idx], t.decimalSeparator);
+                    if (v === null) continue;
+                    out.push(v);
+                    if (limit && out.length >= limit) break;
+                }
+                return out;
+            }
+
+            // Sniff the whole column; re-run on load AND whenever the user
+            // remaps logged_at / calories, since the evidence came from it.
+            function resniffDateFormat() {
+                const values = columnCells("logged_at", 0);
+                if (!values.length) {
+                    S.dateFormat = "iso";
+                    S.dateAmbiguous = false;
+                    return;
+                }
+                const sniffed = sniffDateFormat(values);
+                S.dateFormat = sniffed.format;
+                S.dateAmbiguous = sniffed.ambiguous;
+            }
+            function resniffEnergyUnit() {
+                const t = S.table;
+                const idx = S.mapping.calories;
+                if (!t || !(idx >= 0)) {
+                    S.energyUnit = "kcal";
+                    return;
+                }
+                S.energyUnit = sniffEnergyUnit(
+                    t.headers[idx] || "",
+                    columnNumbers("calories", 0),
+                );
+            }
+
+            // ---- step 2 -> 3: build rows -------------------------------------
+            function buildRows() {
+                const t = S.table;
+                const m = S.mapping;
+                const dec = t.decimalSeparator;
+                const cell = (row, idx) =>
+                    idx >= 0 && !isBlankCell(row[idx])
+                        ? row[idx].trim()
+                        : undefined;
+                const num = (row, idx) => {
+                    if (idx < 0) return undefined;
+                    const v = parseNumber(row[idx], dec);
+                    return v === null ? undefined : v;
+                };
+
+                const rows = [];
+                let skipped = 0;
+                let badDates = 0;
+                let badDateSample = null;
+                for (let i = 0; i < t.rows.length; i++) {
+                    const r = t.rows[i];
+                    if (m.deleted >= 0 && isDeletedRow(r, m.deleted)) {
+                        skipped++;
+                        continue;
+                    }
+                    const rawWhen = cell(r, m.logged_at);
+                    if (rawWhen === undefined) {
+                        skipped++;
+                        continue;
+                    }
+                    // Converted with the format the column agreed on; a cell
+                    // that will not parse is dropped and counted, never sent.
+                    const iso = toIsoDate(rawWhen, S.dateFormat);
+                    if (iso === null) {
+                        badDates++;
+                        if (!badDateSample) {
+                            badDateSample = {
+                                line: t.sourceLines[i],
+                                value: rawWhen,
+                            };
+                        }
+                        skipped++;
+                        continue;
+                    }
+                    let when = iso;
+                    // A separate time column, else a time that rode along in
+                    // the date cell. normalizeTime makes it zero-padded 24-hour;
+                    // one that fails to parse leaves the meal timeless (noon).
+                    const rawTime = cell(r, m.time) || timeInDateCell(rawWhen);
+                    const time = rawTime ? normalizeTime(rawTime) : null;
+                    if (time) when = when + " " + time;
+
+                    // Calories are the only converted unit; every other column
+                    // is already in the unit the server stores.
+                    const energy = num(r, m.calories);
+
+                    rows.push({
+                        source_line: t.sourceLines[i],
+                        logged_at: when,
+                        description: cell(r, m.description),
+                        meal_type: cell(r, m.meal_type),
+                        calories:
+                            energy === undefined
+                                ? undefined
+                                : toKcal(energy, S.energyUnit),
+                        protein_g: num(r, m.protein_g),
+                        carbs_g: num(r, m.carbs_g),
+                        fat_g: num(r, m.fat_g),
+                        fiber_g: num(r, m.fiber_g),
+                        sugar_g: num(r, m.sugar_g),
+                        // Belt to the mapping's braces: this line decides what
+                        // leaves the browser.
+                        alcohol_g: alcoholTracked()
+                            ? num(r, m.alcohol_g)
+                            : undefined,
+                        caffeine_mg: num(r, m.caffeine_mg),
+                        notes: cell(r, m.notes),
+                        // Both passed through untouched; the server decides.
+                        source_id: cell(r, m.source_id),
+                        timezone: cell(r, m.timezone),
+                    });
+                }
+                S.rows = rows;
+                S.badDates = badDates;
+                S.badDateSample = badDateSample;
+                S.skipped = skipped + t.skippedTotalsRows + t.skippedBlankRows;
+            }
+
+            // The real, unit-tested chunker (src/chunk.ts + src/chunk.test.ts):
+            // it keeps every calendar date in one call where it can.
+            /*@inlinets src/chunk.ts@*/
+
+            // ---- step 3: import ----------------------------------------------
+            async function runImport() {
+                if (!API || !API.canCallTools || S.busy) return;
+                S.busy = true;
+                S.result = {
+                    created: 0,
+                    deduplicated: 0,
+                    failed: 0,
+                    chunks: 0,
+                    chunkErrors: [],
+                    rowErrors: [],
+                    warnings: [],
+                };
+                const { chunks } = chunkRows(S.rows, CFG.max_rows_per_call);
+                S.progress = { done: 0, total: chunks.length, label: "" };
+                render();
+
+                for (let i = 0; i < chunks.length; i++) {
+                    const rows = chunks[i];
+                    const kcal = rows.reduce(
+                        (a, r) => a + (r.calories ?? 0),
+                        0,
+                    );
+                    const everyHasKcal = rows.every(
+                        (r) => r.calories !== undefined,
+                    );
+                    const args = {
+                        meals: rows,
+                        expected_row_count: rows.length,
+                        rows_skipped: i === 0 ? S.skipped : 0,
+                        source_app: S.sourceApp || undefined,
+                        // Dry-run the FIRST chunk only: a full second pass would
+                        // double the calls and hit the rate limit on big files.
+                        dry_run: i === 0,
+                    };
+                    if (everyHasKcal) args.expected_total_kcal = kcal;
+                    if (CFG.user_id) args.user_id = CFG.user_id;
+                    const range = (msg) =>
+                        tpl(T.rowsRange, {
+                            a: rows[0].source_line,
+                            b: rows[rows.length - 1].source_line,
+                            msg,
+                        });
+
+                    S.progress.label = tpl(
+                        i === 0 ? T.checkingRows : T.importingRows,
+                        { n: rows.length },
+                    );
+                    render();
+
+                    try {
+                        const res = await API.callTool(
+                            CFG.import_tool_name,
+                            args,
+                            { timeoutMs: 90000 },
+                        );
+                        const sc = res && res.structuredContent;
+                        if (!sc) throw new Error("no result payload");
+                        collect(sc);
+
+                        if (i === 0) {
+                            // Dry run failed: write nothing, and say why on
+                            // this step (the preview never lists warnings).
+                            if (sc.status === "failed") {
+                                S.result.chunkErrors.push(
+                                    range(
+                                        sc.warnings && sc.warnings.length
+                                            ? sc.warnings.join("; ")
+                                            : T.preflightFailed,
+                                    ),
+                                );
+                                S.busy = false;
+                                S.progress = null;
+                                render();
+                                return;
+                            }
+                            // Passed — now write this chunk for real.
+                            args.dry_run = false;
+                            const real = await API.callTool(
+                                CFG.import_tool_name,
+                                args,
+                                { timeoutMs: 90000 },
+                            );
+                            const rsc = real && real.structuredContent;
+                            if (rsc) collect(rsc);
+                        }
+                    } catch (e) {
+                        S.result.chunkErrors.push(range(e.message));
+                    }
+                    S.progress.done = i + 1;
+                    render();
+                }
+
+                S.busy = false;
+                S.progress = null;
+                S.step = "done";
+                render();
+
+                // Tell the model what happened — a summary only, never rows.
+                if (API.updateModelContext) {
+                    const r = S.result;
+                    API.updateModelContext(
+                        "Bulk meal import finished: " +
+                            r.created +
+                            " meals imported, " +
+                            r.deduplicated +
+                            " already logged, " +
+                            r.failed +
+                            " failed" +
+                            (S.skipped
+                                ? ", " + S.skipped + " rows skipped"
+                                : "") +
+                            ". Source: " +
+                            (S.fileName || "pasted data") +
+                            ".",
+                    );
+                }
+            }
+
+            function collect(sc) {
+                const r = S.result;
+                r.chunks++;
+                if (!sc.dry_run) {
+                    r.created += sc.summary.created;
+                    r.deduplicated += sc.summary.deduplicated;
+                    r.failed += sc.summary.failed;
+                }
+                for (const w of sc.warnings || []) {
+                    if (r.warnings.indexOf(w) === -1) r.warnings.push(w);
+                }
+                for (const row of sc.results || []) {
+                    if (row.error) {
+                        r.rowErrors.push({
+                            line: row.source_line,
+                            message: row.error.message,
+                        });
+                    }
+                }
+            }
+
+            // ---- markup helpers ----------------------------------------------
+            // Only esc'd text and constant markup reach these.
+            const TONES = { warn: "s-warn", over: "s-over", info: "s-dim" };
+            function notice(text, tone) {
+                return (
+                    '<div class="ntc' +
+                    (tone === "over" ? " over" : "") +
+                    '"><span class="dot ' +
+                    (TONES[tone] || "s-dim") +
+                    '"></span><span>' +
+                    esc(text) +
+                    "</span></div>"
+                );
+            }
+            function header(meta) {
+                return (
+                    '<div class="hd"><h2 class="hd-title">' +
+                    esc(T.title) +
+                    '</h2><span class="hd-meta">' +
+                    esc(meta) +
+                    "</span></div>"
+                );
+            }
+            function label(text, count) {
+                return (
+                    '<div class="lbl">' +
+                    esc(text) +
+                    (count != null
+                        ? '<span class="lbl-n">' + esc(count) + "</span>"
+                        : "") +
+                    "</div>"
+                );
+            }
+            // A hairline row: secondary cells `subs`, then the title, then
+            // `end` on the right.
+            function row(title, end, subs, tone) {
+                return (
+                    '<div class="row">' +
+                    (subs || [])
+                        .map((x) => '<span class="row-s">' + esc(x) + "</span>")
+                        .join("") +
+                    '<span class="row-t' +
+                    (tone ? " " + tone : "") +
+                    '">' +
+                    esc(title) +
+                    "</span>" +
+                    (end != null
+                        ? '<span class="row-end">' + esc(end) + "</span>"
+                        : "") +
+                    "</div>"
+                );
+            }
+            // Buttons carry data-act for the one click listener on #root.
+            function button(act, text, primary, disabled) {
+                return (
+                    '<button type="button" class="btn' +
+                    (primary ? " primary" : "") +
+                    '" data-act="' +
+                    act +
+                    '"' +
+                    (disabled ? " disabled" : "") +
+                    ">" +
+                    esc(text) +
+                    "</button>"
+                );
+            }
+            function select(ctl, options, sel, attrs) {
+                return (
+                    '<select class="sel" data-ctl="' +
+                    ctl +
+                    '"' +
+                    (attrs || "") +
+                    ">" +
+                    options
+                        .map(
+                            (o) =>
+                                '<option value="' +
+                                esc(o[0]) +
+                                '"' +
+                                (String(sel) === String(o[0])
+                                    ? " selected"
+                                    : "") +
+                                ">" +
+                                esc(o[1]) +
+                                "</option>",
+                        )
+                        .join("") +
+                    "</select>"
+                );
+            }
+            const MONTHS =
+                "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+            // "2026-11-06 19:00" -> "Nov 6 19:00"; `year` -> "Nov 2026".
+            function shortWhen(s, year) {
+                const m = /^(\d{4})-(\d\d)-(\d\d)(?: (.+))?$/.exec(s);
+                if (!m) return s;
+                const mon = MONTHS[Number(m[2]) - 1];
+                return year
+                    ? mon + " " + m[1]
+                    : mon + " " + Number(m[3]) + (m[4] ? " " + m[4] : "");
+            }
+            const nfmt = (n) => Number(n).toLocaleString();
+
+            // Operator-facing English: the file's shape and the first failure,
+            // copyable in one block. Shown, folded, only when something went
+            // wrong.
+            function diagnostics() {
+                const t = S.table;
+                const r = S.result;
+                const lines = [];
+                if (t) {
+                    lines.push(
+                        t.headers.length +
+                            " columns: " +
+                            t.headers.slice(0, 8).join(" | ") +
+                            (t.headers.length > 8 ? " | …" : ""),
+                        "encoding " +
+                            t.encoding +
+                            " · delimiter " +
+                            (t.delimiter === "\t" ? "tab" : t.delimiter) +
+                            " · decimal " +
+                            t.decimalSeparator +
+                            " · " +
+                            t.rows.length +
+                            " rows",
+                        "dates read as " +
+                            dateFormatLabel(S.dateFormat) +
+                            " · energy " +
+                            S.energyUnit +
+                            (S.dateAmbiguous ? " · format was ambiguous" : ""),
+                    );
+                }
+                if (r) {
+                    lines.push(
+                        "imported " +
+                            r.created +
+                            " · already logged " +
+                            r.deduplicated +
+                            " · failed " +
+                            r.failed +
+                            " · skipped " +
+                            S.skipped,
+                    );
+                    if (r.rowErrors[0])
+                        lines.push(
+                            "first error, line " +
+                                r.rowErrors[0].line +
+                                ": " +
+                                r.rowErrors[0].message,
+                        );
+                    if (r.chunkErrors[0])
+                        lines.push("batch error: " + r.chunkErrors[0]);
+                } else if (S.badDateSample) {
+                    lines.push(
+                        S.badDates +
+                            " row(s) have an unreadable date (line " +
+                            S.badDateSample.line +
+                            ": " +
+                            S.badDateSample.value +
+                            ")",
+                    );
+                }
+                return (
+                    '<details class="diag"><summary>' +
+                    esc(T.diagnostics) +
+                    "</summary><pre>" +
+                    esc(lines.join("\n")) +
+                    "</pre></details>"
+                );
+            }
+
+            // ---- steps -------------------------------------------------------
+            function fileStep() {
+                return (
+                    header(tpl(T.step, { n: 1 })) +
+                    (API && !API.canCallTools
+                        ? notice(T.noToolsWarning, "warn")
+                        : "") +
+                    (!CFG.tz_configured ? notice(T.tzWarning, "warn") : "") +
+                    (S.errors.length ? notice(S.errors[0], "over") : "") +
+                    '<div class="drop">' +
+                    '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M7.5 9.5 12 14l4.5-4.5M5 19h14"/></svg>' +
+                    '<div class="drop-t">' +
+                    esc(T.dropTitle) +
+                    '</div><div class="sub">' +
+                    esc(T.dropHint) +
+                    "</div></div>" +
+                    '<label class="btn primary">' +
+                    esc(T.chooseFile) +
+                    '<input type="file" class="vh" data-ctl="file" accept=".csv,text/csv,text/plain" /></label>'
+                );
+            }
+
+            // Worked examples: the first real value from the user's own file,
+            // run through the very functions the import will use.
+            function dateExample() {
+                if (!(S.mapping.logged_at >= 0)) return T.dateMapHint;
+                const raw = columnCells("logged_at", 1)[0];
+                if (raw === undefined) return T.dateNoneHint;
+                const iso = toIsoDate(raw, S.dateFormat);
+                if (iso === null)
+                    return tpl(T.dateUnreadable, {
+                        raw,
+                        format: dateFormatLabel(S.dateFormat),
+                    });
+                const time = normalizeTime(timeInDateCell(raw));
+                return raw + " → " + iso + (time ? " " + time : "");
+            }
+            function energyExample() {
+                if (!(S.mapping.calories >= 0)) return T.energyMapHint;
+                const v = columnNumbers("calories", 1)[0];
+                if (v === undefined) return T.energyNoneHint;
+                return S.energyUnit === "kj"
+                    ? v + " kJ → " + toKcal(v, "kj") + " kcal"
+                    : v + " kcal → " + v + " kcal (no conversion)";
+            }
+            function field(labelText, control, hint) {
+                return (
+                    '<div class="fld"><span class="sub">' +
+                    esc(labelText) +
+                    "</span>" +
+                    control +
+                    '<p class="note">' +
+                    esc(hint) +
+                    "</p></div>"
+                );
+            }
+
+            function mapStep() {
+                const t = S.table;
+                const columns = [["-1", T.notInFile]].concat(
+                    t.headers.map((h, i) => [
+                        String(i),
+                        h || tpl(T.columnFallback, { n: i + 1 }),
+                    ]),
+                );
+                const sugar = headersMatching(ADDED_SUGAR_RE)[0];
+                const caffeine = headersMatching(CAFFEINE_GRAMS_RE)[0];
+                const alcohol = !alcoholTracked() && alcoholColumn();
+                return (
+                    header(tpl(T.step, { n: 2 })) +
+                    '<div class="fl"><b>' +
+                    esc(S.fileName) +
+                    '</b><span class="sub">' +
+                    esc(
+                        plural(T.rowsCount, t.rows.length) +
+                            " · " +
+                            plural(T.columnsCount, t.headers.length) +
+                            " · " +
+                            t.encoding +
+                            ", delimiter " +
+                            (t.delimiter === "\t" ? "tab" : t.delimiter),
+                    ) +
+                    "</span></div>" +
+                    t.warnings.map((w) => notice(w, "warn")).join("") +
+                    (S.mapping.sugar_g === -1 && sugar
+                        ? notice(tpl(T.addedSugarNotice, { column: sugar }))
+                        : "") +
+                    (S.mapping.caffeine_mg === -1 && caffeine
+                        ? notice(
+                              tpl(T.caffeineGramsNotice, { column: caffeine }),
+                          )
+                        : "") +
+                    (alcohol
+                        ? notice(tpl(T.alcoholNotice, { column: alcohol }))
+                        : "") +
+                    '<div class="grp">' +
+                    label(T.columns) +
+                    '<div class="rows">' +
+                    FIELDS.filter((f) => !gatedField(f))
+                        .map((f) => {
+                            const sel = S.mapping[f.key];
+                            const sample =
+                                sel >= 0 && t.rows[0] ? t.rows[0][sel] : "";
+                            return (
+                                '<div class="mrow"><div>' +
+                                esc(T.fieldLabels[f.key]) +
+                                (f.required
+                                    ? ' <span class="req">*</span>'
+                                    : "") +
+                                (sample
+                                    ? '<div class="note">' +
+                                      esc(tpl(T.sampleValue, { sample })) +
+                                      "</div>"
+                                    : "") +
+                                "</div>" +
+                                select(
+                                    "map",
+                                    columns,
+                                    sel,
+                                    ' data-field="' + f.key + '"',
+                                ) +
+                                "</div>"
+                            );
+                        })
+                        .join("") +
+                    "</div></div>" +
+                    label(T.format) +
+                    // Undecidable, so it must not be dressed up as auto-detected.
+                    (S.dateAmbiguous
+                        ? notice(T.dateAmbiguousWarning, "warn")
+                        : "") +
+                    field(
+                        T.dateFormatLabel,
+                        select(
+                            "dateFormat",
+                            DATE_FORMATS.map((o) => [
+                                o[0],
+                                o[1] + " (" + o[2] + ")",
+                            ]),
+                            S.dateFormat,
+                        ),
+                        dateExample(),
+                    ) +
+                    field(
+                        T.energyUnitLabel,
+                        select(
+                            "energyUnit",
+                            ENERGY_UNITS.map((o) => [
+                                o[0],
+                                o[1] + " (" + o[2] + ")",
+                            ]),
+                            S.energyUnit,
+                        ),
+                        energyExample(),
+                    ) +
+                    field(
+                        T.sourceAppLabel,
+                        '<input class="sel" data-ctl="srcapp" value="' +
+                            esc(S.sourceApp) +
+                            '" placeholder="myfitnesspal" />',
+                        T.sourceAppHint,
+                    ) +
+                    '<div class="btns">' +
+                    button("back-file", T.chooseAnotherButton) +
+                    button("preview", T.previewButton, true) +
+                    "</div>"
+                );
+            }
+
+            function previewStep() {
+                const rows = S.rows;
+                const shown = rows.slice(0, 30);
+                const kcal = rows.reduce((a, r) => a + (r.calories ?? 0), 0);
+                const noTime = rows.filter(
+                    (r) => !/\d\d:\d\d/.test(String(r.logged_at)),
+                ).length;
+                const { chunks, splitDates } = chunkRows(
+                    rows,
+                    CFG.max_rows_per_call,
+                );
+                const dates = rows.map((r) => r.logged_at).sort();
+                const ends = dates.length
+                    ? [dates[0], dates[dates.length - 1]].map((d) =>
+                          shortWhen(d.slice(0, 10), true),
+                      )
+                    : [];
+                const span = [...new Set(ends)].join(" – ");
+                const mapped = FIELDS.filter((f) => S.mapping[f.key] >= 0);
+                const r = S.result;
+                return (
+                    header(tpl(T.step, { n: 3 })) +
+                    '<div class="fl"><b>' +
+                    esc(S.fileName) +
+                    '</b><span class="sub">' +
+                    esc(
+                        plural(T.mealsCount, rows.length) +
+                            (span ? " · " + span : ""),
+                    ) +
+                    "</span></div>" +
+                    label(T.columns) +
+                    '<div class="chips">' +
+                    mapped
+                        .slice(0, 4)
+                        .map(
+                            (f, i) =>
+                                '<span class="chip' +
+                                (i === 0 ? " on" : "") +
+                                '">' +
+                                esc(
+                                    S.table.headers[S.mapping[f.key]] +
+                                        " → " +
+                                        T.fieldLabels[f.key],
+                                ) +
+                                "</span>",
+                        )
+                        .join("") +
+                    (mapped.length > 4
+                        ? '<span class="chip">+' +
+                          (mapped.length - 4) +
+                          "</span>"
+                        : "") +
+                    "</div>" +
+                    // Importing fewer rows than the file holds is the exact
+                    // failure this flow exists to prevent: never silent.
+                    (S.badDates
+                        ? notice(
+                              tpl(T.badDatesWarning, {
+                                  n: S.badDates,
+                                  format: dateFormatLabel(S.dateFormat),
+                                  sample: S.badDateSample
+                                      ? tpl(T.badDateSample, S.badDateSample)
+                                      : "",
+                              }),
+                              "warn",
+                          )
+                        : "") +
+                    (noTime
+                        ? notice(tpl(T.noTimeWarning, { n: noTime }), "warn")
+                        : "") +
+                    // A date with more rows than one call takes is split, and
+                    // two identical rows across the split can dedupe.
+                    (splitDates.length
+                        ? notice(
+                              plural(T.splitDatesCount, splitDates.length) +
+                                  tpl(T.splitDatesWarning, {
+                                      max: CFG.max_rows_per_call,
+                                      date: splitDates[0],
+                                  }),
+                              "warn",
+                          )
+                        : "") +
+                    '<div class="pv rows">' +
+                    shown
+                        .map((x) =>
+                            row(
+                                x.description || T.noNameFallback,
+                                x.calories == null ? "—" : nfmt(x.calories),
+                                [shortWhen(x.logged_at), x.meal_type || "—"],
+                                x.description ? "" : "is-dim",
+                            ),
+                        )
+                        .join("") +
+                    "</div>" +
+                    (rows.length > shown.length
+                        ? '<p class="note">' +
+                          esc(
+                              tpl(T.showingRows, {
+                                  shown: shown.length,
+                                  total: rows.length,
+                              }),
+                          ) +
+                          "</p>"
+                        : "") +
+                    // State the conversions applied, so the confirmation shows
+                    // what will be sent rather than what the file said.
+                    '<p class="note">' +
+                    esc(
+                        [
+                            tpl(T.totals, { kcal: nfmt(kcal) }),
+                            S.skipped
+                                ? tpl(T.rowsSkipped, { n: S.skipped })
+                                : "",
+                            plural(T.batchCount, chunks.length),
+                        ]
+                            .filter(Boolean)
+                            .join(" · ") +
+                            ". " +
+                            tpl(T.datesReadAs, {
+                                format: dateFormatLabel(S.dateFormat),
+                                conversion:
+                                    S.energyUnit === "kj"
+                                        ? T.energyConvertedNote
+                                        : T.energyReadAsKcal,
+                            }),
+                    ) +
+                    '</p><div class="sub tz">' +
+                    esc(T.timesIn) +
+                    " <b>" +
+                    esc(S.mapping.timezone >= 0 ? T.timesInFile : CFG.tz) +
+                    "</b></div>" +
+                    (S.progress
+                        ? '<div class="bar"><i style="width:' +
+                          Math.round(
+                              (S.progress.done / S.progress.total) * 100,
+                          ) +
+                          '%"></i></div><p class="note">' +
+                          esc(tpl(T.batchProgress, S.progress)) +
+                          "</p>"
+                        : "") +
+                    (r
+                        ? r.chunkErrors.map((e) => notice(e, "over")).join("")
+                        : "") +
+                    (r && r.rowErrors.length && !S.busy
+                        ? notice(
+                              tpl(T.rowsWouldFail, {
+                                  n: r.rowErrors.length,
+                                  line: r.rowErrors[0].line,
+                                  message: r.rowErrors[0].message,
+                              }),
+                              "over",
+                          )
+                        : "") +
+                    (S.badDates > 0 ? diagnostics() : "") +
+                    '<div class="btns">' +
+                    button("back-map", T.backToMapping, false, S.busy) +
+                    button(
+                        "import",
+                        S.busy
+                            ? T.importingEllipsis
+                            : tpl(T.importButton, { n: rows.length }),
+                        true,
+                        S.busy || !(API && API.canCallTools),
+                    ) +
+                    "</div>"
+                );
+            }
+
+            function doneStep() {
+                const r = S.result || {
+                    created: 0,
+                    deduplicated: 0,
+                    failed: 0,
+                    chunkErrors: [],
+                    rowErrors: [],
+                    warnings: [],
+                };
+                const ok = r.failed === 0 && !r.chunkErrors.length;
+                return (
+                    header(T.stepDone) +
+                    '<div class="res"><span class="disc' +
+                    (ok ? "" : " warn") +
+                    '" aria-hidden="true">' +
+                    (ok
+                        ? '<svg width="14" height="10" viewBox="0 0 14 10"><path d="M1.5 5.2 5.2 8.6 12.5 1.4"/></svg>'
+                        : "!") +
+                    '</span><div><div class="res-t">' +
+                    esc(tpl(T.mealsImported, { n: r.created })) +
+                    '</div><div class="sub">' +
+                    esc(S.fileName) +
+                    "</div></div></div>" +
+                    '<div class="rows">' +
+                    row(T.imported, nfmt(r.created)) +
+                    row(T.alreadyThere, nfmt(r.deduplicated)) +
+                    row(
+                        T.failed,
+                        nfmt(r.failed),
+                        [],
+                        r.failed ? "is-over" : "",
+                    ) +
+                    (S.skipped ? row(T.skippedRows, nfmt(S.skipped)) : "") +
+                    "</div>" +
+                    r.chunkErrors.map((e) => notice(e, "over")).join("") +
+                    r.warnings.map((w) => notice(w)).join("") +
+                    (r.rowErrors.length
+                        ? '<div class="grp">' +
+                          label(T.problems, r.rowErrors.length) +
+                          '<div class="pv rows">' +
+                          r.rowErrors
+                              .slice(0, 20)
+                              .map((e) =>
+                                  row(
+                                      e.message,
+                                      null,
+                                      [tpl(T.line, { n: e.line })],
+                                      "is-over",
+                                  ),
+                              )
+                              .join("") +
+                          "</div></div>"
+                        : "") +
+                    (ok ? "" : diagnostics()) +
+                    '<div class="btns">' +
+                    button("restart", T.restartButton) +
+                    "</div>"
+                );
+            }
+
+            function render() {
+                const body =
+                    S.step === "file"
+                        ? fileStep()
+                        : S.step === "map"
+                          ? mapStep()
+                          : S.step === "preview"
+                            ? previewStep()
+                            : doneStep();
+                v2Paint('<div class="card">' + body + "</div>");
+            }
+
+            // ---- events: one listener per type on #root -----------------------
+            const ACTIONS = {
+                preview() {
+                    buildRows();
+                    S.step = "preview";
+                    S.result = null;
+                },
+                "back-file"() {
+                    S.step = "file";
+                },
+                "back-map"() {
+                    S.step = "map";
+                },
+                import() {
+                    runImport();
+                    return true;
+                },
+                restart() {
+                    Object.assign(S, {
+                        step: "file",
+                        table: null,
+                        rows: [],
+                        result: null,
+                        errors: [],
+                        dateFormat: "iso",
+                        dateAmbiguous: false,
+                        energyUnit: "kcal",
+                        badDates: 0,
+                        badDateSample: null,
+                    });
+                },
+            };
+            const ROOT = document.getElementById("root");
+            ROOT.addEventListener("click", (e) => {
+                const b = e.target.closest && e.target.closest("[data-act]");
+                const act = b && ACTIONS[b.dataset.act];
+                if (act && !act()) render();
+            });
+            ROOT.addEventListener("change", (e) => {
+                const t = e.target;
+                const ctl = t.dataset && t.dataset.ctl;
+                if (ctl === "file") {
+                    const f = t.files && t.files[0];
+                    if (f) loadFile(f);
+                    return;
+                }
+                if (ctl === "map") {
+                    const key = t.dataset.field;
+                    S.mapping[key] = Number(t.value);
+                    // The sniffed settings came from the old column.
+                    if (key === "logged_at") resniffDateFormat();
+                    if (key === "calories") resniffEnergyUnit();
+                } else if (ctl === "dateFormat") {
+                    S.dateFormat = t.value;
+                    // The user has now stated it, so stop asking.
+                    S.dateAmbiguous = false;
+                } else if (ctl === "energyUnit") {
+                    S.energyUnit = t.value;
+                } else return;
+                // Re-rendering on change is what makes the worked example live.
+                render();
+            });
+            ROOT.addEventListener("input", (e) => {
+                const t = e.target;
+                if (t.dataset && t.dataset.ctl === "srcapp")
+                    S.sourceApp = t.value.trim();
+            });
+            function dropZone(e) {
+                return e.target.closest && e.target.closest(".drop");
+            }
+            ROOT.addEventListener("dragover", (e) => {
+                const d = dropZone(e);
+                if (!d) return;
+                e.preventDefault();
+                d.classList.add("over");
+            });
+            ROOT.addEventListener("dragleave", (e) => {
+                const d = dropZone(e);
+                if (d) d.classList.remove("over");
+            });
+            ROOT.addEventListener("drop", (e) => {
+                const d = dropZone(e);
+                if (!d) return;
+                e.preventDefault();
+                d.classList.remove("over");
+                const f =
+                    e.dataTransfer &&
+                    e.dataTransfer.files &&
+                    e.dataTransfer.files[0];
+                if (f) loadFile(f);
+            });
+
+            initWidget({
+                name: "import-meals-widget",
+                loading: '<div class="empty">Preparing import…</div>',
+                coerce: (payload) => {
+                    if (!payload || typeof payload !== "object") return null;
+                    // start_meal_import's own payload, or a wrapper round it.
+                    if (payload.import_tool_name || payload.tz) return payload;
+                    if (payload.structuredContent)
+                        return payload.structuredContent;
+                    return null;
+                },
+                render: v2BridgeRender((data) => {
+                    if (data && data.import_tool_name) {
+                        CFG = Object.assign({}, CFG, data);
+                    }
+                    render();
+                }),
+                sample: {
+                    tz: "America/Denver",
+                    today: "2026-11-09",
+                    max_rows_per_call: 50,
+                    import_tool_name: "bulk_import_meals",
+                    tz_configured: true,
+                    // Tracking off is the default account state.
+                    drink_unit: null,
+                    user_id: "u1",
+                },
+                onReady: (api) => {
+                    API = api;
+                    render();
+                },
+            });
+        </script>
+    </body>
+</html>

@@ -12,15 +12,17 @@ Use when opening or updating a pull request.
 Run, in order:
 
 1. `bun run gen:all`
-2. `bun run format:check`
-3. `bun run typecheck`
-4. `bun test`
-5. `bun run pr:check`
+2. `bun run check:changed` (format, lint, typecheck and the tests CI's `check` job runs for your changes; `--all` runs everything)
+3. `bun run pr:check body.md [--title "<title>"]` (title: the open PR's, else the last commit's; branch, sections, blast floor)
 
 ## Title and body
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title `<type>(<scope>)[!]: <subject>` and the required sections: **Summary**, **Blast radius** (with **Level** and **Rollback**), **Changes**, **Migrations**, **Contracts**, **Testing**, and **Links**.
 
+## Merging
+
+The required checks are `check`, `docker`, `migrations`, `dependency-review` and `policy` (main's copy of the conventions, migration safety, skill drift and the agent context budget). When they are green and review threads are resolved, the PR merges with no review or label.
+
 Path floors, branch naming, and title parsing are defined in [scripts/conventions/](scripts/conventions/).
 
-Create or update the pull request with `gh pr create` or `gh pr edit` once checks pass and the body is complete.
+Then `gh pr create` or `gh pr edit`.

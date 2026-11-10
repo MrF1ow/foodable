@@ -2,8 +2,20 @@ import { Hono } from "hono";
 import { formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { renderNeedsAttentionInventoryPage } from "../loaders.js";
+import { canonicalAppPath } from "../route-map.js";
 
 export const needsAttentionRoutes = new Hono();
+
+const DISMISS_RETURN_ALLOWLIST = new Set([
+    "/kitchen/groceries",
+    "/needs-attention",
+]);
+
+function dismissReturnTo(raw: string | undefined): string {
+    const path = raw ? canonicalAppPath(raw) : raw;
+    if (path && DISMISS_RETURN_ALLOWLIST.has(path)) return path;
+    return "/needs-attention";
+}
 
 needsAttentionRoutes.get("/needs-attention", requireSiteUser, async (c) => {
     const page = await renderNeedsAttentionInventoryPage(
@@ -31,11 +43,18 @@ needsAttentionRoutes.post(
             false,
             { code, subjectKind, subjectId, relatedId, member },
         );
+        const returnTo = dismissReturnTo(formText(body, "return_to"));
         if (page.status !== 303) {
+            // From another page, go back there: the notice is still shown,
+            // so the person can try again where they were.
+            if (returnTo !== "/needs-attention") {
+                // toast: none
+                return c.redirect(returnTo, 303);
+            }
             return c.html(page.html, page.status);
         }
         // toast: none
-        return c.redirect("/needs-attention", 303);
+        return c.redirect(returnTo, 303);
     },
 );
 

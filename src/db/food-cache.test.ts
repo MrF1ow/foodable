@@ -5,6 +5,7 @@ import {
     upsertFoodCacheRow,
 } from "./food-cache.js";
 import { describeDb } from "./testing/pg.js";
+import { lookupBarcode } from "../foods.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
 
@@ -75,5 +76,162 @@ describeDb(pgAvailable !== null, "food-cache db", (getCtx) => {
         });
         const rows = await selectFoodCacheRowsBySource("usda");
         expect(rows).toHaveLength(2);
+    });
+
+    describe("lookupBarcode with a cache row from before quality data", () => {
+        const realFetch = globalThis.fetch;
+        const realUa = process.env.OFF_USER_AGENT;
+        const barcode = "3017624010701";
+        const legacy = {
+            name: "Cached Nutella",
+            brand: "Ferrero",
+            serving: "100 g",
+            calories: 539,
+            protein_g: 6.3,
+            carbs_g: 57.5,
+            fat_g: 30.9,
+            source: `off:${barcode}`,
+            source_name: "openfoodfacts",
+            barcode,
+        };
+
+        beforeEach(async () => {
+            process.env.OFF_USER_AGENT = "Foodable-test (test@example.com)";
+            await upsertFoodCacheRow({
+                source: "openfoodfacts",
+                source_id: barcode,
+                payload: legacy,
+                fetched_at: new Date().toISOString(),
+            });
+        });
+
+        afterEach(() => {
+            globalThis.fetch = realFetch;
+            if (realUa === undefined) delete process.env.OFF_USER_AGENT;
+            else process.env.OFF_USER_AGENT = realUa;
+        });
+
+        test("serves the cached row when the refetch throws", async () => {
+            globalThis.fetch = (async () => {
+                throw new Error("network down");
+            }) as unknown as typeof fetch;
+            const hit = await lookupBarcode(barcode);
+            expect(hit?.name).toBe("Cached Nutella");
+            expect(hit?.quality).toBeUndefined();
+        });
+
+        test("serves the cached row when the refetch misses", async () => {
+            globalThis.fetch = (async () =>
+                new Response("{}", {
+                    status: 404,
+                })) as unknown as typeof fetch;
+            const hit = await lookupBarcode(barcode);
+            expect(hit?.name).toBe("Cached Nutella");
+        });
+
+        test("an outage during a refetch leaves the old row to refetch next time", async () => {
+            const qualityLegacy = {
+                ...legacy,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            };
+            await upsertFoodCacheRow({
+                source: "openfoodfacts",
+                source_id: barcode,
+                payload: qualityLegacy,
+                fetched_at: new Date().toISOString(),
+            });
+            let fetches = 0;
+            globalThis.fetch = (async () => {
+                fetches++;
+                throw new TypeError("network down");
+            }) as unknown as typeof fetch;
+            const first = await lookupBarcode(barcode);
+            globalThis.fetch = (async () => {
+                fetches++;
+                return Response.json({
+                    status: 1,
+                    product: {
+                        product_name: "Nutella",
+                        serving_size: "100 g",
+                        nutriments: {
+                            "energy-kcal_100g": 539,
+                            proteins_100g: 6.3,
+                            carbohydrates_100g: 57.5,
+                            fat_100g: 30.9,
+                            "saturated-fat_100g": 10.6,
+                        },
+                        nutrient_levels: { "saturated-fat": "high" },
+                    },
+                });
+            }) as unknown as typeof fetch;
+            const second = await lookupBarcode(barcode);
+            expect(first?.name).toBe(qualityLegacy.name);
+            expect(fetches).toBe(2);
+            expect(second?.saturated_fat_g).toBe(10.6);
+            expect(second?.nutrient_levels).toEqual({
+                "saturated-fat": "high",
+            });
+        });
+
+        test("legacy quality cache without nutrient_levels stamps on 404 and refetches once", async () => {
+            const qualityLegacy = {
+                ...legacy,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: null,
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-07T12:00:00.000Z",
+                },
+            };
+            await upsertFoodCacheRow({
+                source: "openfoodfacts",
+                source_id: barcode,
+                payload: qualityLegacy,
+                fetched_at: new Date().toISOString(),
+            });
+            let fetches = 0;
+            globalThis.fetch = (async () => {
+                fetches++;
+                return new Response("{}", { status: 404 });
+            }) as unknown as typeof fetch;
+            await lookupBarcode(barcode);
+            await lookupBarcode(barcode);
+            expect(fetches).toBe(1);
+        });
+
+        test("replaces the cached row when the refetch has quality", async () => {
+            globalThis.fetch = (async () =>
+                Response.json({
+                    status: 1,
+                    product: {
+                        product_name: "Fresh Nutella",
+                        nutriments: { "energy-kcal_100g": 539 },
+                        nutriscore_grade: "e",
+                        additives_tags: [],
+                    },
+                })) as unknown as typeof fetch;
+            const hit = await lookupBarcode(barcode);
+            expect(hit?.name).toBe("Fresh Nutella");
+            expect(hit?.quality?.nutriscore_grade).toBe("e");
+            const row = await selectFoodCacheRow("openfoodfacts", barcode);
+            expect(
+                (row?.payload as { quality?: unknown }).quality,
+            ).toBeDefined();
+        });
     });
 });

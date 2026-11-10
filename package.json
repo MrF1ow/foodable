@@ -1,13 +1,13 @@
 {
     "name": "foodable",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Self-hosted MCP platform for one household: fridge, groceries, nutrition, recipes, and settings.",
     "author": "Ethan Flow",
     "license": "MIT",
-    "homepage": "https://github.com/MrF1ow/nutrition-mcp",
+    "homepage": "https://github.com/MrF1ow/foodable",
     "repository": {
         "type": "git",
-        "url": "https://github.com/MrF1ow/nutrition-mcp.git"
+        "url": "https://github.com/MrF1ow/foodable.git"
     },
     "keywords": [
         "mcp",
@@ -22,6 +22,7 @@
     "devDependencies": {
         "@modelcontextprotocol/client": "^2.4.0",
         "@types/bun": "latest",
+        "oxlint": "1.90.0",
         "prettier": "^3.9.10"
     },
     "peerDependencies": {
@@ -33,13 +34,18 @@
         "inspect": "bunx @modelcontextprotocol/inspector",
         "harness": "bun run scripts/widget-harness.ts",
         "preview:app": "bun run scripts/app-preview.ts",
+        "preview:v2": "bun run scripts/v2-gallery.ts",
+        "preview:sheet": "bun run scripts/sheet-preview.ts",
         "check:nav": "bun run scripts/nav-check.ts",
         "e2e:agent": "bun run scripts/e2e-agent.ts",
         "test": "bun test",
         "format": "bunx prettier --write .",
         "format:check": "bunx prettier --check .",
+        "lint": "bun scripts/lint-rules/lint.ts",
         "typecheck": "bun run scripts/typecheck.ts",
+        "check:changed": "bun run scripts/check-changed.ts",
         "db:dryrun": "bun run scripts/migration-dryrun.ts",
+        "db:rehearse": "bun run scripts/db-rehearse.ts",
         "db:migrate": "bun run scripts/migrate.ts",
         "db:dev": "bun run scripts/dev-db.ts",
         "db:import-postgres": "bun run scripts/import-postgres-data.ts",
@@ -47,6 +53,7 @@
         "pr:check": "bun run scripts/pr-lint.ts",
         "labels:sync": "bun run scripts/sync-labels.ts",
         "release": "bun run scripts/release.ts",
+        "flags:apply": "bun run scripts/flags-apply.ts",
         "gen:pages": "bun run scripts/gen-login.ts",
         "gen:tokens": "bun run scripts/gen-tokens.ts",
         "gen:icons": "bun run scripts/gen-icons.ts",
@@ -56,8 +63,9 @@
     "dependencies": {
         "@hotwired/turbo": "8.0.23",
         "@modelcontextprotocol/server": "^2.4.0",
-        "hono": "^4.13.14",
+        "hono": "^4.13.16",
         "parse-ingredient": "3.1.0",
+        "railway": "3.16.0",
         "robots-parser": "3.0.1",
         "zod": "^4.6.7"
     }

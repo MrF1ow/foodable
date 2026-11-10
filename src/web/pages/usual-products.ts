@@ -96,7 +96,7 @@ function removeProductForm(
     product: Food,
     from: string,
 ): string {
-    return `<form id="${escapeHtml(removeFormId(product.id))}" method="post" action="/household/usual-products/${escapeHtml(foodId)}/products/${escapeHtml(product.id)}/remove" hidden><input type="hidden" name="from" value="${escapeHtml(from)}" /></form>`;
+    return `<form id="${escapeHtml(removeFormId(product.id))}" method="post" action="/kitchen/usuals/${escapeHtml(foodId)}/products/${escapeHtml(product.id)}/remove" hidden><input type="hidden" name="from" value="${escapeHtml(from)}" /></form>`;
 }
 
 function manualProductForm(foodId: string, from: string): string {
@@ -106,7 +106,7 @@ function manualProductForm(foodId: string, from: string): string {
                 `<label><input type="checkbox" name="allergens" value="${escapeHtml(code)}" /> ${escapeHtml(ALLERGEN_LABELS[code])}</label>`,
         )
         .join("");
-    return `<form method="post" action="/household/usual-products/${escapeHtml(foodId)}/products" class="usual-product-manual">
+    return `<form method="post" action="/kitchen/usuals/${escapeHtml(foodId)}/products" class="usual-product-manual">
 <input type="hidden" name="from" value="${escapeHtml(from)}" />
 ${field({ id: "usual-product-name", label: "Name", control: `<input id="usual-product-name" name="name" required maxlength="120" />` })}
 ${field({ id: "usual-product-brand", label: "Brand", control: `<input id="usual-product-brand" name="brand" maxlength="80" />` })}
@@ -130,7 +130,7 @@ ${nutrientInput("usual-product-caf", "caffeine_mg", "Caffeine mg", null)}
 export function renderUsualProductsListPage(
     view: UsualProductsListView,
 ): string {
-    const listFrom = safeReturnPath(view.from, "/household/usual-products");
+    const listFrom = safeReturnPath(view.from, "/kitchen/usuals");
     const mainRows = view.rows
         .map((row) => {
             const usualMeta = row.usual
@@ -156,7 +156,7 @@ export function renderUsualProductsListPage(
             const brand = food.brand
                 ? `<p class="row-meta">${escapeHtml(food.brand)}</p>`
                 : "";
-            const chooseHref = `/household/usual-products?food=${encodeURIComponent(food.id)}${listFrom !== "/household/usual-products" ? `&from=${encodeURIComponent(listFrom)}` : ""}`;
+            const chooseHref = `/kitchen/usuals?food=${encodeURIComponent(food.id)}${listFrom !== "/kitchen/usuals" ? `&from=${encodeURIComponent(listFrom)}` : ""}`;
             return `<li><div class="row">
 <p class="row-title">${escapeHtml(food.name)}</p>
 ${brand}
@@ -177,11 +177,11 @@ ${brand}
                   id: USUAL_PRODUCT_ADD_MODAL_ID,
                   title: "Add usual product",
                   openOnLoad: view.addSearch != null,
-                  body: `<form method="get" action="/household/usual-products" class="usual-product-add">
+                  body: `<form method="get" action="/kitchen/usuals" class="usual-product-add">
 ${field({ id: "usual-product-add-q", label: "Food", control: `<input id="usual-product-add-q" name="q" type="search" autocomplete="off" value="${escapeHtml(searchQ)}" />` })}
 <button type="submit" class="btn-primary">Search</button>
 </form>
-<p class="muted">Scanned products aren't listed. File them under a food with Belongs to… on <a href="/household/items">Items</a>.</p>
+<p class="muted">Scanned products aren't listed. File them under a food with Belongs to… on <a href="/settings/household/items">Items</a>.</p>
 ${searchOutcome}`,
               });
     const addTrigger =
@@ -194,7 +194,9 @@ ${searchOutcome}`,
     const body = `
         ${pageHeader({ title: "Usual products", actions: addTrigger })}
         ${pageLevelErrorBanner(view, view.openFoodId ? [`picker-${view.openFoodId}`] : [])}
-        ${renderHouseholdNav("usual-products")}
+        ${renderHouseholdNav("usual-products", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${mainPanel}
         ${addModal}
     `;
@@ -202,6 +204,8 @@ ${searchOutcome}`,
         ...view.chrome,
         title: "Usual products",
         active: "household",
+        v2Active: "kitchen",
+        v2Kitchen: "usuals",
         body,
     });
 }
@@ -211,7 +215,7 @@ export function renderUsualProductsPickerPage(
 ): string {
     const foodId = view.food.id;
     const from = view.from;
-    const backHref = safeReturnPath(from, "/household/usual-products");
+    const backHref = safeReturnPath(from, "/kitchen/usuals");
     const usualId = view.usualProductId;
     const productRadios = view.products.map((p) =>
         productOption(p, p.id === usualId),
@@ -252,7 +256,7 @@ ${field({
         view.products.length === 0
             ? `<p class="muted">No products for this food yet. Search, scan or add one below.</p>`
             : `<p class="muted">Any of these counts as ${escapeHtml(view.food.name)} in the fridge, recipes and the grocery list. The usual one sets its nutrition, store and amount.</p>
-<form method="post" action="/household/usual-products/${escapeHtml(foodId)}" data-usual-buy-follow>
+<form method="post" action="/kitchen/usuals/${escapeHtml(foodId)}" data-usual-buy-follow>
 <input type="hidden" name="from" value="${escapeHtml(from)}" />
 <div class="choice-col">
 <label class="choice-row"><input type="radio" name="product_food_id" value=""${usualBuyAttrs(view.food)}${noneChecked} /> None</label>
@@ -264,7 +268,7 @@ ${usualBuyBlock}
 ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
     const picker = renderFoodPicker({
         id: "usual-product-picker",
-        action: `/household/usual-products/${foodId}/pick`,
+        action: `/kitchen/usuals/${foodId}/pick`,
         method: "post",
         hiddenFields: { from },
         includeQuantity: false,
@@ -275,7 +279,9 @@ ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
             title: `Products of ${view.food.name}`,
             sub: `<p class="muted"><a href="${escapeHtml(backHref)}">Back</a></p>`,
         })}
-        ${renderHouseholdNav("usual-products")}
+        ${renderHouseholdNav("usual-products", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${view.error ? errorBanner(view.error) : ""}
         ${panel({ title: "Products", body: existingProducts })}
         ${panel({ title: "Add a product", body: picker })}
@@ -288,6 +294,8 @@ ${view.products.map((p) => removeProductForm(foodId, p, from)).join("")}`;
         ...view.chrome,
         title: "Usual product",
         active: "household",
+        v2Active: "kitchen",
+        v2Kitchen: "usuals",
         body,
     });
 }

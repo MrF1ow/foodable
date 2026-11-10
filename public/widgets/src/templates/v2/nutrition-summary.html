@@ -1,0 +1,290 @@
+<!doctype html>
+<!--
+  Nutrition summary widget, v2 look (MCP Apps). Served for get_nutrition_summary
+  to callers with the mcp-widgets-v2 flag on; the v1 template beside the
+  templates/ folder stays the default.
+
+  One card: a header line, then the macro strip (the calorie gauge beside the
+  three macro bars, the limits row, the water line). A single day reads as the
+  design draws it ("Today", the day on the right). A range keeps v1's
+  calories-per-day chart and logged-days count above the strip, and the strip
+  shows the daily average over the logged days.
+
+  Same structuredContent and coerce contract as the v1 template. Standalone
+  preview uses the SAMPLE below, which is the design's day.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Nutrition Summary</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            /* v1's calories-per-day chart (shared/trend-chart.js), in v2 type
+               and tokens. Labels are HTML so they keep their size at any
+               card width; only the geometry is SVG. */
+            .chart {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .chead {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+            }
+            .ctitle {
+                font-size: 11px;
+                line-height: 13px;
+                font-weight: 600;
+                letter-spacing: 0.9px;
+                text-transform: uppercase;
+                color: var(--text-tertiary);
+            }
+            .cmeta {
+                margin-left: auto;
+                font-size: 11px;
+                line-height: 13px;
+                color: var(--text-tertiary);
+            }
+            .chart svg {
+                display: block;
+                width: 100%;
+                height: auto;
+            }
+            .axis {
+                stroke: var(--line);
+            }
+            .goalline {
+                stroke: var(--text-tertiary);
+                stroke-dasharray: 3 3;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/date.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            /*@include shared/v2/macros.js@*/
+
+            /*@include shared/trend-chart.js@*/
+
+            const T = {
+                title: "Nutrition summary",
+                today: "Today",
+                loading: "Loading your nutrition summary…",
+                empty: "No meals or water logged in this range.",
+                dailyAvg: "Daily average · logged days",
+                daysLogged: {
+                    one: "{n} day logged",
+                    other: "{n} days logged",
+                },
+                daysOfLogged: "{logged} of {span} days logged",
+            };
+            const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+            // ---- Dates --------------------------------------------------------
+            // Payload dates are calendar days already resolved in the user's
+            // timezone, so they are split by hand: new Date("2026-07-05") is
+            // UTC midnight, the 4th for anyone west of Greenwich.
+            function ymd(s) {
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ""));
+                if (!m) return null;
+                const mon = Number(m[2]);
+                if (mon < 1 || mon > 12) return null;
+                return { y: Number(m[1]), m: mon, d: Number(m[3]) };
+            }
+            // "Sat 7 Nov". The weekday comes from a UTC date built from the
+            // same three numbers, so no timezone can shift it.
+            function dayName(s) {
+                const p = ymd(s);
+                if (!p) return String(s ?? "");
+                const wd = new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay();
+                return `${WEEKDAYS[wd]} ${p.d} ${MONTHS[p.m - 1]}`;
+            }
+            function dayLabel(s, withYear) {
+                const p = ymd(s);
+                if (!p) return String(s ?? "");
+                return `${p.d} ${MONTHS[p.m - 1]}${withYear ? ` ${p.y}` : ""}`;
+            }
+            // "5–7 Jul" within a month, "28 Jun – 4 Jul" across two; the year
+            // when the range crosses one or is not the current year (v1's
+            // rangeLabel).
+            function rangeLabel(start, end) {
+                const a = ymd(start),
+                    b = ymd(end);
+                if (!a || !b) return `${start} → ${end}`;
+                const thisYear = new Date().getFullYear();
+                if (a.y !== b.y)
+                    return `${dayLabel(start, true)} – ${dayLabel(end, true)}`;
+                const yr = b.y === thisYear ? "" : ` ${b.y}`;
+                if (a.m === b.m) {
+                    if (a.d === b.d) return `${dayLabel(end, false)}${yr}`;
+                    return `${a.d}–${b.d} ${MONTHS[b.m - 1]}${yr}`;
+                }
+                return `${dayLabel(start, false)} – ${dayLabel(end, false)}${yr}`;
+            }
+            // "3 days logged", or "15 of 30 days logged" when the payload says
+            // how wide the window was (days_in_range is optional: an older
+            // payload renders as it always did).
+            function loggedDaysCaption(data) {
+                const logged = data.logged_days;
+                const span = Number(data.days_in_range);
+                return Number.isFinite(span) && span > logged
+                    ? tpl(T.daysOfLogged, { logged, span })
+                    : plural(T.daysLogged, logged);
+            }
+            function localToday() {
+                const d = new Date();
+                const p = (x) => String(x).padStart(2, "0");
+                return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+            }
+
+            // ---- Sample: the design's day, dated today -------------------------
+            const SAMPLE_DAY = {
+                calories: 1284,
+                protein_g: 96,
+                carbs_g: 118,
+                fat_g: 42,
+                fiber_g: 18,
+                sugar_g: 31,
+                alcohol_g: 0,
+                caffeine_mg: 180,
+                water_ml: 1600,
+            };
+            const SAMPLE_MEAL = (description, meal_type, v) => ({
+                description,
+                meal_type,
+                date: null,
+                alcohol_g: 0,
+                ...v,
+            });
+            const TODAY = localToday();
+            const SAMPLE = {
+                start_date: TODAY,
+                end_date: TODAY,
+                logged_days: 1,
+                days_in_range: 1,
+                drink_unit: "us",
+                locale: "en",
+                goals: {
+                    calories: 2421,
+                    protein_g: 210,
+                    carbs_g: 213,
+                    fat_g: 81,
+                    fiber_g: 38,
+                    sugar_g: 50,
+                    // No alcohol limit set: the cell reads "0 drinks".
+                    alcohol_g: null,
+                    caffeine_mg: 400,
+                    water_ml: 3000,
+                },
+                averages: SAMPLE_DAY,
+                days: [{ date: TODAY, meal_count: 2, ...SAMPLE_DAY }],
+                meals: [
+                    SAMPLE_MEAL("Overnight oats with berries", "breakfast", {
+                        calories: 432,
+                        protein_g: 27,
+                        carbs_g: 42,
+                        fat_g: 17,
+                        fiber_g: 9.4,
+                        sugar_g: 18.2,
+                        caffeine_mg: 95,
+                    }),
+                    SAMPLE_MEAL("Chicken rice bowl", "lunch", {
+                        calories: 852,
+                        protein_g: 69,
+                        carbs_g: 76,
+                        fat_g: 25,
+                        fiber_g: 8.6,
+                        sugar_g: 12.8,
+                        caffeine_mg: 85,
+                    }),
+                ],
+            };
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function render(data) {
+                const root = document.getElementById("root");
+                if (
+                    !data ||
+                    !Array.isArray(data.days) ||
+                    data.days.length === 0
+                ) {
+                    root.innerHTML = card(
+                        v2Header(T.title) +
+                            `<p class="note">${esc(T.empty)}</p>`,
+                    );
+                    return;
+                }
+                const days = data.days
+                    .slice()
+                    .sort((a, b) => (a.date < b.date ? -1 : 1));
+                const multi = days.length > 1;
+
+                let head;
+                let top = "";
+                if (multi) {
+                    head = v2Header(
+                        T.title,
+                        `${rangeLabel(data.start_date, data.end_date)} · ${loggedDaysCaption(data)}`,
+                    );
+                    // v1's chart and the label that names the average's
+                    // denominator (logged days, not calendar days).
+                    top =
+                        trendChart(days, data.goals?.calories ?? null) +
+                        v2Label(T.dailyAvg);
+                } else {
+                    const date = days[0].date;
+                    head = v2Header(
+                        isToday(date) ? T.today : T.title,
+                        dayName(date),
+                    );
+                }
+
+                const strip = macroStripV2(data.averages, data.goals, {
+                    meals: data.meals,
+                    drinkUnit: data.drink_unit,
+                });
+                root.innerHTML = card(head + top + strip);
+            }
+
+            // Pull the summary out of whatever wrapper the host used.
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.days) || payload.averages)
+                    return payload;
+                if (payload.structuredContent) return payload.structuredContent;
+                return null;
+            }
+
+            initWidget({
+                name: "nutrition-summary-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render,
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

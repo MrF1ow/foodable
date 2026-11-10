@@ -81,7 +81,7 @@ test("noticeList empty, className, escaping, dedupe, action with ctx", () => {
     };
     const withAction = noticeList([a], { className: "x", ctx });
     expect(withAction).toContain(
-        `<a href="/household/usual-products/f-generic?from=%2Frecipes%2Fr1">Pick usual product</a>`,
+        `<a href="/kitchen/usuals/f-generic?from=%2Frecipes%2Fr1">Pick usual product</a>`,
     );
 });
 
@@ -113,11 +113,11 @@ test("noticeAction renders POST add-to-grocery form for fridge notices", () => {
         },
     };
     const ctx: NoticeRouteContext = {
-        from: "/fridge",
+        from: "/kitchen/fridge",
         foods: new Map(),
     };
     expect(noticeAction(notice, ctx)).toBe(
-        '<form class="notice-action" method="post" action="/fridge/items/it-1/add-to-grocery"><input type="hidden" name="from" value="/fridge" /><button type="submit" class="btn-sm">Add to grocery list</button></form>',
+        '<form class="notice-action" method="post" action="/kitchen/fridge/items/it-1/add-to-grocery"><input type="hidden" name="from" value="/kitchen/fridge" /><button type="submit" class="btn-sm">Add to grocery list</button></form>',
     );
     const onList: Notice = {
         ...notice,
@@ -143,7 +143,7 @@ test("noticeAction builds href for plain food and for product generic id", () =>
         foods: new Map([["f-plain", { genericFoodId: null }]]),
     };
     expect(noticeAction(plain, ctxPlain)).toBe(
-        '<a href="/household/usual-products/f-plain?from=%2Frecipes%2Fr1">Pick usual product</a>',
+        '<a href="/kitchen/usuals/f-plain?from=%2Frecipes%2Fr1">Pick usual product</a>',
     );
 
     const product: Notice = {
@@ -155,7 +155,7 @@ test("noticeAction builds href for plain food and for product generic id", () =>
         foods: new Map([["f-prod", { genericFoodId: "f-generic" }]]),
     };
     expect(noticeAction(product, ctxProd)).toBe(
-        '<a href="/household/usual-products/f-generic?from=%2Frecipes%2Fr1">Pick usual product</a>',
+        '<a href="/kitchen/usuals/f-generic?from=%2Frecipes%2Fr1">Pick usual product</a>',
     );
 });
 

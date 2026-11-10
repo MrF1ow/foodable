@@ -1,0 +1,20 @@
+{
+    "code": "3017620422003",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "3017620422003",
+        "product_name": "Nutella",
+        "nutriscore_grade": "e",
+        "nova_group": 3,
+        "ecoscore_grade": "f",
+        "additives_tags": [],
+        "nutrient_levels": {
+            "fat": "high",
+            "salt": "low",
+            "saturated-fat": "high",
+            "sugars": "high"
+        },
+        "nutriments": { "sugars_100g": 56.3, "saturated-fat_100g": 10.6 }
+    }
+}

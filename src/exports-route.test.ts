@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    test,
+} from "bun:test";
+import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import { signExportToken } from "./domain/export-link.js";
 import {
@@ -15,8 +24,19 @@ import {
 } from "./site-session.js";
 import { _resetBuckets } from "./rate-limit.js";
 import { setSqlForTests } from "./db/sql.js";
+import { withActor } from "./db/actor.js";
 import { describeDb } from "./db/testing/pg.js";
 import { findPgBin } from "./db/testing/pg-temp.js";
+
+beforeAll(() =>
+    setClientIpConfigForTests({
+        source: "x-forwarded-for",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    }),
+);
+afterAll(() => setClientIpConfigForTests(null));
 
 const pgAvailable = await findPgBin();
 const USER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -42,11 +62,11 @@ function restoreSessionSecret(): void {
 }
 
 describe("GET /exports/:token", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         prevSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = SECRET;
         resetSessionSecretWarningForTest();
-        _resetBuckets();
+        await _resetBuckets();
     });
 
     afterEach(() => {
@@ -131,36 +151,47 @@ describe("GET /exports/:token", () => {
     });
 });
 
-describeDb(pgAvailable !== null, "GET /exports with live store", (getCtx) => {
-    beforeEach(async () => {
-        const { sql, truncateAll } = getCtx();
-        await truncateAll();
-        setSqlForTests(sql);
-        prevSessionSecret = process.env.SESSION_SECRET;
-        process.env.SESSION_SECRET = SECRET;
-        await sql`
+describeDb(
+    pgAvailable !== null,
+    "GET /exports with live store",
+    (getCtx) => {
+        beforeEach(async () => {
+            const { sql, truncateAll } = getCtx();
+            await truncateAll();
+            setSqlForTests(sql);
+            prevSessionSecret = process.env.SESSION_SECRET;
+            process.env.SESSION_SECRET = SECRET;
+            await sql`
             insert into public.users (id, email)
             values (${USER}, ${"route@test.local"})
         `;
-    });
+        });
 
-    afterEach(() => {
-        setSqlForTests(null);
-        restoreSessionSecret();
-    });
+        afterEach(() => {
+            setSqlForTests(null);
+            restoreSessionSecret();
+        });
 
-    test("valid token returns bytes from Postgres", async () => {
-        const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06]);
-        await liveExportArchiveStore().put(USER, zip, 3600);
-        const token = signExportToken(
-            USER,
-            Date.now() + 3600_000,
-            resolveSessionSigningSecret(),
-        );
-        const app = new Hono();
-        app.route("/", createExportsRouter());
-        const res = await app.request(`http://localhost/exports/${token}`);
-        expect(res.status).toBe(200);
-        expect(new Uint8Array(await res.arrayBuffer())).toEqual(zip);
-    });
-});
+        test("valid token returns bytes from Postgres", async () => {
+            const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06]);
+            // The export tool writes the archive inside the user's request.
+            await withActor(
+                { kind: "user", userId: USER, householdId: null },
+                () => liveExportArchiveStore().put(USER, zip, 3600),
+            );
+            const token = signExportToken(
+                USER,
+                Date.now() + 3600_000,
+                resolveSessionSigningSecret(),
+            );
+            const app = new Hono();
+            app.route("/", createExportsRouter());
+            const res = await app.request(`http://localhost/exports/${token}`);
+            expect(res.status).toBe(200);
+            expect(new Uint8Array(await res.arrayBuffer())).toEqual(zip);
+        });
+    },
+    // No fallback actor: the download route has no session and must name its
+    // own actor, or this request throws.
+    { actor: null },
+);

@@ -9,6 +9,8 @@ export interface LoginDoc {
     subtitle: string;
     emailLabel: string;
     passwordLabel: string;
+    inviteCodeLabel: string;
+    inviteCodeHint: string;
     continueButton: string;
     /** "By continuing you confirm..." — {terms}/{privacy} become the
      * localized names as plain text. Legal HTML is gone, so do not turn
@@ -33,6 +35,11 @@ export interface LoginErrors {
     /** Auth backend could not answer (database down, timeout, rate limit). Kept apart
      * from invalidCredentials so a right password is never blamed. */
     signInUnavailable: string;
+    /** Invite-policy deploy: no code on a new account. */
+    inviteRequired: string;
+    /** Invite-policy deploy: wrong, expired, or reused code. */
+    invalidInvite: string;
+    /** Invite codes are ignored when sign-up is closed. */
 }
 
 export const LOGIN: LoginDoc = {
@@ -40,6 +47,9 @@ export const LOGIN: LoginDoc = {
     subtitle: "Sign in to connect",
     emailLabel: "Email or username",
     passwordLabel: "Password",
+    inviteCodeLabel: "Invite code",
+    inviteCodeHint:
+        "New to this household? Enter the single-use code the owner sent you.",
     continueButton: "Continue",
     consentNote:
         "By continuing you confirm you're at least 16 and agree to the {terms} and {privacy}.",
@@ -57,4 +67,6 @@ export const LOGIN: LoginDoc = {
 export const LOGIN_ERRORS: LoginErrors = {
     invalidCredentials: "Wrong email, username or password.",
     signInUnavailable: "Couldn't sign in right now. Try again in a minute.",
+    inviteRequired: "An invite code is needed to create an account.",
+    invalidInvite: "That invite code is invalid, expired, or already used.",
 };

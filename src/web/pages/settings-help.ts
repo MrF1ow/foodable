@@ -5,10 +5,14 @@ import {
 } from "../shell.js";
 import { pageHeader, panel, field } from "../components/ui.js";
 import { UNVERIFIED_RECIPES_PROMPT } from "../../copy/agent-prompts.js";
+import type { ViewerFlags } from "../../viewer-flags.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsHelpView = {
     chrome: ViewerChrome;
+    /** The viewer's flags, from the route. `ui-v2` adds the Members link to
+     *  the Settings sub-nav. Absent means off. */
+    flags?: ViewerFlags;
     backHref: string;
 };
 
@@ -89,6 +93,11 @@ const GLOSSARY: GlossaryEntry[] = [
         title: "Share recipes from your phone",
         body: "Install Foodable to your home screen (Android Chrome: menu › Install app, or Add to home screen; iOS Safari: Share › Add to Home Screen — iPhone does not list web apps in the share sheet, so on iPhone paste the link instead). Then use Share › Foodable from TikTok, Instagram, Facebook or the browser. Captions that come through are filled in; if only a link arrives you may be asked to paste the caption.",
     },
+    {
+        id: "possible-duplicates",
+        title: "Possible duplicates",
+        body: "Household › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Merge… keeps one name, lets you choose conflicting nutrition or unit values, and combines allergens; the other name becomes another name for it. Keep separate hides the pair until a food is merged away. Undo a Keep separate from Needs attention › Show dismissed.",
+    },
 ];
 
 export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
@@ -115,7 +124,9 @@ ${promptBlock}
 export function renderSettingsHelpPage(view: SettingsHelpView): string {
     const body = `
         ${pageHeader({ title: "Help" })}
-        ${renderSettingsNav("help", view.backHref)}
+        ${renderSettingsNav("help", view.backHref, {
+            v2: view.flags?.uiV2 === true,
+        })}
         ${panel({
             title: "Glossary",
             body: glossaryHtml(),

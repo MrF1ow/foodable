@@ -14,6 +14,7 @@ import {
     row,
 } from "./ui.js";
 import { renderFridgePage } from "../pages/fridge.js";
+import { utcTodayFromDate } from "../../domain/stock.js";
 import { renderGroceryPage } from "../pages/grocery.js";
 import { renderRecipesPage } from "../pages/recipes.js";
 import { renderSettingsPage } from "../pages/settings.js";
@@ -23,6 +24,7 @@ import { renderSettingsHelpPage } from "../pages/settings-help.js";
 import { renderNutritionPage } from "../pages/nutrition.js";
 import { renderAppShell } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -36,6 +38,7 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 
@@ -202,13 +205,13 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "del-item",
         title: "Delete item?",
         message: "Remove <b>eggs</b> from the fridge.",
-        action: "/fridge/items/1/delete",
+        action: "/kitchen/fridge/items/1/delete",
         confirmLabel: "Delete",
         hiddenFields: { csrf: "tok" },
     });
     expect(confirm).toContain('id="del-item"');
     expect(confirm).toContain(
-        '<form class="modal-confirm" method="post" action="/fridge/items/1/delete">',
+        '<form class="modal-confirm" method="post" action="/kitchen/fridge/items/1/delete">',
     );
     expect(confirm).toContain(
         '<input type="hidden" name="csrf" value="tok" />',
@@ -277,13 +280,13 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         target: "fridge-edit-food",
         label: "Edit",
         fill: {
-            action: "/fridge/items/1",
+            action: "/kitchen/fridge/items/1",
             title: `Edit ${hostile}`,
             message: "Remove it?",
             fields: { qty_amount: 6, archived: true, note: null },
         },
     });
-    expect(filled).toContain('data-fill-action="/fridge/items/1"');
+    expect(filled).toContain('data-fill-action="/kitchen/fridge/items/1"');
     expect(filled).toContain(
         'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
@@ -325,7 +328,7 @@ test("modal, modalTrigger, and confirmModal markup", () => {
         id: "household-make-owner",
         title: "Transfer ownership",
         message: "Bob becomes the owner.",
-        action: "/household/members/u2/make-owner",
+        action: "/settings/household/members/u2/make-owner",
         confirmLabel: "Make Bob the owner",
         submitSlot: "owner-label",
         submitDisabled: true,
@@ -387,6 +390,7 @@ test("every page's h1 comes from pageHeader once", async () => {
     const appChrome = {
         theme: "light" as const,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     };
     const member = {
         householdId: "hh",
@@ -418,7 +422,12 @@ test("every page's h1 comes from pageHeader once", async () => {
         ["nutrition", nutrition],
         [
             "fridge",
-            renderFridgePage({ locations: [], items: [], chrome: appChrome }),
+            renderFridgePage({
+                today: utcTodayFromDate(),
+                locations: [],
+                items: [],
+                chrome: appChrome,
+            }),
         ],
         ["grocery", renderGroceryPage({ chrome: appChrome, stores: [] })],
         [

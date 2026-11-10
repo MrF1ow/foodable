@@ -4,7 +4,7 @@ import {
     getMealsByDate,
     getMealsInRange,
     searchMeals,
-    getNutritionGoals,
+    getGoalsForRange,
     getWaterInRange,
     type Meal,
 } from "../../db/nutrition.js";
@@ -26,14 +26,8 @@ import {
 } from "../../domain/insights.js";
 import { exportAllData } from "../../domain/export.js";
 import { formatMealSearchResults } from "../../search.js";
-import { getWidgetHtml } from "../../widgets.js";
 import {
-    SUMMARY_WIDGET_URI,
-    APP_UI_MIME_TYPE,
-    GOAL_PROGRESS_WIDGET_URI,
-    MEAL_LOGGED_WIDGET_URI,
-    TRENDS_WIDGET_URI,
-    WEIGHT_TRENDS_WIDGET_URI,
+    registerWidgetResource,
     resolveDateWindow,
     emptyTotals,
     sumMeals,
@@ -244,133 +238,41 @@ export function registerNutritionReadTools(
         },
     );
 
-    // UI resource for the get_nutrition_summary dashboard widget. Served as an
-    // MCP Apps resource; the host fetches it and renders it in a sandboxed
-    // iframe. Self-contained HTML (inline CSS/JS) — the sandbox blocks external
-    // hosts, so nothing may be loaded over the network.
-    server.registerResource(
-        "nutrition-summary-widget",
-        SUMMARY_WIDGET_URI,
-        {
-            title: "Nutrition Summary Dashboard",
-            description:
-                "Interactive dashboard UI for get_nutrition_summary: macro tiles vs goals and a per-day breakdown, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("nutrition-summary"),
-                        // Prefer a bordered container in hosts that honor it.
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_goal_progress widget (single-day intake vs goal
-    // rings + a weight card). Same self-contained-HTML contract as above.
-    server.registerResource(
-        "goal-progress-widget",
-        GOAL_PROGRESS_WIDGET_URI,
-        {
-            title: "Goal Progress",
-            description:
-                "Interactive UI for get_goal_progress: intake-vs-goal rings for a single day plus body-weight progress, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("goal-progress"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the log_meal widget (day's running totals vs goals as
-    // rings; renders nothing when no goals are set). Same contract as above.
-    server.registerResource(
-        "meal-logged-widget",
-        MEAL_LOGGED_WIDGET_URI,
-        {
-            title: "Meal Logged",
-            description:
-                "Interactive UI shown after log_meal: the day's running intake-vs-goal rings, with automatic light/dark theming. Shows nothing when no nutrition goals are set.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("meal-logged"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_trends widget (interactive 7/14/30-day toggle over
-    // a daily calories chart + trailing-average rings). Same contract as above.
-    server.registerResource(
-        "trends-widget",
-        TRENDS_WIDGET_URI,
-        {
-            title: "Trends",
-            description:
-                "Interactive UI for get_trends: a 7/14/30-day toggle over a daily calories chart and trailing-average-vs-goal rings, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("trends"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
-
-    // UI resource for the get_weight_trends widget (weight-over-time line chart
-    // with a 7/14/30-day toggle and target line). Same contract as above.
-    server.registerResource(
-        "weight-trends-widget",
-        WEIGHT_TRENDS_WIDGET_URI,
-        {
-            title: "Weight Trends",
-            description:
-                "Interactive UI for get_weight_trends: a 7/14/30-day toggle over a weight-over-time chart (data-scaled axis, target line) plus latest/change/target stats, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("weight-trends"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "nutrition-summary",
+        resourceName: "nutrition-summary-widget",
+        title: "Nutrition Summary Dashboard",
+        description:
+            "Interactive dashboard UI for get_nutrition_summary: macro tiles vs goals and a per-day breakdown, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "goal-progress",
+        resourceName: "goal-progress-widget",
+        title: "Goal Progress",
+        description:
+            "Interactive UI for get_goal_progress: intake-vs-goal rings for a single day plus body-weight progress, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "meal-logged",
+        resourceName: "meal-logged-widget",
+        title: "Meal Logged",
+        description:
+            "Interactive UI shown after log_meal: the day's running intake-vs-goal rings, with automatic light/dark theming. Shows nothing when no nutrition goals are set.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "trends",
+        resourceName: "trends-widget",
+        title: "Trends",
+        description:
+            "Interactive UI for get_trends: a 7/14/30-day toggle over a daily calories chart and trailing-average-vs-goal rings, with automatic light/dark theming.",
+    });
+    registerWidgetResource(server, ctx, {
+        key: "weight-trends",
+        resourceName: "weight-trends-widget",
+        title: "Weight Trends",
+        description:
+            "Interactive UI for get_weight_trends: a 7/14/30-day toggle over a weight-over-time chart (data-scaled axis, target line) plus latest/change/target stats, with automatic light/dark theming.",
+    });
 
     server.registerTool(
         "get_nutrition_summary",
@@ -427,7 +329,7 @@ export function registerNutritionReadTools(
                 meals: z.array(MEAL_BREAKDOWN_ITEM),
             }),
             // Link the tool to its dashboard UI (MCP Apps).
-            ...uiMeta(SUMMARY_WIDGET_URI),
+            ...uiMeta("nutrition-summary"),
         },
         async ({ start_date, end_date, user_id }) => {
             return withAnalytics(
@@ -445,13 +347,16 @@ export function registerNutritionReadTools(
                     );
                     const tz = await getUserTimezone(userId);
                     const locale = WIDGET_LOCALE;
-                    const [meals, water, goals] = await Promise.all([
+                    const [meals, water, { forDate }] = await Promise.all([
                         getMealsInRange(userId, start_date, end_date, tz),
                         getWaterInRange(userId, start_date, end_date, tz),
-                        getNutritionGoals(userId),
+                        getGoalsForRange(userId, start_date, end_date),
                     ]);
 
-                    const goalsPayload = goalsPayloadOf(goals, alcohol);
+                    const goalsPayload = goalsPayloadOf(
+                        forDate(end_date),
+                        alcohol,
+                    );
 
                     if (meals.length === 0 && water.length === 0) {
                         return {
@@ -527,8 +432,9 @@ export function registerNutritionReadTools(
                         // the range average down towards zero.
                         const present = nutrientPresence(dateMeals);
                         const header = `## ${date} (${dateMeals.length} meal${dateMeals.length === 1 ? "" : "s"})`;
+                        const dayGoals = forDate(date);
                         sections.push(
-                            `${header}\n${formatProgress(totals, goals, alcohol, present)}`,
+                            `${header}\n${formatProgress(totals, dayGoals, alcohol, present)}`,
                         );
                         days.push({
                             date,
@@ -584,12 +490,23 @@ export function registerNutritionReadTools(
                         ? `\n\n(Averaged over the days that record each figure, not all ${days.length}: ${partial.join(", ")}.)`
                         : "";
 
+                    const span = Math.max(
+                        0,
+                        dateDiffDays(start_date, end_date),
+                    );
+                    const rangeDates: string[] = [];
+                    for (let i = 0; i <= span; i++) {
+                        rangeDates.push(shiftLocalDate(start_date, i));
+                    }
+                    const noGoalsInRange = rangeDates.every(
+                        (d) => forDate(d) == null,
+                    );
                     const footer =
                         coverageNote +
                         loggedDayAverageNote(days.length, daysInRange) +
-                        (goals
-                            ? ""
-                            : "\n\n(Tip: set daily targets with set_nutrition_goals to see progress percentages.)");
+                        (noGoalsInRange
+                            ? "\n\n(Tip: set daily targets with set_nutrition_goals to see progress percentages.)"
+                            : "");
 
                     return {
                         content: [
@@ -679,7 +596,7 @@ export function registerNutritionInsightTools(
                 days: z.array(TRENDS_DAY_ITEM),
             }),
             // Link the tool to its interactive trends UI (MCP Apps).
-            ...uiMeta(TRENDS_WIDGET_URI),
+            ...uiMeta("trends"),
         },
         async ({ days, end_date, user_id }) => {
             return withAnalytics(
@@ -698,10 +615,10 @@ export function registerNutritionInsightTools(
                         endDate,
                         -(seriesDays - 1),
                     );
-                    const [meals, water, goals] = await Promise.all([
+                    const [meals, water, { forDate }] = await Promise.all([
                         getMealsInRange(userId, startDate, endDate, tz),
                         getWaterInRange(userId, startDate, endDate, tz),
-                        getNutritionGoals(userId),
+                        getGoalsForRange(userId, startDate, endDate),
                     ]);
                     const allBuckets = buildDailyBuckets(
                         meals,
@@ -715,7 +632,10 @@ export function registerNutritionInsightTools(
                     const textBuckets = allBuckets.slice(-windowDays);
                     const seriesBuckets = allBuckets.slice(-30);
 
-                    const goalsPayload = goalsPayloadOf(goals, alcohol);
+                    const goalsPayload = goalsPayloadOf(
+                        forDate(endDate),
+                        alcohol,
+                    );
 
                     return {
                         content: [
@@ -723,7 +643,7 @@ export function registerNutritionInsightTools(
                                 type: "text",
                                 text: computeTrends(
                                     gateAlcohol(textBuckets, alcohol),
-                                    goals,
+                                    forDate,
                                 ),
                             },
                         ],
@@ -823,7 +743,7 @@ export function registerNutritionInsightTools(
         {
             title: "Export All Data",
             description:
-                "Export EVERY table this server tracks for the user — meals, meal items, water, weight, nutrition goals and profile settings — as a single ZIP archive (meals.csv, meal_items.csv, water.csv, weight.csv, goals.csv, profile.csv, plus a README.txt describing the columns and the units they are in) and return a private, time-limited download link (valid 60 minutes). Timestamps use the user's timezone if set, otherwise UTC. Only meals.csv can be read back in; water, weight, goals, profile and meal_items are export-only. This is the server's only export path — use it for a full backup, an account takeout, or a request for the meal history alone, in which case tell the user their meals are meals.csv inside the archive. Share the link with the user so they can download their data.",
+                "Export EVERY table this server tracks for the user — meals, meal items, water, weight, nutrition goals and profile settings — as a single ZIP archive (meals.csv, meal_items.csv, water.csv, weight.csv, goals.csv, goal_days.csv, profile.csv, plus a README.txt describing the columns and the units they are in) and return a private, time-limited download link (valid 60 minutes). Timestamps use the user's timezone if set, otherwise UTC. Only meals.csv can be read back in; water, weight, goals, goal_days, profile and meal_items are export-only. This is the server's only export path — use it for a full backup, an account takeout, or a request for the meal history alone, in which case tell the user their meals are meals.csv inside the archive. Share the link with the user so they can download their data.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -855,7 +775,7 @@ export function registerNutritionInsightTools(
                         };
                     }
                     // Name every file's row count, zeros included: the archive
-                    // always ships all six files, so "0 weight entries" is what
+                    // always ships every file, so "0 weight entries" is what
                     // tells the user weight.csv is headers-only because they
                     // never logged weight — not because the export lost it.
                     const contents = [
@@ -863,6 +783,7 @@ export function registerNutritionInsightTools(
                         `${counts.water} water ${counts.water === 1 ? "entry" : "entries"}`,
                         `${counts.weight} weight ${counts.weight === 1 ? "entry" : "entries"}`,
                         goals ? "nutrition goals" : "no nutrition goals set",
+                        `${counts.goal_days} per-day goal override${counts.goal_days === 1 ? "" : "s"}`,
                         profile ? "profile settings" : "no profile settings",
                     ].join(", ");
                     return {
@@ -893,10 +814,10 @@ export function registerNutritionInsightTools(
             const tz = await getUserTimezone(userId);
             const endDate = todayInTz(tz);
             const startDate = shiftLocalDate(endDate, -6);
-            const [meals, water, goals] = await Promise.all([
+            const [meals, water, { forDate }] = await Promise.all([
                 getMealsInRange(userId, startDate, endDate, tz),
                 getWaterInRange(userId, startDate, endDate, tz),
-                getNutritionGoals(userId),
+                getGoalsForRange(userId, startDate, endDate),
             ]);
             const buckets = buildDailyBuckets(
                 meals,
@@ -912,7 +833,7 @@ export function registerNutritionInsightTools(
                         mimeType: "text/plain",
                         text: computeWeeklyDigest(
                             gateAlcohol(buckets, alcohol),
-                            goals,
+                            forDate,
                         ),
                     },
                 ],

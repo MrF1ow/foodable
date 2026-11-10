@@ -2,13 +2,20 @@
 //
 //   bun run gen:tokens
 //
-// src/tokens.test.ts fails when either committed file differs from what this
-// would write, so an edit to a stylesheet instead of the module is caught.
-import { renderBrandCss, renderTokensCss } from "../src/tokens.js";
+// src/tokens.test.ts and src/tokens-v2.test.ts fail when a committed file
+// differs from what this would write, so an edit to a stylesheet instead of the module is caught.
+import {
+    renderBrandCss,
+    renderTokensCss,
+    renderV2TokensCss,
+    renderWidgetV2TokensCss,
+} from "../src/tokens.js";
 
 const OUTPUTS: [string, () => string][] = [
     ["public/widgets/src/shared/tokens.css", renderTokensCss],
     ["public/app/brand.css", renderBrandCss],
+    ["public/app/v2/tokens.css", renderV2TokensCss],
+    ["public/widgets/src/shared/v2/tokens.css", renderWidgetV2TokensCss],
 ];
 
 for (const [path, render] of OUTPUTS) {

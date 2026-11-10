@@ -1,4 +1,5 @@
 import type { SQL } from "bun";
+import { withActor } from "../actor.js";
 
 export type SeededHousehold = {
     userId: string;
@@ -10,7 +11,7 @@ export async function seedHousehold(sql: SQL): Promise<SeededHousehold> {
     const householdId = crypto.randomUUID();
     const email = `test-${userId}@foodable.test`;
     await sql`
-        insert into auth.users (id, email)
+        insert into public.users (id, email)
         values (${userId}, ${email})
     `;
     await sql`
@@ -145,4 +146,17 @@ export async function seedFridgeItem(
         returning id
     `;
     return String(row.id);
+}
+
+/**
+ * Runs `fn` as `userId`, in `householdId` or in none. Database tests act as
+ * the seeded household's owner by default (src/db/testing/pg.ts); a write for
+ * someone outside that household has to act as them, as it would in the app.
+ */
+export function asUser<T>(
+    userId: string,
+    fn: () => Promise<T>,
+    householdId: string | null = null,
+): Promise<T> {
+    return withActor({ kind: "user", userId, householdId }, fn);
 }

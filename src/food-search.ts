@@ -1,12 +1,15 @@
 import {
+    ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE,
     SOURCE_OFF,
     fetchProductsByNameFromOFF,
+    foodLookupsOnline,
     putCachedFood,
     searchCachedFoodsByName,
+    type FoodLookupOptions,
     type FoodResult,
 } from "./foods.js";
 
-type FoodSearchHooks = {
+type FoodSearchHooks = FoodLookupOptions & {
     searchCache?: (query: string) => Promise<FoodResult[]>;
     searchOff?: (query: string) => Promise<FoodResult[]>;
     remember?: (food: FoodResult) => Promise<void>;
@@ -73,6 +76,17 @@ export async function searchFoodsByName(
     const remember = hooks.remember ?? rememberOffHit;
 
     const cacheHits = await searchCache(trimmed);
+    const online = await foodLookupsOnline(hooks);
+    if (!online) {
+        if (hooks.notice) {
+            hooks.notice.message = ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;
+        }
+        return rankHouseholdFirst(
+            mergeBySource(cacheHits),
+            trimmed,
+            householdNames,
+        );
+    }
     const offHits = await searchOff(trimmed);
     for (const hit of offHits) {
         await remember(hit);

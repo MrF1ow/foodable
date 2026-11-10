@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import type { FoodResult } from "../foods.js";
 import {
@@ -28,6 +29,7 @@ function dialogHtml(html: string, id: string): string {
 }
 
 const HH = "hh-1";
+const PAGE_TODAY = utcTodayFromDate();
 
 function food(
     over: Partial<FoodResult> & Pick<FoodResult, "name" | "barcode">,
@@ -184,20 +186,26 @@ test("move item changes location", async () => {
 
 test("empty fridge page prompts add location then add item", () => {
     const html = renderFridgePage({
+        today: PAGE_TODAY,
         locations: [],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).not.toContain("Coming soon.");
     expect(html.toLowerCase()).toContain("add a location");
     expect(html.toLowerCase()).toContain("add an item");
-    expect(html).toContain('action="/fridge/locations"');
-    expect(html).toContain('href="/fridge" aria-current="page"');
+    expect(html).toContain('action="/kitchen/fridge/locations"');
+    expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
 });
 
 test("fridge page reuses quantity field and food picker", () => {
     const html = renderFridgePage({
+        today: PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -226,7 +234,11 @@ test("fridge page reuses quantity field and food picker", () => {
                 foodId: null,
             },
         ],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect(html).toContain('class="quantity-field"');
     expect(html).toContain('class="food-picker"');
@@ -235,7 +247,7 @@ test("fridge page reuses quantity field and food picker", () => {
     expect(html).toContain("Foil");
     expect(html).toContain("2 roll");
     expect(html).toContain('value="roll"');
-    expect(html).toContain('action="/fridge/items"');
+    expect(html).toContain('action="/kitchen/fridge/items"');
 });
 
 test("fridge rows use modals for edit and delete, with expiry badges", () => {
@@ -257,7 +269,12 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
         ).map((n) => n.code),
     ).toEqual(["fridge.expiring"]);
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -305,7 +322,9 @@ test("fridge rows use modals for edit and delete, with expiry badges", () => {
     expect(itemChunk).toContain('aria-label="Delete Eggs"');
     expect(itemChunk).toContain('class="btn-sm btn-icon btn-danger"');
     expect(itemChunk).toContain('data-item-id="it-1"');
-    expect(itemChunk).toContain('data-fill-action="/fridge/items/it-1"');
+    expect(itemChunk).toContain(
+        'data-fill-action="/kitchen/fridge/items/it-1"',
+    );
     expect(itemChunk).toContain('data-fill-title="Edit Eggs"');
     expect(itemChunk).toContain('data-fill-field-qty_amount="6"');
     expect(itemChunk).toContain('data-fill-field-qty_unit="each"');
@@ -323,7 +342,12 @@ test("expired fridge row shows pinned Expired pill and data-expiry", () => {
     const today = utcTodayFromDate();
     const expiresOn = addUtcDays(today, -1);
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -348,7 +372,12 @@ test("expired fridge row shows pinned Expired pill and data-expiry", () => {
 
 test("location actions and add-location live in the page header and head rows", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Pantry", sortOrder: 0 },
         ],
@@ -366,7 +395,9 @@ test("location actions and add-location live in the page header and head rows", 
     expect(html).toContain(
         'data-fill-message="Remove Pantry and everything in it?"',
     );
-    expect(html).toContain('data-fill-action="/fridge/locations/loc-1/delete"');
+    expect(html).toContain(
+        'data-fill-action="/kitchen/fridge/locations/loc-1/delete"',
+    );
     expect(html).toContain("Add household item");
     expect(html).not.toContain("popovertarget=");
     expect(html).toContain('class="fridge-add-supply"');
@@ -375,7 +406,12 @@ test("location actions and add-location live in the page header and head rows", 
 
 test("expiring soon is a closed details block with a count", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: "hh-1", name: "Fridge", sortOrder: 0 },
         ],
@@ -400,7 +436,12 @@ test("expiring soon is a closed details block with a count", () => {
 
 test("supply items omit the eat icon action", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Pantry", sortOrder: 0 },
         ],
@@ -425,14 +466,21 @@ test("supply items omit the eat icon action", () => {
     expect(itemChunk).toContain('commandfor="fridge-delete-item"');
     expect(itemChunk).not.toContain('commandfor="fridge-edit-food"');
     expect(itemChunk).toContain('data-item-id="it-sup"');
-    expect(itemChunk).toContain('data-fill-action="/fridge/items/it-sup"');
+    expect(itemChunk).toContain(
+        'data-fill-action="/kitchen/fridge/items/it-sup"',
+    );
     expect(itemChunk).toContain('data-fill-field-qty_unit="roll"');
     expect(itemChunk).toContain('data-fill-field-expires_on=""');
 });
 
 test("a server error reopens the modal that submitted the form", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [],
         items: [],
         error: "Enter a location name.",
@@ -452,7 +500,11 @@ test("a server error reopens the modal that submitted the form", () => {
 
 test("a server error reopens delete and remove-location confirm modals only", () => {
     const base = {
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -471,13 +523,14 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         error: "Cannot remove.",
     } as const;
     const deleteHtml = renderFridgePage({
+        today: PAGE_TODAY,
         ...base,
         openModalId: "fridge-delete-it-1",
     } as never);
     expect(deleteHtml).toMatch(
         /<dialog class="modal" id="fridge-delete-item"[^>]*data-modal-open-on-load/,
     );
-    expect(deleteHtml).toContain('action="/fridge/items/it-1/delete"');
+    expect(deleteHtml).toContain('action="/kitchen/fridge/items/it-1/delete"');
     expect(deleteHtml).toContain("Remove Milk from the fridge?");
     expect(deleteHtml).not.toContain("Remove this item from the fridge?");
     const deleteDialog = dialogHtml(deleteHtml, "fridge-delete-item");
@@ -491,13 +544,16 @@ test("a server error reopens delete and remove-location confirm modals only", ()
         /<dialog class="modal" id="fridge-remove-location"[^>]*data-modal-open-on-load/,
     );
     const removeHtml = renderFridgePage({
+        today: PAGE_TODAY,
         ...base,
         openModalId: "fridge-remove-location-loc-1",
     } as never);
     expect(removeHtml).toMatch(
         /<dialog class="modal" id="fridge-remove-location"[^>]*data-modal-open-on-load/,
     );
-    expect(removeHtml).toContain('action="/fridge/locations/loc-1/delete"');
+    expect(removeHtml).toContain(
+        'action="/kitchen/fridge/locations/loc-1/delete"',
+    );
     expect(removeHtml).toContain("Remove Fridge and everything in it?");
     const removeDialog = dialogHtml(removeHtml, "fridge-remove-location");
     expect(removeDialog).toContain("error-banner");
@@ -511,7 +567,12 @@ test("a server error reopens delete and remove-location confirm modals only", ()
 
 test("fridge still shows a page banner when openModalId does not match a dialog", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -523,7 +584,12 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     expect(html).toContain("Unknown item.");
     expect(html).not.toMatch(/data-modal-open-on-load/);
     const editGone = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -534,7 +600,12 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
     expect(editGone).toContain("Unknown item.");
     expect(editGone).not.toMatch(/data-modal-open-on-load/);
     const locationGone = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
         ],
@@ -550,7 +621,11 @@ test("fridge still shows a page banner when openModalId does not match a dialog"
 test("a server error reopens the shared edit dialog pre-filled", () => {
     const expiresOn = "2026-11-02";
     const base = {
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
             { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },
@@ -558,6 +633,7 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
         error: "Enter an amount.",
     };
     const foodHtml = renderFridgePage({
+        today: PAGE_TODAY,
         ...base,
         openModalId: "fridge-edit-it-1",
         items: [
@@ -575,7 +651,7 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
     } as never);
     const foodDialog = dialogHtml(foodHtml, "fridge-edit-food");
     expect(foodDialog).toMatch(/data-modal-open-on-load/);
-    expect(foodDialog).toContain('action="/fridge/items/it-1"');
+    expect(foodDialog).toContain('action="/kitchen/fridge/items/it-1"');
     expect(foodDialog).toContain(">Edit Eggs</h2>");
     expect(foodDialog).toContain('id="qty-edit-food-amount"');
     expect(foodDialog).toContain('value="6"');
@@ -599,6 +675,7 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
     expect(foodDialog).toContain('<button type="submit" class="btn-primary">');
 
     const supplyHtml = renderFridgePage({
+        today: PAGE_TODAY,
         ...base,
         openModalId: "fridge-edit-it-sup",
         items: [
@@ -616,7 +693,7 @@ test("a server error reopens the shared edit dialog pre-filled", () => {
     } as never);
     const supplyDialog = dialogHtml(supplyHtml, "fridge-edit-supply");
     expect(supplyDialog).toMatch(/data-modal-open-on-load/);
-    expect(supplyDialog).toContain('action="/fridge/items/it-sup"');
+    expect(supplyDialog).toContain('action="/kitchen/fridge/items/it-sup"');
     expect(supplyDialog).toContain(">Edit Paper towels</h2>");
     expect(supplyDialog).toContain('id="qty-edit-supply-amount"');
     expect(supplyDialog).toContain('value="2"');
@@ -656,7 +733,12 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
         };
     });
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations,
         items,
     } as never);
@@ -693,7 +775,12 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
             sortOrder: index,
         }));
         return renderFridgePage({
-            chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+            today: PAGE_TODAY,
+            chrome: {
+                theme: "light",
+                attention: { count: 0, tabs: {} },
+                flags: FIXTURE_APP_CHROME_FLAGS,
+            },
             locations,
             items: [],
         } as never);
@@ -714,7 +801,9 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
     expect(six).toContain(
         'data-fill-message="Remove Place 6 and everything in it?"',
     );
-    expect(six).toContain('data-fill-action="/fridge/locations/loc-6/delete"');
+    expect(six).toContain(
+        'data-fill-action="/kitchen/fridge/locations/loc-6/delete"',
+    );
     expect(six).not.toContain('id="fridge-add-food-loc-1"');
     expect(dialogHtml(six, "fridge-add-food")).toContain(
         '<button type="submit" class="btn-primary" disabled>',
@@ -726,7 +815,12 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
 
 test("a server error reopens the shared add-food dialog for that location", () => {
     const html = renderFridgePage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        today: PAGE_TODAY,
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         locations: [
             { id: "loc-1", householdId: HH, name: "Fridge", sortOrder: 0 },
             { id: "loc-2", householdId: HH, name: "Pantry", sortOrder: 1 },
@@ -738,7 +832,7 @@ test("a server error reopens the shared add-food dialog for that location", () =
     const foodDialog = dialogHtml(html, "fridge-add-food");
     expect(foodDialog).toMatch(/data-modal-open-on-load/);
     expect(foodDialog).toContain(">Add food to Pantry</h2>");
-    expect(foodDialog).toContain('action="/fridge/items"');
+    expect(foodDialog).toContain('action="/kitchen/fridge/items"');
     expect(foodDialog).toContain('name="location_id" value="loc-2"');
     expect(foodDialog).toContain('name="kind" value="food"');
     expect(foodDialog).toContain("error-banner");

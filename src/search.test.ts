@@ -111,6 +111,113 @@ test("keys on the sorted food_id set when every item has a food", () => {
     expect(variations[0]!.count).toBe(2);
 });
 
+test("ignores item amounts when every item has a food", () => {
+    const eggs = "food-eggs";
+    const toast = "food-toast";
+    const item = (
+        food_id: string,
+        amount: number,
+    ): NonNullable<Meal["items"]>[number] => ({
+        id: `i-${food_id}-${amount}`,
+        meal_id: "m",
+        user_id: "user-1",
+        household_id: "hh-1",
+        food_id,
+        recipe_id: null,
+        label: food_id,
+        amount,
+        unit: "each",
+        grams: 50 * amount,
+        portions: null,
+        calories: 100,
+        protein_g: 10,
+        carbs_g: 1,
+        fat_g: 5,
+        fiber_g: 0,
+        sugar_g: 0,
+        alcohol_g: null,
+        caffeine_mg: null,
+        sort_order: 0,
+        created_at: "2026-06-20T14:30:00.000Z",
+    });
+    const variations = groupMealVariations([
+        meal({
+            id: "a",
+            description: "Small breakfast",
+            items: [item(eggs, 1), item(toast, 1)],
+        }),
+        meal({
+            id: "b",
+            description: "Big breakfast",
+            logged_at: "2026-06-21T14:30:00.000Z",
+            items: [item(eggs, 3), item(toast, 2)],
+        }),
+    ]);
+    expect(variations).toHaveLength(1);
+    expect(variations[0]!.label).toBe("Big breakfast");
+});
+
+test("a food listed twice in one meal still groups by food", () => {
+    const item = (id: string, food_id: string) =>
+        ({
+            id,
+            food_id,
+            recipe_id: null,
+            label: food_id,
+        }) as NonNullable<Meal["items"]>[number];
+    const variations = groupMealVariations([
+        meal({
+            id: "a",
+            description: "Eggs twice",
+            items: [item("i1", "food-eggs"), item("i2", "food-eggs")],
+        }),
+        meal({
+            id: "b",
+            description: "eggs",
+            logged_at: "2026-06-21T14:30:00.000Z",
+            items: [item("i3", "food-eggs")],
+        }),
+    ]);
+    expect(variations).toHaveLength(1);
+});
+
+test("does not group free-text meals with food-backed meals that share words", () => {
+    const eggs = "food-eggs";
+    const toast = "food-toast";
+    const item = (food_id: string): NonNullable<Meal["items"]>[number] => ({
+        id: `i-${food_id}`,
+        meal_id: "m",
+        user_id: "user-1",
+        household_id: "hh-1",
+        food_id,
+        recipe_id: null,
+        label: food_id,
+        amount: 1,
+        unit: "each",
+        grams: 50,
+        portions: null,
+        calories: 100,
+        protein_g: 10,
+        carbs_g: 1,
+        fat_g: 5,
+        fiber_g: 0,
+        sugar_g: 0,
+        alcohol_g: null,
+        caffeine_mg: null,
+        sort_order: 0,
+        created_at: "2026-06-20T14:30:00.000Z",
+    });
+    const variations = groupMealVariations([
+        meal({
+            id: "backed",
+            description: "Eggs and toast",
+            items: [item(eggs), item(toast)],
+        }),
+        meal({ id: "free", description: "Eggs and toast" }),
+    ]);
+    expect(variations).toHaveLength(2);
+});
+
 test("sorts by count desc, ties broken by recency", () => {
     const variations = groupMealVariations([
         meal({

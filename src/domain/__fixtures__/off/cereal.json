@@ -1,0 +1,20 @@
+{
+    "code": "3229820019307",
+    "status": 1,
+    "status_verbose": "product found",
+    "product": {
+        "code": "3229820019307",
+        "product_name": "Flocons d'avoine",
+        "nutriscore_grade": "a",
+        "nova_group": 1,
+        "ecoscore_grade": "a",
+        "additives_tags": [],
+        "nutrient_levels": {
+            "fat": "moderate",
+            "salt": "low",
+            "saturated-fat": "low",
+            "sugars": "low"
+        },
+        "nutriments": { "sugars_100g": 1.7, "saturated-fat_100g": 1.3 }
+    }
+}

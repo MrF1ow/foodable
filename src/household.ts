@@ -1,6 +1,6 @@
 import type { AuthContext } from "./auth-context.js";
 import { MIN_PASSWORD_LENGTH } from "./domain/auth.js";
-import { validateTz } from "./domain/tz.js";
+import { dateInTz, validateTz } from "./domain/tz.js";
 
 /** `admin` is an elevated member: they manage the household (settings,
  * stores, everyone's rules, adding people) alongside the owner. Ownership
@@ -273,6 +273,15 @@ export function householdTimezone(
     return "UTC";
 }
 
+/** Calendar date for the household at `now` (default: current instant). */
+export function householdTodayAt(
+    prefs: Pick<HouseholdPreferences, "timezone">,
+    ownerProfile: { timezone: string | null } | null | undefined,
+    now: Date = new Date(),
+): string {
+    return dateInTz(now, householdTimezone(prefs, ownerProfile));
+}
+
 export function createMemoryHouseholdStore(): HouseholdStore {
     const households: Household[] = [];
     const members: HouseholdMember[] = [];
@@ -482,6 +491,26 @@ export type DashboardAccess =
           subject: HouseholdMember;
       }
     | { ok: false; error: "not_a_member" | "not_a_peer" };
+
+/**
+ * Members whose nutrition may appear in a household-wide digest for this
+ * caller: the same rule the nutrition tools apply to a `user_id` read, so a
+ * member can see exactly the people they could already ask about.
+ */
+export function membersForHouseholdNutritionDigest(
+    auth: AuthContext,
+    viewerUserId: string | null,
+    householdId: string,
+    members: HouseholdMember[],
+): HouseholdMember[] {
+    return members.filter(
+        (member) =>
+            member.householdId === householdId &&
+            (member.userId === viewerUserId ||
+                auth.kind === "household" ||
+                resolveActorUserId(auth, member.userId, "read").ok),
+    );
+}
 
 export function dashboardAccess(
     viewer: HouseholdMember | null,

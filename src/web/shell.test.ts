@@ -14,6 +14,7 @@ import {
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -27,6 +28,7 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 
@@ -41,11 +43,11 @@ test("bottom nav hrefs and tab order", () => {
         "household",
     ]);
     expect(APP_TABS.map((tab) => tab.href)).toEqual([
-        "/fridge",
-        "/grocery",
+        "/kitchen/fridge",
+        "/kitchen/groceries",
         "/",
         "/recipes",
-        "/household",
+        "/settings/household",
     ]);
     expect(APP_TABS.map((tab) => tab.label)).toEqual([
         "Fridge",
@@ -58,14 +60,14 @@ test("bottom nav hrefs and tab order", () => {
     const html = bottomNav("nutrition");
     const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     expect(hrefs).toEqual([
-        "/fridge",
-        "/grocery",
+        "/kitchen/fridge",
+        "/kitchen/groceries",
         "/",
         "/recipes",
-        "/household",
+        "/settings/household",
     ]);
     expect(html).toContain('href="/" aria-current="page"');
-    expect(html).not.toContain('href="/fridge" aria-current="page"');
+    expect(html).not.toContain('href="/kitchen/fridge" aria-current="page"');
     expect(html.match(/<svg\b/g)?.length).toBe(5);
     expect([...html.matchAll(/\stitle="([^"]+)"/g)].map((m) => m[1])).toEqual([
         "Fridge",
@@ -88,7 +90,7 @@ test("unset theme follows the system", () => {
 test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
-    expect(html).toContain('href="/fridge" aria-current="page"');
+    expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
     expect(html).toContain('href="/settings" data-turbo="false"');
     expect(html).toContain('aria-label="Settings"');
     expect(html).toContain('class="btn-icon app-bar-action"');
@@ -168,11 +170,11 @@ test("settings chrome full-loads into and out of tabs", () => {
     const settings = renderSettingsPage({
         title: "Settings",
         theme: "light",
-        backHref: "/fridge",
+        backHref: "/kitchen/fridge",
         body: "<h1>Settings</h1>",
     });
     expect(settings).toContain(
-        'class="settings-back" href="/fridge" data-turbo="false"',
+        'class="settings-back" href="/kitchen/fridge" data-turbo="false"',
     );
     expect(settings).toContain(
         'class="app-bar-logo" href="/" data-turbo="false"',

@@ -78,4 +78,19 @@ test("tabDotsFromNotices lights only tabs that own the code", () => {
         recipes: true,
     });
     expect(tabDotsFromNotices(both).household).toBeUndefined();
+
+    const householdDup: Notice[] = [
+        {
+            code: "food.possible_duplicate",
+            severity: "info",
+            subject: { kind: "food", id: "f1" },
+            related: [{ kind: "food", id: "f2", name: "Eggs" }],
+            params: {
+                name: "chicken egg",
+                rule: "contains_words",
+                foodId: "f1",
+            },
+        },
+    ];
+    expect(tabDotsFromNotices(householdDup)).toEqual({ household: true });
 });

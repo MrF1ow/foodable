@@ -1,0 +1,157 @@
+import { maybeOne, rows, run } from "./sql.js";
+
+export async function put(
+    id: string,
+    payload: unknown,
+    ttlMs: number,
+): Promise<void> {
+    const json = JSON.stringify(payload);
+    const ttlSeconds = ttlMs / 1000;
+    await run(async (tx) => {
+        await tx`
+            insert into public.oauth_login_sessions (id, payload, expires_at)
+            values (
+                ${id},
+                ${json}::jsonb,
+                now() + (${ttlSeconds}::double precision * interval '1 second')
+            )
+            on conflict (id) do update
+            set
+                payload = excluded.payload,
+                expires_at = excluded.expires_at
+        `;
+    });
+}
+
+export async function get<T = unknown>(id: string): Promise<T | null> {
+    return run(async (tx) => {
+        const row = await maybeOne<{ payload: unknown }>(
+            tx,
+            tx`
+                select payload
+                from public.oauth_login_sessions
+                where id = ${id}
+                  and expires_at > now()
+            `,
+            "get login session",
+        );
+        return row ? (row.payload as T) : null;
+    });
+}
+
+export async function take<T = unknown>(id: string): Promise<T | null> {
+    return run(async (tx) => {
+        const data = await rows<{ payload: unknown }>(
+            tx,
+            tx`
+                delete from public.oauth_login_sessions
+                where id = ${id}
+                  and expires_at > now()
+                returning payload
+            `,
+        );
+        const row = data[0];
+        return row ? (row.payload as T) : null;
+    });
+}
+
+export async function del(id: string): Promise<void> {
+    await run(async (tx) => {
+        await tx`
+            delete from public.oauth_login_sessions
+            where id = ${id}
+        `;
+    });
+}
+
+export async function sweepExpired(): Promise<number> {
+    return run(async (tx) => {
+        const deleted = await rows<{ _: number }>(
+            tx,
+            tx`
+                delete from public.oauth_login_sessions
+                where expires_at <= now()
+                returning 1 as _
+            `,
+        );
+        return deleted.length;
+    });
+}
+
+export async function countSiteSessions(): Promise<number> {
+    return run(async (tx) => {
+        const row = await maybeOne<{ n: number }>(
+            tx,
+            tx`
+                select count(*)::int as n
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+            `,
+            "count site login sessions",
+        );
+        return row?.n ?? 0;
+    });
+}
+
+export async function evictOldestSiteSession(): Promise<void> {
+    await run(async (tx) => {
+        await tx`
+            delete from public.oauth_login_sessions
+            where id = (
+                select id
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+                order by expires_at asc
+                limit 1
+            )
+        `;
+    });
+}
+
+// Serializes putSiteSessionWithCap across connections. A constant key of its
+// own: creating a household uses 7314001, and rate limits hash theirs.
+const SITE_SESSION_CAP_LOCK = 7314002;
+
+/**
+ * Insert a site login row and trim live site rows to at most `cap` in one
+ * transaction. The transaction advisory lock makes concurrent calls take
+ * turns; without it two connections each insert, each count the other's row
+ * as not yet visible, and the cap is exceeded.
+ */
+export async function putSiteSessionWithCap(
+    id: string,
+    payload: unknown,
+    ttlMs: number,
+    cap: number,
+): Promise<void> {
+    const json = JSON.stringify(payload);
+    const ttlSeconds = ttlMs / 1000;
+    await run(async (tx) => {
+        await tx`select pg_advisory_xact_lock(${SITE_SESSION_CAP_LOCK})`;
+        await tx`
+            insert into public.oauth_login_sessions (id, payload, expires_at)
+            values (
+                ${id},
+                ${json}::jsonb,
+                now() + (${ttlSeconds}::double precision * interval '1 second')
+            )
+            on conflict (id) do update
+            set
+                payload = excluded.payload,
+                expires_at = excluded.expires_at
+        `;
+        await tx`
+            delete from public.oauth_login_sessions
+            where id in (
+                select id
+                from public.oauth_login_sessions
+                where expires_at > now()
+                  and payload->>'purpose' = 'site'
+                order by expires_at desc
+                offset ${cap}
+            )
+        `;
+    });
+}

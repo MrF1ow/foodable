@@ -55,7 +55,6 @@ const PROFILE: actualDbProfiles.Profile = {
     widgets_enabled: true,
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
-    locale: null,
     theme: "light",
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
@@ -272,7 +271,9 @@ describe("needs-attention routes", () => {
 
     test("POST dismiss info notice redirects and removes it from the list", async () => {
         const { yogurt } = await seedGroupedNotices();
-        const before = await noticesFor(noticeDeps(), HH);
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const countBefore = needsAttentionCount(before.notices);
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
@@ -288,7 +289,9 @@ describe("needs-attention routes", () => {
         });
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/needs-attention");
-        const after = await noticesFor(noticeDeps(), HH);
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(
             after.notices.some(
                 (n) =>
@@ -300,6 +303,68 @@ describe("needs-attention routes", () => {
             headers: { cookie: cookieFor(ALICE) },
         });
         expect(await page.text()).not.toContain("Soon yogurt");
+    });
+
+    test("POST dismiss with return_to=/kitchen/groceries redirects to grocery", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+                return_to: "/kitchen/groceries",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
+    });
+
+    test("POST dismiss with a pre-move return_to=/grocery still goes back to grocery", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: yogurt.id,
+                return_to: "/grocery",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
+    });
+
+    test("POST dismiss rejects open-redirect return_to", async () => {
+        const { yogurt } = await seedGroupedNotices();
+        for (const returnTo of [
+            "https://evil.example",
+            "//evil.example",
+        ] as const) {
+            const r = await app().request("http://x/needs-attention/dismiss", {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    code: "fridge.expiring",
+                    subject_kind: "fridge_item",
+                    subject_id: yogurt.id,
+                    return_to: returnTo,
+                }).toString(),
+            });
+            expect(r.status).toBe(303);
+            expect(r.headers.get("location")).toBe("/needs-attention");
+        }
     });
 
     test("POST dismiss on warn notice returns 4xx and keeps state", async () => {
@@ -316,7 +381,9 @@ describe("needs-attention routes", () => {
             ...milk,
             expiresOn: addDaysUtc(today, -1),
         });
-        const before = await noticesFor(noticeDeps(), HH);
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const r = await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
             headers: {
@@ -332,7 +399,47 @@ describe("needs-attention routes", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html.toLowerCase()).toContain("suggestion");
-        const after = await noticesFor(noticeDeps(), HH);
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
+        expect(after.notices).toEqual(before.notices);
+    });
+
+    test("POST dismiss that fails with return_to=/kitchen/groceries goes back to grocery", async () => {
+        const today = utcTodayFromDate();
+        const loc = await addLocation(db.fridgeStore, HH, "Fridge");
+        const milk = await addManualFood(db.fridgeStore, db.foodsStore, {
+            householdId: HH,
+            locationId: loc.id,
+            name: "Expired milk",
+            amount: 1,
+            unit: "g",
+        });
+        await db.fridgeStore.updateItem({
+            ...milk,
+            expiresOn: addDaysUtc(today, -1),
+        });
+        const before = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
+        const r = await app().request("http://x/needs-attention/dismiss", {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                code: "fridge.expired",
+                subject_kind: "fridge_item",
+                subject_id: milk.id,
+                return_to: "/kitchen/groceries",
+            }).toString(),
+        });
+        expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
+        const after = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(after.notices).toEqual(before.notices);
     });
 
@@ -396,7 +503,9 @@ describe("needs-attention routes", () => {
         expect(undo.headers.get("location")).toBe(
             "/needs-attention?show=dismissed",
         );
-        const open = await noticesFor(noticeDeps(), HH);
+        const open = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         expect(
             open.notices.some(
                 (n) =>
@@ -430,7 +539,7 @@ describe("needs-attention routes", () => {
     });
 
     test("top-bar badge only when count > 0 and settings gear keeps data-turbo", async () => {
-        const empty = await app().request("http://x/fridge", {
+        const empty = await app().request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(ALICE) },
         });
         const emptyHtml = await empty.text();
@@ -438,10 +547,12 @@ describe("needs-attention routes", () => {
         expect(emptyHtml).toContain('href="/settings" data-turbo="false"');
 
         await seedGroupedNotices();
-        const open = await noticesFor(noticeDeps(), HH);
+        const open = await noticesFor(noticeDeps(), HH, {
+            today: utcTodayFromDate(),
+        });
         const count = needsAttentionCount(open.notices);
         expect(count).toBeGreaterThan(0);
-        const withBadge = await app().request("http://x/fridge", {
+        const withBadge = await app().request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(ALICE) },
         });
         const badgeHtml = await withBadge.text();
@@ -556,7 +667,7 @@ describe("needs-attention routes", () => {
         });
         const html = await r.text();
         expect(html).toContain(
-            `action="/fridge/items/${yogurt.id}/add-to-grocery"`,
+            `action="/kitchen/fridge/items/${yogurt.id}/add-to-grocery"`,
         );
         expect(html).toContain(
             '<input type="hidden" name="from" value="/needs-attention" />',
@@ -647,14 +758,17 @@ describe("needs-attention routes", () => {
             relatedKey: "",
             dismissedBy: ALICE,
         });
-        await app().request(`http://x/fridge/locations/${loc.id}/delete`, {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        await app().request(
+            `http://x/kitchen/fridge/locations/${loc.id}/delete`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "",
             },
-            body: "",
-        });
+        );
         const rows = await db.dismissalsStore.listForHousehold(HH);
         expect(rows.some((r) => r.subjectId === item.id)).toBe(false);
     });

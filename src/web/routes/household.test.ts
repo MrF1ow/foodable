@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
+import { legacyRedirects } from "../legacy-redirects.js";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
 import * as actualDbGrocery from "../../db/grocery.js";
@@ -64,7 +65,6 @@ const PROFILE: actualDbProfiles.Profile = {
     widgets_enabled: true,
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
-    locale: null,
     theme: "light",
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
@@ -214,7 +214,7 @@ afterAll(() => {
     mock.module("../../foods.js", () => realFoods);
 });
 
-const { legacyHouseholdPath, householdRoutes } = await import("./household.js");
+const { householdRoutes } = await import("./household.js");
 const { settingsRoutes } = await import("./settings.js");
 const { groceryRoutes } = await import("./grocery.js");
 const { fridgeRoutes } = await import("./fridge.js");
@@ -278,39 +278,6 @@ beforeEach(() => {
             displayName: "Alice",
         },
     ];
-});
-
-describe("legacyHouseholdPath", () => {
-    test("household prefix", () => {
-        expect(legacyHouseholdPath("/settings/household")).toBe("/household");
-        expect(legacyHouseholdPath("/settings/household/name")).toBe(
-            "/household/name",
-        );
-        expect(legacyHouseholdPath("/settings/household?x=1")).toBe(
-            "/household?x=1",
-        );
-        expect(legacyHouseholdPath("/settings/household/stores?id=1")).toBe(
-            "/household/stores?id=1",
-        );
-    });
-
-    test("foods prefix", () => {
-        expect(legacyHouseholdPath("/settings/foods")).toBe("/household/items");
-        expect(legacyHouseholdPath("/settings/foods/merge")).toBe(
-            "/household/items/merge",
-        );
-        expect(legacyHouseholdPath("/settings/foods?x=1")).toBe(
-            "/household/items?x=1",
-        );
-    });
-
-    test("non-matches", () => {
-        expect(legacyHouseholdPath("/settings")).toBeNull();
-        expect(legacyHouseholdPath("/settings/help")).toBeNull();
-        expect(legacyHouseholdPath("/settings/household-settings")).toBeNull();
-        expect(legacyHouseholdPath("/settings/householdx")).toBeNull();
-        expect(legacyHouseholdPath("/settings/foodsy")).toBeNull();
-    });
 });
 
 describe("settings household routes", () => {
@@ -518,28 +485,34 @@ describe("settings household routes", () => {
 
 describe("legacy redirect middleware", () => {
     const legacyApp = new Hono();
-    legacyApp.route("/", householdRoutes);
+    legacyApp.use("*", legacyRedirects());
+    legacyApp.get("/kitchen/fridge", (c) => c.text("ok"));
 
-    test("GET /settings/foods?x=1 → 301 /household/items?x=1", async () => {
-        const r = await legacyApp.request("http://x/settings/foods?x=1");
+    test("GET /fridge?x=1 → 301 /kitchen/fridge?x=1", async () => {
+        const r = await legacyApp.request("http://x/fridge?x=1");
         expect(r.status).toBe(301);
-        expect(r.headers.get("location")).toBe("/household/items?x=1");
+        expect(r.headers.get("location")).toBe("/kitchen/fridge?x=1");
     });
 
-    test("POST /settings/household/name → 308 /household/name", async () => {
-        const r = await legacyApp.request("http://x/settings/household/name", {
+    test("POST /household/name → 308 /settings/household/name", async () => {
+        const r = await legacyApp.request("http://x/household/name", {
             method: "POST",
         });
         expect(r.status).toBe(308);
-        expect(r.headers.get("location")).toBe("/household/name");
+        expect(r.headers.get("location")).toBe("/settings/household/name");
     });
 
-    test("HEAD → 301", async () => {
-        const r = await legacyApp.request("http://x/settings/household", {
+    test("HEAD → 301 without session", async () => {
+        const r = await legacyApp.request("http://x/grocery", {
             method: "HEAD",
         });
         expect(r.status).toBe(301);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/kitchen/groceries");
+    });
+
+    test("GET /kitchen/fridge falls through", async () => {
+        const r = await legacyApp.request("http://x/kitchen/fridge");
+        expect(r.status).toBe(200);
     });
 });
 
@@ -568,16 +541,16 @@ describe("household usual products and items routes", () => {
         const cilantro = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Cilantro" }),
         );
-        const list = await get("/household/usual-products");
+        const list = await get("/kitchen/usuals");
         expect(list.status).toBe(200);
         const html = await list.text();
         expect(html).toContain("No usual products yet.");
         expect(html).not.toContain("Needs a usual product");
         expect(html).toContain('name="q"');
-        const add = await get(`/household/usual-products?food=${cilantro.id}`);
+        const add = await get(`/kitchen/usuals?food=${cilantro.id}`);
         expect(add.status).toBe(302);
         expect(add.headers.get("location")).toBe(
-            `/household/usual-products/${cilantro.id}`,
+            `/kitchen/usuals/${cilantro.id}`,
         );
     });
 
@@ -624,7 +597,7 @@ describe("household usual products and items routes", () => {
         );
         await db.foodsStore.setBarcode(HH, "051500255162", barcodedFlour.id);
 
-        const r = await get("/household/usual-products?q=flour");
+        const r = await get("/kitchen/usuals?q=flour");
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toMatch(
@@ -637,28 +610,28 @@ describe("household usual products and items routes", () => {
         expect(html).toContain("Choose");
         expect(html).not.toContain("Gold Medal flour");
         expect(html).not.toContain("Pillsbury flour");
-        const eggs = await get("/household/usual-products?q=large+eggs");
+        const eggs = await get("/kitchen/usuals?q=large+eggs");
         expect(await eggs.text()).not.toContain("Cage Free Grade A Large Eggs");
 
-        const none = await get("/household/usual-products?q=zzz");
+        const none = await get("/kitchen/usuals?q=zzz");
         expect(none.status).toBe(200);
         expect(await none.text()).toContain("No matching food.");
 
-        const pick = await get(`/household/usual-products?food=${flourA.id}`);
+        const pick = await get(`/kitchen/usuals?food=${flourA.id}`);
         expect(pick.status).toBe(302);
         expect(pick.headers.get("location")).toBe(
-            `/household/usual-products/${flourA.id}`,
+            `/kitchen/usuals/${flourA.id}`,
         );
     });
 
     test("POST set usual redirects and updates state", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const r = await post(
-            `/household/usual-products/${eggs.id}`,
+            `/kitchen/usuals/${eggs.id}`,
             `product_food_id=${kirkland.id}`,
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household/usual-products");
+        expect(r.headers.get("location")).toBe("/kitchen/usuals");
         const plain = await db.foodsStore.getFood(HH, eggs.id);
         expect(plain?.usualProductId).toBe(kirkland.id);
     });
@@ -669,10 +642,7 @@ describe("household usual products and items routes", () => {
             ...eggs,
             usualProductId: kirkland.id,
         });
-        const r = await post(
-            `/household/usual-products/${eggs.id}`,
-            "product_food_id=",
-        );
+        const r = await post(`/kitchen/usuals/${eggs.id}`, "product_food_id=");
         expect(r.status).toBe(303);
         const plain = await db.foodsStore.getFood(HH, eggs.id);
         expect(plain?.usualProductId).toBeNull();
@@ -681,7 +651,7 @@ describe("household usual products and items routes", () => {
     test("POST add product by hand creates product and sets usual", async () => {
         const { eggs } = await seedEggsCatalog();
         const r = await post(
-            `/household/usual-products/${eggs.id}/products`,
+            `/kitchen/usuals/${eggs.id}/products`,
             "name=Store+brand+eggs&brand=Safeway&calories=130&grams_per_each=50",
         );
         expect(r.status).toBe(303);
@@ -706,13 +676,33 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/usual-products/${eggs.id}/pick`,
+            `/kitchen/usuals/${eggs.id}/pick`,
             `food_id=${solo.id}`,
         );
         expect(r.status).toBe(303);
         const plain = await db.foodsStore.getFood(HH, eggs.id);
         expect(plain?.usualProductId).toBe(solo.id);
         expect(kirkland.id).not.toBe(solo.id);
+    });
+
+    test("GET ?food= shortcut carries a pre-move from as its new path", async () => {
+        const { eggs } = await seedEggsCatalog();
+        const get = (path: string) =>
+            app().request(`http://x${path}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            });
+        for (const [from, want] of [
+            ["/grocery", "%2Fkitchen%2Fgroceries"],
+            ["/settings/foods", "%2Fsettings%2Fhousehold%2Fitems"],
+        ] as const) {
+            const r = await get(
+                `/kitchen/usuals?food=${eggs.id}&from=${encodeURIComponent(from)}`,
+            );
+            expect(r.status).toBe(302);
+            expect(r.headers.get("location")).toBe(
+                `/kitchen/usuals/${eggs.id}?from=${want}`,
+            );
+        }
     });
 
     test("POST pick adds a product to the list and keeps the current usual", async () => {
@@ -725,13 +715,13 @@ describe("household usual products and items routes", () => {
             newFood({ householdId: HH, kind: "food", name: "Farm eggs" }),
         );
         const r = await post(
-            `/household/usual-products/${eggs.id}/pick`,
+            `/kitchen/usuals/${eggs.id}/pick`,
             `food_id=${solo.id}&from=%2Fgrocery`,
         );
         expect(r.status).toBe(303);
         // Back to the list, with the return path kept.
         expect(r.headers.get("location")).toBe(
-            `/household/usual-products/${eggs.id}?from=%2Fgrocery`,
+            `/kitchen/usuals/${eggs.id}?from=%2Fkitchen%2Fgroceries`,
         );
         expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
             eggs.id,
@@ -748,7 +738,7 @@ describe("household usual products and items routes", () => {
             usualProductId: kirkland.id,
         });
         const r = await post(
-            `/household/usual-products/${eggs.id}/products`,
+            `/kitchen/usuals/${eggs.id}/products`,
             "name=Farm+eggs",
         );
         expect(r.status).toBe(303);
@@ -771,12 +761,12 @@ describe("household usual products and items routes", () => {
             usualProductId: kirkland.id,
         });
         const r = await post(
-            `/household/usual-products/${eggs.id}/products/${kirkland.id}/remove`,
+            `/kitchen/usuals/${eggs.id}/products/${kirkland.id}/remove`,
             "from=%2Fgrocery",
         );
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe(
-            `/household/usual-products/${eggs.id}?from=%2Fgrocery`,
+            `/kitchen/usuals/${eggs.id}?from=%2Fkitchen%2Fgroceries`,
         );
         const product = await db.foodsStore.getFood(HH, kirkland.id);
         expect(product?.genericFoodId).toBeNull();
@@ -793,7 +783,7 @@ describe("household usual products and items routes", () => {
         );
         const before = await db.foodsStore.listFoods(HH);
         const r = await post(
-            `/household/usual-products/${flour.id}/products/${kirkland.id}/remove`,
+            `/kitchen/usuals/${flour.id}/products/${kirkland.id}/remove`,
             "",
         );
         expect(r.status).toBe(400);
@@ -826,7 +816,7 @@ describe("household usual products and items routes", () => {
             barcode: "012345678905",
         };
         const r = await post(
-            `/household/usual-products/${eggs.id}/pick`,
+            `/kitchen/usuals/${eggs.id}/pick`,
             "barcode=012345678905",
         );
         expect(r.status).toBe(303);
@@ -845,16 +835,16 @@ describe("household usual products and items routes", () => {
             }),
         );
         const link = await post(
-            `/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=/household/items`,
+            `/settings/household/items/${solo.id}/link`,
+            `food_id=${eggs.id}&from=/settings/household/items`,
         );
         expect(link.status).toBe(303);
         expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
             eggs.id,
         );
         const unlink = await post(
-            `/household/items/${solo.id}/link`,
-            "food_id=&from=/household/items",
+            `/settings/household/items/${solo.id}/link`,
+            "food_id=&from=/settings/household/items",
         );
         expect(unlink.status).toBe(303);
         expect(
@@ -872,8 +862,8 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&make_usual=1&from=/household/items`,
+            `/settings/household/items/${solo.id}/link`,
+            `food_id=${eggs.id}&make_usual=1&from=/settings/household/items`,
         );
         expect(r.status).toBe(303);
         const plain = await db.foodsStore.getFood(HH, eggs.id);
@@ -890,8 +880,8 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/household/items`,
+            `/settings/household/items/${solo.id}/link`,
+            `food_id=${solo.id}&from=/settings/household/items`,
         );
         expect(r.status).toBe(400);
         const html = await r.text();
@@ -925,7 +915,7 @@ describe("household usual products and items routes", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
         });
         const r = await post(
-            `/household/items/${solo.id}/link`,
+            `/settings/household/items/${solo.id}/link`,
             `food_id=${eggs.id}&from=/recipes/${recipe.id}`,
         );
         expect(r.status).toBe(303);
@@ -942,11 +932,11 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/items/${solo.id}/link`,
+            `/settings/household/items/${solo.id}/link`,
             `food_id=${eggs.id}&from=${encodeURIComponent("//evil.com")}`,
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household/items");
+        expect(r.headers.get("location")).toBe("/settings/household/items");
     });
 
     test("POST link rejects https evil from and falls back to items", async () => {
@@ -959,17 +949,17 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/items/${solo.id}/link`,
+            `/settings/household/items/${solo.id}/link`,
             `food_id=${eggs.id}&from=${encodeURIComponent("https://evil.com/x")}`,
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household/items");
+        expect(r.headers.get("location")).toBe("/settings/household/items");
     });
 
     test("POST items edit invalid patch leaves usual unchanged", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const r = await post(
-            `/household/items/${eggs.id}`,
+            `/settings/household/items/${eggs.id}`,
             [
                 "name=Eggs",
                 "brand=",
@@ -992,7 +982,7 @@ describe("household usual products and items routes", () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
         const r = await post(
-            `/household/usual-products/${eggs.id}`,
+            `/kitchen/usuals/${eggs.id}`,
             `product_food_id=${kirkland.id}&usual_amount=18&usual_unit=each&usual_store_id=${costco.id}`,
         );
         expect(r.status).toBe(303);
@@ -1005,7 +995,7 @@ describe("household usual products and items routes", () => {
         const { eggs } = await seedEggsCatalog();
         const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
         const r = await post(
-            `/household/items/${eggs.id}`,
+            `/settings/household/items/${eggs.id}`,
             [
                 "name=Eggs",
                 "brand=",
@@ -1036,7 +1026,7 @@ describe("household usual products and items routes", () => {
         );
         const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
         const r = await post(
-            `/household/items/${milk.id}`,
+            `/settings/household/items/${milk.id}`,
             [
                 "name=Oat milk",
                 "brand=",
@@ -1061,7 +1051,7 @@ describe("household usual products and items routes", () => {
         const { eggs } = await seedEggsCatalog();
         const before = await db.foodsStore.getFood(HH, eggs.id);
         const r = await post(
-            `/household/items/${eggs.id}`,
+            `/settings/household/items/${eggs.id}`,
             [
                 "name=Eggs",
                 "brand=",
@@ -1096,14 +1086,14 @@ describe("household usual products and items routes", () => {
         const beforePlain = await db.foodsStore.getFood(HH, eggs.id);
         const beforeProd = await db.foodsStore.getFood(HH, kirkland.id);
         const r = await post(
-            `/household/usual-products/${eggs.id}`,
+            `/kitchen/usuals/${eggs.id}`,
             `product_food_id=${kirkland.id}&usual_amount=2&usual_unit=`,
         );
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("Enter a usual amount with its unit.");
         expect(html).toContain('method="post"');
-        expect(html).toContain(`usual-products/${eggs.id}`);
+        expect(html).toContain(`kitchen/usuals/${eggs.id}`);
         expect(await db.foodsStore.getFood(HH, eggs.id)).toEqual(beforePlain);
         expect(await db.foodsStore.getFood(HH, kirkland.id)).toEqual(
             beforeProd,
@@ -1119,7 +1109,7 @@ describe("household usual products and items routes", () => {
         const beforePlain = await db.foodsStore.getFood(HH, eggs.id);
         const beforeProd = await db.foodsStore.getFood(HH, kirkland.id);
         const r = await post(
-            `/household/usual-products/${eggs.id}`,
+            `/kitchen/usuals/${eggs.id}`,
             `product_food_id=${kirkland.id}&usual_amount=0&usual_unit=g`,
         );
         expect(r.status).toBe(400);
@@ -1135,7 +1125,7 @@ describe("household usual products and items routes", () => {
         const { eggs } = await seedEggsCatalog();
         const before = await db.foodsStore.getFood(HH, eggs.id);
         const r = await post(
-            `/household/items/${eggs.id}`,
+            `/settings/household/items/${eggs.id}`,
             [
                 "name=Eggs",
                 "brand=",
@@ -1177,7 +1167,7 @@ describe("household usual products and items routes", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
         });
         const r = await post(
-            `/household/items/${solo.id}/link`,
+            `/settings/household/items/${solo.id}/link`,
             `food_id=${solo.id}&from=/recipes/r1`,
         );
         expect(r.status).toBe(400);
@@ -1196,8 +1186,8 @@ describe("household usual products and items routes", () => {
             }),
         );
         const r = await post(
-            `/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/fridge`,
+            `/settings/household/items/${solo.id}/link`,
+            `food_id=${solo.id}&from=/kitchen/fridge`,
         );
         expect(r.status).toBe(400);
         const html = await r.text();
@@ -1233,7 +1223,7 @@ describe("household usual products and items routes", () => {
             sortOrder: 0,
         });
         const r = await post(
-            "/fridge/items",
+            "/kitchen/fridge/items",
             "kind=food&location_id=loc1&barcode=9990001112222&qty_amount=6&qty_unit=each",
         );
         expect(r.status).toBe(303);
@@ -1265,11 +1255,11 @@ describe("household usual products and items routes", () => {
             sortOrder: 0,
         });
         const r = await post(
-            "/fridge/items",
+            "/kitchen/fridge/items",
             "kind=food&location_id=loc2&barcode=7770001112222&qty_amount=100&qty_unit=g",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/fridge");
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
     });
 
     test("POST put-away with product_food_id records that product on fridge item", async () => {
@@ -1293,7 +1283,7 @@ describe("household usual products and items routes", () => {
             },
         );
         const r = await post(
-            `/grocery/lines/${line.id}/put-away`,
+            `/kitchen/groceries/lines/${line.id}/put-away`,
             `location_id=${loc.id}&product_food_id=${kirkland.id}`,
         );
         expect(r.status).toBe(303);
@@ -1335,11 +1325,11 @@ describe("household usual products and items routes", () => {
             sortOrder: 0,
         });
         const r = await post(
-            "/fridge/items",
+            "/kitchen/fridge/items",
             "kind=food&location_id=loc1&barcode=8880001112222&qty_amount=1&qty_unit=each",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/fridge");
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
     });
 });
 
@@ -1418,7 +1408,7 @@ describe("fridge notice add-to-grocery route", () => {
     test("POST add-to-grocery creates a notice line and is idempotent", async () => {
         const { item } = await seedExpiredFridgeItem();
         const r1 = await post(
-            `/fridge/items/${item.id}/add-to-grocery`,
+            `/kitchen/fridge/items/${item.id}/add-to-grocery`,
             "from=%2Ffridge",
         );
         expect(r1.status).toBe(303);
@@ -1427,7 +1417,7 @@ describe("fridge notice add-to-grocery route", () => {
         expect(noticeLine).toBeDefined();
         expect(noticeLine!.source).toBe("notice");
         const r2 = await post(
-            `/fridge/items/${item.id}/add-to-grocery`,
+            `/kitchen/fridge/items/${item.id}/add-to-grocery`,
             "from=%2Ffridge",
         );
         expect(r2.status).toBe(303);
@@ -1437,20 +1427,20 @@ describe("fridge notice add-to-grocery route", () => {
     test("POST add-to-grocery respects safe from redirect", async () => {
         const { item } = await seedExpiredFridgeItem();
         const safe = await post(
-            `/fridge/items/${item.id}/add-to-grocery`,
-            `from=${encodeURIComponent("/grocery")}`,
+            `/kitchen/fridge/items/${item.id}/add-to-grocery`,
+            `from=${encodeURIComponent("/kitchen/groceries")}`,
         );
-        expect(safe.headers.get("location")).toMatch(/^\/grocery/);
+        expect(safe.headers.get("location")).toMatch(/^\/kitchen\/groceries/);
         const bad = await post(
-            `/fridge/items/${item.id}/add-to-grocery`,
+            `/kitchen/fridge/items/${item.id}/add-to-grocery`,
             `from=${encodeURIComponent("https://evil.example/")}`,
         );
-        expect(bad.headers.get("location")).toMatch(/^\/fridge/);
+        expect(bad.headers.get("location")).toMatch(/^\/kitchen\/fridge/);
         const dot = await post(
-            `/fridge/items/${item.id}/add-to-grocery`,
+            `/kitchen/fridge/items/${item.id}/add-to-grocery`,
             `from=${encodeURIComponent("//evil")}`,
         );
-        expect(dot.headers.get("location")).toMatch(/^\/fridge/);
+        expect(dot.headers.get("location")).toMatch(/^\/kitchen\/fridge/);
     });
 
     test("GET fridge shows add form and on-list text", async () => {
@@ -1484,14 +1474,14 @@ describe("fridge notice add-to-grocery route", () => {
                 actorUserId: ALICE,
             },
         );
-        const page = await get("/fridge");
+        const page = await get("/kitchen/fridge");
         expect(page.status).toBe(200);
         const html = await page.text();
         expect(html).toContain(
-            `action="/fridge/items/${withButton.item.id}/add-to-grocery"`,
+            `action="/kitchen/fridge/items/${withButton.item.id}/add-to-grocery"`,
         );
         expect(html).toContain(
-            `action="/fridge/items/${expiring.item!.id}/add-to-grocery"`,
+            `action="/kitchen/fridge/items/${expiring.item!.id}/add-to-grocery"`,
         );
         const milkRow = html.match(
             new RegExp(
@@ -1513,7 +1503,7 @@ describe("fridge notice add-to-grocery route", () => {
 
     test("POST add-to-grocery 4xx for unknown item", async () => {
         const r = await post(
-            "/fridge/items/missing-id/add-to-grocery",
+            "/kitchen/fridge/items/missing-id/add-to-grocery",
             "from=%2Ffridge",
         );
         expect(r.status).toBe(400);
@@ -1541,7 +1531,7 @@ describe("fridge notice add-to-grocery route", () => {
         );
         const before = (await db.groceryStore.listLines(HH)).length;
         const r = await post(
-            `/fridge/items/${otherItem.item!.id}/add-to-grocery`,
+            `/kitchen/fridge/items/${otherItem.item!.id}/add-to-grocery`,
             "from=%2Ffridge",
         );
         expect(r.status).toBeGreaterThanOrEqual(400);
@@ -1576,40 +1566,49 @@ describe("social reader settings", () => {
     });
 
     test("owner enables tiktok reader with confirm", async () => {
-        const r = await app().request("http://x/household/social-readers", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        const r = await app().request(
+            "http://x/settings/household/social-readers",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "reader=tiktok&enabled=1&confirm=1",
             },
-            body: "reader=tiktok&enabled=1&confirm=1",
-        });
+        );
         expect(r.status).toBe(303);
         expect(db.household.preferences.socialReaders.tiktok).toBe(true);
     });
 
     test("owner cannot enable without confirm", async () => {
-        const r = await app().request("http://x/household/social-readers", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        const r = await app().request(
+            "http://x/settings/household/social-readers",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "reader=tiktok&enabled=1",
             },
-            body: "reader=tiktok&enabled=1",
-        });
+        );
         expect(r.status).toBe(400);
         expect(db.household.preferences.socialReaders.tiktok).toBe(false);
     });
 
     test("manager gets 403", async () => {
-        const r = await app().request("http://x/household/social-readers", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(MANAGER),
-                "content-type": "application/x-www-form-urlencoded",
+        const r = await app().request(
+            "http://x/settings/household/social-readers",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(MANAGER),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "reader=tiktok&enabled=1&confirm=1",
             },
-            body: "reader=tiktok&enabled=1&confirm=1",
-        });
+        );
         expect(r.status).toBe(403);
     });
 });

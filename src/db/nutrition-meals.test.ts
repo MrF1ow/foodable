@@ -17,7 +17,7 @@ import {
     type MealInput,
 } from "./nutrition.js";
 import { describeDb } from "./testing/pg.js";
-import { seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedFood, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { raceOnUniqueKey } from "./testing/lock-race.js";
 import { setSqlForTests } from "./sql.js";
@@ -26,16 +26,17 @@ const pgAvailable = await findPgBin();
 
 describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
     let userId: string;
+    let householdId: string;
     let otherUserId: string;
 
     beforeEach(async () => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        ({ userId } = await seedHousehold(sql));
+        ({ userId, householdId } = await seedHousehold(sql));
         otherUserId = crypto.randomUUID();
         await sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
         `;
     });
@@ -260,13 +261,19 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
             meal_type: "snack",
             logged_at: "2024-08-01T12:00:00.000Z",
         });
-        await insertMeal(otherUserId, {
-            description: "Theirs",
-            meal_type: "snack",
-            logged_at: "2024-08-01T12:00:00.000Z",
-        });
+        await asUser(otherUserId, () =>
+            insertMeal(otherUserId, {
+                description: "Theirs",
+                meal_type: "snack",
+                logged_at: "2024-08-01T12:00:00.000Z",
+            }),
+        );
         expect(await countMeals(userId)).toBe(1);
-        expect(await countMeals(otherUserId)).toBe(1);
+        // Someone outside the household: invisible to its owner.
+        expect(await countMeals(otherUserId)).toBe(0);
+        expect(await asUser(otherUserId, () => countMeals(otherUserId))).toBe(
+            1,
+        );
     });
 
     test("existingIdempotencyKeys and existingMealIds", async () => {
@@ -282,6 +289,49 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
         expect(
             await existingMealIds(userId, [meal.id, "not-a-uuid", meal.id]),
         ).toEqual(new Set([meal.id.toLowerCase()]));
+    });
+
+    test("searchMeals returns item food ids from the same read", async () => {
+        const { sql } = getCtx();
+        const eggs = await seedFood(sql, householdId, { name: "Eggs" });
+        const toast = await seedFood(sql, householdId, { name: "Toast" });
+        const item = (food_id: string, label: string) => ({
+            household_id: householdId,
+            food_id,
+            recipe_id: null,
+            label,
+            amount: 1,
+            unit: "each",
+            grams: 50,
+            portions: null,
+            calories: 100,
+            protein_g: 10,
+            carbs_g: 1,
+            fat_g: 5,
+            fiber_g: 0,
+            sugar_g: 0,
+            alcohol_g: null,
+            caffeine_mg: null,
+            sort_order: 0,
+        });
+        const { meal: backed } = await insertMeal(userId, {
+            description: "Eggs and toast",
+            meal_type: "breakfast",
+            logged_at: "2024-09-10T08:00:00.000Z",
+            items: [item(eggs, "Eggs"), item(toast, "Toast")],
+        });
+        const { meal: plain } = await insertMeal(userId, {
+            description: "Just eggs",
+            meal_type: "breakfast",
+            logged_at: "2024-09-09T08:00:00.000Z",
+        });
+        const hits = await searchMeals(userId, ["eggs"]);
+        const foundBacked = hits.find((m) => m.id === backed.id);
+        const foundPlain = hits.find((m) => m.id === plain.id);
+        expect(foundBacked?.items?.map((i) => i.food_id).sort()).toEqual(
+            [eggs, toast].sort(),
+        );
+        expect(foundPlain?.items).toEqual([]);
     });
 
     test("searchMeals matches ilike metacharacters literally", async () => {

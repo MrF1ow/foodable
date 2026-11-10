@@ -165,6 +165,40 @@ describe("runtime surfaces that stay", () => {
         expect(js).toContain("[data-food-picker]");
     });
 
+    test("GET /app-v2.css and /app-v2.js serve the new shell's pair", async () => {
+        const css = await app.request("http://x/app-v2.css");
+        expect(css.status).toBe(200);
+        expect(css.headers.get("content-type") ?? "").toContain("text/css");
+        expect(css.headers.get("cache-control")).toBe("no-cache");
+        const cssText = await css.text();
+        expect(cssText).not.toContain("/*@include");
+        expect(cssText).toContain("--surface-bg");
+        expect(cssText).toContain(".fd-tabs");
+
+        const js = await app.request("http://x/app-v2.js");
+        expect(js.status).toBe(200);
+        expect(js.headers.get("content-type") ?? "").toContain(
+            "text/javascript",
+        );
+        expect(js.headers.get("cache-control")).toBe("no-cache");
+        expect(await js.text()).toContain("FoodableApp.onLoad");
+    });
+
+    test("versioned v2 assets are immutable when the query matches", async () => {
+        const { appV2StylesheetHref, appV2ScriptHref } =
+            await import("./widgets.js");
+        for (const href of [appV2StylesheetHref(), appV2ScriptHref()]) {
+            const ok = await app.request(`http://x${href}`);
+            expect(ok.headers.get("cache-control")).toBe(
+                "public, max-age=31536000, immutable",
+            );
+            const stale = await app.request(
+                `http://x${href.replace(/v=[0-9a-f]+/, "v=stale")}`,
+            );
+            expect(stale.headers.get("cache-control")).toBe("no-cache");
+        }
+    });
+
     test("versioned app assets are immutable when the query matches", async () => {
         const { appStylesheetHref, appScriptHref } =
             await import("./widgets.js");
@@ -261,12 +295,12 @@ describe("runtime surfaces that stay", () => {
     test("unauthenticated app routes return login HTML", async () => {
         for (const path of [
             "/",
-            "/fridge",
-            "/grocery",
+            "/kitchen/fridge",
+            "/kitchen/groceries",
             "/recipes",
             "/settings",
-            "/household",
-            "/household/items",
+            "/settings/household",
+            "/settings/household/items",
             "/share?text=hello",
         ]) {
             const r = await app.request(`http://x${path}`);

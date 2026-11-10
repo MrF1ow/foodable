@@ -1,8 +1,13 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
+import { additiveRisk, type AdditiveRisk } from "./additive-risk.js";
+import { filterOffNutrientLevels } from "./off-nutrient-levels.js";
+import type { NutrientLevel } from "./product-score.js";
 import { isQuantityUnit } from "./quantity.js";
 import {
     cleanupDismissalsForFood,
+    dismissalKeyString,
+    lookupDismissalKey,
     type MemoryNoticeDismissalsHolder,
     type NoticeDismissalsStore,
 } from "./notice-dismissals.js";
@@ -13,6 +18,18 @@ export type NutritionSource =
     "openfoodfacts" | "manual" | "estimate" | "recipe";
 
 export type UsualAmount = { amount: number; unit: string };
+
+export type FoodQuality = {
+    nutriscoreGrade: "a" | "b" | "c" | "d" | "e" | null;
+    novaGroup: 1 | 2 | 3 | 4 | null;
+    ecoscoreGrade: "a-plus" | "a" | "b" | "c" | "d" | "e" | "f" | null;
+    additives: { tag: string; risk: AdditiveRisk | null }[] | null;
+    allergensTags: string[] | null;
+    tracesTags: string[] | null;
+    ingredientsAnalysisTags: string[] | null;
+    labelsTags: string[] | null;
+    fetchedAt: string;
+};
 
 export type Food = {
     id: string;
@@ -30,15 +47,18 @@ export type Food = {
     fatG: number | null;
     fiberG: number | null;
     sugarG: number | null;
+    saturatedFatG: number | null;
     alcoholG: number | null;
     caffeineMg: number | null;
     nutritionSource: NutritionSource | null;
+    offNutrientLevels: Record<string, NutrientLevel> | null;
     allergens: string[];
     offSourceId: string | null;
     genericFoodId: string | null;
     usualProductId: string | null;
     usualStoreId: string | null;
     usualAmount: UsualAmount | null;
+    offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
@@ -88,6 +108,16 @@ export type FoodsStore = {
         barcode: string,
     ): Promise<string | null>;
     listBarcodes(householdId: string, foodId: string): Promise<string[]>;
+    /** Barcodes per food id, in the same order as `listBarcodes` for each food. */
+    listBarcodesForFoods(
+        householdId: string,
+        foodIds: readonly string[],
+    ): Promise<Map<string, string[]>>;
+    /** Household food id per barcode that exists in the household (one entry per barcode). */
+    getBarcodeFoodIds(
+        householdId: string,
+        barcodes: readonly string[],
+    ): Promise<Map<string, string>>;
     setBarcode(
         householdId: string,
         barcode: string,
@@ -114,6 +144,28 @@ export type FoodsStore = {
         fromId: string,
         toId: string,
     ): Promise<void>;
+    /**
+     * Write only the OFF quality columns. Applies when the row is live and its
+     * stored `fetchedAt` is null or older; with `onlyIfUnset`, only when it is
+     * null (a miss stamp never replaces data written while the lookup ran).
+     */
+    setFoodQuality(
+        householdId: string,
+        foodId: string,
+        quality: FoodQuality,
+        opts?: { onlyIfUnset?: boolean },
+    ): Promise<Food | null>;
+    /** Write only `saturated_fat_g` and `off_nutrient_levels` from an OFF refresh. */
+    setFoodOffNutrition(
+        householdId: string,
+        foodId: string,
+        patch: FoodOffNutritionPatch,
+    ): Promise<Food | null>;
+};
+
+export type FoodOffNutritionPatch = {
+    saturatedFatG?: number;
+    offNutrientLevels?: Record<string, NutrientLevel>;
 };
 
 export class FoodsInputError extends Error {
@@ -268,6 +320,7 @@ export function catalogNutritionFromOff(food: FoodResult): {
     fatG: number | null;
     fiberG: number | null;
     sugarG: number | null;
+    saturatedFatG: number | null;
     alcoholG: number | null;
 } {
     const serving = (food.serving ?? "")
@@ -275,6 +328,9 @@ export function catalogNutritionFromOff(food: FoodResult): {
         .toLowerCase()
         .replace(/\s+/g, "");
     if (serving === "100g") {
+        const saturatedRaw = food.saturated_fat_g ?? null;
+        const saturatedFatG =
+            saturatedRaw != null && saturatedRaw < 0 ? null : saturatedRaw;
         return {
             calories: food.calories,
             proteinG: food.protein_g,
@@ -282,6 +338,7 @@ export function catalogNutritionFromOff(food: FoodResult): {
             fatG: food.fat_g,
             fiberG: food.fiber_g,
             sugarG: food.sugar_g,
+            saturatedFatG,
             alcoholG: food.alcohol_g,
         };
     }
@@ -292,8 +349,147 @@ export function catalogNutritionFromOff(food: FoodResult): {
         fatG: null,
         fiberG: null,
         sugarG: null,
+        saturatedFatG: null,
         alcoholG: null,
     };
+}
+
+export function offNutrientLevelsFromHit(
+    hit: FoodResult,
+): Record<string, NutrientLevel> | null {
+    return filterOffNutrientLevels(hit.nutrient_levels);
+}
+
+function offNutrientLevelsFromRow(
+    value: unknown,
+): Record<string, NutrientLevel> | null {
+    return filterOffNutrientLevels(value);
+}
+
+export function offNutritionPatchFromHit(
+    food: Food,
+    hit: FoodResult,
+): FoodOffNutritionPatch | null {
+    const patch: FoodOffNutritionPatch = {};
+    const nutrition = catalogNutritionFromOff(hit);
+    if (food.saturatedFatG == null && nutrition.saturatedFatG != null) {
+        patch.saturatedFatG = nutrition.saturatedFatG;
+    }
+    const levels = offNutrientLevelsFromHit(hit);
+    if (
+        levels != null &&
+        (food.offNutrientLevels == null || hitQualityIsNewer(food, hit))
+    ) {
+        patch.offNutrientLevels = levels;
+    }
+    return Object.keys(patch).length > 0 ? patch : null;
+}
+
+export function foodQualityFromHit(hit: FoodResult): FoodQuality | null {
+    const q = hit.quality;
+    if (q === undefined) return null;
+    return {
+        nutriscoreGrade: q.nutriscore_grade,
+        novaGroup: q.nova_group,
+        ecoscoreGrade: q.ecoscore_grade,
+        additives:
+            q.additives_tags == null
+                ? null
+                : q.additives_tags.map((tag) => ({
+                      tag,
+                      risk: additiveRisk(tag),
+                  })),
+        allergensTags: q.allergens_tags == null ? null : [...q.allergens_tags],
+        tracesTags: q.traces_tags == null ? null : [...q.traces_tags],
+        ingredientsAnalysisTags:
+            q.ingredients_analysis_tags == null
+                ? null
+                : [...q.ingredients_analysis_tags],
+        labelsTags: q.labels_tags == null ? null : [...q.labels_tags],
+        fetchedAt: q.fetched_at,
+    };
+}
+
+function hitQualityIsNewer(food: Food, hit: FoodResult): boolean {
+    const next = foodQualityFromHit(hit);
+    if (next == null) return false;
+    if (food.offQuality == null) return true;
+    return (
+        new Date(next.fetchedAt).getTime() >
+        new Date(food.offQuality.fetchedAt).getTime()
+    );
+}
+
+/** OFF confirmed the barcode exists but returned no usable product-quality fields. */
+export function offQualityMissStamp(fetchedAt: string): FoodQuality {
+    return {
+        nutriscoreGrade: null,
+        novaGroup: null,
+        ecoscoreGrade: null,
+        additives: null,
+        allergensTags: null,
+        tracesTags: null,
+        ingredientsAnalysisTags: null,
+        labelsTags: null,
+        fetchedAt,
+    };
+}
+
+/** Stored when OFF confirmed the barcode but returned no product-quality fields. */
+export function offQualityIsEmptyMiss(quality: FoodQuality): boolean {
+    return (
+        quality.nutriscoreGrade == null &&
+        quality.novaGroup == null &&
+        quality.ecoscoreGrade == null &&
+        quality.additives == null &&
+        quality.allergensTags == null &&
+        quality.tracesTags == null &&
+        quality.ingredientsAnalysisTags == null &&
+        quality.labelsTags == null
+    );
+}
+
+export async function applyHitQualityToFood(
+    store: FoodsStore,
+    food: Food,
+    hit: FoodResult,
+): Promise<Food> {
+    let current = food;
+    const offPatch = offNutritionPatchFromHit(current, hit);
+    if (offPatch) {
+        const patched = await store.setFoodOffNutrition(
+            current.householdId,
+            current.id,
+            offPatch,
+        );
+        if (patched) current = patched;
+    }
+    if (!hitQualityIsNewer(current, hit)) return current;
+    const offQuality = foodQualityFromHit(hit);
+    if (offQuality == null) return current;
+    const updated = await store.setFoodQuality(
+        current.householdId,
+        current.id,
+        offQuality,
+    );
+    return (
+        updated ??
+        (await store.getFood(current.householdId, current.id)) ??
+        current
+    );
+}
+
+export async function refreshFoodQualityByBarcode(
+    store: FoodsStore,
+    householdId: string,
+    barcode: string,
+    hit: FoodResult,
+): Promise<Food | null> {
+    const foodId = await store.getBarcodeFoodId(householdId, barcode);
+    if (!foodId) return null;
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt) return null;
+    return applyHitQualityToFood(store, food, hit);
 }
 
 const OFF_COUNT_UNITS = new Set([
@@ -364,6 +560,26 @@ export function gramsPerEachFromOff(food: {
     return Math.round((labeled / count) * 10) / 10;
 }
 
+function copyQuality(q: FoodQuality): FoodQuality {
+    return {
+        nutriscoreGrade: q.nutriscoreGrade,
+        novaGroup: q.novaGroup,
+        ecoscoreGrade: q.ecoscoreGrade,
+        additives:
+            q.additives == null
+                ? null
+                : q.additives.map((a) => ({ tag: a.tag, risk: a.risk })),
+        allergensTags: q.allergensTags == null ? null : [...q.allergensTags],
+        tracesTags: q.tracesTags == null ? null : [...q.tracesTags],
+        ingredientsAnalysisTags:
+            q.ingredientsAnalysisTags == null
+                ? null
+                : [...q.ingredientsAnalysisTags],
+        labelsTags: q.labelsTags == null ? null : [...q.labelsTags],
+        fetchedAt: q.fetchedAt,
+    };
+}
+
 function copyFood(row: Food): Food {
     return {
         ...row,
@@ -375,6 +591,9 @@ function copyFood(row: Food): Food {
                       amount: row.usualAmount.amount,
                       unit: row.usualAmount.unit,
                   },
+        offQuality: row.offQuality == null ? null : copyQuality(row.offQuality),
+        offNutrientLevels:
+            row.offNutrientLevels == null ? null : { ...row.offNutrientLevels },
     };
 }
 
@@ -497,6 +716,56 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             return copyFood(row);
         },
+        async setFoodQuality(householdId, foodId, quality, opts) {
+            const idx = foods.findIndex(
+                (food) =>
+                    food.householdId === householdId && food.id === foodId,
+            );
+            if (idx < 0) return null;
+            const row = foods[idx]!;
+            if (row.archivedAt != null) return null;
+            const priorFetched = row.offQuality?.fetchedAt;
+            if (priorFetched != null && opts?.onlyIfUnset) return null;
+            if (
+                priorFetched != null &&
+                new Date(priorFetched).getTime() >=
+                    new Date(quality.fetchedAt).getTime()
+            ) {
+                return null;
+            }
+            const next = copyFood(row);
+            next.offQuality = copyQuality(quality);
+            next.updatedAt = nowIso();
+            foods[idx] = next;
+            return copyFood(next);
+        },
+        async setFoodOffNutrition(householdId, foodId, patch) {
+            const idx = foods.findIndex(
+                (food) =>
+                    food.householdId === householdId && food.id === foodId,
+            );
+            if (idx < 0) return null;
+            const row = foods[idx]!;
+            if (row.archivedAt != null) return null;
+            let changed = false;
+            const next = copyFood(row);
+            if (
+                patch.saturatedFatG != null &&
+                patch.saturatedFatG >= 0 &&
+                next.saturatedFatG == null
+            ) {
+                next.saturatedFatG = patch.saturatedFatG;
+                changed = true;
+            }
+            if (patch.offNutrientLevels != null) {
+                next.offNutrientLevels = { ...patch.offNutrientLevels };
+                changed = true;
+            }
+            if (!changed) return null;
+            next.updatedAt = nowIso();
+            foods[idx] = next;
+            return copyFood(next);
+        },
         async getByNormalizedName(householdId, kind, normalizedName) {
             const matches = foods.filter(
                 (food) =>
@@ -542,6 +811,32 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                         row.foodId === foodId,
                 )
                 .map((row) => row.barcode);
+        },
+        async listBarcodesForFoods(householdId, foodIds) {
+            if (foodIds.length === 0) return new Map();
+            const want = new Set(foodIds);
+            const grouped = new Map<string, string[]>();
+            for (const row of barcodes) {
+                if (row.householdId !== householdId || !want.has(row.foodId)) {
+                    continue;
+                }
+                const list = grouped.get(row.foodId);
+                if (list) list.push(row.barcode);
+                else grouped.set(row.foodId, [row.barcode]);
+            }
+            return grouped;
+        },
+        async getBarcodeFoodIds(householdId, barcodesIn) {
+            if (barcodesIn.length === 0) return new Map();
+            const want = new Set(barcodesIn);
+            const out = new Map<string, string>();
+            for (const row of barcodes) {
+                if (row.householdId !== householdId || !want.has(row.barcode)) {
+                    continue;
+                }
+                if (!out.has(row.barcode)) out.set(row.barcode, row.foodId);
+            }
+            return out;
         },
         async setBarcode(householdId, barcode, foodId) {
             const idx = barcodes.findIndex(
@@ -722,15 +1017,18 @@ export function newFood(input: {
     fatG?: number | null;
     fiberG?: number | null;
     sugarG?: number | null;
+    saturatedFatG?: number | null;
     alcoholG?: number | null;
     caffeineMg?: number | null;
     nutritionSource?: NutritionSource | null;
+    offNutrientLevels?: Record<string, NutrientLevel> | null;
     allergens?: string[];
     offSourceId?: string | null;
     genericFoodId?: string | null;
     usualProductId?: string | null;
     usualStoreId?: string | null;
     usualAmount?: UsualAmount | null;
+    offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
     const name = input.name.trim();
@@ -751,9 +1049,14 @@ export function newFood(input: {
         fatG: input.fatG ?? null,
         fiberG: input.fiberG ?? null,
         sugarG: input.sugarG ?? null,
+        saturatedFatG: input.saturatedFatG ?? null,
         alcoholG: input.alcoholG ?? null,
         caffeineMg: input.caffeineMg ?? null,
         nutritionSource: input.nutritionSource ?? null,
+        offNutrientLevels:
+            input.offNutrientLevels == null
+                ? null
+                : { ...input.offNutrientLevels },
         allergens: [...(input.allergens ?? [])],
         offSourceId: input.offSourceId ?? null,
         genericFoodId: input.genericFoodId ?? null,
@@ -761,6 +1064,8 @@ export function newFood(input: {
         usualStoreId: input.usualStoreId ?? null,
         usualAmount:
             input.usualAmount == null ? null : { ...input.usualAmount },
+        offQuality:
+            input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
         archivedAt: null,
         createdAt: stamp,
@@ -985,13 +1290,15 @@ export async function findOrCreateFoodByBarcodeFromHit(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
-            return { food: existing, created: false };
+            const food = await applyHitQualityToFood(store, existing, hit);
+            return { food, created: false };
         }
     }
     const byOff = await store.getByOffSourceId(householdId, normalized);
     if (byOff) {
         await store.setBarcode(householdId, normalized, byOff.id);
-        return { food: byOff, created: false };
+        const food = await applyHitQualityToFood(store, byOff, hit);
+        return { food, created: false };
     }
     const byName = await existingByNameOrAlias(
         store,
@@ -1001,7 +1308,8 @@ export async function findOrCreateFoodByBarcodeFromHit(
     );
     if (byName) {
         await store.setBarcode(householdId, normalized, byName.id);
-        return { food: byName, created: false };
+        const food = await applyHitQualityToFood(store, byName, hit);
+        return { food, created: false };
     }
     const nutrition = catalogNutritionFromOff(hit);
     const created = await store.insertFood(
@@ -1011,10 +1319,12 @@ export async function findOrCreateFoodByBarcodeFromHit(
             name: hit.name,
             brand: hit.brand,
             ...nutrition,
+            offNutrientLevels: offNutrientLevelsFromHit(hit),
             gramsPerEach: gramsPerEachFromOff(hit),
             nutritionSource: "openfoodfacts",
             allergens: hit.allergens ?? mapOffAllergenTags(hit.allergens_tags),
             offSourceId: normalized,
+            offQuality: foodQualityFromHit(hit),
         }),
     );
     await store.setBarcode(householdId, normalized, created.id);
@@ -1033,10 +1343,57 @@ export async function findOrCreateFoodByBarcodeResult(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
+            const needsNutritionFill =
+                existing.offNutrientLevels == null ||
+                existing.saturatedFatG == null;
+            const needsOffLookup =
+                existing.offQuality == null ||
+                (needsNutritionFill &&
+                    existing.offQuality != null &&
+                    !offQualityIsEmptyMiss(existing.offQuality));
+            if (needsOffLookup) {
+                try {
+                    const hit = await lookup(normalized);
+                    if (hit) {
+                        const food = await applyHitQualityToFood(
+                            store,
+                            existing,
+                            hit,
+                        );
+                        return { food, created: false };
+                    }
+                    if (existing.offQuality == null) {
+                        const stamped = await store.setFoodQuality(
+                            householdId,
+                            existing.id,
+                            offQualityMissStamp(nowIso()),
+                            { onlyIfUnset: true },
+                        );
+                        const food =
+                            stamped ??
+                            (await store.getFood(householdId, existing.id)) ??
+                            existing;
+                        return { food, created: false };
+                    }
+                    return { food: existing, created: false };
+                } catch {
+                    const food =
+                        (await store.getFood(householdId, existing.id)) ??
+                        existing;
+                    return { food, created: false };
+                }
+            }
             return { food: existing, created: false };
         }
     }
-    const hit = await lookup(normalized);
+    let hit: FoodResult | null;
+    try {
+        hit = await lookup(normalized);
+    } catch {
+        throw new FoodsInputError(
+            "Couldn't reach Open Food Facts. Try again in a moment, or add the food by name.",
+        );
+    }
     if (hit == null) throw new FoodsInputError("Unknown barcode.");
     return findOrCreateFoodByBarcodeFromHit(
         store,
@@ -1086,7 +1443,9 @@ export async function findOrCreateManualFood(
     householdId: string,
     kind: FoodKind,
     name: string,
+    opts?: { onSimilar?: OnSimilar },
 ): Promise<Food> {
+    const onSimilar = opts?.onSimilar ?? "create";
     const trimmed = name.trim();
     if (!trimmed) {
         throw new FoodsInputError(
@@ -1095,6 +1454,14 @@ export async function findOrCreateManualFood(
     }
     const found = await findManualFood(store, householdId, kind, trimmed);
     if (found) return found;
+    if (onSimilar === "ask") {
+        const entries = await similarFoodsForNames(store, householdId, kind, [
+            trimmed,
+        ]);
+        if (entries.length > 0) {
+            throw new SimilarFoodsError(entries);
+        }
+    }
     return store.insertFood(
         newFood({
             householdId,
@@ -1126,6 +1493,7 @@ export async function resolveFoodForWrite(
         name?: string;
     },
     lookup?: (barcode: string) => Promise<FoodResult | null>,
+    opts?: { onSimilar?: OnSimilar },
 ): Promise<Food> {
     const foodId = input.foodId?.trim();
     if (foodId) {
@@ -1157,7 +1525,9 @@ export async function resolveFoodForWrite(
         }
         return food;
     }
-    return findOrCreateManualFood(store, householdId, kind, input.name ?? "");
+    return findOrCreateManualFood(store, householdId, kind, input.name ?? "", {
+        onSimilar: opts?.onSimilar,
+    });
 }
 
 export async function foodsByIds(
@@ -1213,9 +1583,12 @@ export function mergeAllergens(plain: string[], usual: string[]): string[] {
     return out;
 }
 
-function nutritionBlockFrom(
-    source: Food,
-): Pick<Food, (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource"> {
+type NutritionBlockPick = Pick<
+    Food,
+    (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource" | "saturatedFatG"
+>;
+
+function nutritionBlockFrom(source: Food): NutritionBlockPick {
     return {
         calories: source.calories,
         proteinG: source.proteinG,
@@ -1223,9 +1596,47 @@ function nutritionBlockFrom(
         fatG: source.fatG,
         fiberG: source.fiberG,
         sugarG: source.sugarG,
+        saturatedFatG: source.saturatedFatG,
         alcoholG: source.alcoholG,
         caffeineMg: source.caffeineMg,
         nutritionSource: source.nutritionSource,
+    };
+}
+
+function mergeTagArray(
+    keep: string[] | null,
+    drop: string[] | null,
+): string[] | null {
+    if (keep !== null) return [...keep];
+    if (drop !== null) return [...drop];
+    return null;
+}
+
+function mergeOffQuality(
+    keep: FoodQuality | null,
+    drop: FoodQuality | null,
+): FoodQuality | null {
+    if (keep == null && drop == null) return null;
+    if (keep == null) return copyQuality(drop!);
+    if (drop == null) return copyQuality(keep);
+    return {
+        nutriscoreGrade: keep.nutriscoreGrade ?? drop.nutriscoreGrade,
+        novaGroup: keep.novaGroup ?? drop.novaGroup,
+        ecoscoreGrade: keep.ecoscoreGrade ?? drop.ecoscoreGrade,
+        additives:
+            keep.additives !== null
+                ? keep.additives.map((a) => ({ tag: a.tag, risk: a.risk }))
+                : drop.additives !== null
+                  ? drop.additives.map((a) => ({ tag: a.tag, risk: a.risk }))
+                  : null,
+        allergensTags: mergeTagArray(keep.allergensTags, drop.allergensTags),
+        tracesTags: mergeTagArray(keep.tracesTags, drop.tracesTags),
+        ingredientsAnalysisTags: mergeTagArray(
+            keep.ingredientsAnalysisTags,
+            drop.ingredientsAnalysisTags,
+        ),
+        labelsTags: mergeTagArray(keep.labelsTags, drop.labelsTags),
+        fetchedAt: keep.fetchedAt,
     };
 }
 
@@ -1234,12 +1645,15 @@ export type MergedFoodFieldPick = Pick<
     Food,
     | (typeof NUTRITION_BLOCK_KEYS)[number]
     | "nutritionSource"
+    | "saturatedFatG"
     | "gramsPerEach"
     | "gramsPerMl"
     | "defaultUnit"
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | "offQuality"
+    | "offNutrientLevels"
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
@@ -1249,8 +1663,11 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
           ? nutritionBlockFrom(drop)
           : nutritionBlockFrom(keep);
 
+    const saturatedFatG = keep.saturatedFatG ?? drop.saturatedFatG ?? null;
+
     return {
         ...nutritionBlock,
+        saturatedFatG,
         gramsPerEach: keep.gramsPerEach ?? drop.gramsPerEach,
         gramsPerMl: keep.gramsPerMl ?? drop.gramsPerMl,
         defaultUnit: keep.defaultUnit.trim()
@@ -1264,6 +1681,8 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                 : drop.usualAmount != null
                   ? { ...drop.usualAmount }
                   : null,
+        offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
+        offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
 }
 
@@ -1290,6 +1709,8 @@ export function effectiveFood(
     };
     const nutritionFrom = usualHasAnyNutrient(u) ? u : food;
     const block = nutritionBlockFrom(nutritionFrom);
+    const saturatedFatG =
+        block.saturatedFatG ?? u.saturatedFatG ?? food.saturatedFatG ?? null;
     const usualStoreId = u.usualStoreId ?? food.usualStoreId;
     const usualAmount =
         u.usualAmount != null
@@ -1300,6 +1721,7 @@ export function effectiveFood(
     return {
         ...base,
         ...block,
+        saturatedFatG,
         gramsPerEach: u.gramsPerEach ?? food.gramsPerEach,
         gramsPerMl: u.gramsPerMl ?? food.gramsPerMl,
         allergens: mergeAllergens(food.allergens, u.allergens),
@@ -1409,6 +1831,260 @@ export function matchFoodsByWords(
     return hits;
 }
 
+export type SimilarFoodWhy = "same_words" | "contains_words" | "word_match";
+export type SimilarFoodCandidate = { food: Food; why: SimilarFoodWhy };
+export type SimilarFoodsEntry = {
+    name: string;
+    candidates: SimilarFoodCandidate[];
+};
+export type OnSimilar = "ask" | "create";
+
+export const SIMILAR_FOODS_LIMIT = 3;
+
+function foodNameTokenSetEqual(
+    a: readonly string[],
+    b: readonly string[],
+): boolean {
+    if (a.length !== b.length) return false;
+    const setA = new Set(a);
+    for (const token of b) {
+        if (!setA.has(token)) return false;
+    }
+    return true;
+}
+
+function nameStrictlyContainsTokenSet(
+    queryTokens: readonly string[],
+    otherTokens: readonly string[],
+): boolean {
+    if (otherTokens.length === 0) return false;
+    if (queryTokens.length <= otherTokens.length) return false;
+    const set = new Set(queryTokens);
+    return otherTokens.every((token) => set.has(token));
+}
+
+function foodResolvesToName(
+    name: string,
+    food: Food,
+    aliases: readonly string[],
+): boolean {
+    const nameNorm = normalizeFoodName(name);
+    const nameLoose = looseFoodKey(name);
+    if (
+        normalizeFoodName(food.name) === nameNorm ||
+        looseFoodKey(food.name) === nameLoose
+    ) {
+        return true;
+    }
+    for (const alias of aliases) {
+        if (normalizeFoodName(alias) === nameNorm) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function similarFoods(
+    name: string,
+    foods: readonly Food[],
+    aliasesByFoodId: ReadonlyMap<string, string[]>,
+    opts: {
+        kind: FoodKind;
+        branded?: boolean;
+        /**
+         * Keep rows whose name or alias already matches. `upsert_food` asks
+         * only after `findUpsertFoodByName` decided to create, and that skips
+         * branded rows `findManualFood` would reuse, so for it those rows are
+         * the likeliest candidates, not resolved names.
+         */
+        keepResolved?: boolean;
+    },
+): SimilarFoodCandidate[] {
+    const isResolved = (food: Food, aliases: readonly string[]) =>
+        !opts.keepResolved && foodResolvesToName(name, food, aliases);
+    const queryTokens = foodNameTokens(name);
+    if (queryTokens.length === 0) return [];
+
+    const eligible = foods.filter(
+        (food) =>
+            food.archivedAt == null &&
+            food.kind === opts.kind &&
+            food.genericFoodId == null,
+    );
+
+    const seen = new Set<string>();
+    const result: SimilarFoodCandidate[] = [];
+
+    const push = (food: Food, why: SimilarFoodWhy) => {
+        if (seen.has(food.id)) return;
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        if (isResolved(food, aliases)) return;
+        seen.add(food.id);
+        result.push({ food, why });
+    };
+
+    const sortByNameId = (a: { food: Food }, b: { food: Food }): number => {
+        const byName = a.food.name.localeCompare(b.food.name);
+        if (byName !== 0) return byName;
+        return a.food.id.localeCompare(b.food.id);
+    };
+
+    const rule1: SimilarFoodCandidate[] = [];
+    for (const food of eligible) {
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        if (isResolved(food, aliases)) continue;
+        const labels = [food.name, ...aliases];
+        for (const label of labels) {
+            if (foodNameTokenSetEqual(queryTokens, foodNameTokens(label))) {
+                rule1.push({ food, why: "same_words" });
+                break;
+            }
+        }
+    }
+    rule1.sort(sortByNameId);
+    for (const candidate of rule1) {
+        push(candidate.food, candidate.why);
+        if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+    }
+
+    if (!opts.branded) {
+        const rule2: SimilarFoodCandidate[] = [];
+        for (const food of eligible) {
+            const aliases = aliasesByFoodId.get(food.id) ?? [];
+            if (isResolved(food, aliases)) continue;
+            const labels = [food.name, ...aliases];
+            for (const label of labels) {
+                const labelTokens = foodNameTokens(label);
+                if (labelTokens.length === 0) continue;
+                if (nameStrictlyContainsTokenSet(queryTokens, labelTokens)) {
+                    rule2.push({ food, why: "contains_words" });
+                    break;
+                }
+            }
+        }
+        rule2.sort(sortByNameId);
+        for (const candidate of rule2) {
+            push(candidate.food, candidate.why);
+            if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+        }
+    }
+
+    for (const food of matchFoodsByWords(name, eligible, aliasesByFoodId)) {
+        push(food, "word_match");
+        if (result.length >= SIMILAR_FOODS_LIMIT) return result;
+    }
+    return result;
+}
+
+export class SimilarFoodsError extends Error {
+    readonly entries: SimilarFoodsEntry[];
+
+    constructor(entries: SimilarFoodsEntry[]) {
+        const parts = entries.map((entry) => {
+            const first = entry.candidates[0];
+            return first
+                ? `"${entry.name}" may be ${first.food.name}`
+                : `"${entry.name}"`;
+        });
+        super(`Similar foods: ${parts.join("; ")}.`);
+        this.name = "SimilarFoodsError";
+        this.entries = entries;
+    }
+}
+
+function findManualFoodInListed(
+    foods: readonly Food[],
+    aliasesByFoodId: ReadonlyMap<string, string[]>,
+    kind: FoodKind,
+    name: string,
+): Food | null {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const normalized = normalizeFoodName(trimmed);
+    const byName = foods.find(
+        (food) =>
+            food.kind === kind &&
+            !food.archivedAt &&
+            food.normalizedName === normalized,
+    );
+    if (byName) return byName;
+    for (const food of foods) {
+        if (food.kind !== kind || food.archivedAt) continue;
+        const aliases = aliasesByFoodId.get(food.id) ?? [];
+        for (const alias of aliases) {
+            if (normalizeFoodName(alias) === normalized) return food;
+        }
+    }
+    const key = looseFoodKey(trimmed);
+    let matches = foods.filter(
+        (food) =>
+            food.kind === kind &&
+            !food.archivedAt &&
+            looseFoodKey(food.name) === key,
+    );
+    if (matches.length === 0) return null;
+    matches.sort(preferLooseNameMatch);
+    return copyFood(matches[0]!);
+}
+
+/** Names that would create a new food and have similar existing ones. Writes nothing. */
+export async function similarFoodsForNames(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    names: readonly string[],
+): Promise<SimilarFoodsEntry[]> {
+    const [foods, aliasesByFoodId] = await Promise.all([
+        store.listFoods(householdId),
+        store.listAllAliases(householdId),
+    ]);
+    const seenNorm = new Set<string>();
+    const entries: SimilarFoodsEntry[] = [];
+    for (const raw of names) {
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        const norm = normalizeFoodName(trimmed);
+        if (seenNorm.has(norm)) continue;
+        seenNorm.add(norm);
+        if (findManualFoodInListed(foods, aliasesByFoodId, kind, trimmed)) {
+            continue;
+        }
+        const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
+            kind,
+        });
+        if (candidates.length > 0) {
+            entries.push({ name: trimmed, candidates });
+        }
+    }
+    return entries;
+}
+
+/**
+ * Similar foods for one name the caller has already decided to create
+ * (`upsert_food` after `findUpsertFoodByName`). Nothing is skipped as
+ * resolved: any name or alias match left is a row that path will not reuse.
+ */
+export async function similarFoodsForNewName(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    opts?: { branded?: boolean },
+): Promise<SimilarFoodsEntry[]> {
+    const trimmed = name.trim();
+    if (!trimmed) return [];
+    const [foods, aliasesByFoodId] = await Promise.all([
+        store.listFoods(householdId),
+        store.listAllAliases(householdId),
+    ]);
+    const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
+        kind,
+        branded: opts?.branded,
+        keepResolved: true,
+    });
+    return candidates.length > 0 ? [{ name: trimmed, candidates }] : [];
+}
+
 export function foodHasNoNutrition(
     food: Pick<Food, (typeof NUTRITION_BLOCK_KEYS)[number]>,
 ): boolean {
@@ -1510,6 +2186,18 @@ export function linkProductPromptPath(
     if (!suggestFoodFor(product.name, plains)) return null;
     const sep = returnPath.includes("?") ? "&" : "?";
     return `${returnPath}${sep}link_product=${encodeURIComponent(product.id)}`;
+}
+
+/** Build effective foods from an already-listed household catalog (no per-id loads). */
+export function effectiveFoodsFromListed(
+    listed: readonly Food[],
+): Map<string, EffectiveFood> {
+    const catalog = new Map(listed.map((food) => [food.id, food]));
+    const out = new Map<string, EffectiveFood>();
+    for (const food of listed) {
+        out.set(food.id, effectiveFood(food, catalog));
+    }
+    return out;
 }
 
 export async function effectiveFoodsByIds(
@@ -1809,6 +2497,7 @@ export async function createProduct(
         fatG: parseOptionalNutrient(input.fatG),
         fiberG: parseOptionalNutrient(input.fiberG),
         sugarG: parseOptionalNutrient(input.sugarG),
+        saturatedFatG: null as number | null,
         alcoholG: parseOptionalNutrient(input.alcoholG),
         caffeineMg: parseOptionalNutrient(input.caffeineMg),
     };
@@ -2053,18 +2742,37 @@ export async function updateFood(
     return saved;
 }
 
-export async function mergeFoods(
-    store: FoodsStore,
-    householdId: string,
-    keepId: string,
-    dropId: string,
-): Promise<Food> {
-    if (keepId === dropId) {
+/** Same keep ordering as {@link duplicatePairs} (more refs, then older, then id). */
+export function compareFoodsForMergeKeep(
+    a: Food,
+    b: Food,
+    refCounts: ReadonlyMap<string, number>,
+): number {
+    const ra = refCounts.get(a.id) ?? 0;
+    const rb = refCounts.get(b.id) ?? 0;
+    if (rb !== ra) return rb - ra;
+    const byCreated = a.createdAt.localeCompare(b.createdAt);
+    if (byCreated !== 0) return byCreated;
+    return a.id.localeCompare(b.id);
+}
+
+export function defaultMergeKeepId(
+    a: Food,
+    b: Food,
+    refCounts: ReadonlyMap<string, number>,
+): string {
+    return compareFoodsForMergeKeep(a, b, refCounts) > 0 ? b.id : a.id;
+}
+
+export function assertMergeable(
+    keep: Food,
+    drop: Food,
+    listed: readonly Food[],
+): void {
+    if (keep.id === drop.id) {
         throw new FoodsInputError("Pick two different foods to merge.");
     }
-    const keep = await findFoodById(store, householdId, keepId);
-    const drop = await store.getFood(householdId, dropId);
-    if (!drop || drop.archivedAt) {
+    if (drop.archivedAt) {
         throw new FoodsInputError("Unknown food.");
     }
     if (drop.kind !== keep.kind) {
@@ -2080,9 +2788,8 @@ export async function mergeFoods(
             "Those belong to different foods. Unlink one first.",
         );
     }
-    const listed = await store.listFoods(householdId);
-    const dropProducts = listed.filter((row) => row.genericFoodId === dropId);
-    const keepProducts = listed.filter((row) => row.genericFoodId === keepId);
+    const dropProducts = listed.filter((row) => row.genericFoodId === drop.id);
+    const keepProducts = listed.filter((row) => row.genericFoodId === keep.id);
     const mergedGenericId = keep.genericFoodId ?? drop.genericFoodId;
     const mergedUsualId = keep.usualProductId ?? drop.usualProductId ?? null;
     const liveProductsAfter = keepProducts.length + dropProducts.length;
@@ -2091,6 +2798,25 @@ export async function mergeFoods(
             "Merging those would nest products two deep.",
         );
     }
+}
+
+export async function mergeFoods(
+    store: FoodsStore,
+    householdId: string,
+    keepId: string,
+    dropId: string,
+): Promise<Food> {
+    const keep = await findFoodById(store, householdId, keepId);
+    const drop = await store.getFood(householdId, dropId);
+    if (!drop) {
+        throw new FoodsInputError("Unknown food.");
+    }
+    const listed = await store.listFoods(householdId);
+    assertMergeable(keep, drop, listed);
+    const dropProducts = listed.filter((row) => row.genericFoodId === dropId);
+    const keepProducts = listed.filter((row) => row.genericFoodId === keepId);
+    const mergedGenericId = keep.genericFoodId ?? drop.genericFoodId;
+    const mergedUsualId = keep.usualProductId ?? drop.usualProductId ?? null;
     const mergedFields = mergedFoodFields(keep, drop);
     const keepNext: Food = {
         ...keep,
@@ -2249,6 +2975,7 @@ const FIELDS_FILLED_KEY_ORDER: (
     "fatG",
     "fiberG",
     "sugarG",
+    "saturatedFatG",
     "alcoholG",
     "caffeineMg",
     "nutritionSource",
@@ -2602,6 +3329,401 @@ export function duplicatePairs(
     return { merges, skipped };
 }
 
+/** A food's name with its brand, as lists show it: "Milk (Horizon)". */
+export function foodDisplayName(food: Pick<Food, "name" | "brand">): string {
+    const brand = food.brand?.trim();
+    return brand ? `${food.name} (${brand})` : food.name;
+}
+
+export type PossibleDuplicateRule = "same_words" | "contains_words";
+
+export type PossibleDuplicatePair = {
+    subject: Food;
+    related: Food;
+    rule: PossibleDuplicateRule;
+};
+
+/** Wire names for merge-pair pick radios (Items-style snake_case). */
+export const MERGE_PAIR_PICK_FIELDS = [
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "fiber_g",
+    "sugar_g",
+    "alcohol_g",
+    "caffeine_mg",
+    "grams_per_each",
+    "grams_per_ml",
+    "default_unit",
+] as const;
+
+export type MergePairPickField = (typeof MERGE_PAIR_PICK_FIELDS)[number];
+
+const MERGE_PICK_TO_FOOD_KEY: Record<
+    MergePairPickField,
+    keyof Food | "ledgerDefaultUnit"
+> = {
+    calories: "calories",
+    protein_g: "proteinG",
+    carbs_g: "carbsG",
+    fat_g: "fatG",
+    fiber_g: "fiberG",
+    sugar_g: "sugarG",
+    alcohol_g: "alcoholG",
+    caffeine_mg: "caffeineMg",
+    grams_per_each: "gramsPerEach",
+    grams_per_ml: "gramsPerMl",
+    default_unit: "ledgerDefaultUnit",
+};
+
+function foodFieldForMergePick(
+    food: Food,
+    field: MergePairPickField,
+): string | number | null {
+    if (field === "default_unit") return ledgerDefaultUnit(food);
+    const key = MERGE_PICK_TO_FOOD_KEY[field];
+    if (key === "ledgerDefaultUnit") return ledgerDefaultUnit(food);
+    return food[key as keyof Food] as number | null;
+}
+
+const MERGE_PICK_NUTRITION_WIRES = new Set<MergePairPickField>([
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "fiber_g",
+    "sugar_g",
+    "alcohol_g",
+    "caffeine_mg",
+]);
+
+function mergePickFieldsConflict(a: Food, b: Food): MergePairPickField[] {
+    const out: MergePairPickField[] = [];
+    const bothHaveNutrition = usualHasAnyNutrient(a) && usualHasAnyNutrient(b);
+    for (const wire of MERGE_PAIR_PICK_FIELDS) {
+        if (wire === "default_unit") {
+            const ua = ledgerDefaultUnit(a);
+            const ub = ledgerDefaultUnit(b);
+            if (ua !== ub) out.push(wire);
+            continue;
+        }
+        const key = MERGE_PICK_TO_FOOD_KEY[wire] as keyof Food;
+        const va = a[key];
+        const vb = b[key];
+        if (MERGE_PICK_NUTRITION_WIRES.has(wire)) {
+            if (bothHaveNutrition && va !== vb) out.push(wire);
+            continue;
+        }
+        if (va != null && vb != null && va !== vb) out.push(wire);
+    }
+    return out;
+}
+
+export function foodPairMergeConflicts(a: Food, b: Food): MergePairPickField[] {
+    return mergePickFieldsConflict(a, b);
+}
+
+function brandKeyForDuplicate(brand: string | null | undefined): string | null {
+    return brand?.trim() ? brand.trim() : null;
+}
+
+function brandsConflict(a: Food, b: Food): boolean {
+    const ba = brandKeyForDuplicate(a.brand);
+    const bb = brandKeyForDuplicate(b.brand);
+    return ba != null && bb != null && ba !== bb;
+}
+
+function tokenSetOf(food: Food): Set<string> {
+    return new Set(foodNameTokens(food.name));
+}
+
+function isStrictSubset(small: Set<string>, large: Set<string>): boolean {
+    if (small.size >= large.size) return false;
+    for (const t of small) {
+        if (!large.has(t)) return false;
+    }
+    return true;
+}
+
+function pairRule(
+    a: Food,
+    b: Food,
+    setA: Set<string>,
+    setB: Set<string>,
+): PossibleDuplicateRule | null {
+    if (setA.size === setB.size && setA.size > 0) {
+        for (const t of setA) {
+            if (!setB.has(t)) return null;
+        }
+        return "same_words";
+    }
+    const largeFood = setA.size > setB.size ? a : b;
+    const smallSet = setA.size < setB.size ? setA : setB;
+    const largeSet = setA.size < setB.size ? setB : setA;
+    if (!isStrictSubset(smallSet, largeSet)) return null;
+    if (brandKeyForDuplicate(largeFood.brand) != null) return null;
+    return "contains_words";
+}
+
+/** Ordered pair key for deduping (`normalizePairIds` order). */
+function possibleDuplicatePairKey(idA: string, idB: string): string {
+    const { subjectId, relatedKey } =
+        idA < idB
+            ? { subjectId: idA, relatedKey: idB }
+            : { subjectId: idB, relatedKey: idA };
+    return `${subjectId}\0${relatedKey}`;
+}
+
+/**
+ * True when some loose-key group of the merge job has 2+ rows, so the job's
+ * outcome can depend on which row it keeps (reference counts): with 3+ rows the
+ * kept row's accumulated fields decide later skips, and with 2 the alias check
+ * looks only at the dropped row's name. Live rows with the same normalized name
+ * and brand can't coexist, so every such group has differing names. These groups
+ * exist only until the merge job runs, so most page loads skip `countFoodRefs`.
+ */
+export function duplicatesNeedRefCounts(foods: readonly Food[]): boolean {
+    const livePlain = foods.filter(
+        (row) => row.archivedAt == null && row.genericFoodId == null,
+    );
+    const sizes = new Map<string, number>();
+    for (const row of livePlain) {
+        const loose = looseFoodKey(row.name);
+        if (!loose) continue;
+        const brand = duplicateBrandKey(row.brand);
+        const key = `${row.householdId}\0${row.kind}\0${loose}\0${brand === null ? "" : brand}`;
+        const next = (sizes.get(key) ?? 0) + 1;
+        sizes.set(key, next);
+        if (next >= 2) return true;
+    }
+    return false;
+}
+
+/** Pairs the merge job would auto-merge for the given reference counts. */
+function jobAutoMergedPairKeys(
+    foods: readonly Food[],
+    refCounts: ReadonlyMap<string, number>,
+    aliases: ReadonlyMap<string, string[]>,
+): Set<string> {
+    const { merges } = duplicatePairs(foods, refCounts, aliases);
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+        let p = parent.get(id) ?? id;
+        if (p !== id) {
+            p = find(p);
+            parent.set(id, p);
+        }
+        return p;
+    };
+    const union = (a: string, b: string) => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) parent.set(rb, ra);
+    };
+    for (const m of merges) {
+        union(m.keep.id, m.drop.id);
+    }
+    const clusterIds = new Map<string, string[]>();
+    for (const m of merges) {
+        for (const id of [m.keep.id, m.drop.id]) {
+            const root = find(id);
+            const list = clusterIds.get(root) ?? [];
+            if (!list.includes(id)) list.push(id);
+            clusterIds.set(root, list);
+        }
+    }
+    const keys = new Set<string>();
+    for (const ids of clusterIds.values()) {
+        for (let i = 0; i < ids.length; i++) {
+            for (let j = i + 1; j < ids.length; j++) {
+                keys.add(possibleDuplicatePairKey(ids[i]!, ids[j]!));
+            }
+        }
+    }
+    return keys;
+}
+
+function pairDismissed(
+    idA: string,
+    idB: string,
+    dismissed: ReadonlySet<string>,
+): boolean {
+    const key = lookupDismissalKey("food.possible_duplicate", "food", idA, idB);
+    return dismissed.has(dismissalKeyString(key));
+}
+
+export function possibleDuplicates(
+    foods: readonly Food[],
+    aliases: ReadonlyMap<string, string[]>,
+    barcodedIds: ReadonlySet<string>,
+    dismissed: ReadonlySet<string>,
+    refCounts: ReadonlyMap<string, number> = new Map(),
+): PossibleDuplicatePair[] {
+    const jobMerged = jobAutoMergedPairKeys(foods, refCounts, aliases);
+    const tokenSets = new Map<string, Set<string>>();
+    for (const row of foods) {
+        if (row.archivedAt == null) {
+            tokenSets.set(row.id, tokenSetOf(row));
+        }
+    }
+    const candidates = foods.filter(
+        (row) =>
+            row.archivedAt == null &&
+            row.genericFoodId == null &&
+            !barcodedIds.has(row.id) &&
+            !row.offSourceId &&
+            (tokenSets.get(row.id)?.size ?? 0) > 0,
+    );
+
+    const buckets = new Map<string, Food[]>();
+    for (const food of candidates) {
+        const tokens = tokenSets.get(food.id)!;
+        for (const token of tokens) {
+            const key = `${food.householdId}\0${food.kind}\0${token}`;
+            const list = buckets.get(key);
+            if (list) list.push(food);
+            else buckets.set(key, [food]);
+        }
+    }
+
+    const seen = new Set<string>();
+    const pairs: PossibleDuplicatePair[] = [];
+
+    for (const b of candidates) {
+        const bTokens = tokenSets.get(b.id)!;
+        let rarestToken: string | null = null;
+        let rarestSize = Number.POSITIVE_INFINITY;
+        for (const token of bTokens) {
+            const key = `${b.householdId}\0${b.kind}\0${token}`;
+            const size = buckets.get(key)?.length ?? 0;
+            if (size < rarestSize) {
+                rarestSize = size;
+                rarestToken = token;
+            }
+        }
+        if (rarestToken == null) continue;
+        const bucket =
+            buckets.get(`${b.householdId}\0${b.kind}\0${rarestToken}`) ?? [];
+        for (const a of bucket) {
+            if (a.id === b.id) continue;
+            if (a.kind !== b.kind || a.householdId !== b.householdId) continue;
+            const aTokens = tokenSets.get(a.id)!;
+            if (![...bTokens].every((t) => aTokens.has(t))) continue;
+            const rule = pairRule(a, b, aTokens, bTokens);
+            if (!rule) continue;
+            if (brandsConflict(a, b)) continue;
+            const subjectId = a.id < b.id ? a.id : b.id;
+            const relatedId = a.id < b.id ? b.id : a.id;
+            const key = possibleDuplicatePairKey(subjectId, relatedId);
+            if (seen.has(key)) continue;
+            if (jobMerged.has(key)) continue;
+            if (pairDismissed(subjectId, relatedId, dismissed)) continue;
+            seen.add(key);
+            const subject = subjectId === a.id ? a : b;
+            const related = relatedId === a.id ? a : b;
+            pairs.push({ subject, related, rule });
+        }
+    }
+
+    pairs.sort((p, q) => {
+        const bySub = p.subject.name.localeCompare(q.subject.name);
+        if (bySub !== 0) return bySub;
+        const byRel = p.related.name.localeCompare(q.related.name);
+        if (byRel !== 0) return byRel;
+        const byIds = p.subject.id.localeCompare(q.subject.id);
+        if (byIds !== 0) return byIds;
+        return p.related.id.localeCompare(q.related.id);
+    });
+    return pairs;
+}
+
+export type MergeFoodPairInput = {
+    keepId: string;
+    dropId: string;
+    picks?: Partial<Record<MergePairPickField, string>>;
+};
+
+function pickFoodValue(
+    field: MergePairPickField,
+    food: Food,
+): string | number | null {
+    return foodFieldForMergePick(food, field);
+}
+
+function buildMergePairPatch(
+    keep: Food,
+    drop: Food,
+    picks: Partial<Record<MergePairPickField, string>>,
+): FoodPatch {
+    const patch: FoodPatch = {};
+    const conflicts = mergePickFieldsConflict(keep, drop);
+    const bothHaveNutrition =
+        usualHasAnyNutrient(keep) && usualHasAnyNutrient(drop);
+    const nutritionConflicts = conflicts.filter((wire) =>
+        MERGE_PICK_NUTRITION_WIRES.has(wire),
+    );
+    for (const wire of conflicts) {
+        const pickId = picks[wire];
+        const source =
+            pickId === drop.id ? drop : pickId === keep.id ? keep : keep;
+        if (pickId != null && pickId !== keep.id && pickId !== drop.id) {
+            throw new FoodsInputError("Invalid field pick.");
+        }
+        const val = pickFoodValue(wire, source);
+        if (wire === "default_unit") {
+            patch.defaultUnit = String(val);
+        } else if (wire === "calories") patch.calories = val as number | null;
+        else if (wire === "protein_g") patch.proteinG = val as number | null;
+        else if (wire === "carbs_g") patch.carbsG = val as number | null;
+        else if (wire === "fat_g") patch.fatG = val as number | null;
+        else if (wire === "fiber_g") patch.fiberG = val as number | null;
+        else if (wire === "sugar_g") patch.sugarG = val as number | null;
+        else if (wire === "alcohol_g") patch.alcoholG = val as number | null;
+        else if (wire === "caffeine_mg")
+            patch.caffeineMg = val as number | null;
+        else if (wire === "grams_per_each")
+            patch.gramsPerEach = val as number | null;
+        else if (wire === "grams_per_ml")
+            patch.gramsPerMl = val as number | null;
+    }
+    if (
+        bothHaveNutrition &&
+        nutritionConflicts.length > 0 &&
+        nutritionConflicts.every((wire) => picks[wire] === drop.id)
+    ) {
+        patch.nutritionSource = drop.nutritionSource;
+    }
+    return patch;
+}
+
+export async function mergeFoodPair(
+    store: FoodsStore,
+    householdId: string,
+    input: MergeFoodPairInput,
+): Promise<Food> {
+    const { keepId, dropId, picks = {} } = input;
+    if (keepId === dropId) {
+        throw new FoodsInputError("Pick two different foods to merge.");
+    }
+    const actualKeep = await findFoodById(store, householdId, keepId);
+    const actualDrop = await store.getFood(householdId, dropId);
+    if (!actualDrop || actualDrop.archivedAt) {
+        throw new FoodsInputError("Unknown food.");
+    }
+    const listed = await store.listFoods(householdId);
+    assertMergeable(actualKeep, actualDrop, listed);
+    const patch = buildMergePairPatch(actualKeep, actualDrop, picks);
+    const next = await buildFoodUpdate(
+        store,
+        householdId,
+        actualKeep.id,
+        patch,
+    );
+    await store.updateFoodRow(next);
+    return mergeFoods(store, householdId, actualKeep.id, actualDrop.id);
+}
+
 export async function searchFoodCatalog(
     store: FoodsStore,
     householdId: string,
@@ -2624,10 +3746,15 @@ export async function searchFoodCatalog(
             generic_food_name: nameById.get(food.genericFoodId) ?? null,
         };
     };
+    const barcodesByFood = await store.listBarcodesForFoods(
+        householdId,
+        household.map((f) => f.id),
+    );
+    const listedById = new Map(listed.map((row) => [row.id, row]));
     const householdBarcodes = new Set<string>();
     const hits: FoodSearchHit[] = [];
     for (const food of household) {
-        const barcodes = await store.listBarcodes(householdId, food.id);
+        const barcodes = barcodesByFood.get(food.id) ?? [];
         for (const barcode of barcodes) householdBarcodes.add(barcode);
         hits.push({
             food_id: food.id,
@@ -2646,15 +3773,35 @@ export async function searchFoodCatalog(
             ...genericFields(food),
         });
     }
+    const offToResolve: FoodResult[] = [];
     for (const food of offHits) {
         if (householdBarcodes.has(food.barcode)) continue;
-        const existingId = await store.getBarcodeFoodId(
-            householdId,
-            food.barcode,
-        );
+        offToResolve.push(food);
+    }
+    const barcodeToFoodId = await store.getBarcodeFoodIds(
+        householdId,
+        offToResolve.map((f) => f.barcode),
+    );
+    const missingFoodIds = new Set<string>();
+    for (const food of offToResolve) {
+        const existingId = barcodeToFoodId.get(food.barcode);
+        if (existingId != null && !listedById.has(existingId)) {
+            missingFoodIds.add(existingId);
+        }
+    }
+    const loadedOffFoods = new Map<string, Food | null>();
+    await Promise.all(
+        [...missingFoodIds].map(async (id) => {
+            loadedOffFoods.set(id, await store.getFood(householdId, id));
+        }),
+    );
+    for (const food of offToResolve) {
+        const existingId = barcodeToFoodId.get(food.barcode) ?? null;
         const existing =
             existingId != null
-                ? await store.getFood(householdId, existingId)
+                ? (listedById.get(existingId) ??
+                  loadedOffFoods.get(existingId) ??
+                  null)
                 : null;
         hits.push({
             food_id: existingId,
@@ -2676,6 +3823,120 @@ export async function searchFoodCatalog(
     return hits;
 }
 
+function rowTextArray(value: unknown): string[] | null {
+    if (value == null) return null;
+    if (!Array.isArray(value)) return null;
+    return value.map((item) => String(item));
+}
+
+function rowQualityTimestamp(value: unknown): string | null {
+    if (value == null) return null;
+    if (value instanceof Date) return value.toISOString();
+    const s = String(value);
+    return s.trim() ? s : null;
+}
+
+function gradeFromRow(value: unknown): FoodQuality["nutriscoreGrade"] {
+    if (value == null) return null;
+    const g = String(value).trim().toLowerCase();
+    if (g === "a" || g === "b" || g === "c" || g === "d" || g === "e") return g;
+    return null;
+}
+
+function ecoscoreFromRow(value: unknown): FoodQuality["ecoscoreGrade"] {
+    if (value == null) return null;
+    const g = String(value).trim().toLowerCase();
+    if (
+        g === "a-plus" ||
+        g === "a" ||
+        g === "b" ||
+        g === "c" ||
+        g === "d" ||
+        g === "e" ||
+        g === "f"
+    ) {
+        return g;
+    }
+    return null;
+}
+
+function novaFromRow(value: unknown): FoodQuality["novaGroup"] {
+    if (value == null) return null;
+    const n = Number(value);
+    return n === 1 || n === 2 || n === 3 || n === 4 ? n : null;
+}
+
+function offQualityFromRow(row: {
+    nutriscore_grade: unknown;
+    nova_group: unknown;
+    ecoscore_grade: unknown;
+    additives_tags: unknown;
+    allergens_tags: unknown;
+    traces_tags: unknown;
+    ingredients_analysis_tags: unknown;
+    labels_tags: unknown;
+    off_quality_fetched_at: unknown;
+}): FoodQuality | null {
+    const fetchedAt = rowQualityTimestamp(row.off_quality_fetched_at);
+    if (fetchedAt == null) return null;
+    const additiveTags = rowTextArray(row.additives_tags);
+    return {
+        nutriscoreGrade: gradeFromRow(row.nutriscore_grade),
+        novaGroup: novaFromRow(row.nova_group),
+        ecoscoreGrade: ecoscoreFromRow(row.ecoscore_grade),
+        additives:
+            additiveTags == null
+                ? null
+                : additiveTags.map((tag) => ({
+                      tag,
+                      risk: additiveRisk(tag),
+                  })),
+        allergensTags: rowTextArray(row.allergens_tags),
+        tracesTags: rowTextArray(row.traces_tags),
+        ingredientsAnalysisTags: rowTextArray(row.ingredients_analysis_tags),
+        labelsTags: rowTextArray(row.labels_tags),
+        fetchedAt,
+    };
+}
+
+export function offQualityToRowFields(q: FoodQuality | null): {
+    nutriscore_grade: string | null;
+    nova_group: number | null;
+    ecoscore_grade: string | null;
+    additives_tags: string[] | null;
+    allergens_tags: string[] | null;
+    traces_tags: string[] | null;
+    ingredients_analysis_tags: string[] | null;
+    labels_tags: string[] | null;
+    off_quality_fetched_at: string | null;
+} {
+    if (q == null) {
+        return {
+            nutriscore_grade: null,
+            nova_group: null,
+            ecoscore_grade: null,
+            additives_tags: null,
+            allergens_tags: null,
+            traces_tags: null,
+            ingredients_analysis_tags: null,
+            labels_tags: null,
+            off_quality_fetched_at: null,
+        };
+    }
+    return {
+        nutriscore_grade: q.nutriscoreGrade,
+        nova_group: q.novaGroup,
+        ecoscore_grade: q.ecoscoreGrade,
+        additives_tags:
+            q.additives == null ? null : q.additives.map((a) => a.tag),
+        allergens_tags: q.allergensTags,
+        traces_tags: q.tracesTags,
+        ingredients_analysis_tags: q.ingredientsAnalysisTags,
+        labels_tags: q.labelsTags,
+        off_quality_fetched_at: q.fetchedAt,
+    };
+}
+
 export function foodFromRow(row: {
     id: unknown;
     household_id: unknown;
@@ -2692,9 +3953,11 @@ export function foodFromRow(row: {
     fat_g: unknown;
     fiber_g: unknown;
     sugar_g: unknown;
+    saturated_fat_g?: unknown;
     alcohol_g: unknown;
     caffeine_mg: unknown;
     nutrition_source: unknown;
+    off_nutrient_levels?: unknown;
     allergens: unknown;
     off_source_id: unknown;
     generic_food_id: unknown;
@@ -2702,6 +3965,15 @@ export function foodFromRow(row: {
     usual_store_id: unknown;
     usual_amount: unknown;
     usual_unit: unknown;
+    nutriscore_grade?: unknown;
+    nova_group?: unknown;
+    ecoscore_grade?: unknown;
+    additives_tags?: unknown;
+    allergens_tags?: unknown;
+    traces_tags?: unknown;
+    ingredients_analysis_tags?: unknown;
+    labels_tags?: unknown;
+    off_quality_fetched_at?: unknown;
     created_by: unknown;
     archived_at: unknown;
     created_at: unknown;
@@ -2750,9 +4022,12 @@ export function foodFromRow(row: {
         fatG: row.fat_g == null ? null : Number(row.fat_g),
         fiberG: row.fiber_g == null ? null : Number(row.fiber_g),
         sugarG: row.sugar_g == null ? null : Number(row.sugar_g),
+        saturatedFatG:
+            row.saturated_fat_g == null ? null : Number(row.saturated_fat_g),
         alcoholG: row.alcohol_g == null ? null : Number(row.alcohol_g),
         caffeineMg: row.caffeine_mg == null ? null : Number(row.caffeine_mg),
         nutritionSource,
+        offNutrientLevels: offNutrientLevelsFromRow(row.off_nutrient_levels),
         allergens: Array.isArray(row.allergens)
             ? row.allergens.map((item) => String(item))
             : [],
@@ -2773,6 +4048,17 @@ export function foodFromRow(row: {
                 ? row.usual_store_id
                 : null,
         usualAmount,
+        offQuality: offQualityFromRow({
+            nutriscore_grade: row.nutriscore_grade ?? null,
+            nova_group: row.nova_group ?? null,
+            ecoscore_grade: row.ecoscore_grade ?? null,
+            additives_tags: row.additives_tags ?? null,
+            allergens_tags: row.allergens_tags ?? null,
+            traces_tags: row.traces_tags ?? null,
+            ingredients_analysis_tags: row.ingredients_analysis_tags ?? null,
+            labels_tags: row.labels_tags ?? null,
+            off_quality_fetched_at: row.off_quality_fetched_at ?? null,
+        }),
         createdBy:
             typeof row.created_by === "string" && row.created_by
                 ? row.created_by
@@ -2803,9 +4089,11 @@ export function foodToRow(row: Food) {
         fat_g: row.fatG,
         fiber_g: row.fiberG,
         sugar_g: row.sugarG,
+        saturated_fat_g: row.saturatedFatG,
         alcohol_g: row.alcoholG,
         caffeine_mg: row.caffeineMg,
         nutrition_source: row.nutritionSource,
+        off_nutrient_levels: row.offNutrientLevels,
         allergens: row.allergens,
         off_source_id: row.offSourceId,
         generic_food_id: row.genericFoodId,
@@ -2813,9 +4101,105 @@ export function foodToRow(row: Food) {
         usual_store_id: row.usualStoreId,
         usual_amount: row.usualAmount?.amount ?? null,
         usual_unit: row.usualAmount?.unit ?? null,
+        ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,
         created_at: row.createdAt,
         updated_at: row.updatedAt,
     };
+}
+
+// "Did you mean" at web entry: the view model for the question and the
+// alias a chosen candidate can remember (CLN-5).
+
+export type DidYouMeanView = {
+    name: string;
+    heading: string;
+    candidates: { foodId: string; label: string }[];
+    aliasLabel: string;
+    newFoodLabel: string;
+    hiddenFields: Record<string, string>;
+};
+
+const HIDDEN_OMIT = new Set([
+    "food_id",
+    "new_food",
+    "remember_alias",
+    "confirm_allergen",
+]);
+
+function candidateLabel(name: string, brand: string | null): string {
+    return brand ? `${brand} · ${name}` : name;
+}
+
+export function didYouMeanView(
+    entry: SimilarFoodsEntry,
+    fields: Record<string, string>,
+): DidYouMeanView {
+    const hiddenFields: Record<string, string> = {};
+    for (const [key, value] of Object.entries(fields)) {
+        if (HIDDEN_OMIT.has(key) || value === "") continue;
+        hiddenFields[key] = value;
+    }
+    hiddenFields.alias_name = entry.name;
+
+    const candidates = entry.candidates
+        .slice(0, SIMILAR_FOODS_LIMIT)
+        .map((row) => ({
+            foodId: row.food.id,
+            label: candidateLabel(row.food.name, row.food.brand),
+        }));
+
+    const heading =
+        candidates.length === 1
+            ? `Did you mean ${candidates[0]!.label}?`
+            : "Did you mean one of these?";
+
+    const aliasLabel =
+        candidates.length === 1
+            ? `Remember ${entry.name} as another name for ${candidates[0]!.label}`
+            : `Remember ${entry.name} as another name for the food you pick`;
+
+    const newFoodLabel = `Add ${entry.name} as a new food`;
+
+    return {
+        name: entry.name,
+        heading,
+        candidates,
+        aliasLabel,
+        newFoodLabel,
+        hiddenFields,
+    };
+}
+
+export type RememberAliasResult = "set" | "same" | "taken" | "skipped";
+
+export async function rememberAliasForChoice(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    aliasName: string,
+): Promise<RememberAliasResult> {
+    const trimmed = aliasName.trim();
+    if (!trimmed) return "skipped";
+    const alias = normalizeFoodName(trimmed);
+    if (!alias) return "skipped";
+
+    let food;
+    try {
+        food = await findFoodById(store, householdId, foodId);
+    } catch {
+        return "skipped";
+    }
+    if (alias === food.normalizedName) return "same";
+
+    const taken = await store.getAliasFoodId(householdId, alias);
+    if (taken && taken !== foodId) {
+        const owner = await store.getFood(householdId, taken);
+        if (owner && !owner.archivedAt) return "taken";
+    }
+    if (taken === foodId) return "same";
+
+    await store.setAlias(householdId, alias, foodId);
+    return "set";
 }

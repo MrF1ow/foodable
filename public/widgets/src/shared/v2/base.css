@@ -1,0 +1,145 @@
+/* v2 widget shell and type — one compact card per widget, as the FigCraft
+ * "Chat widgets" page draws it: surface/panel fill, a 1px line stroke,
+ * radius/lg, 16px padding and a 14px gap between sections. Header title 15,
+ * secondary 12, small labels 11, system font only.
+ *
+ * Include after shared/v2/tokens.css and before shared/v2/components.css.
+ * Uses only v2 tokens; never include the v1 shared/tokens.css beside it. */
+
+/* The v1 scripts a v2 widget still includes (shared/bridge.js for the chat
+ * footer, shared/macros.js for MACROS colours and macroBits) name v1 custom
+ * properties. Each one maps to its v2 token here, so those scripts paint in
+ * the Theme palette without a single edit and v1 widgets stay byte-identical. */
+:root {
+    --protein: var(--macro-protein);
+    --carbs: var(--macro-carbs);
+    --fat: var(--macro-fat);
+    --calories: var(--macro-calories);
+    --water: var(--nutrient-water);
+    --fiber: var(--nutrient-fiber);
+    --sugar: var(--nutrient-sugar);
+    --caffeine: var(--nutrient-caffeine);
+    --alcohol: var(--nutrient-alcohol);
+    --over: var(--status-over);
+    --panel-border: var(--line);
+    --text-dim: var(--text-tertiary);
+}
+
+* {
+    box-sizing: border-box;
+}
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+/* Transparent so the host's chat surface shows around the card; the
+ * color-scheme the tokens set picks the canvas when there is no host. */
+body {
+    color: var(--text-primary);
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1.25;
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+}
+button {
+    font: inherit;
+    color: inherit;
+}
+
+.w {
+    padding: 4px;
+}
+
+.card {
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+/* Header line: title left, meta (or a range toggle) right. */
+.hd {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 18px;
+}
+.hd-title {
+    margin: 0;
+    font-size: 15px;
+    line-height: 18px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.hd-meta {
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--text-secondary);
+}
+.hd > .seg {
+    margin-left: auto;
+}
+
+/* Group label: 11px caps, tracked, tertiary, with an optional count. */
+.lbl {
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    line-height: 13px;
+    font-weight: 600;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+.lbl-n {
+    margin-left: auto;
+    font-weight: 400;
+    letter-spacing: 0;
+}
+
+.rule {
+    height: 1px;
+    background: var(--line);
+    border: 0;
+    margin: 0;
+}
+
+/* Small print under a card's content ("+ 6 more…", "Tick items off…"). */
+.note {
+    margin: 0;
+    font-size: 11px;
+    line-height: 13px;
+    color: var(--text-tertiary);
+}
+
+.t-2 {
+    color: var(--text-secondary);
+}
+.t-3 {
+    color: var(--text-tertiary);
+}
+
+/* The bridge's "could not connect" and the loading line. */
+.empty {
+    padding: 20px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.empty .big {
+    font-size: 20px;
+    margin-bottom: 6px;
+}

@@ -27,6 +27,7 @@ const EXPECTED_USER_FKS: {
     { table: "meal_items", column: "user_id", deltype: "c" },
     { table: "member_allergens", column: "user_id", deltype: "c" },
     { table: "member_dislikes", column: "user_id", deltype: "c" },
+    { table: "nutrition_goal_days", column: "user_id", deltype: "c" },
     { table: "nutrition_goals", column: "user_id", deltype: "c" },
     { table: "person_rules", column: "user_id", deltype: "c" },
     { table: "profiles", column: "user_id", deltype: "c" },
@@ -35,8 +36,14 @@ const EXPECTED_USER_FKS: {
     { table: "foods", column: "created_by", deltype: "n" },
     { table: "household_mcp_tokens", column: "issued_by", deltype: "n" },
     { table: "notice_dismissals", column: "dismissed_by", deltype: "n" },
+    { table: "household_invites", column: "created_by", deltype: "n" },
+    { table: "household_invites", column: "used_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
+    { table: "flag_assignments", column: "user_id", deltype: "c" },
+    { table: "flag_beta_members", column: "user_id", deltype: "c" },
+    { table: "flag_beta_events", column: "user_id", deltype: "c" },
+    { table: "flag_beta_events", column: "actor", deltype: "n" },
     { table: "auth_codes", column: "user_id", deltype: "a" },
     { table: "meals", column: "user_id", deltype: "a" },
     { table: "oauth_tokens", column: "user_id", deltype: "a" },
@@ -76,6 +83,7 @@ const CASCADE_TABLES = [
     "meal_items",
     "member_allergens",
     "member_dislikes",
+    "nutrition_goal_days",
     "nutrition_goals",
     "person_rules",
     "profiles",
@@ -103,7 +111,7 @@ async function seedCascadeAndSetNullRows(
 ): Promise<{ foodId: string }> {
     const otherUserId = crypto.randomUUID();
     await sql`
-        insert into auth.users (id, email)
+        insert into public.users (id, email)
         values (${otherUserId}, ${`other-${otherUserId}@foodable.test`})
     `;
     await upsertProfile(userId, { timezone: "UTC" });
@@ -118,6 +126,10 @@ async function seedCascadeAndSetNullRows(
     await sql`
         insert into nutrition_goals (user_id, daily_calories)
         values (${userId}, ${1800})
+    `;
+    await sql`
+        insert into nutrition_goal_days (household_id, user_id, date, daily_calories)
+        values (${householdId}, ${userId}, ${"2026-11-08"}, ${2200})
     `;
     await sql`
         insert into person_rules (household_id, user_id, body)
@@ -226,43 +238,20 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
         expect(authRefs).toHaveLength(0);
     });
 
-    test("sync trigger mirrors auth.users into public.users", async () => {
+    test("sync trigger and mirror function are gone", async () => {
         const { sql } = getCtx();
-        const id = crypto.randomUUID();
-        await sql`
-            insert into auth.users (id, email, encrypted_password, created_at)
-            values (
-                ${id},
-                ${"sync@example.com"},
-                ${"$2a$10$5pc/WMgCYJtPxZ3BH1Ccz.jWAQFEavBIGuDkytwIuSpPn9WqjSJSK"},
-                ${"2020-01-01T00:00:00.000Z"}
-            )
+        const triggers = await sql`
+            select 1
+            from pg_trigger
+            where tgname = 'sync_auth_users_to_public_users'
         `;
-        const [row] = await sql`
-            select email, password_hash, created_at
-            from public.users
-            where id = ${id}
+        expect(triggers).toHaveLength(0);
+        const [fn] = await sql`
+            select to_regprocedure(
+                'public.sync_auth_user_to_public_users()'
+            ) as fn
         `;
-        expect(row.email).toBe("sync@example.com");
-        expect(row.password_hash).toBeTruthy();
-        await sql`
-            update auth.users
-            set email = ${"sync2@example.com"},
-                encrypted_password = ${"new-hash"}
-            where id = ${id}
-        `;
-        const [updated] = await sql`
-            select email, password_hash
-            from public.users
-            where id = ${id}
-        `;
-        expect(updated.email).toBe("sync2@example.com");
-        expect(updated.password_hash).toBe("new-hash");
-        await sql`delete from auth.users where id = ${id}`;
-        const [gone] = await sql`
-            select id from public.users where id = ${id}
-        `;
-        expect(gone).toBeUndefined();
+        expect(fn.fn).toBeNull();
     });
 
     test("cascade and set-null on public.users delete", async () => {
@@ -407,7 +396,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             },
         ]) {
             await sql`
-                insert into auth.users (id, email, created_at)
+                insert into public.users (id, email, created_at)
                 values (${row.id}, ${row.email}, ${row.created_at})
             `;
         }
@@ -464,7 +453,7 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             },
         ]) {
             await sql`
-                insert into auth.users (id, email, created_at)
+                insert into public.users (id, email, created_at)
                 values (${row.id}, ${row.email}, ${row.created_at})
             `;
         }
@@ -539,14 +528,12 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
     });
 
     test("resolveApproveUser first user and closed household", async () => {
-        const messages = {
-            invalidCredentials: "Wrong password.",
-            signInUnavailable: "Try again.",
-        };
+        const { LOGIN_ERRORS: messages } = await import("../copy/login.js");
         const first = await resolveApproveUser({
             email: "first@example.com",
             password: "secret123456",
             authUserCount,
+            householdExists: async () => false,
             signInUser,
             signUpUser,
             messages,
@@ -557,11 +544,12 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
                 email: "first@example.com",
                 password: "wrong-pass",
                 authUserCount,
+                householdExists: async () => false,
                 signInUser,
                 signUpUser,
                 messages,
             }),
-        ).rejects.toThrow("Wrong password.");
+        ).rejects.toThrow(messages.invalidCredentials);
         const countBefore = await authUserCount();
         expect(countBefore).toBe(1);
     });

@@ -16,6 +16,7 @@ export function createTtlCache<T>(
     ttlMs: number,
     fetcher: () => Promise<T>,
 ): () => Promise<TtlCacheResult<T>> {
+    // Per instance by design: one entry and in-flight refresh per factory; used inside each process (e.g. flag pins).
     let entry: Entry<T> | null = null;
     // Coalesces concurrent callers arriving while a refresh is already in
     // flight onto the SAME fetcher() call, rather than each starting their

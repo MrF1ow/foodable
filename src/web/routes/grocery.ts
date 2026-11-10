@@ -38,33 +38,15 @@ import {
 } from "../../domain/foods.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
+import {
+    groceryLineRetryFields,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 
 export const groceryRoutes = new Hono();
-
-function groceryAllergenRetryFields(
-    body: Record<string, File | string>,
-    storeId: string,
-): Record<string, string> {
-    const fields: Record<string, string> = {
-        kind: formText(body, "kind") || "food",
-        store_id: storeId,
-    };
-    const sectionId = formText(body, "section_id");
-    if (sectionId) fields.section_id = sectionId;
-    const foodId = formText(body, "food_id");
-    if (foodId) fields.food_id = foodId;
-    const foodName = formText(body, "food_name");
-    if (foodName) fields.food_name = foodName;
-    const barcode = formText(body, "barcode");
-    if (barcode) fields.barcode = barcode;
-    const amount = formText(body, "qty_amount");
-    if (amount) fields.qty_amount = amount;
-    const unit = formText(body, "qty_unit");
-    if (unit) fields.qty_unit = unit;
-    const name = formText(body, "name");
-    if (name) fields.name = name;
-    return fields;
-}
 
 async function groceryFormError(
     userId: string,
@@ -88,14 +70,14 @@ async function groceryFormError(
     return { html: page.html, status: 400 as const };
 }
 
-groceryRoutes.get("/grocery", requireSiteUser, async (c) => {
+groceryRoutes.get("/kitchen/groceries", requireSiteUser, async (c) => {
     const page = await renderGroceryListPage(c.get("userId"), {
         linkProductId: c.req.query("link_product"),
     });
     return c.html(page.html, page.status);
 });
 
-groceryRoutes.post("/grocery/stores", requireManager, async (c) => {
+groceryRoutes.post("/kitchen/groceries/stores", requireManager, async (c) => {
     const userId = c.get("userId");
     const owner = siteMember(c);
     const body = await c.req.parseBody();
@@ -109,10 +91,10 @@ groceryRoutes.post("/grocery/stores", requireManager, async (c) => {
         const page = await groceryFormError(userId, err, "grocery-add-store");
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/grocery", "grocery.store.added");
+    return redirectWithToast(c, "/kitchen/groceries", "grocery.store.added");
 });
 
-groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
+groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
@@ -154,13 +136,16 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                 );
                 catalogAllergens = catalog.get(foodId)?.allergens ?? null;
             } else if (formText(body, "barcode")) {
-                previewName =
-                    (
-                        await fridgeBarcodeLookup(
-                            normalizeBarcode(formText(body, "barcode")) ??
-                                formText(body, "barcode"),
-                        )
-                    )?.name ?? previewName;
+                try {
+                    const hit = await fridgeBarcodeLookup(
+                        normalizeBarcode(formText(body, "barcode")) ??
+                            formText(body, "barcode"),
+                        member.householdId,
+                    );
+                    previewName = hit?.name ?? previewName;
+                } catch {
+                    // OFF unreachable; keep the typed name for allergen preview.
+                }
             }
             const notices = allergenNotices(
                 { kind: "grocery_line", id: "" },
@@ -174,7 +159,7 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     openModalId: `grocery-add-food-${storeId}`,
                     allergenRetry: {
                         storeId,
-                        fields: groceryAllergenRetryFields(body, storeId),
+                        fields: groceryLineRetryFields(body, storeId),
                     },
                 });
                 return c.html(page.html, 400);
@@ -188,12 +173,19 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     amount,
                     unit: formText(body, "qty_unit"),
                 });
+                await rememberAliasIfRequested(
+                    foods,
+                    member.householdId,
+                    body,
+                    foodId,
+                );
             } else if (formText(body, "barcode")) {
                 const { food, created } = await findOrCreateFoodByBarcodeResult(
                     foods,
                     member.householdId,
                     formText(body, "barcode"),
-                    fridgeBarcodeLookup,
+                    (barcode) =>
+                        fridgeBarcodeLookup(barcode, member.householdId),
                 );
                 await addGroceryFoodById(grocery, settings, foods, {
                     householdId: member.householdId,
@@ -208,7 +200,7 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     const prompt = linkProductPromptPath(
                         food,
                         catalog,
-                        "/grocery",
+                        "/kitchen/groceries",
                     );
                     if (prompt) {
                         // toast: none (link-product prompt on destination)
@@ -223,10 +215,27 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
                     name: formText(body, "food_name"),
                     amount,
                     unit: formText(body, "qty_unit"),
+                    onSimilar: manualOnSimilar(body),
                 });
             }
         }
     } catch (err) {
+        if (isSimilarFoodsError(err)) {
+            const modalId = `grocery-add-food-${storeId}`;
+            const didYouMean = buildDidYouMeanModal(
+                err,
+                groceryLineRetryFields(body, storeId),
+                modalId,
+                "/kitchen/groceries/lines",
+            );
+            if (didYouMean) {
+                const page = await renderGroceryListPage(userId, {
+                    openModalId: modalId,
+                    didYouMean,
+                });
+                return c.html(page.html, 409);
+            }
+        }
         const page = await groceryFormError(
             userId,
             err,
@@ -234,80 +243,104 @@ groceryRoutes.post("/grocery/lines", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/grocery", "grocery.line.added");
+    return redirectWithToast(c, "/kitchen/groceries", "grocery.line.added");
 });
 
-groceryRoutes.post("/grocery/lines/:id/check", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    const checked = formText(body, "checked") !== "0";
-    try {
-        const line = await checkGroceryLine(
-            liveGroceryStore(),
-            member.householdId,
-            c.req.param("id"),
-            checked,
-        );
-        if (!line) {
-            // toast: none (no-op)
-            return c.redirect("/grocery", 303);
+groceryRoutes.post(
+    "/kitchen/groceries/lines/:id/check",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const checked = formText(body, "checked") !== "0";
+        try {
+            const line = await checkGroceryLine(
+                liveGroceryStore(),
+                member.householdId,
+                c.req.param("id"),
+                checked,
+            );
+            if (!line) {
+                // toast: none (no-op)
+                return c.redirect("/kitchen/groceries", 303);
+            }
+        } catch (err) {
+            const page = await groceryFormError(userId, err);
+            return c.html(page.html, page.status);
         }
-    } catch (err) {
-        const page = await groceryFormError(userId, err);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/grocery", groceryLineCheckToastKey(checked));
-});
-
-groceryRoutes.post("/grocery/clear-checked", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    try {
-        await clearCheckedLines(liveGroceryStore(), member.householdId);
-    } catch (err) {
-        const page = await groceryFormError(
-            userId,
-            err,
-            "grocery-clear-checked",
+        return redirectWithToast(
+            c,
+            "/kitchen/groceries",
+            groceryLineCheckToastKey(checked),
         );
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/grocery", "grocery.checked.cleared");
-});
+    },
+);
 
-groceryRoutes.post("/grocery/lines/:id/put-away", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        const productRaw = formText(body, "product_food_id");
-        const productFoodIds =
-            productRaw.trim() === ""
-                ? undefined
-                : { [c.req.param("id")]: productRaw.trim() };
-        const lineId = c.req.param("id");
-        const putAwayAmount = formOptionalNumber(body, "put_away_amount");
-        await putAwayGroceryLines(
-            liveGroceryStore(),
-            liveFridgeStore(),
-            liveStockStore(),
-            liveFoodsStore(),
-            {
-                householdId: member.householdId,
-                lineIds: [lineId],
-                locationId: formText(body, "location_id") || undefined,
-                actorUserId: userId,
-                productFoodIds,
-                amountOverrides:
-                    putAwayAmount != null
-                        ? { [lineId]: { amount: putAwayAmount } }
-                        : undefined,
-            },
+groceryRoutes.post(
+    "/kitchen/groceries/clear-checked",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        try {
+            await clearCheckedLines(liveGroceryStore(), member.householdId);
+        } catch (err) {
+            const page = await groceryFormError(
+                userId,
+                err,
+                "grocery-clear-checked",
+            );
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/kitchen/groceries",
+            "grocery.checked.cleared",
         );
-    } catch (err) {
-        const page = await groceryFormError(userId, err);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/grocery", "grocery.line.put-away");
-});
+    },
+);
+
+groceryRoutes.post(
+    "/kitchen/groceries/lines/:id/put-away",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        try {
+            const productRaw = formText(body, "product_food_id");
+            const productFoodIds =
+                productRaw.trim() === ""
+                    ? undefined
+                    : { [c.req.param("id")]: productRaw.trim() };
+            const lineId = c.req.param("id");
+            const putAwayAmount = formOptionalNumber(body, "put_away_amount");
+            await putAwayGroceryLines(
+                liveGroceryStore(),
+                liveFridgeStore(),
+                liveStockStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    lineIds: [lineId],
+                    locationId: formText(body, "location_id") || undefined,
+                    actorUserId: userId,
+                    productFoodIds,
+                    amountOverrides:
+                        putAwayAmount != null
+                            ? { [lineId]: { amount: putAwayAmount } }
+                            : undefined,
+                },
+            );
+        } catch (err) {
+            const page = await groceryFormError(userId, err);
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            "/kitchen/groceries",
+            "grocery.line.put-away",
+        );
+    },
+);

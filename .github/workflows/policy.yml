@@ -1,0 +1,102 @@
+name: Policy
+
+# The repo's own rules, judged by main. These jobs run from a checkout of the
+# base branch and read the pull request through the API; they never check out
+# or run the PR's code, which matters because `pull_request_target` runs with
+# a token. So a PR that edits the scripts below (see POLICY_PATHS in
+# scripts/conventions/conventions.ts) is still judged by main's copy, and its
+# edit takes effect once it merges.
+#
+# Only `policy` is a required check. It waits for the other two, so a skipped
+# or failed dependency fails it instead of counting as passing.
+
+on:
+    # zizmor: ignore[dangerous-triggers] — checks out the base branch only; does not run pull request code
+    pull_request_target:
+        types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+    contents: read
+    pull-requests: read
+
+jobs:
+    skill-drift:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout base
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: Skills stay in step with the files they watch
+              env:
+                  REPO: ${{ github.repository }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+              run: bun run scripts/conventions/skill-drift.ts
+
+    agent-context-budget:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout base
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: CLAUDE.md and skills stay within the baseline
+              env:
+                  REPO: ${{ github.repository }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+              run: bun run scripts/conventions/context-budget.ts
+
+    policy:
+        needs: [skill-drift, agent-context-budget]
+        # A skipped or failed dependency must fail this job: a required check
+        # that is skipped counts as passing.
+        if: always()
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout base
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
+
+            - name: PR conventions and migration safety
+              env:
+                  REPO: ${{ github.repository }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+              run: bun run scripts/conventions/policy.ts
+
+            # Last, so the author sees convention findings even when drift or
+            # the budget failed.
+            - name: Require the other policy jobs
+              if: always()
+              env:
+                  SKILL_DRIFT: ${{ needs.skill-drift.result }}
+                  AGENT_CONTEXT_BUDGET: ${{ needs.agent-context-budget.result }}
+              run: |
+                  ok=true
+                  for pair in "skill-drift=$SKILL_DRIFT" "agent-context-budget=$AGENT_CONTEXT_BUDGET"; do
+                    if [ "${pair#*=}" != "success" ]; then
+                      echo "::error::${pair%%=*} finished as '${pair#*=}', not 'success'"
+                      ok=false
+                    fi
+                  done
+                  [ "$ok" = true ]

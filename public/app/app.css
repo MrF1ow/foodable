@@ -1,9 +1,8 @@
 /* Household web app stylesheet, served at /app.css.
  *
- * Assembled by getAppCss() in src/widgets.ts from the same shared partials the
- * in-chat widgets inline, so the app and the widgets share one set of tokens
- * and components (spec: public/widgets/STYLE_GUIDE.md). Anything both surfaces
- * use belongs in a shared/ partial. Only app layout lives below.
+ * Assembled by getAppCss() in src/widgets.ts. Design tokens come from the
+ * generated shared/tokens.css partial; base, form, table, and seg live in
+ * public/app/ as app-owned copies that may drift from the chat widgets.
  *
  * App markup is plain HTML inside <main class="native">: form.css styles its
  * controls through zero-specificity :where(.native …) hooks, and the rules
@@ -16,16 +15,16 @@
 
 /*@include shared/tokens.css@*/
 
-/*@include shared/base.css@*/
+/*@include ../../app/base.css@*/
 
-/*@include shared/form.css@*/
+/*@include ../../app/form.css@*/
 
-/*@include shared/table.css@*/
+/*@include ../../app/table.css@*/
 
-/*@include shared/seg.css@*/
+/*@include ../../app/seg.css@*/
 
-/* App-only brand layer (palette, type) and motion primitives. After the shared
-   partials so they win; never included by a widget. */
+/* App-only brand layer (palette, type) and motion primitives. After the
+   component partials so they win; never included by a widget. */
 /*@include ../../app/brand.css@*/
 /*@include ../../app/motion.css@*/
 
@@ -216,6 +215,14 @@ html:has(dialog.modal[open]) {
 }
 .notice-list :is(.notice-action, .notice-dismiss-form) > button {
     width: auto;
+}
+/* A grocery line's notice reads as quiet text under its meta, not a list. */
+ul.notice-list.grocery-line-notices {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    color: var(--text-dim);
+    font-size: var(--fs-13-5);
 }
 .tab-dot {
     position: absolute;
@@ -1917,4 +1924,34 @@ html.fx .toast-item--out {
     :where(.native input[type="checkbox"][role="switch"])::after {
         transition: none;
     }
+}
+
+/* "Did you mean" (web add forms): the question sits above the picker as its
+   own card, so it does not read as part of the picker below it. */
+.did-you-mean-block {
+    padding: 11px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--r-10);
+    background: var(--panel);
+}
+.did-you-mean-heading {
+    margin: 0;
+    font-weight: 600;
+}
+.did-you-mean-form {
+    display: grid;
+    gap: var(--gap-field);
+    justify-items: start;
+}
+.did-you-mean-candidates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.did-you-mean-remember {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-13-5);
+    color: var(--text-dim);
 }

@@ -11,9 +11,9 @@ import {
 } from "./nutrition.js";
 import { upsertProfile } from "./profiles.js";
 import { describeDb } from "./testing/pg.js";
-import { seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedHousehold } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { run, setSqlForTests } from "./sql.js";
+import { setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -55,7 +55,7 @@ async function seedDeleteAllUserRows(
     userId: string,
     householdId: string,
 ): Promise<void> {
-    await upsertProfile(userId, { timezone: "UTC" });
+    await asUser(userId, () => upsertProfile(userId, { timezone: "UTC" }));
     await sql`
         insert into nutrition_goals (user_id, daily_calories)
         values (${userId}, ${1800})
@@ -166,14 +166,16 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
         ({ userId, householdId } = await seedHousehold(sql));
         otherUserId = crypto.randomUUID();
         await sql`
-            insert into auth.users (id, email)
+            insert into public.users (id, email)
             values (${otherUserId}, ${`keep-${otherUserId}@foodable.test`})
         `;
-        await insertMeal(otherUserId, {
-            description: "Keep",
-            meal_type: "snack",
-            logged_at: "2024-01-01T12:00:00.000Z",
-        });
+        await asUser(otherUserId, () =>
+            insertMeal(otherUserId, {
+                description: "Keep",
+                meal_type: "snack",
+                logged_at: "2024-01-01T12:00:00.000Z",
+            }),
+        );
     });
 
     afterEach(() => {
@@ -353,7 +355,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
         await seedDeleteAllUserRows(sql, otherUserId, householdId);
         const beforeTarget = await countDeleteAllTables(sql, userId);
         const beforeOther = await countDeleteAllTables(sql, otherUserId);
-        await run(async (tx) => {
+        await sql.begin(async (tx) => {
             await tx`
                 create or replace function public._foodable_break_meals_delete()
                 returns trigger
@@ -382,7 +384,7 @@ describeDb(pgAvailable !== null, "nutrition bulk db", (getCtx) => {
         expect(await countDeleteAllTables(sql, otherUserId)).toEqual(
             beforeOther,
         );
-        await run(async (tx) => {
+        await sql.begin(async (tx) => {
             await tx`drop trigger if exists _foodable_break_meals on meals`;
             await tx`drop function if exists public._foodable_break_meals_delete()`;
         });

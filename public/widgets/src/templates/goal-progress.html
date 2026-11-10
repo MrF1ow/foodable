@@ -87,14 +87,35 @@
         <script>
             "use strict";
 
-            /*@i18n@*/
-            /*@include shared/i18n.js@*/
-
             /*@include shared/date.js@*/
 
             /*@include shared/bridge.js@*/
 
             /*@include shared/util.js@*/
+
+            const T = {
+                goalProgress: {
+                    title: "Goal progress",
+                    empty: "No goal progress to show.",
+                    nothingLoggedFor: "Nothing logged yet for {date}.",
+                    thisDay: "this day",
+                    mealsCount: { one: "{n} meal", other: "{n} meals" },
+                    waterCount: { one: "{n} water", other: "{n} waters" },
+                    weightLabel: "Weight",
+                    weightNoneNoTarget:
+                        "No weight logged yet. Log one with log_weight to track progress.",
+                    weightNoneWithTarget:
+                        "No weight logged yet. Log one with log_weight to track progress toward your {target} target.",
+                    weightNoGoal:
+                        "Weight {reading} — no goal set. Set one with set_nutrition_goals to see progress here.",
+                    atTarget: "at target",
+                    toLose: "{amount} to lose",
+                    toGain: "{amount} to gain",
+                    lastLogged: "last logged {date}",
+                    weightAria:
+                        "Weight {current}, target {target}, {state}{metaSuffix}",
+                },
+            };
 
             // ---- Sample data so the file renders on its own (browser preview) ----
             const SAMPLE = {
@@ -316,7 +337,6 @@
 
             function render(data) {
                 const root = document.getElementById("root");
-                setLocaleFrom(data, __widgetApi);
                 if (!data || typeof data !== "object") {
                     root.innerHTML = `
             <div class="empty">
@@ -352,8 +372,10 @@
                 // it actually is the viewer's today (#114); otherwise it names
                 // the day, matching the date already printed in `meta` below.
                 const calLabel = isToday(data.date)
-                    ? T.macros.caloriesToday
-                    : tpl(T.macros.caloriesOn, { date: shortDate(data.date) });
+                    ? MACRO_COPY.caloriesToday
+                    : tpl(MACRO_COPY.caloriesOn, {
+                          date: shortDate(data.date),
+                      });
 
                 const panel = macroPanel(
                     totals,

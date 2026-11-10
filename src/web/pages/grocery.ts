@@ -31,9 +31,14 @@ import {
     type ModalFill,
     field,
 } from "../components/ui.js";
-import { noticeList } from "../components/notices.js";
+import { noticeInlineLink, noticeList } from "../components/notices.js";
+import {
+    didYouMeanModalBlock,
+    type DidYouMeanModal,
+} from "../components/did-you-mean.js";
 
 export type GroceryLineView = GroceryLine & {
+    notices?: Notice[];
     alreadyHave: AlreadyHaveTag | null;
     lastLocationId?: string | null;
     usualProductName?: string | null;
@@ -64,7 +69,9 @@ export type GroceryPageView = {
     canManage?: boolean;
     error?: string;
     allergenNotices?: Notice[];
+    foodDuplicateNotices?: ReadonlyMap<string, Notice[]>;
     allergenRetry?: GroceryAllergenRetry;
+    didYouMean?: DidYouMeanModal;
     unknownAllergen?: boolean;
     openModalId?: string;
     linkProductPrompt?: LinkProductPromptView | null;
@@ -116,15 +123,25 @@ function grocerySectionFieldHtml(store: GroceryStoreView): string {
 }
 
 /** Section `<select>` for one store. Rendered in that store's template. */
-function sectionOptionsHtml(store: GroceryStoreView): string {
+function sectionOptionsHtml(
+    store: GroceryStoreView,
+    selectedId?: string,
+): string {
     const other = store.sections.find((section) => section.isOther);
+    const visible = store.sections.filter(
+        (section) => !section.hidden || section.isOther,
+    );
+    const picked = visible.some((section) => section.id === selectedId)
+        ? selectedId
+        : undefined;
     const inferAttr = other
         ? ` data-infer-section="${escapeHtml(other.id)}"`
         : "";
-    const options = store.sections
-        .filter((section) => !section.hidden || section.isOther)
+    const options = visible
         .map((section) => {
-            const sel = section.isOther ? " selected" : "";
+            const sel = (picked ? section.id === picked : section.isOther)
+                ? " selected"
+                : "";
             return `<option value="${escapeHtml(section.id)}"${sel}>${escapeHtml(section.name)}</option>`;
         })
         .join("");
@@ -143,15 +160,18 @@ function sectionTemplate(store: GroceryStoreView): string {
     return `<template id="${escapeHtml(sectionTemplateId(store.id))}">${sectionOptionsHtml(store)}</template>`;
 }
 
-function sectionSlot(store: GroceryStoreView | null): string {
+function sectionSlot(
+    store: GroceryStoreView | null,
+    selectedId?: string,
+): string {
     if (!store) return `<div data-fill-slot="sections"></div>`;
     const id = sectionTemplateId(store.id);
-    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store)}</div>`;
+    return `<div data-fill-slot="sections" data-filled-template="${escapeHtml(id)}">${sectionOptionsHtml(store, selectedId)}</div>`;
 }
 
 function storeFill(store: GroceryStoreView): ModalFill {
     return {
-        action: "/grocery/lines",
+        action: "/kitchen/groceries/lines",
         fields: {
             store_id: store.id,
             kind: "food",
@@ -194,7 +214,7 @@ function allergenModalBlock(
         )
         .join("\n");
     return `<div data-fill-transient>${noticeList(view.allergenNotices, { className: "allergen-warning" })}
-<form class="grocery-allergen-override" method="post" action="/grocery/lines">
+<form class="grocery-allergen-override" method="post" action="/kitchen/groceries/lines">
 ${hidden}
 <input type="hidden" name="confirm_allergen" value="1" />
 <button type="submit" class="btn-sm">Add anyway</button>
@@ -214,6 +234,7 @@ function alreadyHaveHtml(tag: AlreadyHaveTag | null): string {
 function lineRow(
     line: GroceryLineView,
     locations: { id: string; name: string }[],
+    view: GroceryPageView,
 ): string {
     let putAwayHtml = "";
     if (line.checked && locations.length > 0) {
@@ -245,7 +266,7 @@ function lineRow(
 <input id="put-away-amt-${escapeHtml(line.id)}" name="put_away_amount" type="number" min="0" step="any" inputmode="decimal" value="1" required />
 <span class="muted grocery-put-away-unit">${escapeHtml(quantityUnitOptionLabel(line.quantity.unit))}</span>`
             : "";
-        putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/grocery/lines/${escapeHtml(line.id)}/put-away">
+        putAwayHtml = `<form class="grocery-put-away row-actions" method="post" action="/kitchen/groceries/lines/${escapeHtml(line.id)}/put-away">
 <label class="visually-hidden" for="put-away-loc-${escapeHtml(line.id)}">Location</label>
 <select id="put-away-loc-${escapeHtml(line.id)}" name="location_id">${options}</select>
 ${productSelect}
@@ -258,6 +279,20 @@ ${noteHint}
         line.usualPickerHref && line.foodId
             ? `<a class="btn-sm" href="${escapeHtml(line.usualPickerHref)}">Usual product</a>`
             : "";
+    const dupNotices = line.foodId
+        ? (view.foodDuplicateNotices?.get(line.foodId) ?? [])
+        : [];
+    const duplicateNoticeHtml =
+        dupNotices.length > 0 && line.foodId
+            ? dupNotices
+                  .map((n) =>
+                      noticeInlineLink(n, line.foodId!, {
+                          from: "/kitchen/groceries",
+                          foods: new Map(),
+                      }),
+                  )
+                  .join(" ")
+            : undefined;
     return renderGroceryLineRow({
         id: line.id,
         kind: line.kind,
@@ -268,12 +303,15 @@ ${noteHint}
         putAwayHtml,
         usualProductName: line.usualProductName,
         extraActionsHtml: usualAction,
+        duplicateNoticeHtml,
+        notices: line.notices,
     });
 }
 
 function storeSection(
     store: GroceryStoreView,
     locations: { id: string; name: string }[],
+    view: GroceryPageView,
 ): string {
     const rules = store.rules
         .map((rule) => `<li class="store-rule">${escapeHtml(rule.body)}</li>`)
@@ -282,7 +320,7 @@ function storeSection(
         .filter((section) => section.lines.length > 0)
         .map((section) => {
             const rows = section.lines
-                .map((line) => lineRow(line, locations))
+                .map((line) => lineRow(line, locations, view))
                 .join("");
             return `<section class="grocery-section psec" data-section-id="${escapeHtml(section.id)}" data-section-name="${escapeHtml(section.name)}">
 <h3>${escapeHtml(section.name)}</h3>
@@ -318,6 +356,16 @@ function sharedAddFoodModal(view: GroceryPageView): string {
     const store = reopenStore(view);
     const reopenId = store ? `${ADD_FOOD_PREFIX}${store.id}` : "";
     const open = store != null && modalOpen(view, reopenId);
+    // A re-render that replays the submitted fields (the allergen retry or
+    // "Did you mean") shows the section that was picked, so the select and
+    // the replay form agree; grocery.js keeps them in step from there.
+    const replayedSection = !open
+        ? undefined
+        : view.didYouMean?.modalId === reopenId
+          ? view.didYouMean.view.hiddenFields.section_id
+          : view.allergenRetry?.storeId === store?.id
+            ? view.allergenRetry?.fields.section_id
+            : undefined;
     return modal({
         id: GROCERY_ADD_FOOD_ID,
         title: "Add food",
@@ -325,10 +373,18 @@ function sharedAddFoodModal(view: GroceryPageView): string {
         submitDisabled: store == null,
         body: `${open ? modalFormError(view, reopenId) : ""}${
             store ? allergenModalBlock(view, store.id, reopenId) : ""
-        }${sectionSlot(store)}
+        }${
+            store
+                ? didYouMeanModalBlock(
+                      view.didYouMean,
+                      reopenId,
+                      view.openModalId,
+                  )
+                : ""
+        }${sectionSlot(store, replayedSection)}
 ${renderFoodPicker({
     id: GROCERY_FOOD_PICKER_ID,
-    action: store ? "/grocery/lines" : "",
+    action: store ? "/kitchen/groceries/lines" : "",
     method: "post",
     hiddenFields: { kind: "food", store_id: store?.id ?? "" },
     formExtras: store ? grocerySectionFieldHtml(store) : "",
@@ -354,11 +410,11 @@ export function renderGroceryPage(view: GroceryPageView): string {
     const empty =
         view.stores.length === 0
             ? `${emptyState("Add a grocery store under Household, then add a line.", "empty-grocery")}
-<p><a href="/household">Household</a></p>`
+<p><a href="/settings/household">Household</a></p>`
             : "";
     const locations = view.locations ?? [];
     const stores = view.stores
-        .map((store) => storeSection(store, locations))
+        .map((store) => storeSection(store, locations, view))
         .join("");
     const addFoodMatch = sharedDialogItem({
         openModalId: view.openModalId,
@@ -396,7 +452,7 @@ export function renderGroceryPage(view: GroceryPageView): string {
                 id: ADD_STORE_MODAL_ID,
                 title: "Add store",
                 openOnLoad: modalOpen(view, ADD_STORE_MODAL_ID),
-                body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/grocery/stores">
+                body: `${modalFormError(view, ADD_STORE_MODAL_ID)}<form class="grocery-add-store" method="post" action="/kitchen/groceries/stores">
 ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id="grocery_store_name" name="name" maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
@@ -410,7 +466,7 @@ ${field({ id: "grocery_store_name", label: "Grocery store", control: `<input id=
                 id: CLEAR_CHECKED_MODAL_ID,
                 title: "Clear checked",
                 message: "Remove every checked item from the list?",
-                action: "/grocery/clear-checked",
+                action: "/kitchen/groceries/clear-checked",
                 confirmLabel: "Clear checked",
                 formClass: "modal-confirm grocery-clear-checked",
                 openOnLoad: modalOpen(view, CLEAR_CHECKED_MODAL_ID),

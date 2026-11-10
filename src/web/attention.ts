@@ -1,11 +1,20 @@
+import { householdToday } from "../db/restock.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveRecipesStore } from "../db/recipes.js";
-import { needsAttentionCount, tabDotsFromNotices } from "../domain/notices.js";
+import {
+    needsAttentionCount,
+    tabDotsFromNotices,
+    type Notice,
+} from "../domain/notices.js";
 import { noticesFor, type NoticesForResult } from "../domain/notices-for.js";
-import type { AppTabId, ViewerChrome } from "./shell.js";
+import { buildFlagContext } from "../flags.js";
+import type { HouseholdMember } from "../household.js";
+import { getHouseholdConfig, listHouseholdMembers } from "../db/household.js";
+import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
+import type { AppTabId, ShellIdentity, ViewerChrome } from "./shell.js";
 import { resolveTheme } from "./shell.js";
 
 export type AttentionChrome = {
@@ -15,7 +24,19 @@ export type AttentionChrome = {
 
 export type AppChromeBase = ViewerChrome & {
     attention: AttentionChrome;
+    flags: ViewerFlags;
+    /** The new shell's sidebar and account chip. Only loaded when `ui-v2` is
+     *  on for the viewer, so a viewer on the old shell costs no extra query. */
+    identity?: ShellIdentity;
+    /** Open `food.possible_duplicate` notices (Household sub-nav badge). */
+    householdPossibleDuplicates?: number;
 };
+
+export function householdPossibleDuplicateCount(
+    notices: readonly Notice[],
+): number {
+    return notices.filter((n) => n.code === "food.possible_duplicate").length;
+}
 
 export function attentionFromNotices(
     result: NoticesForResult,
@@ -28,7 +49,13 @@ export function attentionFromNotices(
 
 export async function loadHouseholdNotices(
     householdId: string,
+    opts?: {
+        refCounts?: ReadonlyMap<string, number>;
+        /** The household date the caller already looked up, so one request reads one date. */
+        today?: string;
+    },
 ): Promise<NoticesForResult> {
+    const today = opts?.today ?? (await householdToday(householdId));
     return noticesFor(
         {
             foods: liveFoodsStore(),
@@ -38,18 +65,58 @@ export async function loadHouseholdNotices(
             grocery: liveGroceryStore(),
         },
         householdId,
+        { ...opts, today },
     );
 }
 
 export async function viewerChromeWithAttention(
     profile: { theme?: string | null } | null,
-    householdId: string,
+    viewer: HouseholdMember,
     prefetched?: NoticesForResult,
+    /** Seam for tests: how the new shell's household identity is loaded. */
+    loadIdentity: (
+        viewer: HouseholdMember,
+    ) => Promise<ShellIdentity> = loadShellIdentity,
 ): Promise<AppChromeBase> {
     const noticeResult =
-        prefetched ?? (await loadHouseholdNotices(householdId));
+        prefetched ?? (await loadHouseholdNotices(viewer.householdId));
+    const flags = await viewerFlagsFor(viewer);
+    const identity = flags.uiV2 ? await loadIdentity(viewer) : undefined;
     return {
         theme: resolveTheme(profile?.theme),
         attention: attentionFromNotices(noticeResult),
+        householdPossibleDuplicates: householdPossibleDuplicateCount(
+            noticeResult.notices,
+        ),
+        flags,
+        ...(identity ? { identity } : {}),
+    };
+}
+
+/** The viewer's flags. Pure (no query), so the Settings routes, which do not
+ *  load notices, can ask for them without touching the database. */
+export function viewerFlagsFor(viewer: HouseholdMember): Promise<ViewerFlags> {
+    return loadViewerFlags(
+        buildFlagContext({
+            auth: { kind: "user", userId: viewer.userId },
+            member: viewer,
+        }),
+    );
+}
+
+/** Household name and member count for the new shell's sidebar. The viewer's
+ *  own name and role come from the membership the caller already holds. */
+export async function loadShellIdentity(
+    viewer: HouseholdMember,
+): Promise<ShellIdentity> {
+    const [config, members] = await Promise.all([
+        getHouseholdConfig(viewer.householdId),
+        listHouseholdMembers(viewer.householdId),
+    ]);
+    return {
+        viewerName: viewer.displayName,
+        viewerRole: viewer.role,
+        householdName: config.name,
+        memberCount: members.length,
     };
 }

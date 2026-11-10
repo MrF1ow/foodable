@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import { newFood } from "../../domain/foods.js";
 import {
@@ -10,14 +11,18 @@ const HH = "hh-web";
 test("usual products list starts empty with an add action", () => {
     const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
     const html = renderUsualProductsListPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         rows: [],
         addable: [eggs],
     });
     expect(html).toContain("No usual products yet.");
     expect(html).not.toContain("Needs a usual product");
     expect(html).toContain("Add usual product");
-    expect(html).toContain('action="/household/usual-products"');
+    expect(html).toContain('action="/kitchen/usuals"');
     expect(html).toContain('name="q"');
     expect(html).toContain('type="search"');
     expect(html).not.toContain('name="food"');
@@ -34,7 +39,11 @@ test("usual products list shows foods with products", () => {
         genericFoodId: eggs.id,
     });
     const html = renderUsualProductsListPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         rows: [{ food: eggs, products: [kirkland], usual: kirkland }],
         addable: [],
     });
@@ -48,7 +57,11 @@ test("usual products list shows foods with products", () => {
 test("picker page includes search and manual product panels", () => {
     const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         food: eggs,
         products: [],
         usualProductId: null,
@@ -59,7 +72,7 @@ test("picker page includes search and manual product panels", () => {
     });
     expect(html).toContain("Add a product");
     expect(html).toContain("Add product by hand");
-    expect(html).toContain('action="/household/usual-products/');
+    expect(html).toContain('action="/kitchen/usuals/');
     expect(html).not.toContain('name="food_name"');
     expect(html).not.toContain('data-tab="manual"');
 });
@@ -73,14 +86,18 @@ test("picker explains the list and gives each product a Remove that submits its 
         genericFoodId: eggs.id,
     });
     const html = renderUsualProductsPickerPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         food: eggs,
         products: [kirkland],
         usualProductId: null,
         prefillStoreId: null,
         prefillAmount: null,
         stores: [],
-        from: "/grocery",
+        from: "/kitchen/groceries",
     } as never);
     expect(html).toContain("Products of Eggs");
     expect(html).toContain(
@@ -89,7 +106,7 @@ test("picker explains the list and gives each product a Remove that submits its 
     const formId = `remove-product-${kirkland.id}`;
     expect(html).toContain(`form="${formId}">Remove</button>`);
     expect(html).toContain(
-        `<form id="${formId}" method="post" action="/household/usual-products/${eggs.id}/products/${kirkland.id}/remove" hidden>`,
+        `<form id="${formId}" method="post" action="/kitchen/usuals/${eggs.id}/products/${kirkland.id}/remove" hidden>`,
     );
     // The remove form is not nested inside the Set usual form.
     const setUsual = html.indexOf("data-usual-buy-follow");

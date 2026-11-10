@@ -161,6 +161,57 @@ None.
 `;
 }
 
+type GhPr = { number: number; title: string; labels: { name: string }[] };
+
+// Loads the PRs named in the log. One `gh pr list` covers the PRs merged into
+// main; a PR merged into a stacked branch that later landed on main is not in
+// that list, so each one still missing is fetched on its own.
+export async function loadMergedPrs(
+    numbers: number[],
+    gh: (args: string[]) => Promise<string>,
+): Promise<MergedPr[]> {
+    const listed = JSON.parse(
+        await gh([
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--base",
+            "main",
+            "--limit",
+            String(Math.max(100, numbers.length * 2)),
+            "--json",
+            "number,title,labels",
+        ]),
+    ) as GhPr[];
+    const byNumber = new Map(listed.map((p) => [p.number, p]));
+    const prs: MergedPr[] = [];
+    for (const n of numbers) {
+        let p = byNumber.get(n);
+        if (!p) {
+            try {
+                p = JSON.parse(
+                    await gh([
+                        "pr",
+                        "view",
+                        String(n),
+                        "--json",
+                        "number,title,labels",
+                    ]),
+                ) as GhPr;
+            } catch {
+                throw new Error(`Could not load PR #${n} from GitHub`);
+            }
+        }
+        prs.push({
+            number: n,
+            title: p.title,
+            labels: p.labels.map((l) => l.name),
+        });
+    }
+    return prs;
+}
+
 async function run(cmd: string[], opts: { quiet?: boolean } = {}) {
     const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
     const [code, out, err] = await Promise.all([
@@ -232,31 +283,7 @@ async function main(argv: string[]): Promise<void> {
         console.log(`Nothing merged since ${lastTag ?? "the start"}.`);
         return;
     }
-    const listed = JSON.parse(
-        await run([
-            "gh",
-            "pr",
-            "list",
-            "--state",
-            "merged",
-            "--base",
-            "main",
-            "--limit",
-            String(Math.max(100, numbers.length * 2)),
-            "--json",
-            "number,title,labels",
-        ]),
-    ) as { number: number; title: string; labels: { name: string }[] }[];
-    const byNumber = new Map(listed.map((p) => [p.number, p]));
-    const prs: MergedPr[] = numbers.map((n) => {
-        const p = byNumber.get(n);
-        if (!p) throw new Error(`Could not load PR #${n} from GitHub`);
-        return {
-            number: n,
-            title: p.title,
-            labels: p.labels.map((l) => l.name),
-        };
-    });
+    const prs = await loadMergedPrs(numbers, (args) => run(["gh", ...args]));
 
     const suggestion = suggestLevel(current, prs);
     const level = (explicit as Level | undefined) ?? suggestion.level;
@@ -320,9 +347,7 @@ async function main(argv: string[]): Promise<void> {
         body,
     ]);
     console.log(url);
-    console.log(
-        "Add gate:approved and merge; the Release workflow does the rest.",
-    );
+    console.log("Merge it; the Release workflow does the rest.");
 }
 
 if (import.meta.main) {

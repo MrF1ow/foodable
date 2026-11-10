@@ -10,10 +10,14 @@ import {
     isWeightUnit,
     type WeightUnit,
 } from "../../domain/units.js";
+import type { ViewerFlags } from "../../viewer-flags.js";
 import { renderSettingsNav } from "../components/settings-nav.js";
 
 export type SettingsPageView = {
     chrome: ViewerChrome;
+    /** The viewer's flags, from the route. `ui-v2` adds the Members link to
+     *  the Settings sub-nav. Absent means off. */
+    flags?: ViewerFlags;
     backHref: string;
     displayName: string;
     timezone: string;
@@ -106,7 +110,9 @@ export function renderSettingsPage(view: SettingsPageView): string {
     const body = `
         ${pageHeader({ title: "Settings" })}
         ${errorBanner(view.error)}
-        ${renderSettingsNav("account", view.backHref)}
+        ${renderSettingsNav("account", view.backHref, {
+            v2: view.flags?.uiV2 === true,
+        })}
         <form method="POST" action="/settings" class="appearance panel" data-turbo="false">
             <input type="hidden" name="group" value="account" />
             ${fromField}

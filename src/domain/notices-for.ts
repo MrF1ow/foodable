@@ -1,5 +1,11 @@
-import type { Food } from "./foods.js";
-import { effectiveFoodsByIds, type FoodsStore } from "./foods.js";
+import type { Food, PossibleDuplicatePair } from "./foods.js";
+import {
+    duplicatesNeedRefCounts,
+    foodDisplayName,
+    effectiveFoodsByIds,
+    possibleDuplicates,
+    type FoodsStore,
+} from "./foods.js";
 import type { FridgeStore } from "./fridge.js";
 import {
     assertDismissibleCode,
@@ -13,10 +19,11 @@ import {
 } from "./notice-dismissals.js";
 import type { Notice } from "./notices.js";
 import type { NoticeSubjectKind } from "./notice-dismissals.js";
-import { sortNotices } from "./notices.js";
+import { NOTICE_SEVERITY, sortNotices } from "./notices.js";
 import { listRecipes, recipeNotices, type RecipesStore } from "./recipes.js";
 import type { GroceryListStore } from "./grocery.js";
-import { fridgeNotices, utcTodayFromDate } from "./stock.js";
+import { groceryRestockNotices } from "./restock.js";
+import { fridgeNotices } from "./stock.js";
 
 export type NoticesForDeps = {
     foods: FoodsStore;
@@ -36,10 +43,57 @@ export type NoticesForResult = {
     /** Panel group keys (`recipe:<id>` or `<kind>:<id>`) to activity ms, newest-first ordering. */
     subjectTimes: Map<string, number>;
     noticeFoods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
+    catalogFoods: Food[];
+    aliasMap: ReadonlyMap<string, string[]>;
+    barcodedIds: ReadonlySet<string>;
+    possibleDuplicatePairs: PossibleDuplicatePair[];
 };
 
 function subjectNameKey(kind: NoticeSubjectKind, id: string): string {
     return `${kind}:${id}`;
+}
+
+export function possibleDuplicateNoticesByFoodId(
+    notices: readonly Notice[],
+): Map<string, Notice[]> {
+    const map = new Map<string, Notice[]>();
+    for (const notice of notices) {
+        if (notice.code !== "food.possible_duplicate") continue;
+        if (notice.subject.kind !== "food") continue;
+        const rel = notice.related.find((r) => r.kind === "food");
+        if (!rel) continue;
+        for (const id of [notice.subject.id, rel.id]) {
+            const list = map.get(id) ?? [];
+            list.push(notice);
+            map.set(id, list);
+        }
+    }
+    return map;
+}
+
+export function possibleDuplicateNotices(
+    foods: readonly Food[],
+    aliases: ReadonlyMap<string, string[]>,
+    barcodedIds: ReadonlySet<string>,
+    dismissed: ReadonlySet<string>,
+    refCounts: ReadonlyMap<string, number> = new Map(),
+): Notice[] {
+    const pairs = possibleDuplicates(
+        foods,
+        aliases,
+        barcodedIds,
+        dismissed,
+        refCounts,
+    );
+    return pairs.map(({ subject, related, rule }) => ({
+        code: "food.possible_duplicate",
+        severity: NOTICE_SEVERITY["food.possible_duplicate"],
+        subject: { kind: "food", id: subject.id },
+        related: [
+            { kind: "food", id: related.id, name: foodDisplayName(related) },
+        ],
+        params: { rule, name: foodDisplayName(subject), foodId: subject.id },
+    }));
 }
 
 /** Panel grouping key; recipe-ingredient notices roll up under their recipe. */
@@ -77,6 +131,16 @@ export function dismissalSubjectLabel(
     dismissal: NoticeDismissal,
     subjectNames: ReadonlyMap<string, string>,
 ): string {
+    if (dismissal.code === "food.possible_duplicate" && dismissal.relatedKey) {
+        const sub =
+            subjectNames.get(
+                subjectNameKey(dismissal.subjectKind, dismissal.subjectId),
+            ) ?? "Removed item";
+        const rel =
+            subjectNames.get(subjectNameKey("food", dismissal.relatedKey)) ??
+            "Removed item";
+        return `${sub} · ${rel}`;
+    }
     const key = subjectNameKey(dismissal.subjectKind, dismissal.subjectId);
     return subjectNames.get(key) ?? "Removed item";
 }
@@ -105,33 +169,49 @@ async function buildSubjectTimes(
 export async function noticesFor(
     deps: NoticesForDeps,
     householdId: string,
-    opts?: { today?: string; includeDismissed?: boolean },
+    opts: {
+        today: string;
+        includeDismissed?: boolean;
+        /** When set (e.g. Possible duplicates page), used for job exclusion and not fetched again. */
+        refCounts?: ReadonlyMap<string, number>;
+    },
 ): Promise<NoticesForResult> {
-    const today = opts?.today ?? utcTodayFromDate(new Date());
+    const today = opts.today;
     const dismissals = await deps.dismissals.listForHousehold(householdId);
     const dismissed = dismissedKeySet(dismissals);
 
-    const [recipes, fridgeItems, allIngredients, subjectTimes, grocery] =
-        await Promise.all([
-            listRecipes(deps.recipes, householdId),
-            deps.fridge.listItems(householdId),
-            deps.recipes.listIngredientsForHousehold(householdId),
-            buildSubjectTimes(deps, householdId),
-            deps.grocery
-                ? Promise.all([
-                      deps.grocery.listLines(householdId),
-                      deps.foods.listFoods(householdId),
-                  ]).then(([lines, foods]) => ({
-                      lines,
-                      foodsById: new Map(
-                          foods.map((row) => [
-                              row.id,
-                              { id: row.id, genericFoodId: row.genericFoodId },
-                          ]),
-                      ),
-                  }))
-                : Promise.resolve(undefined),
-        ]);
+    const [
+        recipes,
+        fridgeItems,
+        allIngredients,
+        subjectTimes,
+        grocery,
+        catalogFoods,
+        aliasMap,
+        barcodedIds,
+    ] = await Promise.all([
+        listRecipes(deps.recipes, householdId),
+        deps.fridge.listItems(householdId),
+        deps.recipes.listIngredientsForHousehold(householdId),
+        buildSubjectTimes(deps, householdId),
+        deps.grocery
+            ? deps.grocery.listLines(householdId).then((lines) => ({ lines }))
+            : Promise.resolve(undefined),
+        deps.foods.listFoods(householdId),
+        deps.foods.listAllAliases(householdId),
+        deps.foods.listBarcodedFoodIds(householdId),
+    ]);
+    const groceryWithFoods = grocery
+        ? {
+              ...grocery,
+              foodsById: new Map(
+                  catalogFoods.map((row) => [
+                      row.id,
+                      { id: row.id, genericFoodId: row.genericFoodId },
+                  ]),
+              ),
+          }
+        : undefined;
 
     const foodIds = new Set<string>();
     for (const ing of allIngredients) {
@@ -164,6 +244,22 @@ export async function noticesFor(
             item.displayName,
         );
     }
+    for (const food of catalogFoods) {
+        if (food.archivedAt) continue;
+        subjectNames.set(
+            subjectNameKey("food", food.id),
+            foodDisplayName(food),
+        );
+    }
+    if (grocery) {
+        for (const line of grocery.lines) {
+            subjectNames.set(
+                subjectNameKey("grocery_line", line.id),
+                line.displayName,
+            );
+            subjectNames.set(`grocery_line:${line.id}`, line.displayName);
+        }
+    }
 
     const noticeFoods = new Map<string, Pick<Food, "genericFoodId">>();
     for (const [id, food] of catalog) {
@@ -188,7 +284,44 @@ export async function noticesFor(
             });
         }
     }
-    raw.push(...fridgeNotices(fridgeItems, today, grocery));
+    raw.push(...fridgeNotices(fridgeItems, today, groceryWithFoods));
+    const dismissedForDuplicates = opts?.includeDismissed
+        ? new Set<string>()
+        : dismissed;
+    let refCounts = opts?.refCounts;
+    if (refCounts == null && duplicatesNeedRefCounts(catalogFoods)) {
+        refCounts = await deps.foods.countFoodRefs(householdId);
+    }
+    const refCountsForPossible = refCounts ?? new Map();
+    const duplicateNotices = possibleDuplicateNotices(
+        catalogFoods,
+        aliasMap,
+        barcodedIds,
+        dismissedForDuplicates,
+        refCountsForPossible,
+    );
+    const possibleDuplicatePairs = possibleDuplicates(
+        catalogFoods,
+        aliasMap,
+        barcodedIds,
+        dismissed,
+        refCountsForPossible,
+    );
+    raw.push(...duplicateNotices);
+    for (const notice of duplicateNotices) {
+        if (notice.subject.kind === "food") {
+            const name = notice.params.name;
+            if (typeof name === "string" && name.length > 0) {
+                subjectNames.set(
+                    subjectNameKey("food", notice.subject.id),
+                    name,
+                );
+            }
+        }
+    }
+    if (grocery) {
+        raw.push(...groceryRestockNotices(grocery.lines, fridgeItems, today));
+    }
 
     let filtered = raw;
     if (!opts?.includeDismissed) {
@@ -213,6 +346,10 @@ export async function noticesFor(
         subjectNames,
         subjectTimes,
         noticeFoods,
+        catalogFoods,
+        aliasMap,
+        barcodedIds,
+        possibleDuplicatePairs,
     };
 }
 
@@ -228,10 +365,12 @@ export async function dismissNotice(
     householdId: string,
     userId: string,
     input: DismissNoticeInput,
+    opts: { today: string },
 ): Promise<NoticeDismissal> {
     assertDismissibleCode(input.code);
 
     const { notices } = await noticesFor(deps, householdId, {
+        today: opts.today,
         includeDismissed: true,
     });
     const key = lookupDismissalKey(

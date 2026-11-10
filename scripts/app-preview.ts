@@ -5,6 +5,10 @@
  *
  *   bun run preview:app            # writes tmp/app-preview/*.html, serves :4787
  *   bun run preview:app --shots    # also writes a 430px and a 1280px PNG per page, then exits
+ *   FOODABLE_FLAGS=ui-v2:all bun run preview:app --shots
+ *                                  # the new shell (flag ui-v2): serves /app-v2.css and
+ *                                  # /app-v2.js and adds a 390x844 phone shot (-v2-390.png)
+ *                                  # and a 1440x960 desktop shot (-v2-1440.png) per page
  *
  * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
  * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
@@ -15,6 +19,7 @@
  * The server never imports this file.
  */
 import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
+import { groceryRestockNotices } from "../src/domain/restock.js";
 import {
     needsAttentionCount,
     sortNotices,
@@ -40,6 +45,7 @@ import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
 import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
 import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
 import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
+import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
 import {
     DEFAULT_RESTOCK,
     EMPTY_HOUSEHOLD_PREFERENCES,
@@ -56,8 +62,29 @@ import {
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
 import { isNutritionCard } from "../src/domain/layout.js";
-import { matchFoodsByWords, usualProductRows } from "../src/domain/foods.js";
-import { getAppCss, getAppJs, getEmbedWidgetHtml } from "../src/widgets.js";
+import {
+    didYouMeanView,
+    matchFoodsByWords,
+    possibleDuplicates,
+    usualProductRows,
+} from "../src/domain/foods.js";
+import {
+    possibleDuplicateNotices,
+    possibleDuplicateNoticesByFoodId,
+} from "../src/domain/notices-for.js";
+import {
+    DUP_MERGE_MODAL_ID,
+    renderPossibleDuplicatesPage,
+} from "../src/web/pages/possible-duplicates.js";
+import {
+    getAppCss,
+    getAppJs,
+    getAppV2Css,
+    getAppV2Js,
+    getEmbedWidgetHtml,
+} from "../src/widgets.js";
+import { buildFlagContext, initFlags } from "../src/flags.js";
+import { evaluateViewerFlags } from "../src/viewer-flags.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4787;
@@ -127,6 +154,7 @@ function fridgeView(chrome: unknown) {
     ]);
     return {
         chrome,
+        today,
         locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
         items: [
             item(
@@ -168,6 +196,37 @@ function fridgeView(chrome: unknown) {
         ],
         foodsById,
     };
+}
+
+/** A line the weekly restock run added, with its "Restocked" notice. */
+function restockLine() {
+    const today = utcTodayFromDate();
+    const row = {
+        id: "g4",
+        householdId: H,
+        storeId: "s1",
+        sectionId: "sec2",
+        kind: "food" as const,
+        displayName: "Milk",
+        quantity: { amount: 2, unit: "l" },
+        foodId: "f-milk",
+        checked: false,
+        source: "restock" as const,
+        sourceFridgeItemId: "i-milk-restock",
+        note: null,
+    };
+    const notices = groceryRestockNotices(
+        [row],
+        [
+            {
+                id: "i-milk-restock",
+                displayName: "Milk",
+                expiresOn: addUtcDays(today, 3),
+            } as never,
+        ],
+        today,
+    );
+    return { ...row, alreadyHave: null, notices };
 }
 
 function groceryView(chrome: unknown) {
@@ -245,7 +304,7 @@ function groceryView(chrome: unknown) {
                             ),
                             usualProductName: "Kirkland Large Eggs",
                             usualPickerHref:
-                                "/household/usual-products/f-eggs?from=%2Fgrocery",
+                                "/kitchen/usuals/f-eggs?from=%2Fkitchen%2Fgroceries",
                             putAwayProducts: [
                                 { id: "f-eggs", label: "Eggs" },
                                 {
@@ -255,6 +314,7 @@ function groceryView(chrome: unknown) {
                             ],
                             putAwayProductId: "f-kirkland",
                         },
+                        restockLine(),
                     ]),
                 ],
             },
@@ -311,21 +371,6 @@ const MACROS = {
     sugar_g: 9,
     alcohol_g: 0,
     incomplete: true,
-    incompleteReasons: [
-        "Buttermilk: no nutrition — add it, or pick a usual product",
-    ],
-    gaps: [
-        {
-            ingredientId: "ing0",
-            displayName: "Buttermilk",
-            foodId: "f-buttermilk",
-            reason: "no_nutrition",
-            missingNutrients: [],
-            usualProduct: null,
-            message:
-                "Buttermilk: no nutrition — add it, or pick a usual product",
-        },
-    ],
 };
 
 function food(
@@ -350,11 +395,14 @@ function food(
         fatG: null,
         fiberG: null,
         sugarG: null,
+        saturatedFatG: null,
         alcoholG: null,
         caffeineMg: null,
         nutritionSource: null,
+        offNutrientLevels: null,
         allergens: [],
         offSourceId: null,
+        offQuality: null,
         genericFoodId: null,
         usualProductId: null,
         usualStoreId: null,
@@ -368,13 +416,13 @@ function food(
     };
 }
 
-// Views are cast with `as never`: this script is not typechecked (CI's
-// typecheck covers src/ only) and the fixtures only carry what renderers read.
+// Views are cast with `as never`: the fixtures only carry what renderers read.
 function previewFoodCatalog() {
     const catalog = [
-        food("f-eggs", "Eggs", null, {
+        food("f-eggs", "Eggs", 143, {
             usualProductId: "f-kirkland",
             gramsPerEach: 50,
+            proteinG: 12,
         }),
         food("f-kirkland", "Kirkland Large Eggs", 140, {
             genericFoodId: "f-eggs",
@@ -390,6 +438,7 @@ function previewFoodCatalog() {
         food("f-carton", "Cage Free Grade A Large Eggs", 140, {
             offSourceId: "070852010016",
         }),
+        food("f-chicken-egg", "chicken egg", 155, { proteinG: 13 }),
     ];
     const usual = usualProductRows({ foods: catalog });
     return { catalog, usual };
@@ -399,6 +448,7 @@ function previewFoodCatalog() {
  *  producer over the fridge fixture, plus one recipe gap. The top-bar count
  *  and the tab dots are computed from them, as the loaders do. */
 function previewNotices(): Notice[] {
+    const { catalog } = previewFoodCatalog();
     const recipeGap: Notice = {
         code: "recipe.no_nutrition",
         severity: "warn",
@@ -406,8 +456,15 @@ function previewNotices(): Notice[] {
         related: [],
         params: { name: "Buttermilk", foodId: "f-buttermilk" },
     };
+    const duplicateNotices = possibleDuplicateNotices(
+        catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+        new Map(),
+        new Set(),
+        new Set(),
+    );
     return sortNotices([
         recipeGap,
+        ...duplicateNotices,
         ...(() => {
             const items = fridgeView(null).items;
             // Nothing is on the grocery list, so each food item offers
@@ -426,6 +483,34 @@ function previewNotices(): Notice[] {
     ]);
 }
 
+// The viewer's flags, read the way the server reads them on a deploy without a
+// Railway token: FOODABLE_FLAGS (for example ui-v2:all) switches the new shell on.
+await initFlags();
+const PREVIEW_FLAGS = evaluateViewerFlags(
+    buildFlagContext({
+        auth: { kind: "user", userId: ME.userId },
+        member: ME as never,
+    }),
+);
+const V2 = PREVIEW_FLAGS.uiV2;
+
+// What viewerChromeWithAttention loads when ui-v2 is on.
+const PREVIEW_IDENTITY = {
+    viewerName: "Ethan Flow",
+    viewerRole: "owner",
+    householdName: "The Flow household",
+    memberCount: 3,
+} as const;
+
+function previewChrome(theme: "light" | "dark") {
+    return {
+        ...viewerChromeFromProfile({ theme }),
+        attention: previewAttention(),
+        flags: PREVIEW_FLAGS,
+        ...(V2 ? { identity: PREVIEW_IDENTITY } : {}),
+    };
+}
+
 function previewAttention() {
     const notices = previewNotices();
     return {
@@ -435,10 +520,7 @@ function previewAttention() {
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = {
-        ...viewerChromeFromProfile({ theme }),
-        attention: previewAttention(),
-    };
+    const chrome = previewChrome(theme);
     const { catalog, usual } = previewFoodCatalog();
     const catalogById = new Map(catalog.map((row) => [row.id, row]));
     const eggsPlain = catalog.find((row) => row.id === "f-eggs")!;
@@ -476,6 +558,94 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ],
         viewMemberId: SAM.userId,
     } as never);
+    const recipeView = {
+        chrome: {
+            ...chrome,
+            householdPossibleDuplicates: 1,
+        },
+        foodDuplicateNotices: possibleDuplicateNoticesByFoodId(
+            possibleDuplicateNotices(catalog, new Map(), new Set(), new Set()),
+        ),
+        recipe: {
+            ...RECIPE,
+            name: "Banana bread",
+            yieldPortions: 10,
+            instructions:
+                "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
+        },
+        notices: [
+            {
+                code: "recipe.no_nutrition",
+                severity: "warn",
+                subject: {
+                    kind: "recipe_ingredient",
+                    id: "ing0",
+                    recipeId: "r1",
+                },
+                related: [],
+                params: { name: "Buttermilk", foodId: "f-buttermilk" },
+            },
+        ],
+        noticeContext: {
+            from: "/recipes/r1",
+            foods: new Map(
+                catalog.map((f) => [f.id, { genericFoodId: f.genericFoodId }]),
+            ),
+        },
+        ingredients: [
+            {
+                id: "ing1",
+                recipeId: "r1",
+                foodId: "f-eggs",
+                displayName: "Eggs · Kirkland Large Eggs",
+                quantity: { amount: 3, unit: "each" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 0.3,
+                personAmount: 0.3,
+            },
+            {
+                id: "ing0",
+                recipeId: "r1",
+                foodId: "f-buttermilk",
+                displayName: "Buttermilk",
+                quantity: { amount: 200, unit: "ml" },
+                note: null,
+                sortOrder: 0,
+                perPortionAmount: 20,
+                personAmount: 20,
+            },
+            {
+                id: "ing2",
+                recipeId: "r1",
+                foodId: "f2",
+                displayName: "All-purpose flour",
+                quantity: { amount: 200, unit: "g" },
+                note: null,
+                sortOrder: 1,
+                perPortionAmount: 20,
+                personAmount: 20,
+            },
+            {
+                id: "ing3",
+                recipeId: "r1",
+                foodId: "f3",
+                displayName: "Sugar",
+                quantity: { amount: 100, unit: "g" },
+                note: null,
+                sortOrder: 2,
+                perPortionAmount: 10,
+                personAmount: 10,
+            },
+        ],
+        members: [ME, SAM],
+        stores: [{ id: "s1", name: "Safeway" }],
+        viewerId: "u1",
+        filterUserId: "u1",
+        portionCount: 1,
+        macros: MACROS,
+        isOwner: true,
+    };
     return {
         nutrition,
         "nutrition-peer": nutritionPeer,
@@ -504,100 +674,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             },
         } as never),
+        "grocery-did-you-mean": renderGroceryPage({
+            ...(groceryView(chrome) as object),
+            openModalId: "grocery-add-food-s1",
+            didYouMean: didYouMeanSample(
+                "grocery-add-food-s1",
+                "/kitchen/groceries/lines",
+                { kind: "food", store_id: "s1" },
+            ),
+        } as never),
+        "fridge-did-you-mean": renderFridgePage({
+            ...(fridgeView(chrome) as object),
+            openModalId: "fridge-add-food-l1",
+            didYouMean: didYouMeanSample(
+                "fridge-add-food-l1",
+                "/kitchen/fridge/items",
+                { kind: "food", location_id: "l1" },
+            ),
+        } as never),
         recipes: renderRecipesPage({
             chrome,
             recipes: [RECIPE, RECIPE_TWO],
             members: [ME, SAM],
             viewerId: "u1",
         } as never),
-        recipe: renderRecipeDetailPage({
-            chrome,
-            recipe: {
-                ...RECIPE,
-                name: "Banana bread",
-                yieldPortions: 10,
-                instructions:
-                    "Mash the bananas.\nWhisk in the sugar, then fold in the flour.\nBake at 175 °C for 55 minutes.",
-            },
-            notices: [
-                {
-                    code: "recipe.no_nutrition",
-                    severity: "warn",
-                    subject: {
-                        kind: "recipe_ingredient",
-                        id: "ing0",
-                        recipeId: "r1",
-                    },
-                    related: [],
-                    params: { name: "Buttermilk", foodId: "f-buttermilk" },
-                },
-            ],
-            noticeContext: {
-                from: "/recipes/r1",
-                foods: new Map(
-                    catalog.map((f) => [
-                        f.id,
-                        { genericFoodId: f.genericFoodId },
-                    ]),
-                ),
-            },
-            ingredients: [
-                {
-                    id: "ing1",
-                    recipeId: "r1",
-                    foodId: "f-eggs",
-                    displayName: "Eggs · Kirkland Large Eggs",
-                    quantity: { amount: 3, unit: "each" },
-                    note: null,
-                    sortOrder: 0,
-                    perPortionAmount: 0.3,
-                    personAmount: 0.3,
-                },
-                {
-                    id: "ing0",
-                    recipeId: "r1",
-                    foodId: "f-buttermilk",
-                    displayName: "Buttermilk",
-                    quantity: { amount: 200, unit: "ml" },
-                    note: null,
-                    sortOrder: 0,
-                    perPortionAmount: 20,
-                    personAmount: 20,
-                },
-                {
-                    id: "ing2",
-                    recipeId: "r1",
-                    foodId: "f2",
-                    displayName: "All-purpose flour",
-                    quantity: { amount: 200, unit: "g" },
-                    note: null,
-                    sortOrder: 1,
-                    perPortionAmount: 20,
-                    personAmount: 20,
-                },
-                {
-                    id: "ing3",
-                    recipeId: "r1",
-                    foodId: "f3",
-                    displayName: "Sugar",
-                    quantity: { amount: 100, unit: "g" },
-                    note: null,
-                    sortOrder: 2,
-                    perPortionAmount: 10,
-                    personAmount: 10,
-                },
-            ],
-            members: [ME, SAM],
-            stores: [{ id: "s1", name: "Safeway" }],
-            viewerId: "u1",
-            filterUserId: "u1",
-            portionCount: 1,
-            macros: MACROS,
-            isOwner: true,
+        recipe: renderRecipeDetailPage(recipeView as never),
+        "recipe-did-you-mean": renderRecipeDetailPage({
+            ...recipeView,
+            openModalId: "recipe-add-ingredient-r1",
+            didYouMean: didYouMeanSample(
+                "recipe-add-ingredient-r1",
+                "/recipes/r1/ingredients",
+                {},
+            ),
         } as never),
         settings: renderSettingsPage({
             chrome,
-            backHref: "/fridge",
+            flags: PREVIEW_FLAGS,
+            backHref: "/kitchen/fridge",
             displayName: "Ethan",
             timezone: "America/Los_Angeles",
             weightUnit: "kg",
@@ -654,7 +768,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             prefillStoreId: catalogById.get("f-kirkland")!.usualStoreId,
             prefillAmount: catalogById.get("f-kirkland")!.usualAmount,
             stores: PREVIEW_STORES,
-            from: "/household/usual-products",
+            from: "/kitchen/usuals",
         } as never),
         "usual-products": renderUsualProductsListPage({
             chrome,
@@ -675,7 +789,57 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 truncated: false,
             },
         } as never),
-        help: renderSettingsHelpPage({ chrome, backHref: "/fridge" } as never),
+        "possible-duplicates": (() => {
+            const dupPairs = possibleDuplicates(
+                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+                new Map(),
+                new Set(),
+                new Set(),
+            );
+            return renderPossibleDuplicatesPage({
+                chrome: {
+                    ...chrome,
+                    householdPossibleDuplicates: dupPairs.length,
+                },
+                pairs: dupPairs,
+                refCounts: new Map([
+                    ["f-chicken-egg", 0],
+                    ["f-eggs", 1],
+                ]),
+            } as never);
+        })(),
+        "possible-duplicates-merge": (() => {
+            const dupPairs = possibleDuplicates(
+                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+                new Map(),
+                new Set(),
+                new Set(),
+            );
+            const pair = dupPairs[0]!;
+            return renderPossibleDuplicatesPage({
+                chrome: {
+                    ...chrome,
+                    householdPossibleDuplicates: dupPairs.length,
+                },
+                pairs: dupPairs,
+                refCounts: new Map([
+                    [pair.subject.id, 0],
+                    [pair.related.id, 0],
+                ]),
+                openModalId: DUP_MERGE_MODAL_ID,
+                mergePost: {
+                    foodA: pair.subject.id,
+                    foodB: pair.related.id,
+                    keepId: pair.subject.id,
+                    picks: {},
+                },
+            } as never);
+        })(),
+        help: renderSettingsHelpPage({
+            chrome,
+            flags: PREVIEW_FLAGS,
+            backHref: "/kitchen/fridge",
+        } as never),
         "needs-attention": (() => {
             const fridgeItems = fridgeView(null).items;
             return renderNeedsAttentionPage({
@@ -718,7 +882,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         })(),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
-            backHref: "/fridge",
+            flags: PREVIEW_FLAGS,
+            backHref: "/kitchen/fridge",
             member: { ...ME, role: "owner" },
             preferences: {
                 ...EMPTY_HOUSEHOLD_PREFERENCES,
@@ -729,13 +894,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "settings-household-member": renderHouseholdSettingsPrefsPage({
             chrome,
-            backHref: "/fridge",
+            flags: PREVIEW_FLAGS,
+            backHref: "/kitchen/fridge",
             member: { ...SAM, role: "member" },
             preferences: {
                 ...EMPTY_HOUSEHOLD_PREFERENCES,
                 restock: { ...DEFAULT_RESTOCK, enabled: true },
             },
             ownerTimezoneLabel: "America/Los_Angeles",
+        }),
+        "settings-household-invites": renderHouseholdInvitesPage({
+            chrome,
+            flags: PREVIEW_FLAGS,
+            backHref: "/",
+            member: { ...ME, role: "owner" },
+            invites: [
+                {
+                    id: "i-active",
+                    householdId: H,
+                    createdBy: ME.userId,
+                    // Relative to the preview clock, so it always shows as active.
+                    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+                    expiresAt: new Date(
+                        Date.now() + 6 * 86_400_000,
+                    ).toISOString(),
+                    usedAt: null,
+                    usedBy: null,
+                },
+                {
+                    id: "i-used",
+                    householdId: H,
+                    createdBy: ME.userId,
+                    createdAt: "2026-02-20T12:00:00.000Z",
+                    expiresAt: "2026-02-27T12:00:00.000Z",
+                    usedAt: "2026-02-22T09:00:00.000Z",
+                    usedBy: SAM.userId,
+                },
+            ],
+            createdCode: "preview-invite-code",
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
@@ -771,10 +967,7 @@ async function nutritionWithModal(
     theme: "light" | "dark",
     openModalId: string,
 ): Promise<string> {
-    const chrome = {
-        ...viewerChromeFromProfile({ theme }),
-        attention: previewAttention(),
-    };
+    const chrome = previewChrome(theme);
     return renderNutritionPage({
         access: { ok: true, mode: "self", viewer: ME, subject: ME },
         members: [ME, SAM],
@@ -792,6 +985,41 @@ async function nutritionWithModal(
         openModalId,
     } as never);
 }
+
+function didYouMeanSample(
+    modalId: string,
+    action: string,
+    fields: Record<string, string>,
+) {
+    return {
+        modalId,
+        action,
+        view: didYouMeanView(
+            {
+                name: "chicken egg",
+                candidates: [
+                    {
+                        food: {
+                            id: "f-eggs",
+                            name: "Eggs",
+                            brand: null,
+                        } as never,
+                        why: "contains_words",
+                    },
+                ],
+            },
+            {
+                food_name: "chicken egg",
+                qty_amount: "6",
+                qty_unit: "each",
+                ...fields,
+            },
+        ),
+    };
+}
+
+// The hashed asset hrefs the pages carry only exist once the bundles are built.
+await Promise.all([getAppCss(), getAppJs(), getAppV2Css(), getAppV2Js()]);
 
 const names: string[] = [];
 const modalShotPages: string[] = [];
@@ -817,6 +1045,12 @@ for (const theme of ["light", "dark"] as const) {
     modalShotPages.push(
         `foods-edit-${theme}`,
         `usual-products-picker-${theme}`,
+        `possible-duplicates-${theme}`,
+        `possible-duplicates-merge-${theme}`,
+        `recipe-${theme}`,
+        `grocery-did-you-mean-${theme}`,
+        `fridge-did-you-mean-${theme}`,
+        `recipe-did-you-mean-${theme}`,
     );
 }
 
@@ -846,6 +1080,16 @@ const server = Bun.serve({
         }
         if (path === "/app.js") {
             return new Response(await getAppJs(), {
+                headers: { "content-type": "text/javascript; charset=utf-8" },
+            });
+        }
+        if (path === "/app-v2.css") {
+            return new Response(await getAppV2Css(), {
+                headers: { "content-type": "text/css; charset=utf-8" },
+            });
+        }
+        if (path === "/app-v2.js") {
+            return new Response(await getAppV2Js(), {
                 headers: { "content-type": "text/javascript; charset=utf-8" },
             });
         }
@@ -885,6 +1129,14 @@ if (process.argv.includes("--shots")) {
         // From 768px the bottom nav becomes the left sidebar.
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1280,900 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-wide.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}-wide.png`);
+        if (V2) {
+            // The new shell's two layouts: the phone nav at 390 wide, the
+            // sidebar and top bar at the design's 1440.
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
+            console.log(`${OUT}/${name}-v2-390.png`);
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1440,960 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
+            console.log(`${OUT}/${name}-v2-1440.png`);
+        }
     }
     for (const name of modalShotPages) {
         const theme = name.endsWith("-dark") ? "dark" : "light";

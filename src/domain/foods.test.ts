@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import type { FoodResult } from "../foods.js";
 import {
     catalogNutritionFromOff,
+    offNutrientLevelsFromHit,
     createMemoryFoodsStore,
     findFoodByNameAndBrand,
     findOrCreateFoodByBarcode,
@@ -17,6 +18,7 @@ import {
     updateFood,
     usualProductRows,
     gramsPerEachFromOff,
+    type FoodsStore,
 } from "./foods.js";
 
 const HH = "hh-1";
@@ -183,6 +185,19 @@ test("mapOffAllergenTags maps en: tags onto NAMED_ALLERGENS", () => {
     ).toEqual(["milk", "peanut", "sesame"]);
 });
 
+test("catalogNutritionFromOff treats negative saturated fat as unknown", () => {
+    expect(
+        catalogNutritionFromOff(
+            off({
+                name: "Bad data",
+                barcode: "44444444",
+                serving: "100 g",
+                saturated_fat_g: -0.5,
+            }),
+        ).saturatedFatG,
+    ).toBeNull();
+});
+
 test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", () => {
     expect(
         catalogNutritionFromOff(
@@ -191,9 +206,10 @@ test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", 
                 barcode: "070852010016",
                 serving: "100 g",
                 calories: 98,
+                saturated_fat_g: 2.5,
             }),
-        ).calories,
-    ).toBe(98);
+        ),
+    ).toMatchObject({ calories: 98, saturatedFatG: 2.5 });
     expect(
         catalogNutritionFromOff(
             off({
@@ -201,8 +217,30 @@ test("catalogNutritionFromOff keeps 100 g figures and refuses a serving basis", 
                 barcode: "11111111",
                 serving: "150 g",
                 calories: 140,
+                saturated_fat_g: 1.2,
             }),
-        ).calories,
+        ),
+    ).toMatchObject({ calories: null, saturatedFatG: null });
+});
+
+test("offNutrientLevelsFromHit keeps low moderate high only", () => {
+    expect(
+        offNutrientLevelsFromHit(
+            off({
+                name: "Snack",
+                barcode: "22222222",
+                nutrient_levels: {
+                    sugars: "low",
+                    "saturated-fat": "HIGH",
+                    salt: "unknown",
+                },
+            }),
+        ),
+    ).toEqual({ sugars: "low", "saturated-fat": "high" });
+    expect(
+        offNutrientLevelsFromHit(
+            off({ name: "Plain", barcode: "33333333", nutrient_levels: {} }),
+        ),
     ).toBeNull();
 });
 
@@ -479,6 +517,277 @@ async function productRow(
         }),
     );
 }
+
+test("searchFoodCatalog batches barcode lookups and preserves hit shape", async () => {
+    const base = createMemoryFoodsStore();
+    const calls = {
+        listBarcodes: 0,
+        listBarcodesForFoods: 0,
+        getBarcodeFoodId: 0,
+        getBarcodeFoodIds: 0,
+        getFood: 0,
+    };
+    const store: FoodsStore = {
+        ...base,
+        async listBarcodes(householdId, foodId) {
+            calls.listBarcodes++;
+            return base.listBarcodes(householdId, foodId);
+        },
+        async listBarcodesForFoods(householdId, foodIds) {
+            calls.listBarcodesForFoods++;
+            return base.listBarcodesForFoods(householdId, foodIds);
+        },
+        async getBarcodeFoodId(householdId, barcode) {
+            calls.getBarcodeFoodId++;
+            return base.getBarcodeFoodId(householdId, barcode);
+        },
+        async getBarcodeFoodIds(householdId, barcodes) {
+            calls.getBarcodeFoodIds++;
+            return base.getBarcodeFoodIds(householdId, barcodes);
+        },
+        async getFood(householdId, id) {
+            calls.getFood++;
+            return base.getFood(householdId, id);
+        },
+    };
+    const plainMilk = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const alpha = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Alpha dairy milk",
+            brand: "Farm",
+            calories: 40,
+            proteinG: 3,
+            carbsG: 5,
+            fatG: 1,
+            fiberG: 0,
+            sugarG: 5,
+            defaultUnit: "g",
+        }),
+    );
+    const beta = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Beta dairy yogurt",
+            calories: 60,
+            proteinG: 10,
+            carbsG: 4,
+            fatG: 0,
+            fiberG: 0,
+            sugarG: 4,
+            defaultUnit: "g",
+        }),
+    );
+    const gamma = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Gamma dairy cheese",
+            calories: 110,
+            proteinG: 7,
+            carbsG: 1,
+            fatG: 9,
+            fiberG: 0,
+            sugarG: 0,
+            defaultUnit: "g",
+        }),
+    );
+    const silent = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Silent tofu",
+            genericFoodId: plainMilk.id,
+            calories: 80,
+            proteinG: 8,
+            carbsG: 2,
+            fatG: 4,
+            fiberG: 1,
+            sugarG: 1,
+        }),
+    );
+    await store.setBarcode(HH, "1111000000001", alpha.id);
+    await store.setBarcode(HH, "1111000000002", alpha.id);
+    await store.setBarcode(HH, "2222000000001", beta.id);
+    await store.setBarcode(HH, "3333000000001", gamma.id);
+    await store.setBarcode(HH, "9999000000001", silent.id);
+    // Archived rows are absent from listFoods, so the search must fall back
+    // to getFood (once, even when two OFF hits name the same barcode).
+    const archived = await base.insertFood({
+        ...newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Old tofu",
+            genericFoodId: plainMilk.id,
+        }),
+        archivedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await store.setBarcode(HH, "8888000000001", archived.id);
+
+    const offHits = [
+        off({
+            name: "Silent scanned tofu",
+            barcode: "9999000000001",
+            calories: 75,
+        }),
+        off({
+            name: "Mystery bar",
+            barcode: "0000000000000",
+            calories: 12,
+        }),
+        off({
+            name: "Duplicate alpha",
+            barcode: "1111000000001",
+            calories: 1,
+        }),
+        off({
+            name: "Alpha second barcode",
+            barcode: "1111000000002",
+            calories: 2,
+        }),
+        off({
+            name: "Archived tofu A",
+            barcode: "8888000000001",
+            calories: 70,
+        }),
+        off({
+            name: "Archived tofu B",
+            barcode: "8888000000001",
+            calories: 71,
+        }),
+    ];
+    const hits = await searchFoodCatalog(store, HH, "dairy", offHits);
+    expect(calls.listBarcodes).toBe(0);
+    expect(calls.listBarcodesForFoods).toBe(1);
+    expect(calls.getBarcodeFoodId).toBe(0);
+    expect(calls.getBarcodeFoodIds).toBe(1);
+    expect(calls.getFood).toBe(1);
+    expect(hits).toEqual([
+        {
+            food_id: alpha.id,
+            name: "Alpha dairy milk",
+            brand: "Farm",
+            barcode: "1111000000001",
+            source: "household",
+            calories: 40,
+            protein_g: 3,
+            carbs_g: 5,
+            fat_g: 1,
+            fiber_g: 0,
+            sugar_g: 5,
+            serving: "100 g",
+            default_unit: "g",
+            generic_food_id: null,
+            generic_food_name: null,
+        },
+        {
+            food_id: beta.id,
+            name: "Beta dairy yogurt",
+            brand: null,
+            barcode: "2222000000001",
+            source: "household",
+            calories: 60,
+            protein_g: 10,
+            carbs_g: 4,
+            fat_g: 0,
+            fiber_g: 0,
+            sugar_g: 4,
+            serving: "100 g",
+            default_unit: "g",
+            generic_food_id: null,
+            generic_food_name: null,
+        },
+        {
+            food_id: gamma.id,
+            name: "Gamma dairy cheese",
+            brand: null,
+            barcode: "3333000000001",
+            source: "household",
+            calories: 110,
+            protein_g: 7,
+            carbs_g: 1,
+            fat_g: 9,
+            fiber_g: 0,
+            sugar_g: 0,
+            serving: "100 g",
+            default_unit: "g",
+            generic_food_id: null,
+            generic_food_name: null,
+        },
+        {
+            food_id: silent.id,
+            name: "Silent scanned tofu",
+            brand: null,
+            barcode: "9999000000001",
+            source: "off:9999000000001",
+            calories: 75,
+            protein_g: 11,
+            carbs_g: 3,
+            fat_g: 4.3,
+            fiber_g: 0,
+            sugar_g: 3,
+            serving: "100 g",
+            default_unit: null,
+            generic_food_id: plainMilk.id,
+            generic_food_name: "Milk",
+        },
+        {
+            food_id: null,
+            name: "Mystery bar",
+            brand: null,
+            barcode: "0000000000000",
+            source: "off:0000000000000",
+            calories: 12,
+            protein_g: 11,
+            carbs_g: 3,
+            fat_g: 4.3,
+            fiber_g: 0,
+            sugar_g: 3,
+            serving: "100 g",
+            default_unit: null,
+            generic_food_id: null,
+            generic_food_name: null,
+        },
+        {
+            food_id: archived.id,
+            name: "Archived tofu A",
+            brand: null,
+            barcode: "8888000000001",
+            source: "off:8888000000001",
+            calories: 70,
+            protein_g: 11,
+            carbs_g: 3,
+            fat_g: 4.3,
+            fiber_g: 0,
+            sugar_g: 3,
+            serving: "100 g",
+            default_unit: null,
+            generic_food_id: plainMilk.id,
+            generic_food_name: "Milk",
+        },
+        {
+            food_id: archived.id,
+            name: "Archived tofu B",
+            brand: null,
+            barcode: "8888000000001",
+            source: "off:8888000000001",
+            calories: 71,
+            protein_g: 11,
+            carbs_g: 3,
+            fat_g: 4.3,
+            fiber_g: 0,
+            sugar_g: 3,
+            serving: "100 g",
+            default_unit: null,
+            generic_food_id: plainMilk.id,
+            generic_food_name: "Milk",
+        },
+    ]);
+});
 
 test("searchFoodCatalog household hits use word matching", async () => {
     const store = createMemoryFoodsStore();

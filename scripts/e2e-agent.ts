@@ -22,8 +22,10 @@
  * users, so truncate cannot touch users while tokens exist; restoring OAuth
  * would sign Grok out mid-session.
  *
- * Needs: DATABASE_URL or E2E_DB_URL pointing at Postgres (local or
- * hosted), server on E2E_SERVER (default :8080), and Grok signed
+ * Needs: E2E_DB_URL pointing at a throwaway Postgres (never DATABASE_URL:
+ * under `bun run` that comes from .env and can be production, and this
+ * script restores over the database it names), server on E2E_SERVER
+ * (default :8080), and Grok signed
  * into the foodable MCP server for full runs. Snapshot/restore use PG_BIN tools.
  */
 
@@ -39,10 +41,17 @@ import {
     e2eSnapshot,
 } from "../src/db/testing/e2e-snapshot.js";
 
-const DB_URL =
-    process.env.E2E_DB_URL ??
-    process.env.DATABASE_URL ??
-    "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+// The run snapshots and then restores over this database, so it must be named
+// on purpose: no fallback to DATABASE_URL (loaded from .env under `bun run`,
+// possibly production) or to a default. --list touches no database.
+const LISTING = process.argv.includes("--list");
+const DB_URL = process.env.E2E_DB_URL ?? "";
+if (!DB_URL && !LISTING) {
+    console.error(
+        "e2e:agent: set E2E_DB_URL to a throwaway database (see the foodable-test skill); it is restored over after the run.",
+    );
+    process.exit(2);
+}
 const SERVER = process.env.E2E_SERVER ?? "http://localhost:8080";
 const GROK = process.env.GROK_BIN ?? `${process.env.HOME}/.grok/bin/grok`;
 const MCP_NAME = process.env.E2E_MCP_NAME ?? "foodable";
@@ -52,7 +61,8 @@ const OUT_DIR = "tmp/e2e-agent";
 // Grok resumes sessions per working directory, and an empty one keeps repo
 // instructions out of the agent's context.
 const WORK_DIR = `${OUT_DIR}/work`;
-const sql = new SQL(DB_URL);
+// Bun's SQL falls back to DATABASE_URL when given no URL; never let it.
+const sql = new SQL(DB_URL || "postgres://127.0.0.1:1/e2e-list-only");
 
 // ---- terminal output ----
 
@@ -956,8 +966,10 @@ const SCENARIOS: Scenario[] = [
                     // Recipe yields 4; 2 portions use half: 250 g chicken,
                     // 150 g broccoli. Cooking takes what the fridge holds and
                     // never goes below zero; anything missing is a shortfall.
-                    const used = (have: number | null, need: number) =>
-                        Math.min(have ?? 0, need);
+                    const used = (
+                        have: number | null | undefined,
+                        need: number,
+                    ) => Math.min(have ?? 0, need);
                     c.near(
                         (await stockOf(chicken)).g ?? 0,
                         (chickenBefore.g ?? 0) - used(chickenBefore.g, 250),

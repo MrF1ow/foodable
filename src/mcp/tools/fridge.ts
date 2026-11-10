@@ -3,6 +3,7 @@ import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
+import { householdToday } from "../../db/restock.js";
 import { liveStockStore } from "../../db/stock.js";
 import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
@@ -27,7 +28,6 @@ import {
     listExpiring,
     StockInputError,
     updateFridgeItemQuantityAdjust,
-    utcTodayFromDate,
 } from "../../domain/stock.js";
 import { sortNotices } from "../../domain/notices.js";
 import { fridgeExpiryLine } from "../../copy/notices.js";
@@ -40,15 +40,30 @@ import {
 } from "../../domain/meals.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { getWidgetHtml } from "../../widgets.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
-    APP_UI_MIME_TYPE,
-    FRIDGE_WIDGET_URI,
+    registerWidgetResource,
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
     type ToolContext,
 } from "../shared.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
+
+export const ADD_FRIDGE_ITEM_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    id: z.string().nullable(),
+    display_name: z.string().nullable(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+});
 
 function shortfallText(
     rows: { displayName: string; amount: number; unit: string }[],
@@ -104,19 +119,21 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     }),
                 ),
             }),
-            ...uiMeta(FRIDGE_WIDGET_URI),
+            ...uiMeta("fridge"),
         },
         async () =>
             withAnalytics(
                 "get_fridge",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const { locations, items } = await listFridge(
-                        liveFridgeStore(),
-                        householdId,
-                    );
-                    const today = utcTodayFromDate();
-                    const [groceryLines, allFoods] = await Promise.all([
+                    const [
+                        { locations, items },
+                        today,
+                        groceryLines,
+                        allFoods,
+                    ] = await Promise.all([
+                        listFridge(liveFridgeStore(), householdId),
+                        householdToday(householdId),
                         liveGroceryStore().listLines(householdId),
                         liveFoodsStore().listFoods(householdId),
                     ]);
@@ -187,28 +204,13 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    server.registerResource(
-        "fridge-widget",
-        FRIDGE_WIDGET_URI,
-        {
-            title: "Fridge",
-            description:
-                "Interactive UI for get_fridge: locations with their items, with automatic light/dark theming.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("fridge"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "fridge",
+        resourceName: "fridge-widget",
+        title: "Fridge",
+        description:
+            "Interactive UI for get_fridge: locations with their items, with automatic light/dark theming.",
+    });
 
     server.registerTool(
         "add_fridge_location",
@@ -317,13 +319,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 barcode: z.string().optional(),
                 food_id: z.string().optional(),
                 unit: z.string().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
-            outputSchema: z.object({
-                id: z.string(),
-                display_name: z.string(),
-                amount: z.number(),
-                unit: z.string(),
-            }),
+            outputSchema: ADD_FRIDGE_ITEM_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
@@ -332,6 +331,17 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const store = liveFridgeStore();
                     const foods = liveFoodsStore();
+                    const onSimilar = onSimilarFor(args);
+                    const similarNull = {
+                        status: "similar_foods" as const,
+                        similar_foods: [] as z.infer<
+                            typeof SIMILAR_FOODS_ENTRY
+                        >[],
+                        id: null,
+                        display_name: null,
+                        amount: null,
+                        unit: null,
+                    };
                     try {
                         const prepared =
                             args.kind === "supply"
@@ -342,6 +352,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                       amount: args.amount,
                                       unit: args.unit ?? "",
                                       foodId: args.food_id,
+                                      onSimilar,
                                   })
                                 : args.food_id
                                   ? await prepareAddFoodById(store, foods, {
@@ -362,7 +373,12 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                               amount: args.amount,
                                               unit: args.unit,
                                           },
-                                          { lookup: lookupBarcode },
+                                          {
+                                              lookup: (barcode) =>
+                                                  lookupBarcode(barcode, {
+                                                      householdId,
+                                                  }),
+                                          },
                                       )
                                     : await prepareAddManualFood(store, foods, {
                                           householdId,
@@ -370,6 +386,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                           name: args.name ?? "",
                                           amount: args.amount,
                                           unit: args.unit,
+                                          onSimilar,
                                       });
                         const added = await addFridgeItemAdjust(
                             store,
@@ -395,6 +412,8 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 },
                             ],
                             structuredContent: {
+                                status: "ok" as const,
+                                similar_foods: [],
                                 id: item.id,
                                 display_name: item.displayName,
                                 amount: item.quantity.amount,
@@ -402,6 +421,21 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                             },
                         };
                     } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    ...similarNull,
+                                    similar_foods: wire,
+                                },
+                            };
+                        }
                         if (
                             err instanceof FridgeInputError ||
                             err instanceof StockInputError
@@ -584,11 +618,11 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 "list_expiring",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const { items } = await listFridge(
-                        liveFridgeStore(),
-                        householdId,
-                    );
-                    const expiring = listExpiring(items, args.days ?? 3);
+                    const [{ items }, today] = await Promise.all([
+                        listFridge(liveFridgeStore(), householdId),
+                        householdToday(householdId),
+                    ]);
+                    const expiring = listExpiring(items, today, args.days ?? 3);
                     const payload = {
                         items: expiring.map((item) => ({
                             id: item.id,

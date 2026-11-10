@@ -6,6 +6,7 @@ import {
     beforeAll,
     beforeEach,
     afterAll,
+    afterEach,
 } from "bun:test";
 import {
     formatProgress,
@@ -31,6 +32,7 @@ import {
 import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
+import { ADD_FRIDGE_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/fridge.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -51,9 +53,34 @@ import * as actualFoods from "./foods.js";
 import * as actualFoodSearch from "./food-search.js";
 import * as actualExports from "./db/exports.js";
 import * as actualDbUsers from "./db/users.js";
+import {
+    GOAL_DAY_FIELDS,
+    goalsForDate,
+    goalsResolver,
+    type GoalDayOverride,
+} from "./domain/insights.js";
+import { SET_NUTRITION_GOALS_OUTPUT_SCHEMA } from "./mcp/tools/goals.js";
 import { createMemoryExportArchiveStore } from "./db/exports.js";
 import { verifyExportToken } from "./domain/export-link.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
+import { z } from "zod";
+import {
+    allFlagsOff,
+    allFlagsOn,
+    buildFlagContext,
+    createMemoryFlags,
+    defaultFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "./flags.js";
+import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
+import {
+    createToolContext,
+    MEAL_LOGGED_WIDGET_URI,
+    widgetUri,
+} from "./mcp/shared.js";
+import { gatedTool } from "./mcp/gated.js";
+import { toolNamesFor } from "./test-support/flag-harness.js";
 
 // Snapshot BEFORE mock.module runs: Bun patches a mocked module's namespace
 // in place, so restoring from the live import afterwards would hand the next
@@ -97,12 +124,29 @@ import { createMemoryFoodsStore } from "./domain/foods.js";
 import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
+    mergeFoods,
+    newFood,
     updateFood,
 } from "./domain/foods.js";
-import { FOOD_OUTPUT, GET_FOOD_OUTPUT } from "./mcp/tools/food.js";
-import { GROCERY_LIST_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
-import { MACROS_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
+import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
+import {
+    FOOD_OUTPUT,
+    GET_FOOD_OUTPUT,
+    UPSERT_FOOD_OUTPUT,
+} from "./mcp/tools/food.js";
+import {
+    ADD_GROCERY_LINE_OUTPUT_SCHEMA,
+    GROCERY_LIST_OUTPUT_SCHEMA,
+} from "./mcp/tools/grocery.js";
+import {
+    ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA,
+    IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA,
+    MACROS_ITEM_OUTPUT_SCHEMA,
+} from "./mcp/tools/recipes.js";
+import { MEAL_PROGRESS_OUTPUT_SCHEMA } from "./mcp/shared.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
+import { LIST_NOTICES_OUTPUT_SCHEMA } from "./mcp/tools/notices.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
@@ -246,7 +290,6 @@ const PROFILE_BASE: actualProfiles.Profile = {
     widgets_enabled: true,
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
-    locale: null,
     theme: null,
     nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
@@ -276,6 +319,7 @@ function storedMeal(input: Record<string, unknown>): Meal {
 const db = {
     profile: null as actualProfiles.Profile | null,
     goals: null as NutritionGoals | null,
+    goalDays: [] as GoalDayOverride[],
     meals: [] as Meal[],
     water: [] as WaterEntry[],
     inserted: [] as Record<string, unknown>[],
@@ -296,6 +340,7 @@ const db = {
     wipedUsers: [] as string[],
     ownershipTransfers: [] as { from: string; to: string }[],
     profileReads: [] as string[],
+    profilesByUserId: {} as Record<string, actualProfiles.Profile>,
     membershipReads: [] as string[],
     members: [] as actualHousehold.HouseholdMembership[],
     addedLogins: [] as string[],
@@ -314,6 +359,14 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    // Off by default so no test reaches Open Food Facts or depends on
+    // OFF_USER_AGENT; the kill-switch tests turn it on (with fetch stubbed or
+    // the switch off) to exercise the real lookup's gate.
+    realBarcodeLookup: false,
+    lookupBarcodeCalls: [] as {
+        barcode: string;
+        options?: actualFoods.FoodLookupHooks;
+    }[],
     foodSearchHits: [] as FoodResult[],
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
@@ -337,6 +390,12 @@ mock.module("./db/nutrition.js", () => ({
         db.members = db.members.filter((member) => member.userId !== userId);
     },
     getNutritionGoals: async () => db.goals,
+    getGoalsForDate: async (_u: string, date: string) =>
+        goalsForDate(db.goals, db.goalDays, date),
+    getGoalsForRange: async () => ({
+        defaults: db.goals,
+        forDate: goalsResolver(db.goals, db.goalDays),
+    }),
     getMealsByDate: async () => db.meals,
     getWaterByDate: async () => [],
     getWeightByDate: async () => [],
@@ -432,12 +491,73 @@ mock.module("./db/nutrition.js", () => ({
         db.goals = { ...goals(), user_id: userId, ...patch } as NutritionGoals;
         return db.goals;
     },
+    upsertGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+        input: Record<string, number | null | undefined>,
+    ) => {
+        const provided = GOAL_DAY_FIELDS.filter((f) => input[f] !== undefined);
+        if (provided.length === 0 || dates.length === 0) return [];
+        const saved: GoalDayOverride[] = [];
+        for (const date of [...new Set(dates)]) {
+            let row = db.goalDays.find(
+                (o) => o.user_id === userId && o.date === date,
+            );
+            if (!row) {
+                row = {
+                    user_id: userId,
+                    date,
+                    updated_at: new Date().toISOString(),
+                    daily_calories: null,
+                    daily_protein_g: null,
+                    daily_carbs_g: null,
+                    daily_fat_g: null,
+                    daily_fiber_g: null,
+                    daily_sugar_g: null,
+                    daily_alcohol_g: null,
+                    daily_caffeine_mg: null,
+                    daily_water_ml: null,
+                };
+                db.goalDays.push(row);
+            }
+            for (const field of provided) {
+                row[field] = input[field] ?? null;
+            }
+            row.updated_at = new Date().toISOString();
+            if (GOAL_DAY_FIELDS.every((f) => row![f] == null)) {
+                db.goalDays = db.goalDays.filter(
+                    (o) => !(o.user_id === userId && o.date === date),
+                );
+            } else {
+                saved.push({ ...row });
+            }
+        }
+        return saved;
+    },
+    clearGoalDays: async (
+        userId: string,
+        _householdId: string,
+        dates: string[],
+    ) => {
+        let removed = 0;
+        for (const date of dates) {
+            const before = db.goalDays.length;
+            db.goalDays = db.goalDays.filter(
+                (o) => !(o.user_id === userId && o.date === date),
+            );
+            if (db.goalDays.length < before) removed += 1;
+        }
+        return removed;
+    },
     getLatestWeight: async () => null,
     getWeightInRange: async () => [],
     getAllMeals: async () => db.meals,
+    searchMeals: async () => db.meals,
     getAllMealItems: async () => [],
     getAllWater: async () => db.water,
     getAllWeight: async () => [],
+    getAllGoalDays: async () => db.goalDays,
 }));
 
 mock.module("./db/exports.js", () => ({
@@ -449,6 +569,9 @@ mock.module("./db/profiles.js", () => ({
     ...actualProfiles,
     getProfile: async (userId: string) => {
         db.profileReads.push(userId);
+        if (db.profilesByUserId[userId]) {
+            return db.profilesByUserId[userId];
+        }
         return db.profile;
     },
     getUserTimezone: async () => db.profile?.timezone ?? "UTC",
@@ -561,6 +684,24 @@ mock.module("./db/household.js", () => ({
                     : member,
         );
     },
+    // The real one checks membership as the system, then runs
+    // deleteAllUserData, whose stub above records the wipe.
+    removeHouseholdMemberAccount: async (
+        householdId: string,
+        userId: string,
+    ) => {
+        const member = db.members.find(
+            (m) => m.householdId === householdId && m.userId === userId,
+        );
+        if (!member || member.role === "owner") {
+            throw new Error(
+                "Only a member other than the owner can be removed.",
+            );
+        }
+        db.accountWipes += 1;
+        db.wipedUsers.push(userId);
+        db.members = db.members.filter((m) => m.userId !== userId);
+    },
     rotateHouseholdMcpToken: async (args: {
         householdId: string;
         tokenHashHex: string;
@@ -614,6 +755,12 @@ mock.module("./db/rules.js", () => ({
 mock.module("./db/foods.js", () => ({
     ...actualDbFoods,
     liveFoodsStore: () => db.foodsStore,
+    mergeLiveFoods: (
+        householdId: string,
+        keepId: string,
+        dropId: string,
+        store = db.foodsStore,
+    ) => mergeFoods(store, householdId, keepId, dropId),
 }));
 
 mock.module("./db/notice-dismissals.js", () => ({
@@ -628,7 +775,17 @@ mock.module("./db/social-readers.js", () => ({
 
 mock.module("./foods.js", () => ({
     ...actualFoods,
-    lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
+    lookupBarcode: async (
+        barcode: string,
+        options?: actualFoods.FoodLookupHooks,
+    ) => {
+        db.lookupBarcodeCalls.push({ barcode, options });
+        if (Object.hasOwn(db.barcodeFoods, barcode)) {
+            return db.barcodeFoods[barcode];
+        }
+        if (!db.realBarcodeLookup) return null;
+        return realFoods.lookupBarcode(barcode, options);
+    },
 }));
 
 mock.module("./food-search.js", () => ({
@@ -695,6 +852,7 @@ afterAll(() => {
 beforeEach(() => {
     db.profile = { ...PROFILE_BASE };
     db.goals = null;
+    db.goalDays = [];
     db.meals = [];
     db.water = [];
     db.inserted = [];
@@ -710,6 +868,7 @@ beforeEach(() => {
     db.wipedUsers = [];
     db.ownershipTransfers = [];
     db.profileReads = [];
+    db.profilesByUserId = {};
     db.membershipReads = [];
     db.addedLogins = [];
     db.tokenRotations = [];
@@ -739,6 +898,8 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.realBarcodeLookup = false;
+    db.lookupBarcodeCalls = [];
     db.foodSearchHits = [];
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
@@ -755,6 +916,33 @@ type CallTool = (
     name: string,
     args?: Record<string, unknown>,
 ) => Promise<ToolResult>;
+
+const SIMILAR_WRITE_TOOLS = new Set([
+    "upsert_food",
+    "add_fridge_item",
+    "add_grocery_line",
+    "add_recipe_ingredient",
+    "import_recipe_from_text",
+    "log_meal",
+]);
+
+function callToolArguments(
+    name: string,
+    args: Record<string, unknown>,
+): Record<string, unknown> {
+    const next = { ...args };
+    // Existing fixtures predate "did you mean" and expect a create, so they
+    // get on_similar "create". A test that passes the key (even as undefined,
+    // which serializes away) runs the tool's real default, "ask".
+    if (
+        SIMILAR_WRITE_TOOLS.has(name) &&
+        !("on_similar" in next) &&
+        next.new_food !== true
+    ) {
+        next.on_similar = "create";
+    }
+    return next;
+}
 
 /** Register the real tools for a user whose alcohol gate is `alcohol`, then
  *  drive them through a client. `alcohol` is the whole opt-in: null = off. */
@@ -787,7 +975,7 @@ async function withTools(
             (name, args = {}) =>
                 client.callTool({
                     name,
-                    arguments: args,
+                    arguments: callToolArguments(name, args),
                 }) as Promise<ToolResult>,
         );
     } finally {
@@ -1283,6 +1471,59 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
     });
 });
 
+describe("search_meals groups food-backed variations by food set", () => {
+    test("returns one variation for differently worded meals with the same foods", async () => {
+        const eggs = "11111111-1111-4111-8111-111111111101";
+        const toast = "11111111-1111-4111-8111-111111111102";
+        const item = (food_id: string): NonNullable<Meal["items"]>[number] => ({
+            id: `i-${food_id}`,
+            meal_id: "m",
+            user_id: "u1",
+            household_id: "hh-1",
+            food_id,
+            recipe_id: null,
+            label: "Item",
+            amount: 1,
+            unit: "each",
+            grams: 50,
+            portions: null,
+            calories: 100,
+            protein_g: 10,
+            carbs_g: 1,
+            fat_g: 5,
+            fiber_g: 0,
+            sugar_g: 0,
+            alcohol_g: null,
+            caffeine_mg: null,
+            sort_order: 0,
+            created_at: "2026-06-20T14:30:00.000Z",
+        });
+        db.meals = [
+            meal({
+                id: "m1",
+                description: "Eggs and toast",
+                logged_at: "2026-06-20T08:00:00.000Z",
+                items: [item(eggs), item(toast)],
+            }),
+            meal({
+                id: "m2",
+                description: "Breakfast plate",
+                logged_at: "2026-06-21T08:00:00.000Z",
+                items: [item(toast), item(eggs)],
+            }),
+        ];
+        await withTools(null, async (call) => {
+            const text = textOf(
+                await call("search_meals", { queries: ["eggs"] }),
+            );
+            expect(text).toContain("Found 2 past meals");
+            expect(text).toContain("logged 2×");
+            expect(text).toContain("Breakfast plate");
+            expect(text).not.toMatch(/2\.\s/);
+        });
+    });
+});
+
 describe("log_meal with food items", () => {
     test("computes totals from snapshots and ignores caller-sent totals", async () => {
         const eggs = await findOrCreateManualFood(
@@ -1363,6 +1604,246 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
             expect(db.goals!.daily_caffeine_mg).toBe(400);
             await call("set_nutrition_goals", { daily_caffeine_mg: null });
             expect(db.goals!.daily_caffeine_mg).toBeNull();
+        });
+    });
+});
+
+describe("per-day nutrition goal overrides (read path)", () => {
+    test("get_goal_progress uses override calories; target weight stays default", async () => {
+        db.goals = goals({
+            daily_calories: 2000,
+            daily_protein_g: 150,
+            target_weight_g: 80000,
+        });
+        db.goalDays = [
+            {
+                user_id: "u1",
+                date: "2026-07-04",
+                updated_at: "2026-07-04T00:00:00Z",
+                daily_calories: 2500,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            const text = textOf(r);
+            expect(text).toContain("2500");
+            expect(text).not.toMatch(/Calories:.*2000 kcal target/);
+            expect(text).toContain("80 kg");
+            const sc = r.structuredContent as {
+                goals: { calories: number | null };
+            };
+            expect(sc.goals?.calories).toBe(2500);
+        });
+    });
+
+    test("get_trends text shows varies by day when overrides differ", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.meals = [
+            meal({ logged_at: "2026-06-01T12:00:00Z", calories: 2000 }),
+            meal({ logged_at: "2026-06-02T12:00:00Z", calories: 2000 }),
+        ];
+        db.goalDays = [
+            {
+                user_id: "u1",
+                date: "2026-06-02",
+                updated_at: "2026-06-02T00:00:00Z",
+                daily_calories: 3000,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ];
+        await withTools(null, async (call) => {
+            const text = textOf(
+                await call("get_trends", {
+                    days: 2,
+                    end_date: "2026-06-02",
+                }),
+            );
+            expect(text).toContain("varies by day");
+        });
+    });
+});
+
+describe("set_nutrition_goals per-day overrides", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+    const otherDay = "2026-07-05";
+
+    test("override on one day; another day keeps the default", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const set = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(set.isError).toBeFalsy();
+            SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(set.structuredContent);
+            expect(set.structuredContent?.scope).toBe("days");
+            const onDay = await call("get_goal_progress", {
+                date: "2026-07-04",
+            });
+            expect(textOf(onDay)).toContain("2800");
+            const other = await call("get_goal_progress", { date: otherDay });
+            expect(textOf(other)).toContain("2000");
+        });
+    });
+
+    test("a three-day range writes each day", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-08-01",
+                to: "2026-08-03",
+                daily_protein_g: 180,
+            });
+            expect(r.isError).toBeFalsy();
+            const sc = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(sc.days).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+            expect(
+                db.goalDays
+                    .filter((o) => o.user_id === "u1")
+                    .map((o) => o.date),
+            ).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+        });
+    });
+
+    test("clear removes an override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                clear: true,
+            });
+            expect(db.goalDays).toHaveLength(0);
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2000");
+            expect(textOf(r)).not.toContain("2800");
+        });
+    });
+
+    test("null on one field clears only that override field", async () => {
+        db.goals = goals({ daily_calories: 2000, daily_protein_g: 150 });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+                daily_protein_g: 200,
+            });
+            await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_protein_g: null,
+            });
+            const row = db.goalDays.find(
+                (o) => o.date === "2026-07-04" && o.user_id === "u1",
+            );
+            expect(row?.daily_calories).toBe(2800);
+            expect(row?.daily_protein_g).toBeNull();
+            const r = await call("get_goal_progress", { date: "2026-07-04" });
+            expect(textOf(r)).toContain("2800");
+            expect(textOf(r)).toContain("150");
+        });
+    });
+
+    test("an empty date is refused instead of writing the defaults", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "",
+                daily_calories: 2100,
+            });
+            expect(r.isError).toBe(true);
+            expect(db.goals?.daily_calories).toBe(2000);
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("standing defaults do not need a household membership", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 2200,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals?.daily_calories).toBe(2200);
+        });
+    });
+
+    test("a 93-day range is refused without writing", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                from: "2026-01-01",
+                to: "2026-04-03",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("92");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("date and from together is refused", async () => {
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                from: "2026-07-01",
+                to: "2026-07-02",
+                daily_calories: 2500,
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("not both");
+            expect(db.goalDays).toHaveLength(0);
+        });
+    });
+
+    test("target_member writes the other member's override", async () => {
+        db.goals = goals({ daily_calories: 2000 });
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                target_member: bob,
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(
+                db.goalDays.some(
+                    (o) => o.user_id === bob && o.daily_calories === 2800,
+                ),
+            ).toBe(true);
         });
     });
 });
@@ -2025,19 +2506,9 @@ describe("get_nutrition_summary discloses its logged-day denominator", () => {
     });
 
     // Widgets are English-only; structuredContent.locale stays "en".
-    test("structuredContent locale stays English even if a profile locale is set", async () => {
+    test("structuredContent locale is English", async () => {
         stage(1);
-        db.profile = { ...PROFILE_BASE, locale: "de" };
-        await withTools(null, async (call) => {
-            const sc = (await summarize(call))
-                .structuredContent as unknown as SummaryPayload;
-            expect(sc.locale).toBe("en");
-        });
-    });
-
-    test("structuredContent defaults locale to English when never set", async () => {
-        stage(1);
-        db.profile = { ...PROFILE_BASE, locale: null };
+        db.profile = PROFILE_BASE;
         await withTools(null, async (call) => {
             const sc = (await summarize(call))
                 .structuredContent as unknown as SummaryPayload;
@@ -2676,7 +3147,7 @@ describe("current-time disclosure", () => {
     });
 
     test("get_profile does not report a widget language", async () => {
-        db.profile = { ...PROFILE_BASE, locale: "fr" };
+        db.profile = PROFILE_BASE;
         await withTools(null, async (call) => {
             const text = textOf(await call("get_profile"));
             expect(text).not.toContain("Language:");
@@ -2834,6 +3305,7 @@ describe("export_all_data is on the tool surface", () => {
             "water.csv",
             "weight.csv",
             "goals.csv",
+            "goal_days.csv",
             "profile.csv",
             "README.txt",
         ]) {
@@ -2992,7 +3464,7 @@ describe("household PAT has no default user", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
                 async () => {
                     const { tools } = await client.listTools();
@@ -3113,7 +3585,7 @@ describe("household person targeting", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3381,11 +3853,22 @@ describe("household config tools", () => {
             { name: "foodable-test", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
         );
+        const flags = evaluateViewerFlags(
+            buildFlagContext({
+                auth: { kind: "household", householdId: "hh-1" },
+                householdId: "hh-1",
+            }),
+            createMemoryFlags(allFlagsOn()),
+        );
         registerTools(
             server,
             { kind: "household", householdId: "hh-1" },
             true,
             null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
         );
         const [clientTransport, serverTransport] =
             InMemoryTransport.createLinkedPair();
@@ -3399,7 +3882,7 @@ describe("household config tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
                 async () => {
                     const { tools } = await client.listTools();
@@ -3716,6 +4199,265 @@ describe("household config tools", () => {
         });
     });
 
+    describe("gated tools and flag-off tool list", () => {
+        const snapshot = (async () =>
+            (await Bun.file(
+                new URL("./mcp/tools-list.snapshot.json", import.meta.url),
+            ).json()) as string[])();
+
+        function viewerFlagCtx() {
+            return buildFlagContext({
+                auth: { kind: "user", userId: "u1" },
+                member: {
+                    userId: "u1",
+                    householdId: "hh-1",
+                    role: "owner",
+                    displayName: "Owner",
+                },
+            });
+        }
+
+        // The snapshot is the all-flags-on list. With a flag off, tools/list
+        // is the snapshot minus exactly the gated tools left unregistered, in
+        // the same order.
+        async function listAgainstSnapshot(flags: ViewerFlags) {
+            const { names, gated } = await toolNamesFor(flags);
+            const hidden = new Set(
+                gated.filter((e) => !e.registered).map((e) => e.name),
+            );
+            return {
+                names,
+                expected: (await snapshot).filter((name) => !hidden.has(name)),
+            };
+        }
+
+        test("all flags off is the snapshot minus gated tools", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(allFlagsOff()),
+            );
+            const { names, expected } = await listAgainstSnapshot(flags);
+            expect(names).toEqual(expected);
+        });
+
+        test("all flags on matches snapshot", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(allFlagsOn()),
+            );
+            const { names } = await toolNamesFor(flags);
+            expect(names).toEqual(await snapshot);
+        });
+
+        test("registry defaults match snapshot", async () => {
+            const flags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags(defaultFlags()),
+            );
+            const { names, expected } = await listAgainstSnapshot(flags);
+            expect(names).toEqual(expected);
+        });
+
+        test("gatedTool stays out of tools/list when off and keeps neighbor order", async () => {
+            const offFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": false }),
+            );
+            const { names, gated } = await toolNamesFor(
+                offFlags,
+                (server, auth) => {
+                    const ctx = createToolContext(
+                        auth,
+                        true,
+                        null,
+                        undefined,
+                        "http://localhost",
+                        true,
+                        offFlags,
+                    );
+                    server.registerTool(
+                        "test_tool_a",
+                        {
+                            title: "A",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "a" }],
+                        }),
+                    );
+                    gatedTool(
+                        server,
+                        ctx,
+                        "ui-v2",
+                        "test_gated_tool",
+                        {
+                            title: "Gated",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "gated" }],
+                        }),
+                    );
+                    server.registerTool(
+                        "test_tool_b",
+                        {
+                            title: "B",
+                            description: "test",
+                            inputSchema: z.object({
+                                _ping: z.string().optional(),
+                            }),
+                        },
+                        async (_args) => ({
+                            content: [{ type: "text" as const, text: "b" }],
+                        }),
+                    );
+                    return ctx.gatedTools;
+                },
+            );
+            expect(names).toEqual(["test_tool_a", "test_tool_b"]);
+            expect(gated).toEqual([
+                { name: "test_gated_tool", flag: "ui-v2", registered: false },
+            ]);
+        });
+
+        test("gated tool off answers unknown-tool; on is listed and callable", async () => {
+            const offFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": false }),
+            );
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const ctx = createToolContext(
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                offFlags,
+            );
+            gatedTool(
+                server,
+                ctx,
+                "ui-v2",
+                "test_gated_tool",
+                {
+                    title: "Gated",
+                    description: "test",
+                    inputSchema: z.object({ _ping: z.string().optional() }),
+                },
+                async (_args) => ({
+                    content: [{ type: "text" as const, text: "gated" }],
+                }),
+            );
+            const [clientTransport, serverTransport] =
+                InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([
+                server.connect(serverTransport),
+                client.connect(clientTransport),
+            ]);
+            try {
+                await expect(
+                    client.callTool({
+                        name: "test_gated_tool",
+                        arguments: {},
+                    }),
+                ).rejects.toThrow(/not found/i);
+            } finally {
+                await client.close();
+                await server.close();
+            }
+
+            const onFlags = evaluateViewerFlags(
+                viewerFlagCtx(),
+                createMemoryFlags({ "ui-v2": true }),
+            );
+            const { names } = await toolNamesFor(onFlags, (server, auth) => {
+                const ctxOn = createToolContext(
+                    auth,
+                    true,
+                    null,
+                    undefined,
+                    "http://localhost",
+                    true,
+                    onFlags,
+                );
+                gatedTool(
+                    server,
+                    ctxOn,
+                    "ui-v2",
+                    "test_gated_tool",
+                    {
+                        title: "Gated",
+                        description: "test",
+                        inputSchema: z.object({ _ping: z.string().optional() }),
+                    },
+                    async () => ({
+                        content: [{ type: "text", text: "gated" }],
+                    }),
+                );
+                return ctxOn.gatedTools;
+            });
+            expect(names).toEqual(["test_gated_tool"]);
+            const onServer = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const ctxOn = createToolContext(
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                onFlags,
+            );
+            gatedTool(
+                onServer,
+                ctxOn,
+                "ui-v2",
+                "test_gated_tool",
+                {
+                    title: "Gated",
+                    description: "test",
+                    inputSchema: z.object({ _ping: z.string().optional() }),
+                },
+                async () => ({
+                    content: [{ type: "text", text: "gated" }],
+                }),
+            );
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            const onClient = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([onServer.connect(st), onClient.connect(ct)]);
+            try {
+                const r = (await onClient.callTool({
+                    name: "test_gated_tool",
+                    arguments: {},
+                })) as ToolResult;
+                expect(r.isError).not.toBe(true);
+                expect(textOf(r)).toBe("gated");
+            } finally {
+                await onClient.close();
+                await onServer.close();
+            }
+        });
+    });
+
     test("person-scoped catalog tools include optional user_id", () => {
         const skip = new Set<string>([
             ...HOUSEHOLD_SCOPED_TOOL_NAMES,
@@ -3745,6 +4487,637 @@ describe("household config tools", () => {
                 required: false,
             });
         }
+    });
+
+    async function withRateProductFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-rate-product": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [clientTransport, serverTransport] =
+            InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test-client", version: "0.0.0" });
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+        try {
+            await run(
+                (name, args = {}) =>
+                    client.callTool({
+                        name,
+                        arguments: callToolArguments(name, args),
+                    }) as Promise<ToolResult>,
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    async function seedMilkProduct(): Promise<string> {
+        const food = newFood({
+            householdId: "hh-1",
+            kind: "food",
+            name: "Milk Yogurt",
+            brand: "Test",
+            calories: 60,
+            sugarG: 8,
+            saturatedFatG: 2,
+            offQuality: {
+                nutriscoreGrade: "b",
+                novaGroup: 3,
+                ecoscoreGrade: "c",
+                additives: null,
+                allergensTags: ["en:milk"],
+                tracesTags: null,
+                ingredientsAnalysisTags: null,
+                labelsTags: null,
+                fetchedAt: "2026-11-09T12:00:00.000Z",
+            },
+        });
+        await db.foodsStore.insertFood(food);
+        return food.id;
+    }
+
+    describe("rate_product", () => {
+        test("a gluten-only product warns the same in the catalog and by barcode", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "wheat",
+            });
+            const { findOrCreateFoodByBarcodeFromHit } =
+                await import("./domain/foods.js");
+            const hitFor = (barcode: string) => ({
+                name: "Wheat Crackers",
+                brand: "Test",
+                serving: "100 g",
+                serving_quantity: null,
+                serving_quantity_unit: null,
+                calories: 450,
+                protein_g: 10,
+                carbs_g: 70,
+                fat_g: 12,
+                fiber_g: 3,
+                sugar_g: 2,
+                saturated_fat_g: 1,
+                alcohol_g: null,
+                nutriscore_grade: "c",
+                nova_group: 3,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                allergens_tags: ["en:gluten"],
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "c",
+                    nova_group: 3,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: ["en:gluten"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            const inCatalog = "4000000000017";
+            const notInCatalog = "4000000000024";
+            await findOrCreateFoodByBarcodeFromHit(
+                db.foodsStore,
+                "hh-1",
+                inCatalog,
+                hitFor(inCatalog) as never,
+            );
+            db.barcodeFoods[notInCatalog] = hitFor(notInCatalog) as never;
+            await withRateProductFlag(true, async (call) => {
+                for (const barcode of [inCatalog, notInCatalog]) {
+                    const r = await call("rate_product", { barcode });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(
+                        out.checks[0]!.notices.map((n) => [n.code, n.severity]),
+                    ).toEqual([["food.product_gluten", "warn"]]);
+                }
+            });
+        });
+
+        test("flag off hides tool and rejects calls", async () => {
+            const server = new McpServer(
+                { name: "foodable-test", version: "0.0.0" },
+                { capabilities: { tools: {}, resources: {} } },
+            );
+            const flagCtx = buildFlagContext({
+                auth: { kind: "user", userId: "u1" },
+            });
+            const flags = evaluateViewerFlags(
+                flagCtx,
+                createMemoryFlags({ "mcp-rate-product": false }),
+            );
+            registerTools(
+                server,
+                { kind: "user", userId: "u1" },
+                true,
+                null,
+                undefined,
+                "http://localhost",
+                true,
+                flags,
+            );
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            const client = new Client({
+                name: "test-client",
+                version: "0.0.0",
+            });
+            await Promise.all([server.connect(st), client.connect(ct)]);
+            try {
+                const list = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(list).not.toContain("rate_product");
+                await expect(
+                    client.callTool({
+                        name: "rate_product",
+                        arguments: { barcode: "12345678" },
+                    }),
+                ).rejects.toThrow(/not found/i);
+            } finally {
+                await client.close();
+                await server.close();
+            }
+        });
+
+        test("a household-scoped off-lookups kill switch stops Open Food Facts requests", async () => {
+            const barcode = "4000000000031";
+            // A catalog food with no nutrition of its own looks its
+            // barcode up too.
+            const bare = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Bare Biscuits",
+            });
+            await db.foodsStore.insertFood(bare);
+            await db.foodsStore.setBarcode("hh-1", "4000000000048", bare.id);
+            db.realBarcodeLookup = true;
+            const offRequests: string[] = [];
+            const realFetch = globalThis.fetch;
+            const realAgent = process.env.OFF_USER_AGENT;
+            process.env.OFF_USER_AGENT = "Foodable (test@example.invalid)";
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = String(
+                    input instanceof Request ? input.url : input,
+                );
+                if (url.includes("openfoodfacts")) offRequests.push(url);
+                return new Response("{}", { status: 404 });
+            }) as typeof fetch;
+            try {
+                // Off only for this household: a deploy-wide check would
+                // still see it on and call Open Food Facts.
+                for (const [offFor, expected] of [
+                    ["hh-1", 0],
+                    ["hh-other", 2],
+                ] as const) {
+                    offRequests.length = 0;
+                    setFlagsForTests(
+                        createMemoryFlags({
+                            "off-lookups": (ctx) => ctx.household_id !== offFor,
+                        }),
+                    );
+                    await withRateProductFlag(true, async (call) => {
+                        const r = await call("rate_product", { barcode });
+                        const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            r.structuredContent,
+                        );
+                        expect(out.found).toBe(false);
+                        const byFood = await call("rate_product", {
+                            food_id: bare.id,
+                        });
+                        RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            byFood.structuredContent,
+                        );
+                    });
+                    expect({ offFor, requests: offRequests.length }).toEqual({
+                        offFor,
+                        requests: expected,
+                    });
+                }
+            } finally {
+                globalThis.fetch = realFetch;
+                if (realAgent === undefined) delete process.env.OFF_USER_AGENT;
+                else process.env.OFF_USER_AGENT = realAgent;
+                resetFlagsForTests();
+            }
+        });
+
+        test("food_id returns schema output with milk allergen block", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: foodId });
+                expect(r.isError).toBeFalsy();
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.checks).toHaveLength(1);
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("catalogued per-serving product uses off cache for goal notices", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
+            const barcode = "5449000000996";
+            const colaHit = {
+                name: "Cola",
+                brand: null,
+                serving: "330 ml",
+                serving_quantity: 330,
+                serving_quantity_unit: "ml",
+                calories: 139,
+                protein_g: 0,
+                carbs_g: 35,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 35,
+                saturated_fat_g: 0,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: [],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            db.barcodeFoods[barcode] = colaHit as never;
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Cola",
+                calories: null,
+                proteinG: null,
+                carbsG: null,
+                fatG: null,
+                fiberG: null,
+                sugarG: null,
+                alcoholG: null,
+                offQuality: colaHit.quality as never,
+            });
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            await withRateProductFlag(true, async (call) => {
+                for (const args of [
+                    { barcode },
+                    { food_id: food.id },
+                ] as const) {
+                    const r = await call("rate_product", args);
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    const messages = out.checks[0]!.notices.map(
+                        (n) => n.message,
+                    );
+                    expect(messages).toContain("35 g sugar, 40 g left today");
+                }
+            });
+        });
+
+        test("a per-serving barcode in ml still gives goal notices", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_sugar_g: 40 });
+            const barcode = "5449000000996";
+            db.barcodeFoods[barcode] = {
+                name: "Cola",
+                brand: null,
+                serving: "330 ml",
+                serving_quantity: 330,
+                serving_quantity_unit: "ml",
+                calories: 139,
+                protein_g: 0,
+                carbs_g: 35,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 35,
+                saturated_fat_g: 0,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: null,
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: null,
+                    additives_tags: [],
+                    allergens_tags: [],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            } as never;
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const messages = out.checks[0]!.notices.map((n) => n.message);
+                expect(messages).toContain("35 g sugar, 40 g left today");
+            });
+        });
+
+        test("barcode resolves off cache without creating a food", async () => {
+            const barcode = "4006381333931";
+            db.barcodeFoods[barcode] = {
+                name: "Nutella",
+                brand: "Ferrero",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+                nutrient_levels: { sugars: "high" },
+                quality: {
+                    nutriscore_grade: "e",
+                    nova_group: 4,
+                    ecoscore_grade: "d",
+                    additives_tags: ["en:e322"],
+                    allergens_tags: ["en:nuts", "en:milk"],
+                    traces_tags: null,
+                    ingredients_analysis_tags: null,
+                    labels_tags: null,
+                    fetched_at: "2026-11-09T12:00:00.000Z",
+                },
+            };
+            const before = (await db.foodsStore.listFoods("hh-1")).length;
+            db.goals = goals({ daily_sugar_g: 40 });
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.food_id).toBeNull();
+                expect(out.product.barcode).toBe(barcode);
+                expect(out.info_rows[0]!.per_100g).toBeNull();
+                expect(out.info_rows[0]!.level).toBe("high");
+                const sugarGoal = out.checks[0]!.notices.find(
+                    (n) =>
+                        n.code === "food.product_goal" &&
+                        n.message.includes("sugar"),
+                );
+                expect(sugarGoal).toBeDefined();
+                expect(sugarGoal!.message).toContain("8.4 g sugar");
+            });
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(before);
+        });
+
+        test("catalog milk allergen blocks when offQuality is missing", async () => {
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Creamer",
+                allergens: ["milk"],
+                offQuality: null,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(true);
+            });
+        });
+
+        test("gramsPerEach drives goal notice from per-100g macros", async () => {
+            db.goals = goals({ daily_sugar_g: 30 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Sweet Bar",
+                sugarG: 50,
+                gramsPerEach: 40,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const goal = out.checks[0]!.notices.find(
+                    (n) => n.code === "food.product_goal",
+                );
+                expect(goal?.message).toContain("20 g sugar");
+                expect(goal?.message).toContain("30 g left today");
+            });
+        });
+
+        test("no alcohol goal notice while alcohol display is off", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_alcohol_g: 20 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Lager",
+                alcoholG: 4,
+                gramsPerEach: 330,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const messages = out.checks[0]!.notices.map((n) => n.message);
+                expect(messages.some((m) => m.includes("alcohol"))).toBe(false);
+            });
+        });
+
+        test("missing food_id returns found false", async () => {
+            const missing = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: missing });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
+
+        test("archived household barcode falls through to off cache", async () => {
+            const barcode = "3017620422003";
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Archived Jar",
+            });
+            food.archivedAt = "2026-11-09T12:00:00.000Z";
+            await db.foodsStore.insertFood(food);
+            await db.foodsStore.setBarcode("hh-1", barcode, food.id);
+            db.barcodeFoods[barcode] = {
+                name: "Off Jar",
+                brand: "Test",
+                serving: "15 g",
+                serving_quantity: 15,
+                serving_quantity_unit: "g",
+                calories: 80,
+                protein_g: 1,
+                carbs_g: 8.5,
+                fat_g: 4.6,
+                fiber_g: 0.5,
+                sugar_g: 8.4,
+                saturated_fat_g: 1.5,
+                alcohol_g: null,
+                nutriscore_grade: "e",
+                nova_group: 4,
+                source: `off:${barcode}`,
+                source_name: "openfoodfacts",
+                barcode,
+            };
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { barcode });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(true);
+                expect(out.product.name).toBe("Off Jar");
+                expect(out.product.food_id).toBeNull();
+            });
+        });
+
+        test("user_id narrows checks to one member", async () => {
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "Alex",
+                },
+                {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    role: "member",
+                    displayName: "Bob",
+                },
+            ];
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: "u2",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.checks).toHaveLength(1);
+                expect(out.checks[0]!.user_id).toBe("u2");
+                expect(
+                    out.checks[0]!.notices.some((n) => n.severity === "block"),
+                ).toBe(false);
+            });
+        });
+
+        test("rejects user_id from another household", async () => {
+            const other = "22222222-2222-4222-8222-222222222222";
+            db.members.push({
+                householdId: "hh-2",
+                userId: other,
+                role: "owner",
+                displayName: "Elsewhere",
+            });
+            const foodId = await seedMilkProduct();
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    food_id: foodId,
+                    user_id: other,
+                });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toContain("not a household member");
+            });
+        });
+
+        test("unknown barcode returns found false", async () => {
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", {
+                    barcode: "9999888877776",
+                });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.found).toBe(false);
+            });
+        });
     });
 });
 
@@ -3810,7 +5183,7 @@ describe("phone-app domain MCP tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3841,7 +5214,7 @@ describe("phone-app domain MCP tools", () => {
                 (name, args = {}) =>
                     client.callTool({
                         name,
-                        arguments: args,
+                        arguments: callToolArguments(name, args),
                     }) as Promise<ToolResult>,
             );
         } finally {
@@ -3883,6 +5256,216 @@ describe("phone-app domain MCP tools", () => {
                     }),
                 ]),
             );
+        });
+    });
+
+    test("add_fridge_item returns similar_foods without writing", async () => {
+        await withPat(async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            const before = (await db.fridgeStore.listItems("hh-1")).length;
+            const r = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg",
+                amount: 2,
+                on_similar: "ask",
+            });
+            expect(r.isError).toBeFalsy();
+            expect(r.structuredContent?.status).toBe("similar_foods");
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(r.structuredContent);
+            expect((await db.fridgeStore.listItems("hh-1")).length).toBe(
+                before,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+            const created = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg",
+                amount: 2,
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(created.structuredContent?.status).toBe("ok");
+            expect(created.structuredContent?.similar_foods).toEqual([]);
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(created.structuredContent);
+            const forced = await call("add_fridge_item", {
+                location_id: locationId,
+                kind: "food",
+                name: "egg white",
+                amount: 1,
+                on_similar: "create",
+            });
+            expect(forced.structuredContent?.status).toBe("ok");
+            ADD_FRIDGE_ITEM_OUTPUT_SCHEMA.parse(forced.structuredContent);
+        });
+    });
+
+    test("similar_foods on grocery, recipe, meal, upsert, and import tools", async () => {
+        await withPat(async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            await call("upsert_food", { name: "Milk" });
+            await createGroceryStore(db.settingsStore, "hh-1", "Store");
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            const groceryBefore = (await db.groceryStore.listLines("hh-1"))
+                .length;
+            const groceryAsk = await call("add_grocery_line", {
+                kind: "food",
+                name: "whole milk",
+                on_similar: "ask",
+            });
+            expect(groceryAsk.isError).toBeFalsy();
+            expect(groceryAsk.structuredContent?.status).toBe("similar_foods");
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(groceryAsk.structuredContent);
+            expect((await db.groceryStore.listLines("hh-1")).length).toBe(
+                groceryBefore,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+
+            const recipe = await call("create_recipe", {
+                name: "Test",
+                yield_portions: 1,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const ingBefore = (
+                await db.recipesStore.listIngredients("hh-1", recipeId)
+            ).length;
+            const ingAsk = await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                name: "chicken egg",
+                on_similar: "ask",
+            });
+            expect(ingAsk.structuredContent?.status).toBe("similar_foods");
+            ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA.parse(ingAsk.structuredContent);
+            expect(
+                (await db.recipesStore.listIngredients("hh-1", recipeId))
+                    .length,
+            ).toBe(ingBefore);
+            const ingNew = await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                name: "egg",
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(ingNew.structuredContent?.status).toBe("ok");
+            ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA.parse(ingNew.structuredContent);
+
+            const groceryNew = await call("add_grocery_line", {
+                kind: "food",
+                name: "egg",
+                on_similar: "ask",
+                new_food: true,
+            });
+            expect(groceryNew.structuredContent?.status).toBe("ok");
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(groceryNew.structuredContent);
+
+            const recipeBefore = (await db.recipesStore.listRecipes("hh-1"))
+                .length;
+            const foodBeforeImport = (await db.foodsStore.listFoods("hh-1"))
+                .length;
+            const importAsk = await call("import_recipe_from_text", {
+                name: "Dup",
+                text: "Dup",
+                ingredients: [{ name: "chicken egg" }, { name: "whole milk" }],
+                on_similar: "ask",
+            });
+            expect(importAsk.structuredContent?.status).toBe("similar_foods");
+            const parsedImport = IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA.parse(
+                importAsk.structuredContent,
+            );
+            expect(parsedImport.similar_foods.map((e) => e.name)).toEqual([
+                "chicken egg",
+                "whole milk",
+            ]);
+            expect((await db.recipesStore.listRecipes("hh-1")).length).toBe(
+                recipeBefore,
+            );
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBeforeImport,
+            );
+        });
+        await withPat(async (call) => {
+            const branded = await call("upsert_food", {
+                name: "All-purpose flour",
+                brand: "King Arthur",
+            });
+            const foodBefore = (await db.foodsStore.listFoods("hh-1")).length;
+            // No on_similar value: the tool's own default ("ask") applies.
+            const upsertAsk = await call("upsert_food", {
+                name: "all purpose flour",
+                on_similar: undefined,
+            });
+            expect(upsertAsk.isError).toBeFalsy();
+            expect(upsertAsk.structuredContent?.status).toBe("similar_foods");
+            const parsedAsk = UPSERT_FOOD_OUTPUT.parse(
+                upsertAsk.structuredContent,
+            );
+            expect(
+                parsedAsk.similar_foods[0]?.candidates.map((c) => c.food_id),
+            ).toEqual([branded.structuredContent?.id as string]);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBefore,
+            );
+            const upsertCreate = await call("upsert_food", {
+                name: "all purpose flour",
+                on_similar: "create",
+            });
+            expect(upsertCreate.structuredContent?.status).toBe("ok");
+            UPSERT_FOOD_OUTPUT.parse(upsertCreate.structuredContent);
+        });
+        await withUser(alice, async (call) => {
+            await call("upsert_food", { name: "Eggs" });
+            const mealsBefore = db.inserted.length;
+            const foodBeforeMeal = (await db.foodsStore.listFoods("hh-1"))
+                .length;
+            const mealAsk = await call("log_meal", {
+                description: "Snack",
+                meal_type: "snack",
+                items: [{ name: "chicken egg" }],
+                on_similar: "ask",
+            });
+            expect(mealAsk.isError).toBeFalsy();
+            expect(mealAsk.structuredContent?.status).toBe("similar_foods");
+            expect(mealAsk.structuredContent?.similar_foods).not.toEqual([]);
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealAsk.structuredContent);
+            expect(db.inserted.length).toBe(mealsBefore);
+            expect((await db.foodsStore.listFoods("hh-1")).length).toBe(
+                foodBeforeMeal,
+            );
+            const mealNew = await call("log_meal", {
+                description: "Snack",
+                meal_type: "snack",
+                items: [{ name: "egg", new_food: true }],
+                on_similar: "ask",
+            });
+            expect(mealNew.structuredContent?.status).toBe("ok");
+            expect(mealNew.structuredContent?.similar_foods).toEqual([]);
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealNew.structuredContent);
+            const mealCreate = await call("log_meal", {
+                description: "Snack 2",
+                meal_type: "snack",
+                items: [{ name: "egg salad" }],
+                on_similar: "create",
+            });
+            expect(mealCreate.structuredContent?.status).toBe("ok");
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(mealCreate.structuredContent);
+            await call("log_meal", {
+                description: "Base",
+                meal_type: "lunch",
+                calories: 100,
+            });
+            const updated = await call("update_meal", {
+                id: "m1",
+                description: "Base edit",
+            });
+            expect(updated.structuredContent?.status).toBe("ok");
+            MEAL_PROGRESS_OUTPUT_SCHEMA.parse(updated.structuredContent);
         });
     });
 
@@ -4060,10 +5643,17 @@ describe("phone-app domain MCP tools", () => {
             });
             const got = await call("get_recipe", { id: recipeId });
             expect(got.isError).toBeFalsy();
-            const macros = MACROS_ITEM_OUTPUT_SCHEMA.parse(
+            MACROS_ITEM_OUTPUT_SCHEMA.parse(
                 got.structuredContent?.macros_per_portion,
             );
-            expect(macros.gaps[0]?.reason).toBe("no_nutrition");
+            const sc = got.structuredContent as {
+                notices: Array<{ code: string }>;
+                macros_per_portion: { incomplete: boolean };
+            };
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(
+                sc.notices.some((n) => n.code === "recipe.no_nutrition"),
+            ).toBe(true);
             expect(textOf(got)).toContain(
                 "Half and half: no nutrition — add it, or pick a usual product",
             );
@@ -5599,12 +7189,16 @@ describe("phone-app domain MCP tools", () => {
                 amount: 100,
             });
             expect(line.isError).toBeFalsy();
-            expect(line.structuredContent?.warning).toContain("peanut");
             expect(textOf(line).toLowerCase()).toContain("peanut");
+            const sc = ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(
+                line.structuredContent,
+            );
+            expect(sc.notices.map((n) => n.code)).toEqual(["grocery.allergen"]);
+            expect(sc.notices[0]!.severity).toBe("block");
         });
     });
 
-    test("get_recipe wires recipe.no_nutrition notices beside gaps", async () => {
+    test("get_recipe wires recipe.no_nutrition notices", async () => {
         await withUser(alice, async (call) => {
             const plain = await call("upsert_food", { name: "Half and half" });
             const plainId = plain.structuredContent?.id as string;
@@ -5636,7 +7230,7 @@ describe("phone-app domain MCP tools", () => {
                     message: string;
                     action: { label: string } | null;
                 }>;
-                macros_per_portion: { gaps: Array<{ message: string }> };
+                macros_per_portion: { incomplete: boolean };
             };
             for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
             const nn = sc.notices.find((n) => n.code === "recipe.no_nutrition");
@@ -5644,7 +7238,8 @@ describe("phone-app domain MCP tools", () => {
             expect(nn?.subject.kind).toBe("recipe_ingredient");
             expect(nn?.subject.recipe_id).toBe(recipeId);
             expect(nn?.action).toEqual({ label: "Pick usual product" });
-            expect(nn?.message).toBe(sc.macros_per_portion.gaps[0]?.message);
+            expect(sc.macros_per_portion.incomplete).toBe(true);
+            expect(nn?.message).toContain("no nutrition");
         });
     });
 
@@ -5688,6 +7283,72 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("list_grocery_lines returns grocery.restocked on restock lines", async () => {
+        const store = await createGroceryStore(
+            db.settingsStore,
+            "hh-1",
+            "Safeway",
+        );
+        const sections = await db.settingsStore.listSections(store.id);
+        const sectionId = sections[0]!.id;
+        await withPat(async (call) => {
+            const milk = await call("upsert_food", { name: "Restock Milk" });
+            const foodId = (milk.structuredContent as { id: string }).id;
+            const itemId = crypto.randomUUID();
+            await db.fridgeStore.insertItem({
+                id: itemId,
+                householdId: "hh-1",
+                kind: "food",
+                foodId,
+                displayName: "Milk pint",
+                quantity: { amount: 1, unit: "l" },
+                locationId: "loc-1",
+                expiresOn: "2030-06-03",
+                openedOn: null,
+                purchasedOn: null,
+            });
+            await db.groceryStore.insertLine({
+                id: "line-restock",
+                householdId: "hh-1",
+                storeId: store.id,
+                sectionId,
+                kind: "food",
+                displayName: "Restock Milk",
+                quantity: { amount: 1, unit: "l" },
+                foodId,
+                checked: false,
+                source: "restock",
+                sourceFridgeItemId: itemId,
+                note: null,
+            });
+            const listed = await call("list_grocery_lines");
+            const lines = (
+                listed.structuredContent as {
+                    stores: Array<{
+                        sections: Array<{
+                            lines: Array<{
+                                id: string;
+                                notices: unknown[];
+                            }>;
+                        }>;
+                    }>;
+                }
+            ).stores.flatMap((s) => s.sections.flatMap((sec) => sec.lines));
+            const hit = lines.find((l) => l.id === "line-restock");
+            expect(hit).toBeTruthy();
+            const notice = (
+                hit!.notices as Array<{ code: string; message: string }>
+            ).find((n) => n.code === "grocery.restocked");
+            expect(notice).toBeTruthy();
+            expect(notice!.message).toContain(
+                "Added because Milk pint expires",
+            );
+            for (const n of hit!.notices) NOTICE_SCHEMA.parse(n);
+            const text = (listed.content as Array<{ text: string }>)[0]!.text;
+            expect(text).toContain("— Added because Milk pint expires");
+        });
+    });
+
     test("list_grocery_lines wires grocery.allergen notices on lines", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
@@ -5708,9 +7369,8 @@ describe("phone-app domain MCP tools", () => {
                 name: "Peanut Butter",
                 amount: 1,
             });
-            expect(added.structuredContent?.warning).toBe(
-                "Contains peanut — Bob.",
-            );
+            ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(added.structuredContent);
+            expect(textOf(added)).toContain("Contains peanut — Bob.");
             await call("add_grocery_line", {
                 store_id: store.id,
                 kind: "food",
@@ -5750,9 +7410,7 @@ describe("phone-app domain MCP tools", () => {
                     (r) => r.kind === "member" && r.name === "Bob",
                 ),
             ).toBe(true);
-            expect(pean!.notices[0]?.message).toBe(
-                added.structuredContent?.warning as string,
-            );
+            expect(pean!.notices[0]?.message).toBe("Contains peanut — Bob.");
             expect(textOf(listed)).toContain(" — Contains peanut — Bob.");
             const oats = lines.find((l) =>
                 l.display_name.toLowerCase().includes("oats"),
@@ -5881,6 +7539,41 @@ describe("phone-app domain MCP tools", () => {
             });
             const payload = GET_FOOD_OUTPUT.parse(got.structuredContent);
             expect(payload.notices).toEqual([]);
+        });
+    });
+
+    test("get_food emits quality null or full literal", async () => {
+        await withPat(async (call) => {
+            const plain = await call("upsert_food", { name: "Oats" });
+            const plainId = plain.structuredContent?.id as string;
+            const without = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: plainId }))
+                    .structuredContent,
+            );
+            expect(without.quality).toBeNull();
+
+            await db.foodsStore.updateFoodRow({
+                ...(await db.foodsStore.getFood("hh-1", plainId))!,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 1,
+                    ecoscoreGrade: "b",
+                    additives: [{ tag: "en:e250", risk: "high" }],
+                    allergensTags: ["en:gluten"],
+                    tracesTags: [],
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-07T12:00:00.000Z",
+                },
+            });
+            const withQ = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: plainId }))
+                    .structuredContent,
+            );
+            expect(withQ.quality?.nutriscore_grade).toBe("a");
+            expect(withQ.quality?.additives).toEqual([
+                { tag: "en:e250", risk: "high" },
+            ]);
         });
     });
 
@@ -6037,6 +7730,113 @@ describe("phone-app domain MCP tools", () => {
             expect(textOf(missing).toLowerCase()).toContain("not open");
         });
     });
+
+    test("food.possible_duplicate list, dismiss pair either order, merge, get_food", async () => {
+        await withUser(alice, async (call) => {
+            const a = await call("upsert_food", { name: "chicken egg" });
+            const b = await call("upsert_food", {
+                name: "Eggs",
+                calories: 140,
+            });
+            const idA = a.structuredContent?.id as string;
+            const idB = b.structuredContent?.id as string;
+            await call("upsert_food", {
+                food_id: idA,
+                calories: 100,
+            });
+
+            const byCode = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            const notices = (
+                byCode.structuredContent as {
+                    notices: Array<{
+                        code: string;
+                        subject: { id: string };
+                        related: Array<{ id: string }>;
+                    }>;
+                }
+            ).notices.filter((n) => n.code === "food.possible_duplicate");
+            expect(
+                notices.some(
+                    (n) =>
+                        (n.subject.id === idA &&
+                            n.related.some((r) => r.id === idB)) ||
+                        (n.subject.id === idB &&
+                            n.related.some((r) => r.id === idA)),
+                ),
+            ).toBe(true);
+            for (const n of notices) NOTICE_SCHEMA.parse(n);
+
+            const oat = await call("upsert_food", { name: "rolled oat" });
+            const oats = await call("upsert_food", { name: "rolled oats" });
+            const oatId = oat.structuredContent?.id as string;
+            const oatsId = oats.structuredContent?.id as string;
+
+            const dismissSwapped = await call("dismiss_notice", {
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: oatsId,
+                related_id: oatId,
+            });
+            expect(dismissSwapped.isError).toBeFalsy();
+            const afterSwapped = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            expect(
+                (
+                    afterSwapped.structuredContent as {
+                        notices: Array<{ subject: { id: string } }>;
+                    }
+                ).notices.some(
+                    (n) => n.subject.id === oatId || n.subject.id === oatsId,
+                ),
+            ).toBe(false);
+
+            const dismissDirect = await call("dismiss_notice", {
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: idA,
+                related_id: idB,
+            });
+            expect(dismissDirect.isError).toBeFalsy();
+
+            const pita = await call("upsert_food", { name: "pita" });
+            const pitas = await call("upsert_food", { name: "pitas" });
+            const pitaId = pita.structuredContent?.id as string;
+            const pitasId = pitas.structuredContent?.id as string;
+            const gotFood = await call("get_food", { food_id: pitaId });
+            const withNotice = GET_FOOD_OUTPUT.parse(gotFood.structuredContent);
+            expect(
+                withNotice.notices.some(
+                    (n) => n.code === "food.possible_duplicate",
+                ),
+            ).toBe(true);
+            for (const n of withNotice.notices) NOTICE_SCHEMA.parse(n);
+
+            await call("merge_foods", {
+                keep_id: pitaId,
+                drop_id: pitasId,
+            });
+            const afterMerge = await call("list_notices", {
+                code: "food.possible_duplicate",
+            });
+            expect(
+                (
+                    afterMerge.structuredContent as {
+                        notices: Array<{
+                            code: string;
+                            subject: { id: string };
+                        }>;
+                    }
+                ).notices.some(
+                    (n) =>
+                        n.code === "food.possible_duplicate" &&
+                        (n.subject.id === pitaId || n.subject.id === pitasId),
+                ),
+            ).toBe(false);
+        });
+    });
 });
 
 describe("removed membership admin MCP tools", () => {
@@ -6155,6 +7955,339 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
 
+describe("set_nutrition_goals over HTTP", () => {
+    test.each(ERAS)(
+        "per-day override and get_goal_progress agree (%p)",
+        async (era) => {
+            db.goals = goals({ daily_calories: 2000 });
+            await withHttpClient("u1", era, async (client) => {
+                const set = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: {
+                        date: "2026-07-04",
+                        daily_calories: 2800,
+                    },
+                })) as ToolResult;
+                expect(set.isError).toBeFalsy();
+                const out = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                    set.structuredContent,
+                );
+                expect(out.scope).toBe("days");
+                expect(out.days).toEqual(["2026-07-04"]);
+                const prog = (await client.callTool({
+                    name: "get_goal_progress",
+                    arguments: { date: "2026-07-04" },
+                })) as ToolResult;
+                expect(textOf(prog)).toContain("2800");
+            });
+        },
+    );
+});
+
+describe("rate_product over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Rated Bar",
+                offQuality: {
+                    nutriscoreGrade: "c",
+                    novaGroup: 3,
+                    ecoscoreGrade: "b",
+                    additives: null,
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("rate_product");
+                    const r = (await client.callTool({
+                        name: "rate_product",
+                        arguments: { food_id: food.id },
+                    })) as ToolResult;
+                    RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits rate_product from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": false }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("rate_product");
+                    await expect(
+                        client.callTool({
+                            name: "rate_product",
+                            arguments: { barcode: "12345678" },
+                        }),
+                    ).rejects.toThrow(/not found/i);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
+describe("get_household_digest", () => {
+    const bob = "22222222-2222-4222-8222-222222222222";
+
+    async function withHouseholdDigestFlag(
+        on: boolean,
+        run: (call: CallTool) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+            member: member
+                ? {
+                      userId: member.userId,
+                      householdId: member.householdId,
+                      role: member.role,
+                      displayName: member.displayName,
+                  }
+                : undefined,
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const call: CallTool = async (name, args) =>
+                (await client.callTool({
+                    name,
+                    arguments: args ?? {},
+                })) as ToolResult;
+            await run(call);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    test("flag off hides tool and rejects calls", async () => {
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        const flagCtx = buildFlagContext({
+            auth: { kind: "user", userId: "u1" },
+        });
+        const flags = evaluateViewerFlags(
+            flagCtx,
+            createMemoryFlags({ "mcp-household-digest": false }),
+        );
+        registerTools(
+            server,
+            { kind: "user", userId: "u1" },
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({
+            name: "test-client",
+            version: "0.0.0",
+        });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            const list = (await client.listTools()).tools.map((t) => t.name);
+            expect(list).not.toContain("get_household_digest");
+            const resources = await client.listResources();
+            expect(
+                resources.resources.some(
+                    (r) => r.uri === "household://weekly-digest",
+                ),
+            ).toBe(false);
+            await expect(
+                client.callTool({
+                    name: "get_household_digest",
+                    arguments: {},
+                }),
+            ).rejects.toThrow(/not found/i);
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    });
+
+    test("flag on returns schema output and respects week_of", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "2026-08-07",
+            });
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(out.window).toEqual({
+                from: "2026-08-01",
+                to: "2026-08-07",
+            });
+            expect(out.text.length).toBeGreaterThan(0);
+        });
+    });
+
+    test("invalid week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {
+                week_of: "not-a-date",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("week_of");
+        });
+    });
+
+    test("impossible calendar week_of is an error", async () => {
+        await withHouseholdDigestFlag(true, async (call) => {
+            for (const bad of ["2026-02-31", "2026-13-01"]) {
+                const r = await call("get_household_digest", { week_of: bad });
+                expect(r.isError).toBe(true);
+                expect(textOf(r)).toMatch(/week_of|calendar/i);
+            }
+        });
+    });
+
+    test("every household member a caller can read appears", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+            {
+                householdId: "hh-1",
+                userId: bob,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        await withHouseholdDigestFlag(true, async (call) => {
+            const r = await call("get_household_digest", {});
+            expect(r.isError).toBeFalsy();
+            const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            const ids = out.members.map((m) => m.member_id);
+            expect(ids).toContain("u1");
+            expect(ids).toContain(bob);
+        });
+    });
+});
+
+describe("get_household_digest over HTTP", () => {
+    test.each(ERAS)(
+        "flag on lists and returns structuredContent (%p)",
+        async (era) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).toContain("get_household_digest");
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits get_household_digest from tools/list (%p)",
+        async (era) => {
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": false }),
+            );
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    expect(names).not.toContain("get_household_digest");
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (r) => r.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(false);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
 describe("household PAT over HTTP has no default userId", () => {
     async function withHouseholdHttp<T>(
         mode: EraMode,
@@ -6230,6 +8363,92 @@ describe("household PAT over HTTP has no default userId", () => {
             expect(db.inserted).toHaveLength(0);
         });
     });
+
+    test.each(ERAS)(
+        "get_household_digest succeeds for household PAT (%p)",
+        async (mode) => {
+            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "U1",
+                },
+            ];
+            setFlagsForTests(
+                createMemoryFlags({ "mcp-household-digest": true }),
+            );
+            try {
+                await withHouseholdHttp(mode, async (client) => {
+                    const r = (await client.callTool({
+                        name: "get_household_digest",
+                        arguments: {},
+                    })) as ToolResult;
+                    expect(r.isError).toBeFalsy();
+                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+                    const resources = await client.listResources();
+                    expect(
+                        resources.resources.some(
+                            (res) => res.uri === "household://weekly-digest",
+                        ),
+                    ).toBe(true);
+                    const payload = await client.readResource({
+                        uri: "household://weekly-digest",
+                    });
+                    const body = payload.contents[0];
+                    expect(
+                        body && "text" in body && body.text.length,
+                    ).toBeGreaterThan(0);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+});
+
+describe("off-lookups kill switch over HTTP", () => {
+    test.each(ERAS)(
+        "lookup_barcode surfaces the paused message (%p)",
+        async (mode) => {
+            setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
+            db.realBarcodeLookup = true;
+            try {
+                await withHttpClient("u1", mode, async (client) => {
+                    const made = await client.callTool({
+                        name: "upsert_food",
+                        arguments: {
+                            name: "Paused lookup food",
+                            barcode: "737628064502",
+                            calories: 120,
+                        },
+                    });
+                    expect(made.isError).toBeFalsy();
+                    const r = await client.callTool({
+                        name: "lookup_barcode",
+                        arguments: { barcode: "737628064502" },
+                    });
+                    expect(r.isError).toBeFalsy();
+                    const text = (
+                        r.content as { type: string; text?: string }[]
+                    )
+                        .map((c) => c.text ?? "")
+                        .join("\n");
+                    expect(text).toContain("Online food lookups are paused");
+                    expect(text).toContain("Paused lookup food");
+                    expect(text).toContain("Source: household catalog");
+                    expect(text).not.toContain("Open Food Facts has no fiber");
+                    const lookupCall = db.lookupBarcodeCalls.find(
+                        (c) => c.barcode === "737628064502",
+                    );
+                    expect(lookupCall?.options?.householdId).toBe("hh-1");
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
 });
 
 describe("/mcp serves the 2026-07-28 revision", () => {
@@ -6456,6 +8675,239 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
             });
         },
     );
+
+    const MCP_WIDGET_FILES = [
+        "nutrition-summary.html",
+        "goal-progress.html",
+        "meal-logged.html",
+        "trends.html",
+        "weight-trends.html",
+        "import-meals.html",
+        "grocery-list.html",
+        "fridge.html",
+    ] as const;
+
+    const V1_WIDGET_URIS = MCP_WIDGET_FILES.map((f) => widgetUri(f)).sort();
+    const ATTENTION_V2_URI = widgetUri("attention.html", true);
+
+    describe("widget-attention flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        test.each(ERAS)(
+            "flag off leaves list_notices without ui meta and no attention resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-attention": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_notices");
+                    expect(list?._meta?.ui).toBeUndefined();
+                    expect(
+                        list?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+
+                    const { resources } = await client.listResources();
+                    const widgetUris = resources
+                        .map((r) => r.uri)
+                        .filter((u) => u.startsWith("ui://widget/"));
+                    expect(widgetUris).not.toContain(ATTENTION_V2_URI);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links attention uri, lists and reads the v2 resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-attention": true }),
+                );
+                const assembled = await getWidgetHtml("attention", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_notices");
+                    expect(
+                        (list?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(ATTENTION_V2_URI);
+                    expect(list?._meta?.["openai/outputTemplate"]).toBe(
+                        ATTENTION_V2_URI,
+                    );
+
+                    const { resources } = await client.listResources();
+                    expect(
+                        resources.map((r) => r.uri).includes(ATTENTION_V2_URI),
+                    ).toBe(true);
+
+                    const res = await client.readResource({
+                        uri: ATTENTION_V2_URI,
+                    });
+                    const c = res.contents[0] as { text?: string };
+                    expect(c.text).toBe(assembled);
+
+                    const empty = await client.callTool({
+                        name: "list_notices",
+                        arguments: {},
+                    });
+                    const sc0 = empty.structuredContent as {
+                        count: number;
+                        notices: unknown[];
+                    };
+                    expect(() =>
+                        LIST_NOTICES_OUTPUT_SCHEMA.parse(sc0),
+                    ).not.toThrow();
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on list_notices output parses with notices present (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-attention": true }),
+                );
+                function addDaysUtc(iso: string, delta: number): string {
+                    const [y, m, d] = iso.split("-").map(Number);
+                    return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                        .toISOString()
+                        .slice(0, 10);
+                }
+                await withHttpClient("u1", mode, async (client) => {
+                    const loc = await client.callTool({
+                        name: "add_fridge_location",
+                        arguments: { name: "Fridge" },
+                    });
+                    const locationId = (loc.structuredContent as { id: string })
+                        .id;
+                    const today = utcTodayFromDate();
+                    const added = await client.callTool({
+                        name: "add_fridge_item",
+                        arguments: {
+                            location_id: locationId,
+                            kind: "food",
+                            name: "Soon kefir",
+                            amount: 1,
+                            unit: "g",
+                        },
+                    });
+                    const itemId = (added.structuredContent as { id: string })
+                        .id;
+                    const row = (await db.fridgeStore.listItems("hh-1")).find(
+                        (r) => r.id === itemId,
+                    );
+                    await db.fridgeStore.updateItem({
+                        ...row!,
+                        expiresOn: addDaysUtc(today, 4),
+                    });
+
+                    const listed = await client.callTool({
+                        name: "list_notices",
+                        arguments: {},
+                    });
+                    const sc = listed.structuredContent as {
+                        count: number;
+                        notices: unknown[];
+                    };
+                    expect(sc.count).toBeGreaterThanOrEqual(1);
+                    for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
+                    expect(() =>
+                        LIST_NOTICES_OUTPUT_SCHEMA.parse(sc),
+                    ).not.toThrow();
+                });
+            },
+        );
+    });
+
+    describe("mcp-widgets-v2 flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        test.each(ERAS)(
+            "flag off keeps v1 tool _meta URIs and resources/list unchanged (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-widgets-v2": false }),
+                );
+                db.goals = goals({ user_id: "u1" });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const logMeal = tools.find((t) => t.name === "log_meal");
+                    expect(logMeal?._meta?.ui).toEqual({
+                        resourceUri: MEAL_LOGGED_WIDGET_URI,
+                    });
+                    expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
+                        MEAL_LOGGED_WIDGET_URI,
+                    );
+                    const summary = tools.find(
+                        (t) => t.name === "get_nutrition_summary",
+                    );
+                    expect(
+                        (summary?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(widgetUri("nutrition-summary.html"));
+
+                    const { resources } = await client.listResources();
+                    const widgetUris = resources
+                        .map((r) => r.uri)
+                        .filter((u) => u.startsWith("ui://widget/"))
+                        .sort();
+                    expect(widgetUris).toEqual(V1_WIDGET_URIS);
+                    expect(widgetUris.some((u) => u.includes("/v2/"))).toBe(
+                        false,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links v2 URIs, lists v1 and v2 resources, v2 read matches assembly (%p)",
+            async (mode) => {
+                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
+                db.goals = goals({ user_id: "u1" });
+                const assembledV2 = await getWidgetHtml("meal-logged", {
+                    v2: true,
+                });
+                const v2Uri = widgetUri("meal-logged.html", true);
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const logMeal = tools.find((t) => t.name === "log_meal");
+                    expect(
+                        (logMeal?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(v2Uri);
+                    expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
+                        v2Uri,
+                    );
+
+                    const { resources } = await client.listResources();
+                    const widgetUris = resources
+                        .map((r) => r.uri)
+                        .filter((u) => u.startsWith("ui://widget/"))
+                        .sort();
+                    const expected = [
+                        ...V1_WIDGET_URIS,
+                        ...MCP_WIDGET_FILES.map((f) => widgetUri(f, true)),
+                    ].sort();
+                    expect(widgetUris).toEqual(expected);
+
+                    const res = await client.readResource({ uri: v2Uri });
+                    const c = res.contents[0] as {
+                        mimeType?: string;
+                        text?: string;
+                        _meta?: { ui?: { prefersBorder?: boolean } };
+                    };
+                    expect(c.mimeType).toBe("text/html;profile=mcp-app");
+                    expect(c._meta?.ui?.prefersBorder).toBe(true);
+                    expect(c.text).toBe(assembledV2);
+                    expect(
+                        c.text?.trimStart().startsWith("<!doctype html>"),
+                    ).toBe(true);
+                    expect(c.text).toContain("function initWidget(config)");
+                });
+            },
+        );
+    });
 
     test.each(ERAS)(
         "input validation errors are in-band, not transport failures (%p)",
@@ -7012,7 +9464,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('name="log_meal"');
         expect(html).not.toContain('class="facts"');
         expect(html).toContain('class="bottom-nav"');
-        expect(html).toContain('href="/fridge"');
+        expect(html).toContain('href="/kitchen/fridge"');
         expect(html).toMatch(/href="\/app\.css\?v=[a-f0-9]{12}"/);
         expect(html).toMatch(/src="\/app\.js\?v=[a-f0-9]{12}"/);
     });
@@ -7042,8 +9494,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('action="/add-household-member"');
     });
 
-    test("POST /household as owner adds a username member", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household as owner adds a username member", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7052,7 +9504,7 @@ describe("authenticated dashboard HTTP", () => {
             body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.members).toContainEqual({
             householdId: "hh-1",
             userId: "55555555-5555-4555-8555-555555555555",
@@ -7065,8 +9517,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(await home.text()).toContain("Kid");
     });
 
-    test("POST /household as a member is 403 and adds nobody", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household as a member is 403 and adds nobody", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -7079,11 +9531,14 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.addedLogins).toEqual([]);
     });
 
-    test("POST /household/rotate-token as owner issues a token once", async () => {
-        const r = await siteApp.request("http://x/household/rotate-token", {
-            method: "POST",
-            headers: { cookie: cookieFor(alice) },
-        });
+    test("POST /settings/household/rotate-token as owner issues a token once", async () => {
+        const r = await siteApp.request(
+            "http://x/settings/household/rotate-token",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("Household bot token (shown once):");
@@ -7106,9 +9561,12 @@ describe("authenticated dashboard HTTP", () => {
     }
 
     test("the owner can make another member the owner", async () => {
-        const r = await postForm(`/household/members/${bob}/make-owner`, alice);
+        const r = await postForm(
+            `/settings/household/members/${bob}/make-owner`,
+            alice,
+        );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.ownershipTransfers).toEqual([{ from: alice, to: bob }]);
         expect(
             db.members.map((m) => `${m.displayName}:${m.role}`).sort(),
@@ -7116,14 +9574,17 @@ describe("authenticated dashboard HTTP", () => {
     });
 
     test("a member cannot take or hand out ownership", async () => {
-        const r = await postForm(`/household/members/${bob}/make-owner`, bob);
+        const r = await postForm(
+            `/settings/household/members/${bob}/make-owner`,
+            bob,
+        );
         expect(r.status).toBe(403);
         expect(db.ownershipTransfers).toEqual([]);
     });
 
     test("ownership cannot go to someone outside the household", async () => {
         const r = await postForm(
-            `/household/members/${outsider}/make-owner`,
+            `/settings/household/members/${outsider}/make-owner`,
             alice,
         );
         expect(r.status).toBe(400);
@@ -7135,18 +9596,21 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner removes a member after confirming", async () => {
         const r = await postForm(
-            `/household/members/${bob}/remove`,
+            `/settings/household/members/${bob}/remove`,
             alice,
             "confirm=yes",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/household");
+        expect(r.headers.get("location")).toBe("/settings/household");
         expect(db.wipedUsers).toEqual([bob]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice"]);
     });
 
     test("removing a member without the confirm box erases nothing", async () => {
-        const r = await postForm(`/household/members/${bob}/remove`, alice);
+        const r = await postForm(
+            `/settings/household/members/${bob}/remove`,
+            alice,
+        );
         expect(r.status).toBe(400);
         expect(await r.text()).toContain(
             "Tick the box to confirm removing Bob.",
@@ -7156,7 +9620,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("the owner cannot remove themselves", async () => {
         const r = await postForm(
-            `/household/members/${alice}/remove`,
+            `/settings/household/members/${alice}/remove`,
             alice,
             "confirm=yes",
         );
@@ -7167,7 +9631,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("a member cannot remove anyone", async () => {
         const r = await postForm(
-            `/household/members/${alice}/remove`,
+            `/settings/household/members/${alice}/remove`,
             bob,
             "confirm=yes",
         );
@@ -7177,7 +9641,7 @@ describe("authenticated dashboard HTTP", () => {
 
     test("removing someone outside the household erases nothing", async () => {
         const r = await postForm(
-            `/household/members/${outsider}/remove`,
+            `/settings/household/members/${outsider}/remove`,
             alice,
             "confirm=yes",
         );
@@ -7185,17 +9649,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.wipedUsers).toEqual([]);
     });
 
-    test("POST /household/rotate-token as a member is 403", async () => {
-        const r = await siteApp.request("http://x/household/rotate-token", {
-            method: "POST",
-            headers: { cookie: cookieFor(bob) },
-        });
+    test("POST /settings/household/rotate-token as a member is 403", async () => {
+        const r = await siteApp.request(
+            "http://x/settings/household/rotate-token",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(bob) },
+            },
+        );
         expect(r.status).toBe(403);
         expect(db.tokenRotations).toHaveLength(0);
     });
 
-    test("POST /household with a short password stays on the page", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household with a short password stays on the page", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7206,7 +9673,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("Password must be at least 12 characters.");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(html).toMatch(
             /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
         );
@@ -7214,8 +9681,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /household logged out does not add a member", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("POST /settings/household logged out does not add a member", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 "content-type": "application/x-www-form-urlencoded",
@@ -7225,13 +9692,13 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(401);
         const html = await r.text();
         expect(html).toContain('action="/approve"');
-        expect(html).not.toContain('action="/household"');
+        expect(html).not.toContain('action="/settings/household"');
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
     });
 
-    test("POST /household duplicate username stays on the page", async () => {
-        await siteApp.request("http://x/household", {
+    test("POST /settings/household duplicate username stays on the page", async () => {
+        await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7239,7 +9706,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "display_name=Kid&password=password1234&username=kid",
         });
-        const r = await siteApp.request("http://x/household", {
+        const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7250,28 +9717,28 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain("That login is already in use.");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(
             db.members.filter((m) => m.displayName.startsWith("Kid")),
         ).toHaveLength(1);
     });
 
-    test("GET /fridge returns the inventory page with Fridge active", async () => {
-        const r = await siteApp.request("http://x/fridge", {
+    test("GET /kitchen/fridge returns the inventory page with Fridge active", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Fridge</h1>");
         expect(html).toContain("Add a location, then add an item.");
-        expect(html).toContain('action="/fridge/locations"');
+        expect(html).toContain('action="/kitchen/fridge/locations"');
         expect(html).not.toContain("Coming soon.");
-        expect(html).toContain('href="/fridge" aria-current="page"');
+        expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
         expect(html).not.toContain('class="facts"');
     });
 
-    test("POST /fridge/locations adds Pantry for any member", async () => {
-        const r = await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/locations adds Pantry for any member", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -7280,8 +9747,8 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Pantry",
         });
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/fridge");
-        const page = await siteApp.request("http://x/fridge", {
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7291,8 +9758,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Add an item to Pantry.");
     });
 
-    test("POST /fridge/items adds a supply with the entered unit", async () => {
-        await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/items adds a supply with the entered unit", async () => {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7302,7 +9769,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         const listed = await db.fridgeStore.listLocations("hh-1");
         const locationId = listed[0]!.id;
-        const add = await siteApp.request("http://x/fridge/items", {
+        const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7311,7 +9778,7 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=supply&location_id=${locationId}&name=Foil&qty_amount=2&qty_unit=roll`,
         });
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/fridge", {
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7332,7 +9799,7 @@ describe("authenticated dashboard HTTP", () => {
         ).toBe(true);
     });
 
-    test("POST /fridge/items adds barcode food in grams", async () => {
+    test("POST /kitchen/fridge/items adds barcode food in grams", async () => {
         db.barcodeFoods["070852010016"] = {
             name: "Good Culture Cottage Cheese",
             brand: "Good Culture",
@@ -7350,7 +9817,7 @@ describe("authenticated dashboard HTTP", () => {
             source_name: "openfoodfacts",
             barcode: "070852010016",
         };
-        await siteApp.request("http://x/fridge/locations", {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7359,7 +9826,7 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Fridge",
         });
         const locationId = (await db.fridgeStore.listLocations("hh-1"))[0]!.id;
-        const add = await siteApp.request("http://x/fridge/items", {
+        const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7368,7 +9835,7 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=food&location_id=${locationId}&barcode=070852010016&qty_amount=1360.8&qty_unit=g`,
         });
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/fridge", {
+        const page = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -7376,8 +9843,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("1360.8 g");
     });
 
-    test("POST /fridge/items/:id updates quantity and move, then delete removes it", async () => {
-        await siteApp.request("http://x/fridge/locations", {
+    test("POST /kitchen/fridge/items/:id updates quantity and move, then delete removes it", async () => {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7385,7 +9852,7 @@ describe("authenticated dashboard HTTP", () => {
             },
             body: "name=Fridge",
         });
-        await siteApp.request("http://x/fridge/locations", {
+        await siteApp.request("http://x/kitchen/fridge/locations", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7396,7 +9863,7 @@ describe("authenticated dashboard HTTP", () => {
         const locations = await db.fridgeStore.listLocations("hh-1");
         const fridge = locations.find((l) => l.name === "Fridge")!;
         const pantry = locations.find((l) => l.name === "Pantry")!;
-        await siteApp.request("http://x/fridge/items", {
+        await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -7405,14 +9872,17 @@ describe("authenticated dashboard HTTP", () => {
             body: `kind=supply&location_id=${fridge.id}&name=Foil&qty_amount=2&qty_unit=roll`,
         });
         const item = (await db.fridgeStore.listItems("hh-1"))[0]!;
-        const save = await siteApp.request(`http://x/fridge/items/${item.id}`, {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
+        const save = await siteApp.request(
+            `http://x/kitchen/fridge/items/${item.id}`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: `qty_amount=1&qty_unit=roll&location_id=${pantry.id}`,
             },
-            body: `qty_amount=1&qty_unit=roll&location_id=${pantry.id}`,
-        });
+        );
         expect(save.status).toBe(303);
         const moved = (await db.fridgeStore.listItems("hh-1"))[0]!;
         expect(moved.quantity.amount).toBe(1);
@@ -7426,7 +9896,7 @@ describe("authenticated dashboard HTTP", () => {
             ),
         ).toBe(true);
         const del = await siteApp.request(
-            `http://x/fridge/items/${item.id}/delete`,
+            `http://x/kitchen/fridge/items/${item.id}/delete`,
             {
                 method: "POST",
                 headers: { cookie: cookieFor(alice) },
@@ -7446,10 +9916,10 @@ describe("authenticated dashboard HTTP", () => {
         ).toBe(true);
     });
 
-    test("POST /fridge/items/:id rejects an item that is already gone", async () => {
+    test("POST /kitchen/fridge/items/:id rejects an item that is already gone", async () => {
         const missing = "00000000-0000-4000-8000-000000000099";
         const edit = await postForm(
-            `/fridge/items/${missing}`,
+            `/kitchen/fridge/items/${missing}`,
             alice,
             "qty_amount=1",
         );
@@ -7475,7 +9945,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
 
         const withMove = await postForm(
-            `/fridge/items/${missing}`,
+            `/kitchen/fridge/items/${missing}`,
             alice,
             "qty_amount=1&qty_unit=g&location_id=not-a-location&expires_on=2026-12-01",
         );
@@ -7493,9 +9963,12 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
 
-    test("POST /fridge/items/:id/delete rejects an item that is already gone", async () => {
+    test("POST /kitchen/fridge/items/:id/delete rejects an item that is already gone", async () => {
         const missing = "00000000-0000-4000-8000-000000000099";
-        const del = await postForm(`/fridge/items/${missing}/delete`, alice);
+        const del = await postForm(
+            `/kitchen/fridge/items/${missing}/delete`,
+            alice,
+        );
         expect(del.status).toBe(400);
         expect(del.headers.get("location")).toBeNull();
         expect(del.headers.get("set-cookie") ?? "").not.toContain(
@@ -7518,8 +9991,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
 
-    test("GET /fridge is 403 for a non-member", async () => {
-        const r = await siteApp.request("http://x/fridge", {
+    test("GET /kitchen/fridge is 403 for a non-member", async () => {
+        const r = await siteApp.request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(outsider) },
         });
         expect(r.status).toBe(403);
@@ -7528,18 +10001,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("<h1>Fridge</h1>");
     });
 
-    test("GET /grocery lists by store and GET /recipes is the cookbook", async () => {
-        const grocery = await siteApp.request("http://x/grocery", {
+    test("GET /kitchen/groceries lists by store and GET /recipes is the cookbook", async () => {
+        const grocery = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(grocery.status).toBe(200);
         const groceryHtml = await grocery.text();
         expect(groceryHtml).toContain("<h1>Groceries</h1>");
-        expect(groceryHtml).toContain('href="/grocery" aria-current="page"');
+        expect(groceryHtml).toContain(
+            'href="/kitchen/groceries" aria-current="page"',
+        );
         expect(groceryHtml).not.toContain("Coming soon.");
         expect(groceryHtml).toContain("Add a grocery store");
         expect(groceryHtml).toContain('class="grocery-add-store"');
-        expect(groceryHtml).toContain('action="/grocery/stores"');
+        expect(groceryHtml).toContain('action="/kitchen/groceries/stores"');
         expect(groceryHtml).not.toContain("<h3>Add supply</h3>");
 
         const recipes = await siteApp.request("http://x/recipes", {
@@ -8096,7 +10571,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
     });
 
-    test("POST /grocery/lines adds a supply and checking it does not insert fridge stock", async () => {
+    test("POST /kitchen/groceries/lines adds a supply and checking it does not insert fridge stock", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8104,7 +10579,7 @@ describe("authenticated dashboard HTTP", () => {
         );
         const sections = await db.settingsStore.listSections(store.id);
         const other = sections.find((row) => row.isOther)!;
-        const add = await siteApp.request("http://x/grocery/lines", {
+        const add = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8117,7 +10592,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(lines).toHaveLength(1);
         expect(lines[0]?.displayName).toBe("Foil");
         const check = await siteApp.request(
-            `http://x/grocery/lines/${lines[0]!.id}/check`,
+            `http://x/kitchen/groceries/lines/${lines[0]!.id}/check`,
             {
                 method: "POST",
                 headers: {
@@ -8132,7 +10607,7 @@ describe("authenticated dashboard HTTP", () => {
             true,
         );
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
-        const page = await siteApp.request("http://x/grocery", {
+        const page = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -8143,15 +10618,18 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Add food</button>");
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(html).not.toContain("grocery-add-supply");
-        const clear = await siteApp.request("http://x/grocery/clear-checked", {
-            method: "POST",
-            headers: { cookie: cookieFor(alice) },
-        });
+        const clear = await siteApp.request(
+            "http://x/kitchen/groceries/clear-checked",
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(alice) },
+            },
+        );
         expect(clear.status).toBe(303);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
-    test("POST /grocery/lines warns on peanut for an affected member", async () => {
+    test("POST /kitchen/groceries/lines warns on peanut for an affected member", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8162,7 +10640,7 @@ describe("authenticated dashboard HTTP", () => {
             userId: bob,
             allergen: "peanut",
         });
-        const add = await siteApp.request("http://x/grocery/lines", {
+        const add = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8186,7 +10664,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
-    test("POST /grocery/lines confirm_allergen override succeeds after allergen block", async () => {
+    test("POST /kitchen/groceries/lines confirm_allergen override succeeds after allergen block", async () => {
         const store = await createGroceryStore(
             db.settingsStore,
             "hh-1",
@@ -8197,7 +10675,7 @@ describe("authenticated dashboard HTTP", () => {
             userId: bob,
             allergen: "peanut",
         });
-        const ok = await siteApp.request("http://x/grocery/lines", {
+        const ok = await siteApp.request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8211,8 +10689,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(lines[0]?.displayName).toBe("Peanut Butter");
     });
 
-    test("GET /grocery is 403 for a non-member", async () => {
-        const r = await siteApp.request("http://x/grocery", {
+    test("GET /kitchen/groceries is 403 for a non-member", async () => {
+        const r = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(outsider) },
         });
         expect(r.status).toBe(403);
@@ -8221,8 +10699,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("<h1>Groceries</h1>");
     });
 
-    test("POST /grocery/stores as owner adds Corner on the grocery page", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores as owner adds Corner on the grocery page", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8231,10 +10709,10 @@ describe("authenticated dashboard HTTP", () => {
             body: "name=Corner",
         });
         expect(add.status).toBe(303);
-        expect(add.headers.get("location")).toBe("/grocery");
+        expect(add.headers.get("location")).toBe("/kitchen/groceries");
         const stores = await db.settingsStore.listStores("hh-1");
         expect(stores.map((row) => row.name)).toEqual(["Corner"]);
-        const page = await siteApp.request("http://x/grocery", {
+        const page = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -8244,8 +10722,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("grocery-add-supply");
     });
 
-    test("POST /grocery/stores with an empty name re-renders grocery with the error", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores with an empty name re-renders grocery with the error", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
@@ -8258,26 +10736,26 @@ describe("authenticated dashboard HTTP", () => {
         const html = await add.text();
         expect(html).toContain("<h1>Groceries</h1>");
         expect(html).toContain("Enter a store name.");
-        expect(html).toContain('action="/grocery/stores"');
+        expect(html).toContain('action="/kitchen/groceries/stores"');
         expect(html).not.toContain("<h3>Add supply</h3>");
         expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
     });
 
-    test("GET /grocery as a member has no add-store form", async () => {
+    test("GET /kitchen/groceries as a member has no add-store form", async () => {
         db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/grocery", {
+        const r = await siteApp.request("http://x/kitchen/groceries", {
             headers: { cookie: cookieFor(bob) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Groceries</h1>");
         expect(html).not.toContain("grocery-add-store");
-        expect(html).not.toContain('action="/grocery/stores"');
+        expect(html).not.toContain('action="/kitchen/groceries/stores"');
         expect(html).not.toContain("<h3>Add supply</h3>");
     });
 
-    test("POST /grocery/stores as a member is refused", async () => {
-        const add = await siteApp.request("http://x/grocery/stores", {
+    test("POST /kitchen/groceries/stores as a member is refused", async () => {
+        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
             method: "POST",
             headers: {
                 cookie: cookieFor(bob),
@@ -8307,14 +10785,16 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("coming-soon");
     });
 
-    test("GET /household/items lists the catalog", async () => {
-        const r = await siteApp.request("http://x/household/items", {
+    test("GET /settings/household/items lists the catalog", async () => {
+        const r = await siteApp.request("http://x/settings/household/items", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Items</h1>");
-        expect(html).toContain('href="/household/items" aria-current="page"');
+        expect(html).toContain(
+            'href="/settings/household/items" aria-current="page"',
+        );
         expect(html).toContain("No foods in the catalog yet.");
     });
 
@@ -8331,19 +10811,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(outsiderRes.status).toBe(403);
     });
 
-    test("GET /household shows owner add-member form", async () => {
-        const r = await siteApp.request("http://x/household", {
+    test("GET /settings/household shows owner add-member form", async () => {
+        const r = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
-        expect(html).toContain('action="/household"');
+        expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
     });
 
-    test("GET /household ignores invalid refusals_after cursor", async () => {
+    test("GET /settings/household ignores invalid refusals_after cursor", async () => {
         db.fetchMemoryStore = {
             ...createMemoryFetchMemoryStore(),
             async listRefusals(_hh, opts) {
@@ -8352,7 +10832,7 @@ describe("authenticated dashboard HTTP", () => {
             },
         };
         const r = await siteApp.request(
-            "http://x/household?refusals_after=not-a-date%7Cexample.com",
+            "http://x/settings/household?refusals_after=not-a-date%7Cexample.com",
             {
                 headers: { cookie: cookieFor(alice) },
             },
@@ -8360,16 +10840,16 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(200);
     });
 
-    test("GET /household as a member is read-only", async () => {
+    test("GET /settings/household as a member is read-only", async () => {
         db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/household", {
+        const r = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(bob) },
         });
         expect(r.status).toBe(200);
         const html = await r.text();
         expect(html).toContain("<h1>Household</h1>");
         expect(html).not.toContain('commandfor="household-add-member"');
-        expect(html).not.toContain('action="/household/stores"');
+        expect(html).not.toContain('action="/settings/household/stores"');
     });
 
     test("GET /settings/help is available to members", async () => {
@@ -8383,17 +10863,20 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('id="food-vs-household-item"');
     });
 
-    test("POST /household/stores seeds default sections", async () => {
-        const add = await siteApp.request("http://x/household/stores", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
+    test("POST /settings/household/stores seeds default sections", async () => {
+        const add = await siteApp.request(
+            "http://x/settings/household/stores",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Safeway",
             },
-            body: "name=Safeway",
-        });
+        );
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/household", {
+        const page = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await page.text();
@@ -8532,17 +11015,19 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("--accent");
     });
 
-    test("POST /settings with from=/fridge redirects back with query", async () => {
+    test("POST /settings with from=/kitchen/fridge redirects back with query", async () => {
         const save = await siteApp.request("http://x/settings", {
             method: "POST",
             headers: {
                 cookie: cookieFor(alice),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "group=account&theme=light&from=%2Ffridge",
+            body: "group=account&theme=light&from=%2Fkitchen%2Ffridge",
         });
         expect(save.status).toBe(303);
-        expect(save.headers.get("location")).toBe("/settings?from=%2Ffridge");
+        expect(save.headers.get("location")).toBe(
+            "/settings?from=%2Fkitchen%2Ffridge",
+        );
     });
 
     test("POST /settings ignores unsafe from in redirect", async () => {

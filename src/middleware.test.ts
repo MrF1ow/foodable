@@ -5,10 +5,13 @@ import {
     beforeEach,
     afterEach,
     afterAll,
+    beforeAll,
     spyOn,
 } from "bun:test";
+import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
+import * as householdDb from "./db/household.js";
 
 // Snapshot before mocking — restoring from the live namespace is a no-op
 // because Bun patches it in place (see mcp.test.ts).
@@ -40,9 +43,38 @@ afterAll(() => {
     mock.module("./db/tokens.js", () => realTokens);
 });
 
+const testClientIpConfig = {
+    source: "x-forwarded-for" as const,
+    sourceIsDefault: false,
+    trustedHops: 1,
+    cloudflareOriginSecret: null,
+};
+
 const { authenticateBearer, banRepeatAuthFailures, rateLimit } =
     await import("./middleware.js");
-const { _resetBuckets } = await import("./rate-limit.js");
+const { _resetBuckets, createMemoryRateLimitStore, setRateLimitStore } =
+    await import("./rate-limit.js");
+type RateLimitStore = import("./rate-limit.js").RateLimitStore;
+
+// A memory store whose ban reads or writes can be switched to fail, standing
+// in for a database outage on the ban table.
+function flakyBanStore(fail: { read: boolean; write: boolean }) {
+    const inner = createMemoryRateLimitStore();
+    const store: RateLimitStore = {
+        checkBucket: (key, limit, windowMs) =>
+            inner.checkBucket(key, limit, windowMs),
+        readBan: async (ip) => {
+            if (fail.read) throw new Error("connection refused");
+            return inner.readBan(ip);
+        },
+        updateBan: async (ip, fn, opts) => {
+            if (fail.write) throw new Error("connection refused");
+            return inner.updateBan(ip, fn, opts);
+        },
+        reset: () => inner.reset(),
+    };
+    return store;
+}
 
 // Mirrors the /mcp wiring in index.ts: the ban guard runs ahead of the bearer
 // check, and the outermost access log honours the suppression flag. Replicated
@@ -71,12 +103,29 @@ const from = (ip: string, token?: string) =>
         },
     });
 
-beforeEach(() => {
-    _resetBuckets();
+const fromXff = (xff: string, token?: string) =>
+    new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+            "x-forwarded-for": xff,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+    });
+
+beforeAll(() => setClientIpConfigForTests(testClientIpConfig));
+afterAll(() => setClientIpConfigForTests(null));
+
+beforeEach(async () => {
+    await _resetBuckets();
     tokenLookups = 0;
     tokenStoreAvailable = true;
+    setClientIpConfigForTests(testClientIpConfig);
+    spyOn(householdDb, "getHouseholdMembership").mockResolvedValue(null);
 });
-afterEach(() => _resetBuckets());
+afterEach(async () => {
+    await _resetBuckets();
+    spyOn(householdDb, "getHouseholdMembership").mockRestore();
+});
 
 test("unauthenticated /mcp is shed with 429 after the strike threshold", async () => {
     const { app } = buildApp();
@@ -169,6 +218,53 @@ test("a token lookup outage never bans anyone", async () => {
     expect((await app.fetch(from("3.3.3.3", "valid-token"))).status).toBe(200);
 });
 
+test("an unreadable ban store answers 503 with Retry-After, before any token lookup", async () => {
+    const fail = { read: true, write: false };
+    setRateLimitStore(flakyBanStore(fail));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+        const { app } = buildApp();
+        for (const token of [undefined, "valid-token", "nope"]) {
+            const res = await app.fetch(from("4.4.4.4", token));
+            expect(res.status).toBe(503);
+            expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+        }
+        expect(tokenLookups).toBe(0);
+
+        fail.read = false;
+        expect((await app.fetch(from("4.4.4.4", "valid-token"))).status).toBe(
+            200,
+        );
+    } finally {
+        errors.mockRestore();
+        setRateLimitStore(createMemoryRateLimitStore());
+    }
+});
+
+test("a failed strike write answers 503, not 401", async () => {
+    const fail = { read: false, write: true };
+    setRateLimitStore(flakyBanStore(fail));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+        const { app } = buildApp();
+        const bad = await app.fetch(from("4.4.4.5", "nope"));
+        expect(bad.status).toBe(503);
+        expect(Number(bad.headers.get("Retry-After"))).toBeGreaterThan(0);
+        expect((await app.fetch(from("4.4.4.5"))).status).toBe(503);
+
+        // A valid token still gets through: clearing strikes is best effort.
+        expect((await app.fetch(from("4.4.4.5", "valid-token"))).status).toBe(
+            200,
+        );
+
+        fail.write = false;
+        expect((await app.fetch(from("4.4.4.5", "nope"))).status).toBe(401);
+    } finally {
+        errors.mockRestore();
+        setRateLimitStore(createMemoryRateLimitStore());
+    }
+});
+
 test("bans are per-IP and do not affect other clients", async () => {
     const { app } = buildApp();
     for (let i = 0; i < 21; i++) await app.fetch(from("8.8.8.8"));
@@ -218,4 +314,87 @@ test("PAT traffic is rate-limited on householdId", async () => {
         "same household PAT shares the householdId bucket across IPs",
     ).toBe(429);
     expect((await app.fetch(from(ip, "valid-token"))).status).toBe(200);
+});
+
+test("rotating a forged left-most XFF entry does not escape a ban", async () => {
+    const { app } = buildApp();
+    const trusted = "11.22.33.44";
+    for (let i = 0; i < 21; i++) {
+        await app.fetch(fromXff(`9.9.9.${i}, ${trusted}`));
+    }
+    expect((await app.fetch(fromXff(`1.2.3.4, ${trusted}`))).status).toBe(429);
+});
+
+test("with x-real-ip source a forged XFF has no effect", async () => {
+    setClientIpConfigForTests({
+        source: "x-real-ip",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    });
+    const { app } = buildApp();
+    const req = (xff: string) =>
+        new Request("http://localhost/mcp", {
+            method: "POST",
+            headers: {
+                "x-real-ip": "55.66.77.88",
+                "x-forwarded-for": xff,
+            },
+        });
+    for (let i = 0; i < 21; i++) await app.fetch(req(`forged-${i}, ignored`));
+    expect((await app.fetch(req("other-forged"))).status).toBe(429);
+});
+
+test("socket source without a Bun socket shares the unknown bucket", async () => {
+    setClientIpConfigForTests({
+        source: "socket",
+        sourceIsDefault: false,
+        trustedHops: 1,
+        cloudflareOriginSecret: null,
+    });
+    const { app } = buildApp();
+    for (let i = 0; i < 21; i++) {
+        await app.fetch(
+            new Request("http://localhost/mcp", {
+                method: "POST",
+                headers: { "x-forwarded-for": `1.2.3.${i}` },
+            }),
+        );
+    }
+    expect(
+        (
+            await app.fetch(
+                new Request("http://localhost/mcp", {
+                    method: "POST",
+                    headers: { "x-forwarded-for": "9.9.9.9" },
+                }),
+            )
+        ).status,
+    ).toBe(429);
+});
+
+test("two IPv6 addresses in one /64 share a ban", async () => {
+    setClientIpConfigForTests(testClientIpConfig);
+    const { app } = buildApp();
+    const prefix = "2001:db8:1:2";
+    for (let i = 0; i < 21; i++) {
+        await app.fetch(fromXff(`${prefix}::${i + 1}`));
+    }
+    expect((await app.fetch(fromXff(`${prefix}::beef`))).status).toBe(429);
+});
+
+test("two appended X-Forwarded-For headers pick the right-most trusted hop", async () => {
+    setClientIpConfigForTests(testClientIpConfig);
+    const { app } = buildApp();
+    const post = (...xff: string[]) => {
+        const headers = new Headers({ "content-type": "application/json" });
+        for (const v of xff) headers.append("x-forwarded-for", v);
+        return app.fetch(
+            new Request("http://localhost/mcp", { method: "POST", headers }),
+        );
+    };
+    for (let i = 0; i < 21; i++) await post("1.1.1.1", "203.0.113.90");
+    // The strikes landed on the second header line, not the first.
+    expect((await post("203.0.113.90")).status).toBe(429);
+    expect((await post("1.1.1.1")).status).not.toBe(429);
 });

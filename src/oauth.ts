@@ -8,7 +8,20 @@ import {
     consumeRefreshToken,
     registerClient,
 } from "./db/tokens.js";
-import { signUpUser, signInUser, authUserCount } from "./db/users.js";
+import {
+    signUpUser,
+    signInUser,
+    authAccountExists,
+    authUserCount,
+} from "./db/users.js";
+import { householdExists } from "./db/household.js";
+import { peekInviteCode, signUpWithInvite } from "./db/invites.js";
+import {
+    canSignUp,
+    getSignupPolicy,
+    signupPolicyForRoutes,
+} from "./domain/signup.js";
+import { runAsSystem } from "./db/actor.js";
 import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
 import { rateLimitAuth } from "./middleware.js";
@@ -25,43 +38,26 @@ import {
     appStylesheetHref,
     getAppCss,
     getAppJs,
+    getAppV2Css,
+    getAppV2Js,
 } from "./widgets.js";
 import { isSafeShareReturnPath } from "./domain/share.js";
+import {
+    getLoginSessionStore,
+    MAX_SITE_LOGIN_SESSIONS_POSTGRES,
+    siteLoginSessionCountSync,
+    type OAuthSessionPayload,
+} from "./oauth-login-sessions.js";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 /** Bounds memory held by signed-out site logins (each up to 64 KiB). */
 export const MAX_SITE_LOGIN_SESSIONS = 32;
 
-interface OAuthSession {
-    state: string;
-    redirectUri: string;
-    codeChallenge?: string;
-    clientId: string;
-    purpose: "mcp" | "site";
-}
+type OAuthSession = OAuthSessionPayload;
 
-// In-memory session store (sessions are short-lived, 10min TTL)
-const sessions = new Map<
-    string,
-    { session: OAuthSession; expiresAt: number }
->();
-
-function cleanExpiredSessions() {
-    const now = Date.now();
-    for (const [key, value] of sessions) {
-        if (value.expiresAt < now) sessions.delete(key);
-    }
-}
-
-setInterval(cleanExpiredSessions, 60 * 1000);
-
-/** Test hook: how many site-login sessions are held. */
+/** Test hook: how many site-login sessions are held (in-memory store only). */
 export function siteLoginSessionCount(): number {
-    let count = 0;
-    for (const value of sessions.values()) {
-        if (value.session.purpose === "site") count += 1;
-    }
-    return count;
+    return siteLoginSessionCountSync();
 }
 
 function base64URLEncode(buffer: Buffer): string {
@@ -79,6 +75,10 @@ export async function renderLoginPage(
 ): Promise<string> {
     await getAppCss();
     await getAppJs();
+    // The signed-in app may be on the new shell after this login; have its
+    // pair hashed too, so the first page carries ?v= hrefs.
+    await getAppV2Css();
+    await getAppV2Js();
     const template = await Bun.file("./public/login.html").text();
     const errorHtml = error
         ? `<div class="error-banner">${escapeHtml(error)}</div>`
@@ -92,22 +92,33 @@ export async function renderLoginPage(
             connectHint = "";
         }
     }
+    const policy = getSignupPolicy();
+    const inviteFields =
+        policy === "invite"
+            ? `<label for="invite_code">${escapeHtml(LOGIN.inviteCodeLabel)}</label>
+                    <input type="text" id="invite_code" name="invite_code" autocomplete="off" autocapitalize="none" spellcheck="false" />
+                    <p class="auth-note">${escapeHtml(LOGIN.inviteCodeHint)}</p>`
+            : "";
     return template
         .replaceAll("{{SESSION_ID}}", escapeHtml(sessionId))
         .replaceAll("{{ERROR}}", errorHtml)
         .replaceAll("{{CONNECT_HINT}}", connectHint)
+        .replaceAll("{{INVITE_FIELDS}}", inviteFields)
         .replaceAll("{{APP_CSS_HREF}}", appStylesheetHref())
         .replaceAll("{{APP_JS_HREF}}", appScriptHref());
 }
 
+function displayNameFromLogin(email: string): string {
+    const local = email.includes("@") ? email.split("@")[0]! : email;
+    const trimmed = local.trim();
+    return trimmed.length > 0 ? trimmed.slice(0, 80) : "Member";
+}
+
 async function finishAuthorization(
     c: Context,
-    sessionId: string,
     session: OAuthSession,
     userId: string,
 ): Promise<Response> {
-    sessions.delete(sessionId);
-
     if (session.purpose === "site") {
         const secure =
             getBaseUrl(c).startsWith("https://") ||
@@ -121,11 +132,13 @@ async function finishAuthorization(
     }
 
     const authCode = crypto.randomUUID();
-    await storeAuthCode(
-        authCode,
-        session.redirectUri,
-        userId,
-        session.codeChallenge,
+    await runAsSystem("oauth authorization code", () =>
+        storeAuthCode(
+            authCode,
+            session.redirectUri,
+            userId,
+            session.codeChallenge,
+        ),
     );
 
     const redirectUrl = new URL(session.redirectUri);
@@ -158,39 +171,120 @@ export function classifySignInFailure(err: unknown): SignInFailure {
 export async function resolveApproveUser(args: {
     email: string;
     password: string;
+    inviteCode?: string;
     authUserCount: () => Promise<number>;
+    householdExists: () => Promise<boolean>;
     signInUser: (email: string, password: string) => Promise<string>;
     signUpUser: (email: string, password: string) => Promise<string>;
-    messages: { invalidCredentials: string; signInUnavailable: string };
+    messages: typeof LOGIN_ERRORS;
+    signupPolicy?: ReturnType<typeof getSignupPolicy>;
+    accountExists?: (email: string) => Promise<boolean>;
+    peekInvite?: (code: string) => Promise<{ valid: true } | { valid: false }>;
+    signUpWithInvite?: typeof signUpWithInvite;
 }): Promise<string> {
     const count = await args.authUserCount();
+    const policy = signupPolicyForRoutes(
+        args.signupPolicy ?? getSignupPolicy(),
+    );
     if (count === 0) {
-        try {
-            return await args.signInUser(args.email, args.password);
-        } catch {
-            return await args.signUpUser(args.email, args.password);
+        const first = canSignUp(policy, {
+            userCount: 0,
+            householdExists: await args.householdExists(),
+            mode: "register",
+            callerHasHousehold: false,
+        });
+        if (first.ok) {
+            try {
+                return await args.signInUser(args.email, args.password);
+            } catch {
+                return await args.signUpUser(args.email, args.password);
+            }
         }
     }
-    // Once the owner exists, accounts are only created in Household ›
-    // Household, so a failed sign-in never falls through to sign-up.
     try {
         return await args.signInUser(args.email, args.password);
     } catch (err) {
         const failure = classifySignInFailure(err);
-        if (failure === "credentials") {
-            console.warn("[auth] sign-in refused: invalid credentials");
-            throw new Error(args.messages.invalidCredentials);
-        }
         if (failure === "account") {
             const { code } = err as { code?: string };
             console.warn(`[auth] sign-in refused: ${JSON.stringify(code)}`);
             throw err as Error;
         }
+        if (failure === "unavailable") {
+            console.error(
+                `[auth] sign-in unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
+            );
+            throw new Error(args.messages.signInUnavailable);
+        }
+        return registerAfterFailedSignIn(args, count, policy);
+    }
+}
+
+// The password did not match, or no login has this email. An existing login
+// always gets the plain wrong-credentials answer, whatever the invite field
+// holds; only a new email can sign up, and only as the policy allows.
+async function registerAfterFailedSignIn(
+    args: Parameters<typeof resolveApproveUser>[0],
+    count: number,
+    policy: ReturnType<typeof getSignupPolicy>,
+): Promise<string> {
+    const invalidCredentials = (): Error => {
+        console.warn("[auth] sign-in refused: invalid credentials");
+        return new Error(args.messages.invalidCredentials);
+    };
+    const inviteCode = args.inviteCode?.trim() ?? "";
+    // Closed: nobody can register, so every failed sign-in gets the same
+    // answer whatever the invite field holds, and no account lookup runs; a
+    // different answer for unknown emails would tell who has an account.
+    if (policy === "closed") throw invalidCredentials();
+    let exists: boolean;
+    try {
+        exists = await (args.accountExists ?? authAccountExists)(args.email);
+    } catch (err) {
         console.error(
-            `[auth] sign-in unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
+            `[auth] account lookup unavailable: ${JSON.stringify(err instanceof Error ? err.message : String(err))}`,
         );
         throw new Error(args.messages.signInUnavailable);
     }
+    if (exists) throw invalidCredentials();
+    const invite =
+        policy === "invite" && inviteCode
+            ? await (args.peekInvite ?? peekInviteCode)(inviteCode)
+            : undefined;
+    const register = canSignUp(
+        policy,
+        {
+            userCount: count,
+            householdExists: true,
+            mode: "register",
+            callerHasHousehold: false,
+        },
+        invite,
+    );
+    if (!register.ok) {
+        if (register.reason === "invite-required") {
+            throw new Error(
+                inviteCode
+                    ? args.messages.invalidInvite
+                    : args.messages.inviteRequired,
+            );
+        }
+        throw invalidCredentials();
+    }
+    if (register.joins === "existing-household") {
+        const result = await (args.signUpWithInvite ?? signUpWithInvite)({
+            code: inviteCode,
+            email: args.email,
+            password: args.password,
+            displayName: displayNameFromLogin(args.email),
+        });
+        if (result.ok) return result.userId;
+        if (result.reason === "invalid-invite") {
+            throw new Error(args.messages.invalidInvite);
+        }
+        throw invalidCredentials();
+    }
+    return args.signUpUser(args.email, args.password);
 }
 
 // A client whose callback is not allow-listed fails before anyone signs in,
@@ -279,7 +373,9 @@ export function createOAuthRouter() {
         }
 
         // Fire-and-forget: track who registers
-        registerClient(body.client_name ?? null, redirectUris);
+        void runAsSystem("oauth client registration", async () =>
+            registerClient(body.client_name ?? null, redirectUris),
+        );
 
         return c.json({
             client_id: clientId,
@@ -348,9 +444,7 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_request" }, 400);
         }
 
-        cleanExpiredSessions();
-
-        // Store session and show login page
+        const store = getLoginSessionStore();
         const sessionId = crypto.randomUUID();
         const session: OAuthSession = {
             state,
@@ -359,10 +453,7 @@ export function createOAuthRouter() {
             clientId: reqClientId,
             purpose: "mcp",
         };
-        sessions.set(sessionId, {
-            session,
-            expiresAt: Date.now() + SESSION_TTL_MS,
-        });
+        await store.put(sessionId, session, SESSION_TTL_MS);
 
         return c.html(await renderLoginPage(sessionId, session));
     });
@@ -373,37 +464,50 @@ export function createOAuthRouter() {
         const sessionId = body.session_id as string;
         const email = authEmailForSignIn(String(body.email ?? ""));
         const password = body.password as string;
+        const inviteCode =
+            typeof body.invite_code === "string" ? body.invite_code : undefined;
 
         if (!sessionId || !email || !password) {
             return c.json({ error: "invalid_request" }, 400);
         }
 
-        const entry = sessions.get(sessionId);
-        if (!entry || entry.expiresAt < Date.now()) {
-            sessions.delete(sessionId);
+        const store = getLoginSessionStore();
+        const session = await store.get(sessionId);
+        if (!session) {
+            await store.del(sessionId);
             return c.json({ error: "session_expired" }, 400);
         }
 
         let userId: string;
         try {
-            userId = await resolveApproveUser({
-                email,
-                password,
-                authUserCount,
-                signInUser,
-                signUpUser,
-                messages: LOGIN_ERRORS,
-            });
+            // Nobody is signed in yet: the credential check is the system's.
+            userId = await runAsSystem("sign in", () =>
+                resolveApproveUser({
+                    email,
+                    password,
+                    inviteCode,
+                    authUserCount,
+                    householdExists,
+                    signInUser,
+                    signUpUser,
+                    messages: LOGIN_ERRORS,
+                }),
+            );
         } catch (err: unknown) {
             const message =
                 err instanceof Error ? err.message : "Authentication failed";
             return c.html(
-                await renderLoginPage(sessionId, entry.session, message),
+                await renderLoginPage(sessionId, session, message),
                 400,
             );
         }
 
-        return finishAuthorization(c, sessionId, entry.session, userId);
+        const consumed = await store.take(sessionId);
+        if (!consumed) {
+            return c.json({ error: "session_expired" }, 400);
+        }
+
+        return finishAuthorization(c, consumed, userId);
     });
 
     // Token endpoint
@@ -423,15 +527,21 @@ export function createOAuthRouter() {
             }
 
             // Look up the existing user from the refresh token
-            const userId = await consumeRefreshToken(refreshToken);
+            const newAccessToken = crypto.randomUUID();
+            const newRefreshToken = crypto.randomUUID();
+            const userId = await runAsSystem(
+                "oauth refresh token exchange",
+                async () => {
+                    const owner = await consumeRefreshToken(refreshToken);
+                    if (!owner) return null;
+                    await storeToken(newAccessToken, owner);
+                    await storeRefreshToken(newRefreshToken, owner);
+                    return owner;
+                },
+            );
             if (!userId) {
                 return c.json({ error: "invalid_grant" }, 400);
             }
-
-            const newAccessToken = crypto.randomUUID();
-            const newRefreshToken = crypto.randomUUID();
-            await storeToken(newAccessToken, userId);
-            await storeRefreshToken(newRefreshToken, userId);
 
             return c.json({
                 access_token: newAccessToken,
@@ -458,7 +568,10 @@ export function createOAuthRouter() {
         }
 
         // Atomically consume the auth code
-        const authCodeData = await consumeAuthCode(code);
+        const authCodeData = await runAsSystem(
+            "oauth authorization code exchange",
+            () => consumeAuthCode(code),
+        );
         if (!authCodeData) {
             return c.json({ error: "invalid_grant" }, 400);
         }
@@ -494,8 +607,10 @@ export function createOAuthRouter() {
         // Issue tokens linked to the authenticated user
         const accessToken = crypto.randomUUID();
         const refreshToken = crypto.randomUUID();
-        await storeToken(accessToken, authCodeData.user_id);
-        await storeRefreshToken(refreshToken, authCodeData.user_id);
+        await runAsSystem("oauth token exchange", async () => {
+            await storeToken(accessToken, authCodeData.user_id);
+            await storeRefreshToken(refreshToken, authCodeData.user_id);
+        });
 
         return c.json({
             access_token: accessToken,
@@ -534,22 +649,12 @@ export async function beginSiteLogin(
     // A signed-out share keeps up to 64 KiB of return path in memory, and
     // GET /share is not rate limited, so site-login sessions are capped: the
     // oldest one goes first. MCP authorization sessions are never evicted.
-    let siteSessions = 0;
-    for (const value of sessions.values()) {
-        if (value.session.purpose === "site") siteSessions += 1;
-    }
-    if (siteSessions >= MAX_SITE_LOGIN_SESSIONS) {
-        for (const [key, value] of sessions) {
-            if (value.session.purpose === "site") {
-                sessions.delete(key);
-                break;
-            }
-        }
-    }
-    sessions.set(sessionId, {
-        session,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-    });
+    const store = getLoginSessionStore();
+    const cap =
+        store.kind === "postgres"
+            ? MAX_SITE_LOGIN_SESSIONS_POSTGRES
+            : MAX_SITE_LOGIN_SESSIONS;
+    await store.putSiteSession(sessionId, session, SESSION_TTL_MS, cap);
     const status = error ? 400 : c.req.method === "GET" ? 200 : 401;
     return c.html(await renderLoginPage(sessionId, session, error), status);
 }

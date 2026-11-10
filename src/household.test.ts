@@ -19,6 +19,8 @@ import {
     dashboardAccess,
     type Household,
     type HouseholdMember,
+    householdTodayAt,
+    householdTimezone,
 } from "./household.js";
 
 const alice = "11111111-1111-4111-8111-111111111111";
@@ -462,4 +464,45 @@ test("anyone edits their own rules; managers edit everyone's", () => {
     expect(canEditPersonRules(member, carol)).toBe(true);
     expect(canEditPersonRules(member, bob)).toBe(false);
     expect(canEditPersonRules(admin, carol)).toBe(true);
+});
+
+test("householdTodayAt uses household timezone", () => {
+    const la = { timezone: "America/Los_Angeles" as const };
+    expect(
+        householdTodayAt(la, null, new Date("2026-11-08T05:00:00.000Z")),
+    ).toBe("2026-11-07");
+    const auckland = { timezone: "Pacific/Auckland" as const };
+    expect(
+        householdTodayAt(auckland, null, new Date("2026-11-07T12:00:00.000Z")),
+    ).toBe("2026-11-08");
+});
+
+test("householdTodayAt falls back owner then UTC", () => {
+    const noTz = { timezone: null as string | null };
+    expect(
+        householdTodayAt(
+            noTz,
+            { timezone: "America/Los_Angeles" },
+            new Date("2026-11-08T05:00:00.000Z"),
+        ),
+    ).toBe("2026-11-07");
+    expect(
+        householdTodayAt(
+            { timezone: "Not/A_Tz" },
+            { timezone: "America/Los_Angeles" },
+            new Date("2026-11-08T05:00:00.000Z"),
+        ),
+    ).toBe("2026-11-07");
+    expect(
+        householdTodayAt(
+            noTz,
+            { timezone: "Not/A_Tz" },
+            // 9 November in Auckland, still 8 November in UTC.
+            new Date("2026-11-08T20:00:00.000Z"),
+        ),
+    ).toBe("2026-11-08");
+    expect(
+        householdTodayAt(noTz, null, new Date("2026-11-08T20:00:00.000Z")),
+    ).toBe("2026-11-08");
+    expect(householdTimezone(noTz, null)).toBe("UTC");
 });

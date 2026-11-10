@@ -47,6 +47,45 @@ export const GRANDFATHERED_BRANCHES = [
     "cursor/",
 ] as const;
 
+// Files the policy workflow (.github/workflows/policy.yml) runs from main,
+// never from the pull request: a prefix matches everything below it, a name
+// matches itself and anything that starts with it. A PR that edits one is still
+// judged by main's copy; the edit takes effect once it merges. The skills are
+// here because the skill-drift check reads their `watches:` from main.
+export const POLICY_PATHS = [
+    "scripts/conventions/",
+    "scripts/migration-safety",
+    "scripts/data-api-grants.ts",
+    ".github/agent-context-budget.json",
+    ".github/workflows/policy.yml",
+    ".claude/skills/",
+] as const;
+
+export function isPolicyPath(path: string): boolean {
+    return POLICY_PATHS.some((prefix) => path.startsWith(prefix));
+}
+
+// Files that define checks which run from the pull request itself (the `check`
+// job, the linter, the dependency pins), unlike POLICY_PATHS, which run from
+// main. A PR that edits one changes the checks that judge it, so the policy
+// check names them for the reviewer. policy.yml is not here: it is in
+// POLICY_PATHS and runs from main.
+const PR_CONTROLLED_CHECK_PREFIXES = [
+    ".github/workflows/",
+    "scripts/check-changed.ts",
+    "scripts/typecheck.ts",
+    "scripts/lint-rules/",
+    ".oxlintrc.json",
+    "package.json",
+] as const;
+
+export function isPrControlledCheckPath(path: string): boolean {
+    return (
+        !isPolicyPath(path) &&
+        PR_CONTROLLED_CHECK_PREFIXES.some((prefix) => path.startsWith(prefix))
+    );
+}
+
 export type Level = "low" | "medium" | "high";
 export type BlastLevel = Level;
 
@@ -59,8 +98,18 @@ export type Classified = {
 };
 type ClassifyResult = Classified;
 
+// The checks that judge a PR are themselves PR-controlled (check-changed,
+// typecheck, the linter and its rules, the agent settings and flow profile, the
+// context budget, bunfig), so editing one is as risky as editing the policy.
 const HIGH_EXACT = new Set([
     "package.json",
+    "bunfig.toml",
+    "scripts/check-changed.ts",
+    "scripts/typecheck.ts",
+    ".oxlintrc.json",
+    ".claude/settings.json",
+    ".flow/profile.yaml",
+    ".github/agent-context-budget.json",
     "Dockerfile",
     "docker-compose.yml",
     "railway.toml",
@@ -68,6 +117,7 @@ const HIGH_EXACT = new Set([
     "src/auth-context.ts",
     "src/domain/auth.ts",
     "src/oauth.ts",
+    "src/oauth-login-sessions.ts",
     "src/oauth-redirect.ts",
     "src/web/middleware.ts",
     "src/mcp/server.ts",
@@ -92,6 +142,8 @@ const HIGH_PREFIXES = [
     "scripts/conventions/",
     "scripts/migration-safety/",
     "scripts/migration-dryrun",
+    "scripts/db-rehearse",
+    "scripts/lint-rules/",
     "public/widgets/src/shared/",
 ];
 
@@ -99,6 +151,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/meals.ts": "nutrition",
     "src/domain/insights.ts": "nutrition",
     "src/domain/layout.ts": "nutrition",
+    "src/domain/geometry.ts": "nutrition",
     "src/mcp/tools/nutrition.ts": "nutrition",
     "src/mcp/tools/nutrition-insights.ts": "nutrition",
     "src/web/routes/nutrition.ts": "nutrition",
@@ -114,7 +167,9 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/fridge.ts": "fridge",
     "public/widgets/src/templates/fridge.html": "fridge",
     "src/domain/grocery.ts": "grocery",
+    "src/domain/restock.ts": "grocery",
     "src/domain/rules.ts": "grocery",
+    "src/restock-runner.ts": "grocery",
     "src/mcp/tools/grocery.ts": "grocery",
     "src/mcp/tools/rules.ts": "grocery",
     "src/web/routes/grocery.ts": "grocery",
@@ -144,13 +199,23 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/components/share-arrived.ts": "web",
     "src/domain/share.ts": "recipes",
     "src/domain/foods.ts": "foods",
+    "src/domain/foods-possible-duplicates.test.ts": "foods",
     "src/domain/food-merge-job.ts": "foods",
     "src/domain/food-identity.ts": "foods",
     "src/domain/food-quantity.ts": "foods",
+    "src/domain/off-quality.ts": "foods",
+    "src/domain/product-checks.ts": "foods",
+    "src/domain/product-checks.test.ts": "foods",
+    "src/domain/off-nutrient-levels.ts": "foods",
+    "src/domain/product-score.ts": "foods",
+    "src/domain/additive-risk.ts": "foods",
     "src/domain/linking.ts": "foods",
     "src/mcp/tools/food.ts": "foods",
+    "src/mcp/tools/product-score.ts": "foods",
     "src/web/routes/foods.ts": "foods",
     "src/web/pages/foods.ts": "foods",
+    "src/web/pages/possible-duplicates.ts": "household",
+    "src/web/pages/possible-duplicates.test.ts": "household",
     "src/foods.ts": "foods",
     "src/domain/settings.ts": "settings",
     "src/mcp/tools/profile.ts": "settings",
@@ -160,9 +225,17 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/settings-household.ts": "settings",
     "src/web/settings-back.ts": "web",
     "src/web/settings-back.test.ts": "web",
+    "src/web/route-map.ts": "web",
+    "src/web/route-map.test.ts": "web",
+    "src/web/legacy-redirects.ts": "web",
+    "src/web/route-links.test.ts": "web",
     "src/mcp/tools/household.ts": "household",
+    "src/mcp/tools/household-digest.ts": "household",
+    "src/db/household-digest.ts": "household",
     "src/web/routes/household.ts": "household",
     "src/web/routes/household.test.ts": "household",
+    "src/web/routes/possible-duplicates.test.ts": "household",
+    "src/copy/notices-inline-guard.test.ts": "web",
     "src/web/pages/household.ts": "household",
     "src/web/pages/usual-products.ts": "household",
     "src/web/pages/usual-products.test.ts": "household",
@@ -170,6 +243,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/usual-products-path.test.ts": "web",
     "src/household.ts": "household",
     "src/household-token.ts": "household",
+    "src/domain/household-digest.ts": "household",
+    "src/domain/household-digest.test.ts": "household",
     "src/mcp/tools/goals.ts": "goals",
     "public/widgets/src/templates/goal-progress.html": "goals",
     "src/mcp/tools/weight.ts": "weight",
@@ -177,6 +252,10 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/mcp/tools/water.ts": "water",
     "public/widgets/src/templates/component-gallery.html": "widgets",
     "src/web/shell.ts": "web",
+    "src/web/shell-v2.ts": "web",
+    "src/web/fixtures/shell-legacy.golden.json": "web",
+    "src/test-support/shell-legacy-cases.ts": "web",
+    "src/test-support/recipe-macros.ts": "recipes",
     "src/web/form.ts": "web",
     "src/web/loaders.ts": "web",
     "src/web/display-quantity.ts": "web",
@@ -187,6 +266,10 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/dashboard-data.ts": "platform",
     "src/discovery.ts": "platform",
     "src/domain/export-link.ts": "platform",
+    "src/domain/signup.ts": "platform",
+    "src/domain/signup.test.ts": "platform",
+    "src/db/invites.ts": "platform",
+    "src/web/pages/v2/settings-household-invites.ts": "web",
     "src/domain/notices.ts": "web",
     "src/domain/notice-dismissals.ts": "web",
     "src/domain/notices-for.ts": "web",
@@ -199,8 +282,19 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/html.ts": "platform",
     "src/mcp.ts": "platform",
     "src/middleware.ts": "platform",
+    "src/client-ip.ts": "platform",
+    "src/cloudflare-ips.ts": "platform",
+    "src/client-ip.test.ts": "platform",
     "src/net.ts": "platform",
     "src/normalize.ts": "platform",
+    "src/flags.ts": "platform",
+    "src/flag-pins.ts": "platform",
+    "src/domain/flag-pins.ts": "platform",
+    "src/viewer-flags.ts": "platform",
+    "src/mcp/gated.ts": "platform",
+    "src/test-support/flag-harness.ts": "platform",
+    "src/test-support/chrome-flags.ts": "web",
+    "src/web/gated.ts": "web",
     "src/rate-limit.ts": "platform",
     "src/routes.ts": "platform",
     "src/search.ts": "platform",
@@ -210,18 +304,24 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/version.ts": "platform",
     "src/widgets.ts": "platform",
     "bun.lock": "deps",
+    "flags/rollout.yml": "platform",
+    "src/flags-rollout.ts": "platform",
+    "scripts/flags-apply.ts": "platform",
 };
 
 const MEDIUM_PREFIXES: Readonly<Array<{ prefix: string; area: string }>> = [
     { prefix: "src/domain/fixtures/recipe-pages/", area: "recipes" },
     { prefix: "src/domain/fixtures/captions/", area: "recipes" },
     { prefix: "src/domain/fixtures/social/", area: "recipes" },
+    { prefix: "src/domain/__fixtures__/off/", area: "foods" },
+    { prefix: "src/domain/__snapshots__/", area: "foods" },
     { prefix: "src/db/", area: "db" },
     { prefix: "public/app/", area: "web" },
     { prefix: "src/web/components/", area: "web" },
     { prefix: "src/web/client/", area: "web" },
     { prefix: "src/copy/", area: "web" },
     { prefix: "public/brand/", area: "brand" },
+    { prefix: "public/widgets/src/templates/v2/", area: "widgets" },
 ];
 
 const LOW_REPO_EXACT = new Set([
@@ -245,9 +345,11 @@ const LOW_REPO_PREFIXES = [
     ".github/",
     ".claude/",
     ".agents/",
+    ".flow/",
     "scripts/",
     ".cursor/",
     "public/fonts/",
+    "design/",
 ];
 
 const BLAST_RANK: Record<BlastLevel, number> = {
@@ -349,10 +451,9 @@ function parseConventionalTitle(
     if (!match) {
         return { error: `Invalid title: ${title}` };
     }
-    const type = match[1];
-    const scope = match[2];
-    const breaking = match[3] === "!";
-    const subject = match[4];
+    // Every group is non-optional, so a match always fills all four.
+    const [, type = "", scope = "", bang = "", subject = ""] = match;
+    const breaking = bang === "!";
 
     if (!(TYPES as readonly string[]).includes(type)) {
         return { error: `Invalid title: ${title}` };
@@ -375,20 +476,31 @@ function parseConventionalTitle(
     return { type, scope, breaking, subject };
 }
 
-export function parseTitle(title: string): ParsedTitle | { error: string } {
+const MAX_TITLE_LENGTH = 72;
+
+/**
+ * `maxLength` is the title length limit. Dependabot titles are generated from
+ * the dependency names and cannot be shortened, so `lintPr` lifts the limit
+ * for that author only.
+ */
+export function parseTitle(
+    title: string,
+    opts: { maxLength?: number } = {},
+): ParsedTitle | { error: string } {
+    const maxLength = opts.maxLength ?? MAX_TITLE_LENGTH;
     const revertMatch = /^Revert "(.+)"$/.exec(title);
     if (revertMatch) {
-        if (title.length > 72) {
+        if (title.length > maxLength) {
             return { error: `Invalid title: ${title}` };
         }
-        const inner = parseConventionalTitle(revertMatch[1]);
+        const inner = parseConventionalTitle(revertMatch[1] ?? "");
         if ("error" in inner) {
             return inner;
         }
         return inner;
     }
 
-    if (title.length > 72) {
+    if (title.length > maxLength) {
         return { error: `Invalid title: ${title}` };
     }
     return parseConventionalTitle(title);
@@ -478,7 +590,7 @@ export function parseBody(markdown: string): {
         const headingMatch = /^## (.+)$/.exec(line);
         if (headingMatch) {
             flush();
-            currentHeading = headingMatch[1];
+            currentHeading = headingMatch[1] ?? null;
             currentLines = [];
         } else if (currentHeading !== null) {
             currentLines.push(line);
@@ -517,7 +629,7 @@ function sectionIsNone(text: string | undefined): boolean {
 function hasMigrationContract(content: string): boolean {
     for (const line of content.split("\n")) {
         const m = /^--\s*foodable:contract\s+(.+)$/.exec(line.trim());
-        if (m && m[1].trim().length > 0) {
+        if (m && (m[1] ?? "").trim().length > 0) {
             return true;
         }
     }
@@ -540,8 +652,11 @@ export function lintPr(input: {
 } {
     const findings: Finding[] = [];
     const { level: floor, areas, highPaths } = blastFloor(input.files);
-    const parsed = parseTitle(input.title);
     const isDependabot = input.author === "dependabot[bot]";
+    const parsed = parseTitle(
+        input.title,
+        isDependabot ? { maxLength: Infinity } : {},
+    );
 
     if ("error" in parsed) {
         findings.push({ rule: "title", message: parsed.error });

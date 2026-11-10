@@ -4,12 +4,17 @@ import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { createOAuthRouter } from "./oauth.js";
 import {
+    startLoginSessionCleanup,
+    useLiveLoginSessionStore,
+} from "./oauth-login-sessions.js";
+import {
     authenticateBearer,
     rateLimit,
     banRepeatAuthFailures,
 } from "./middleware.js";
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
+import { startFlagPinSweep } from "./flag-pins.js";
 import {
     startFetchMemorySweep,
     startUnverifiedRecipeCleanup,
@@ -17,14 +22,21 @@ import {
 import { listHouseholdsForRecipeSweep } from "./db/household.js";
 import { liveRecipesStore } from "./db/recipes.js";
 import { recipeFetchMemory } from "./db/fetch-memory.js";
+import { bootRestockRuns } from "./restock-runner.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
+import { clientIpConfigBootLine, getClientIpConfig } from "./client-ip.js";
+import { clientIp } from "./middleware.js";
 import { isNutritionCard } from "./domain/layout.js";
 import {
     appScriptHref,
     appStylesheetHref,
+    appV2ScriptHref,
+    appV2StylesheetHref,
     getAppCss,
     getAppJs,
+    getAppV2Css,
+    getAppV2Js,
     getEmbedWidgetHtml,
     warmWidgets,
 } from "./widgets.js";
@@ -43,8 +55,17 @@ import { settingsRoutes } from "./web/routes/settings.js";
 import { needsAttentionRoutes } from "./web/routes/needs-attention.js";
 import { flashToastMiddleware } from "./web/components/toast.js";
 import { createExportsRouter } from "./exports-route.js";
+import { runAsSystem } from "./db/actor.js";
+import {
+    createPostgresRateLimitStore,
+    setRateLimitStore,
+    startRateLimitSweep,
+} from "./rate-limit.js";
 import { requireDatabaseUrl } from "./db/sql.js";
 import { resolveSessionSigningSecret } from "./site-session.js";
+import { initFlags } from "./flags.js";
+import { getSignupPolicy } from "./domain/signup.js";
+import { legacyRedirects } from "./web/legacy-redirects.js";
 
 const app = new Hono();
 
@@ -64,7 +85,7 @@ app.use("*", async (c, next) => {
     await next();
     if (c.get("suppressAccessLog")) return;
     const ms = Math.round(performance.now() - start);
-    const ip = maskIp(c.req.header("x-forwarded-for"));
+    const ip = maskIp(clientIp(c));
     // /mcp serves two protocol eras from one endpoint, and the only way to know
     // when the 2025-11-25 leg can be retired is to count who still uses it.
     // handleMcp publishes the era the SDK actually negotiated (not a guess from
@@ -211,6 +232,7 @@ app.use(
 // Registered after CORS so the refusal still carries Allow-Origin (a browser
 // client sees the 503 rather than an opaque CORS error) and is still access
 // logged. OPTIONS preflights never reach it: cors() answers those itself.
+// Per instance by design: graceful-shutdown gate for this process only.
 let shuttingDown = false;
 
 // Exported for src/index.test.ts. The gate's entire value is WHERE it sits — it
@@ -275,6 +297,8 @@ app.all(
 
 app.use("*", flashToastMiddleware);
 
+app.use("*", legacyRedirects());
+
 app.route("/", nutritionRoutes);
 app.route("/", foodsRoutes);
 app.route("/", fridgeRoutes);
@@ -326,6 +350,21 @@ app.get("/app.css", async (c) => {
 app.get("/app.js", async (c) => {
     const href = appScriptHref();
     return c.body(await getAppJs(), 200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
+    });
+});
+// The new shell's pair (flag `ui-v2`), served exactly like the old one.
+app.get("/app-v2.css", async (c) => {
+    const href = appV2StylesheetHref();
+    return c.body(await getAppV2Css(), 200, {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": appAssetCacheControl(c, href),
+    });
+});
+app.get("/app-v2.js", async (c) => {
+    const href = appV2ScriptHref();
+    return c.body(await getAppV2Js(), 200, {
         "Content-Type": "text/javascript; charset=utf-8",
         "Cache-Control": appAssetCacheControl(c, href),
     });
@@ -441,6 +480,7 @@ if (import.meta.main) {
     try {
         requireDatabaseUrl();
         resolveSessionSigningSecret();
+        console.log(clientIpConfigBootLine(getClientIpConfig()));
     } catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
@@ -448,18 +488,38 @@ if (import.meta.main) {
 
     console.log(`Foodable server listening on 0.0.0.0:${port}`);
 
+    // Load feature flags before widgets; bounded by initFlags timeout and never
+    // fails boot.
+    await initFlags();
+    getSignupPolicy();
+
     // Assemble every MCP Apps widget from its source partials up front, so a
     // broken @include/partial fails fast at boot rather than on a client's
     // first tool call.
     await warmWidgets();
 
-    // Periodically delete expired meal-export files from the storage bucket.
-    startExportCleanup();
-    startUnverifiedRecipeCleanup(
-        () => listHouseholdsForRecipeSweep(),
-        liveRecipesStore(),
+    useLiveLoginSessionStore();
+    setRateLimitStore(createPostgresRateLimitStore());
+
+    // Background jobs act for no member. A timer keeps the async context it
+    // was started in, so each job's ticks run as the system actor named here.
+    // The flag pin sweep and the restock runner name their own actors.
+    void runAsSystem("export sweep", async () => startExportCleanup());
+    void runAsSystem("login session sweep", async () =>
+        startLoginSessionCleanup(),
     );
-    startFetchMemorySweep(recipeFetchMemory());
+    void runAsSystem("rate limit sweep", async () => startRateLimitSweep());
+    startFlagPinSweep();
+    void runAsSystem("unverified recipe sweep", async () =>
+        startUnverifiedRecipeCleanup(
+            () => listHouseholdsForRecipeSweep(),
+            liveRecipesStore(),
+        ),
+    );
+    void runAsSystem("fetch memory sweep", async () =>
+        startFetchMemorySweep(recipeFetchMemory()),
+    );
+    bootRestockRuns();
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));

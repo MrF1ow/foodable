@@ -1,0 +1,307 @@
+<!doctype html>
+<!--
+  Goal progress widget, v2 look (MCP Apps). Served for get_goal_progress to
+  callers with the mcp-widgets-v2 flag on; the v1 template stays the default.
+
+  One card, as the design draws it: a header line, the goal list (calories
+  then the three macros, each against its goal), a hairline and one tip line.
+  v1 shows more than the design draws, and none of it is dropped: the limits
+  row and the water line sit under the goal list, every row some meal
+  contributed to opens the "<metric> by meal" breakdown, and the latest weight
+  against its target closes the card.
+
+  Same structuredContent and coerce contract as the v1 template. Standalone
+  preview uses the SAMPLE below, which is the design's day.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Goal Progress</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/date.js@*/
+
+            /*@include shared/macros.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            /*@include shared/v2/macros.js@*/
+
+            const T = {
+                title: "Goal progress",
+                loading: "Loading your goal progress…",
+                empty: "No goal progress to show.",
+                today: "today",
+                thisDay: "this day",
+                nothingLoggedFor: "Nothing logged yet for {date}.",
+                mealsCount: { one: "{n} meal", other: "{n} meals" },
+                waterCount: { one: "{n} water", other: "{n} waters" },
+                tipOver: "{kcal} kcal over your calorie goal.",
+                tipLeft: "{protein} g of protein and {kcal} kcal to go.",
+                tipKcalLeft: "Protein goal met. {kcal} kcal to go.",
+                tipDone: "Calorie and protein goals met.",
+                tipProtein: "{protein} g of protein to go.",
+                tipKcal: "{kcal} kcal to go.",
+                tipKcalMet: "Calorie goal met.",
+                tipProteinMet: "Protein goal met.",
+                weightLabel: "Weight",
+                weightGoal: "goal {target}",
+                weightNoneNoTarget:
+                    "No weight logged yet. Log one with log_weight to track progress.",
+                weightNoneWithTarget:
+                    "No weight logged yet. Log one with log_weight to track progress toward your {target} target.",
+                weightNoGoal:
+                    "Weight {reading} — no goal set. Set one with set_nutrition_goals to see progress here.",
+                atTarget: "at target",
+                toLose: "{amount} to lose",
+                toGain: "{amount} to gain",
+                lastLogged: "last logged {date}",
+            };
+
+            function localDay(offset) {
+                const d = new Date();
+                d.setDate(d.getDate() + (offset || 0));
+                const p = (x) => String(x).padStart(2, "0");
+                return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+            }
+
+            // ---- Sample: the design's day, dated today -------------------------
+            const SAMPLE_MEAL = (description, meal_type, v) => ({
+                description,
+                meal_type,
+                date: null,
+                alcohol_g: 0,
+                ...v,
+            });
+            const SAMPLE = {
+                date: localDay(0),
+                locale: "en",
+                meal_count: 2,
+                water_entries: 4,
+                drink_unit: "us",
+                goals: {
+                    calories: 2421,
+                    protein_g: 210,
+                    carbs_g: 213,
+                    fat_g: 81,
+                    fiber_g: 38,
+                    sugar_g: 50,
+                    alcohol_g: null,
+                    caffeine_mg: 400,
+                    water_ml: 3000,
+                },
+                totals: {
+                    calories: 1284,
+                    protein_g: 96,
+                    carbs_g: 118,
+                    fat_g: 42,
+                    fiber_g: 18,
+                    sugar_g: 31,
+                    alcohol_g: 0,
+                    caffeine_mg: 180,
+                    water_ml: 1600,
+                },
+                weight: {
+                    current: 182.4,
+                    target: 175,
+                    unit: "lb",
+                    logged_on: localDay(-1),
+                },
+                meals: [
+                    SAMPLE_MEAL("Overnight oats with berries", "breakfast", {
+                        calories: 432,
+                        protein_g: 27,
+                        carbs_g: 42,
+                        fat_g: 17,
+                        fiber_g: 9.4,
+                        sugar_g: 18.2,
+                        caffeine_mg: 95,
+                    }),
+                    SAMPLE_MEAL("Chicken rice bowl", "lunch", {
+                        calories: 852,
+                        protein_g: 69,
+                        carbs_g: 76,
+                        fat_g: 25,
+                        fiber_g: 8.6,
+                        sugar_g: 12.8,
+                        caffeine_mg: 85,
+                    }),
+                ],
+            };
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+            function note(text) {
+                return `<p class="note">${esc(text)}</p>`;
+            }
+
+            // ---- Goal list, limits and water as one breakdown panel -----------
+            // The design's goal list replaces the gauge and bars, but v1's
+            // limits row, water line and tap-for-meals breakdown stay.
+            function progressPanel(data) {
+                return goalListV2(data.totals || {}, data.goals, {
+                    meals: data.meals,
+                    drinkUnit: data.drink_unit,
+                    withLimits: true,
+                    withWater: true,
+                });
+            }
+
+            // ---- Tip line -----------------------------------------------------
+            // The design's pace sentence, from what the payload carries: the
+            // calories over the goal, or the protein and calories still to go.
+            function tipLine(totals, goals) {
+                // A goal counts only when it is a number above 0, the rule
+                // the goal list uses for "no goal". A negative figure (a
+                // correction logged as a meal) reads as 0, as everywhere in
+                // the card.
+                const left = (k) => {
+                    const g = goals?.[k];
+                    if (typeof g !== "number" || !(g > 0)) return null;
+                    return g - Math.max(0, Number(totals[k]) || 0);
+                };
+                const kcalLeft = left("calories");
+                const proteinLeft = left("protein_g");
+                if (kcalLeft != null && kcalLeft < 0) {
+                    return v2Tip(
+                        tpl(T.tipOver, { kcal: fmt(-kcalLeft, 0) }),
+                        "status-over",
+                    );
+                }
+                const kcal = fmt(kcalLeft, 0);
+                const protein = fmt(proteinLeft, 0);
+                const hasP = proteinLeft != null;
+                let text = "";
+                if (proteinLeft > 0)
+                    text = tpl(kcalLeft > 0 ? T.tipLeft : T.tipProtein, {
+                        protein,
+                        kcal,
+                    });
+                else if (kcalLeft > 0)
+                    text = tpl(hasP ? T.tipKcalLeft : T.tipKcal, { kcal });
+                else if (kcalLeft != null)
+                    text = hasP ? T.tipDone : T.tipKcalMet;
+                else if (hasP) text = T.tipProteinMet;
+                return text ? v2Tip(text) : "";
+            }
+
+            // ---- Weight (latest reading against its target) -------------------
+            function weightBlock(w) {
+                const cur = w?.current;
+                const tgt = w?.target;
+                const unit = w?.unit || "kg";
+                const amount = (x) => `${fmt(x, 1)} ${unit}`;
+                if (cur == null) {
+                    return note(
+                        tgt != null
+                            ? tpl(T.weightNoneWithTarget, {
+                                  target: amount(tgt),
+                              })
+                            : T.weightNoneNoTarget,
+                    );
+                }
+                if (tgt == null) {
+                    const when = w.logged_on
+                        ? ` (${shortDate(w.logged_on)})`
+                        : "";
+                    return note(
+                        tpl(T.weightNoGoal, {
+                            reading: `${amount(cur)}${when}`,
+                        }),
+                    );
+                }
+                const delta = Math.round((cur - tgt) * 10) / 10;
+                const state =
+                    Math.abs(cur - tgt) < 0.05
+                        ? T.atTarget
+                        : tpl(delta > 0 ? T.toLose : T.toGain, {
+                              amount: amount(Math.abs(delta)),
+                          });
+                const goal = tpl(T.weightGoal, { target: amount(tgt) });
+                return v2Group(T.weightLabel, [
+                    {
+                        dot: { color: "accent-fill" },
+                        title: amount(cur),
+                        sub: w.logged_on
+                            ? `${goal} · ${tpl(T.lastLogged, { date: shortDate(w.logged_on) })}`
+                            : goal,
+                        end: state,
+                        endTone: state === T.atTarget ? "ok" : "",
+                    },
+                ]);
+            }
+
+            function render(data) {
+                const root = document.getElementById("root");
+                if (!data || typeof data !== "object") {
+                    root.innerHTML = card(v2Header(T.title) + note(T.empty));
+                    return;
+                }
+                const meals = data.meal_count || 0;
+                const water = data.water_entries || 0;
+                const w = data.weight;
+                const day = isToday(data.date)
+                    ? T.today
+                    : shortDate(data.date) || T.thisDay;
+                const nothing = tpl(T.nothingLoggedFor, { date: day });
+
+                if (
+                    meals === 0 &&
+                    water === 0 &&
+                    !(w && (w.current != null || w.target != null))
+                ) {
+                    root.innerHTML = card(
+                        v2Header(T.title, day) + note(nothing),
+                    );
+                    return;
+                }
+
+                const meta = `${plural(T.mealsCount, meals)} · ${plural(T.waterCount, water)} · ${day}`;
+                // A day with only a weight reading still shows the goal list
+                // (all zeros against the goals), so say why.
+                const why = meals === 0 && water === 0 ? note(nothing) : "";
+                const tip = tipLine(data.totals || {}, data.goals);
+                root.innerHTML = card(
+                    v2Header(T.title, meta) +
+                        why +
+                        progressPanel(data) +
+                        (tip ? `<hr class="rule" />${tip}` : "") +
+                        weightBlock(w),
+                );
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (payload.totals || payload.date) return payload;
+                if (payload.structuredContent) return payload.structuredContent;
+                return null;
+            }
+
+            initWidget({
+                name: "goal-progress-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render,
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

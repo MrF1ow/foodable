@@ -4,10 +4,12 @@ import {
     FOODS_MERGE_MODAL_ID,
     renderFoodsSettingsPage,
 } from "../web/pages/foods.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 const food = {
@@ -26,15 +28,18 @@ const food = {
     fatG: 10,
     fiberG: null,
     sugarG: null,
+    saturatedFatG: null,
     alcoholG: null,
     caffeineMg: null,
     nutritionSource: null,
+    offNutrientLevels: null,
     allergens: [],
     offSourceId: null,
     genericFoodId: null,
     usualProductId: null,
     usualStoreId: null,
     usualAmount: null,
+    offQuality: null,
     createdBy: null,
     archivedAt: null,
     createdAt: "2026-01-01T00:00:00Z",
@@ -51,12 +56,12 @@ test("foods settings use modals for edit and merge", () => {
     expect(html).not.toContain('<details class="more">');
     expect(html).toContain(`commandfor="${FOOD_EDIT_MODAL_ID}"`);
     expect(html).not.toContain('commandfor="food-edit-f1"');
-    expect(html).toContain('data-fill-action="/household/items/f1"');
+    expect(html).toContain('data-fill-action="/settings/household/items/f1"');
     expect(html).toContain('data-fill-title="Edit Eggs"');
     expect(html).toContain('data-fill-field-name="Eggs"');
     expect(html).toContain(`commandfor="${FOODS_MERGE_MODAL_ID}"`);
     expect(html).toContain('class="food-edit"');
-    expect(html).toContain('action="/household/items/merge"');
+    expect(html).toContain('action="/settings/household/items/merge"');
     expect(html).toContain(
         '<button type="submit" class="btn-primary" disabled>Save food</button>',
     );
@@ -110,7 +115,7 @@ test("foods server error reopens edit and merge modals", () => {
             `<dialog class="modal" id="${FOOD_EDIT_MODAL_ID}"[^>]*data-modal-open-on-load`,
         ),
     );
-    expect(editHtml).toContain('action="/household/items/f1"');
+    expect(editHtml).toContain('action="/settings/household/items/f1"');
     expect(editHtml).toContain(">Edit Eggs</h2>");
     expect(editHtml).not.toContain(
         '<button type="submit" class="btn-primary" disabled>',

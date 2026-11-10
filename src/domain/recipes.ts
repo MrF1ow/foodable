@@ -10,6 +10,9 @@ import {
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
     FoodsInputError,
+    similarFoodsForNames,
+    SimilarFoodsError,
+    type OnSimilar,
     type EffectiveFood,
     type Food,
     type FoodsStore,
@@ -138,8 +141,6 @@ export type RecipeMacros = {
     sugar_g: number | null;
     alcohol_g: number | null;
     incomplete: boolean;
-    incompleteReasons: string[];
-    gaps: RecipeGap[];
 };
 
 export type RecipesStore = {
@@ -222,6 +223,7 @@ export type RecipeImportIngredient = {
     note?: string | null;
     foodId?: string;
     barcode?: string;
+    newFood?: boolean;
 };
 
 export type IngredientGapKind =
@@ -682,10 +684,7 @@ function scaleNutrient(value: number | null, factor: number): number | null {
     return roundAmount(value * factor);
 }
 
-type MacroNutrient = Exclude<
-    keyof RecipeMacros,
-    "incomplete" | "incompleteReasons" | "gaps"
->;
+type MacroNutrient = Exclude<keyof RecipeMacros, "incomplete">;
 
 export function macrosForPerson(
     ingredients: RecipeIngredient[],
@@ -693,7 +692,7 @@ export function macrosForPerson(
     portionCount: number,
     foodsById: ReadonlyMap<string, Food> = new Map(),
 ): RecipeMacros {
-    const gaps: RecipeGap[] = [];
+    let hasGaps = false;
     const sum: RecipeMacros = {
         calories: null,
         protein_g: null,
@@ -703,8 +702,6 @@ export function macrosForPerson(
         sugar_g: null,
         alcohol_g: null,
         incomplete: false,
-        incompleteReasons: [],
-        gaps: [],
     };
     for (const ingredient of ingredients) {
         const catalog = ingredient.foodId
@@ -715,8 +712,10 @@ export function macrosForPerson(
             ingredient,
             catalog,
         );
-        gaps.push(...notices.map(gapFromNotice));
-        if (notices.length > 0) continue;
+        if (notices.length > 0) {
+            hasGaps = true;
+            continue;
+        }
         if (ingredient.quantity == null) continue;
         const nutrition = nutritionFromCatalogFood(catalog!)!;
         const eaten = amountForPortion(
@@ -743,16 +742,7 @@ export function macrosForPerson(
         add("sugar_g");
         add("alcohol_g");
     }
-    sum.gaps = gaps;
-    const seen = new Set<string>();
-    sum.incompleteReasons = gaps
-        .map((gap) => gap.message)
-        .filter((message) => {
-            if (seen.has(message)) return false;
-            seen.add(message);
-            return true;
-        });
-    sum.incomplete = gaps.length > 0;
+    sum.incomplete = hasGaps;
     return sum;
 }
 
@@ -1451,6 +1441,7 @@ export async function addRecipeManualIngredient(
         name: string;
         amount?: number | null;
         unit?: string;
+        onSimilar?: OnSimilar;
     },
 ): Promise<RecipeIngredient> {
     const recipe = await requireRecipe(
@@ -1466,6 +1457,7 @@ export async function addRecipeManualIngredient(
             input.householdId,
             "food",
             input.name,
+            { onSimilar: input.onSimilar },
         );
         const quantity = quantityForNewIngredient(
             input.amount,
@@ -1960,6 +1952,7 @@ export async function importRecipeFromText(
         notes?: string | null;
         prepMinutes?: number | null;
         cookMinutes?: number | null;
+        onSimilar?: OnSimilar;
     },
     opts: {
         lookup: (barcode: string) => Promise<FoodResult | null>;
@@ -1985,6 +1978,29 @@ export async function importRecipeFromText(
 
     const lines = input.ingredients ?? [];
     const validated = lines.map((line) => validateImportLine(line));
+
+    const onSimilar = input.onSimilar ?? "create";
+    if (onSimilar === "ask") {
+        const namesToCheck: string[] = [];
+        for (const line of lines) {
+            if (line.foodId?.trim()) continue;
+            if (line.barcode?.trim()) continue;
+            if (line.newFood === true) continue;
+            const n = line.name?.trim() ?? "";
+            if (n) namesToCheck.push(n);
+        }
+        if (namesToCheck.length > 0) {
+            const entries = await similarFoodsForNames(
+                foods,
+                input.householdId,
+                "food",
+                namesToCheck,
+            );
+            if (entries.length > 0) {
+                throw new SimilarFoodsError(entries);
+            }
+        }
+    }
 
     const barcodeHits = new Map<string, FoodResult>();
     for (const line of lines) {
@@ -2040,6 +2056,8 @@ export async function importRecipeFromText(
                         input.householdId,
                         "food",
                         line.name,
+                        // Asked once above for every line; what is left is created.
+                        { onSimilar: "create" },
                     );
                 }
             } catch (err) {

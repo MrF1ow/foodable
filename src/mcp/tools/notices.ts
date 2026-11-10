@@ -1,3 +1,4 @@
+import { householdToday } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
@@ -13,9 +14,15 @@ import {
 } from "../../domain/notices-for.js";
 import { needsAttentionCount } from "../../domain/notices.js";
 import { NoticeDismissError } from "../../domain/notice-dismissals.js";
-import { NOTICE_SCHEMA, noticeToWire, type ToolContext } from "../shared.js";
+import {
+    NOTICE_SCHEMA,
+    noticeToWire,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
+    type ToolContext,
+} from "../shared.js";
 
-const LIST_NOTICES_OUTPUT_SCHEMA = z.object({
+export const LIST_NOTICES_OUTPUT_SCHEMA = z.object({
     count: z.number(),
     notices: z.array(NOTICE_SCHEMA),
 });
@@ -45,6 +52,15 @@ function noticeDeps(): NoticesForDeps {
 export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, actorUserId, analytics } = ctx;
 
+    registerV2OnlyWidgetResource(server, ctx, {
+        key: "attention",
+        resourceName: "attention",
+        title: "Needs attention",
+        description:
+            "Household notices grouped for the Needs attention digest card.",
+        flag: "widget-attention",
+    });
+
     server.registerTool(
         "list_notices",
         {
@@ -63,15 +79,21 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                 subject_kind: SUBJECT_KIND_SCHEMA.optional(),
             }),
             outputSchema: LIST_NOTICES_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "attention", {
+                v2: true,
+                flag: "widget-attention",
+            }),
         },
         async (input) => {
             return withAnalytics(
                 "list_notices",
                 async () => {
                     const householdId = await callerHouseholdId();
+                    const today = await householdToday(householdId);
                     const { notices: all } = await noticesFor(
                         noticeDeps(),
                         householdId,
+                        { today },
                     );
                     const count = needsAttentionCount(all);
                     let notices = all;
@@ -109,7 +131,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Dismiss Notice",
             description:
-                "Dismiss an info-level suggestion after the person agrees. Do not call without asking first.",
+                "Dismiss an info-level suggestion after the person agrees. Do not call without asking first. Pair notices (for example food.possible_duplicate) require related_id naming the other food in the pair.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -131,12 +153,19 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const userId = await actorUserId(undefined);
                     try {
-                        await dismissNotice(noticeDeps(), householdId, userId, {
-                            code: input.code as never,
-                            subjectKind: input.subject_kind,
-                            subjectId: input.subject_id,
-                            relatedId: input.related_id,
-                        });
+                        const today = await householdToday(householdId);
+                        await dismissNotice(
+                            noticeDeps(),
+                            householdId,
+                            userId,
+                            {
+                                code: input.code as never,
+                                subjectKind: input.subject_kind,
+                                subjectId: input.subject_id,
+                                relatedId: input.related_id,
+                            },
+                            { today },
+                        );
                         return {
                             content: [
                                 {

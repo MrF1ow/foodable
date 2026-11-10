@@ -53,19 +53,47 @@ import {
     importRecipeFromUrlAnalyticsOutcome,
 } from "../../domain/recipe-import.js";
 import {
+    buildRecipeLinkReaderPausedOutcome,
+    RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
     recipeFetchMemory,
     recipeImportFetcher,
+    linkImportPaused,
+    recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
 import { cookRecipe, StockInputError } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
 import { noticeSentence } from "../../copy/notices.js";
 import {
     NOTICE_SCHEMA,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
     noticeToWire,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
     QUANTITY_ITEM,
     recipeAllergenNoticesForView,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
+import { RecipeInputError } from "../../domain/recipes.js";
+
+export const ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    ingredient: z
+        .object({
+            id: z.string(),
+            food_id: z.string().nullable(),
+            display_name: z.string(),
+            amount: z.number().nullable(),
+            unit: z.string().nullable(),
+            note: z.string().nullable(),
+        })
+        .nullable(),
+});
 
 const RECIPE_FIELDS = {
     id: z.string(),
@@ -88,12 +116,70 @@ const RECIPE_PROBLEM = z.object({
     line: z.string().nullable(),
 });
 
+export const IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA = z.object({
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    recipe: z.object(RECIPE_FIELDS).nullable(),
+    ingredients: z.array(
+        z.object({
+            id: z.string(),
+            food_id: z.string().nullable(),
+            display_name: z.string(),
+            amount: z.number().nullable(),
+            unit: z.string().nullable(),
+            note: z.string().nullable(),
+            missing: z.array(
+                z.enum([
+                    "nutrition",
+                    "amount",
+                    "grams_per_each",
+                    "grams_per_ml",
+                ]),
+            ),
+        }),
+    ),
+    recipe_search_places: z.array(
+        z.object({
+            name: z.string(),
+            kind: z.string(),
+            url: z.string().nullable(),
+        }),
+    ),
+    verification: z.enum(["verified", "unverified"]).nullable(),
+    problems: z.array(RECIPE_PROBLEM),
+});
+
 export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
     status: z.enum(["verified", "unverified", "not_found"]),
     recipe_id: z.string(),
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
 });
+
+export function importRecipeFromUrlPausedStructuredContent(url: string) {
+    const outcome = buildRecipeLinkReaderPausedOutcome(url);
+    const payload = {
+        status: outcome.status,
+        recipe_id: outcome.recipeId,
+        recipe_name: outcome.recipeName,
+        verification: outcome.verification,
+        problems: wireProblems(outcome.problems),
+        source: outcome.source
+            ? {
+                  kind: outcome.source.kind,
+                  url: outcome.source.url,
+                  label: outcome.source.label,
+              }
+            : null,
+        unresolved_lines: outcome.unresolvedLines,
+        reader_failure: outcome.readerFailure,
+        message: RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
+        from_memory: outcome.fromMemory,
+        remembered_until: outcome.rememberedUntil,
+    };
+    IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
+    return payload;
+}
 
 const RECIPE_IMPORT_STATUS = z.enum([
     "imported",
@@ -166,16 +252,6 @@ function wireImport(row: RecipeImport | null) {
 const INSTRUCTIONS_DESCRIPTION =
     'Method steps, one per line. Leave a blank line between steps to write one step over several lines. Numbering ("1.", "Step 2:") is optional and stripped on display.';
 
-const RECIPE_GAP_REASON = z.enum([
-    "no_food",
-    "no_nutrition",
-    "partial_nutrition",
-    "no_amount",
-    "unknown_unit",
-    "missing_grams_per_each",
-    "missing_grams_per_ml",
-]);
-
 function recipeIngredientAmountText(ingredient: {
     quantity: { amount: number; unit: string } | null;
     note: string | null;
@@ -196,22 +272,6 @@ const MACROS_ITEM = z.object({
     sugar_g: z.number().nullable(),
     alcohol_g: z.number().nullable(),
     incomplete: z.boolean(),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
-    incompleteReasons: z.array(z.string()),
-    // Deprecated: kept for one release beside `notices` and derived from them; a later contract PR removes it (docs/notices-plan.md).
-    gaps: z.array(
-        z.object({
-            ingredient_id: z.string(),
-            display_name: z.string(),
-            food_id: z.string().nullable(),
-            reason: RECIPE_GAP_REASON,
-            missing_nutrients: z.array(z.string()),
-            usual_product: z
-                .object({ id: z.string(), name: z.string() })
-                .nullable(),
-            message: z.string(),
-        }),
-    ),
 });
 
 export const MACROS_ITEM_OUTPUT_SCHEMA = MACROS_ITEM;
@@ -226,16 +286,6 @@ function wireMacros(macros: ReturnType<typeof macrosForPerson>) {
         sugar_g: macros.sugar_g,
         alcohol_g: macros.alcohol_g,
         incomplete: macros.incomplete,
-        incompleteReasons: macros.incompleteReasons,
-        gaps: macros.gaps.map((gap) => ({
-            ingredient_id: gap.ingredientId,
-            display_name: gap.displayName,
-            food_id: gap.foodId,
-            reason: gap.reason,
-            missing_nutrients: gap.missingNutrients,
-            usual_product: gap.usualProduct,
-            message: gap.message,
-        })),
     };
 }
 
@@ -426,7 +476,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Recipe",
             description:
-                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place. When macros are incomplete, `macros_per_portion.gaps` lists one entry per missing piece (nutrition, unit conversion, and so on).",
+                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place; when macros are incomplete, `macros_per_portion.incomplete` is true.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -670,7 +720,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 barcode: z.string().optional(),
                 food_id: z.string().optional(),
                 unit: z.string().optional(),
+                on_similar: ON_SIMILAR_INPUT,
+                new_food: NEW_FOOD_INPUT,
             }),
+            outputSchema: ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
@@ -679,42 +732,91 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const store = liveRecipesStore();
                     const foods = liveFoodsStore();
-                    const ingredient = args.food_id
-                        ? await addRecipeIngredientById(store, foods, {
-                              householdId,
-                              recipeId: args.recipe_id,
-                              foodId: args.food_id,
-                              amount: args.amount,
-                              unit: args.unit,
-                          })
-                        : args.barcode
-                          ? await addRecipeIngredientByBarcode(
-                                store,
-                                foods,
-                                {
+                    const onSimilar = onSimilarFor(args);
+                    const similarNull = {
+                        status: "similar_foods" as const,
+                        similar_foods: [] as z.infer<
+                            typeof SIMILAR_FOODS_ENTRY
+                        >[],
+                        ingredient: null,
+                    };
+                    try {
+                        const ingredient = args.food_id
+                            ? await addRecipeIngredientById(store, foods, {
+                                  householdId,
+                                  recipeId: args.recipe_id,
+                                  foodId: args.food_id,
+                                  amount: args.amount,
+                                  unit: args.unit,
+                              })
+                            : args.barcode
+                              ? await addRecipeIngredientByBarcode(
+                                    store,
+                                    foods,
+                                    {
+                                        householdId,
+                                        recipeId: args.recipe_id,
+                                        barcode: args.barcode,
+                                        amount: args.amount,
+                                        unit: args.unit,
+                                    },
+                                    {
+                                        lookup: (barcode) =>
+                                            lookupBarcode(barcode, {
+                                                householdId,
+                                            }),
+                                    },
+                                )
+                              : await addRecipeManualIngredient(store, foods, {
                                     householdId,
                                     recipeId: args.recipe_id,
-                                    barcode: args.barcode,
+                                    name: args.name ?? "",
                                     amount: args.amount,
                                     unit: args.unit,
-                                },
-                                { lookup: lookupBarcode },
-                            )
-                          : await addRecipeManualIngredient(store, foods, {
-                                householdId,
-                                recipeId: args.recipe_id,
-                                name: args.name ?? "",
-                                amount: args.amount,
-                                unit: args.unit,
-                            });
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Added ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}`,
+                                    onSimilar,
+                                });
+                        const structured = {
+                            status: "ok" as const,
+                            similar_foods: [],
+                            ingredient: {
+                                id: ingredient.id,
+                                food_id: ingredient.foodId,
+                                display_name: ingredient.displayName,
+                                amount: ingredient.quantity?.amount ?? null,
+                                unit: ingredient.quantity?.unit ?? null,
+                                note: ingredient.note,
                             },
-                        ],
-                    };
+                        };
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Added ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}`,
+                                },
+                            ],
+                            structuredContent: structured,
+                        };
+                    } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    ...similarNull,
+                                    similar_foods: wire,
+                                },
+                            };
+                        }
+                        if (err instanceof RecipeInputError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
+                    }
                 },
                 analytics,
             ),
@@ -1323,7 +1425,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food.',
+                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food. When it returns similar_foods, ask the person about every listed ingredient at once, then call again passing each chosen food_id on that ingredient or new_food: true.',
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1345,6 +1447,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             note: z.string().optional(),
                             food_id: z.string().optional(),
                             barcode: z.string().optional(),
+                            new_food: NEW_FOOD_INPUT,
                         }),
                     )
                     .optional(),
@@ -1352,114 +1455,126 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 notes: z.string().optional(),
                 prep_minutes: z.coerce.number().optional(),
                 cook_minutes: z.coerce.number().optional(),
+                on_similar: ON_SIMILAR_INPUT,
             }),
-            outputSchema: z.object({
-                recipe: z.object(RECIPE_FIELDS),
-                ingredients: z.array(
-                    z.object({
-                        id: z.string(),
-                        food_id: z.string().nullable(),
-                        display_name: z.string(),
-                        amount: z.number().nullable(),
-                        unit: z.string().nullable(),
-                        note: z.string().nullable(),
-                        missing: z.array(
-                            z.enum([
-                                "nutrition",
-                                "amount",
-                                "grams_per_each",
-                                "grams_per_ml",
-                            ]),
-                        ),
-                    }),
-                ),
-                recipe_search_places: z.array(
-                    z.object({
-                        name: z.string(),
-                        kind: z.string(),
-                        url: z.string().nullable(),
-                    }),
-                ),
-                verification: z.enum(["verified", "unverified"]),
-                problems: z.array(RECIPE_PROBLEM),
-            }),
+            outputSchema: IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA,
         },
         async (args) =>
             withAnalytics(
                 "import_recipe_from_text",
                 async () => {
                     const actor = await callerActor();
-                    const result = await importRecipeFromText(
-                        liveRecipesStore(),
-                        liveFoodsStore(),
-                        {
-                            householdId: actor.householdId,
-                            creatorId: actor.userId,
-                            text: args.text,
-                            instructions: args.instructions,
-                            sourceUrl: args.source_url,
-                            name: args.name,
-                            yieldPortions: args.yield_portions,
-                            ingredients: args.ingredients?.map((line) => ({
-                                name: line.name,
-                                amount: line.amount,
-                                unit: line.unit,
-                                note: line.note,
-                                foodId: line.food_id,
-                                barcode: line.barcode,
-                            })),
-                            tags: args.tags,
-                            notes: args.notes,
-                            prepMinutes: args.prep_minutes,
-                            cookMinutes: args.cook_minutes,
-                        },
-                        {
-                            lookup: lookupBarcode,
-                            transaction: (fn) => run(async () => fn()),
-                        },
-                    );
                     const household = await getHouseholdConfig(
                         actor.householdId,
                     );
                     const places = recipePlacesToWire(
                         household.recipeSearchPlaces,
                     );
-                    const payload = {
-                        recipe: recipeFields(result.recipe),
-                        ingredients: result.ingredients.map((ingredient) => ({
-                            id: ingredient.id,
-                            food_id: ingredient.foodId,
-                            display_name: ingredient.displayName,
-                            amount: ingredient.quantity?.amount ?? null,
-                            unit: ingredient.quantity?.unit ?? null,
-                            note: ingredient.note,
-                            missing:
-                                result.gaps.find(
-                                    (gap) => gap.ingredientId === ingredient.id,
-                                )?.missing ?? [],
-                        })),
-                        recipe_search_places: places,
-                        verification: result.verification,
-                        problems: wireProblems(result.problems),
-                    };
-                    return {
-                        content: [
+                    const onSimilar = onSimilarFor(args);
+                    try {
+                        const result = await importRecipeFromText(
+                            liveRecipesStore(),
+                            liveFoodsStore(),
                             {
-                                type: "text",
-                                text: `Imported ${result.recipe.name} ${result.recipe.id} (${result.verification})\n${payload.ingredients
-                                    .map(
-                                        (row) =>
-                                            `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
-                                    )
-                                    .join("\n")}${
-                                    places.length
-                                        ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
-                                        : ""
-                                }`,
+                                householdId: actor.householdId,
+                                creatorId: actor.userId,
+                                text: args.text,
+                                instructions: args.instructions,
+                                sourceUrl: args.source_url,
+                                name: args.name,
+                                yieldPortions: args.yield_portions,
+                                ingredients: args.ingredients?.map((line) => ({
+                                    name: line.name,
+                                    amount: line.amount,
+                                    unit: line.unit,
+                                    note: line.note,
+                                    foodId: line.food_id,
+                                    barcode: line.barcode,
+                                    newFood: line.new_food,
+                                })),
+                                tags: args.tags,
+                                notes: args.notes,
+                                prepMinutes: args.prep_minutes,
+                                cookMinutes: args.cook_minutes,
+                                onSimilar,
                             },
-                        ],
-                        structuredContent: payload,
-                    };
+                            {
+                                lookup: (barcode) =>
+                                    lookupBarcode(barcode, {
+                                        householdId: actor.householdId,
+                                    }),
+                                transaction: (fn) => run(async () => fn()),
+                            },
+                        );
+                        const importGapRows = result.gaps;
+                        const payload = {
+                            status: "ok" as const,
+                            similar_foods: [],
+                            recipe: recipeFields(result.recipe),
+                            ingredients: result.ingredients.map(
+                                (ingredient) => ({
+                                    id: ingredient.id,
+                                    food_id: ingredient.foodId,
+                                    display_name: ingredient.displayName,
+                                    amount: ingredient.quantity?.amount ?? null,
+                                    unit: ingredient.quantity?.unit ?? null,
+                                    note: ingredient.note,
+                                    missing:
+                                        importGapRows.find(
+                                            (gap) =>
+                                                gap.ingredientId ===
+                                                ingredient.id,
+                                        )?.missing ?? [],
+                                }),
+                            ),
+                            recipe_search_places: places,
+                            verification: result.verification,
+                            problems: wireProblems(result.problems),
+                        };
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Imported ${result.recipe.name} ${result.recipe.id} (${result.verification})\n${payload.ingredients
+                                        .map(
+                                            (row) =>
+                                                `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
+                                        )
+                                        .join("\n")}${
+                                        places.length
+                                            ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
+                                            : ""
+                                    }`,
+                                },
+                            ],
+                            structuredContent: payload,
+                        };
+                    } catch (err) {
+                        if (err instanceof SimilarFoodsError) {
+                            const wire = similarFoodsWire(err.entries);
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: similarFoodsText(err.entries),
+                                    },
+                                ],
+                                structuredContent: {
+                                    status: "similar_foods" as const,
+                                    similar_foods: wire,
+                                    recipe: null,
+                                    ingredients: [],
+                                    recipe_search_places: places,
+                                    verification: null,
+                                    problems: [],
+                                },
+                            };
+                        }
+                        if (err instanceof RecipeInputError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
+                    }
                 },
                 analytics,
             ),
@@ -1603,46 +1718,63 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const household = await getHouseholdConfig(
                         actor.householdId,
                     );
-                    const outcome = await importRecipeFromUrl(
-                        {
-                            recipes: liveRecipesStore(),
-                            foods: liveFoodsStore(),
-                            fetcher: recipeImportFetcher(),
-                            memory: recipeFetchMemory(),
-                            transaction: (fn) => run(async () => fn()),
-                            readers: household.preferences.socialReaders,
-                            readerStatus: liveSocialReaderStatusStore(),
-                        },
-                        {
-                            householdId: actor.householdId,
-                            creatorId: actor.userId,
-                            url: args.url,
-                            text: args.text,
-                            credit: args.credit,
-                            textOrigin: "pasted",
-                            retry: args.retry === true,
-                        },
+                    const readerEnabled = await recipeLinkReaderEnabled(
+                        actor.householdId,
                     );
-                    const payload = {
-                        status: outcome.status,
-                        recipe_id: outcome.recipeId,
-                        recipe_name: outcome.recipeName,
-                        verification: outcome.verification,
-                        problems: wireProblems(outcome.problems),
-                        source: outcome.source
-                            ? {
-                                  kind: outcome.source.kind,
-                                  url: outcome.source.url,
-                                  label: outcome.source.label,
-                              }
-                            : null,
-                        unresolved_lines: outcome.unresolvedLines,
-                        reader_failure: outcome.readerFailure,
-                        message: importOutcomeMessage(outcome),
-                        from_memory: outcome.fromMemory,
-                        remembered_until: outcome.rememberedUntil,
-                    };
-                    IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
+                    const paused = linkImportPaused({
+                        text: args.text,
+                        readerEnabled,
+                    });
+                    const payload = !paused
+                        ? await (async () => {
+                              const outcome = await importRecipeFromUrl(
+                                  {
+                                      recipes: liveRecipesStore(),
+                                      foods: liveFoodsStore(),
+                                      fetcher: await recipeImportFetcher({
+                                          householdId: actor.householdId,
+                                      }),
+                                      memory: recipeFetchMemory(),
+                                      transaction: (fn) =>
+                                          run(async () => fn()),
+                                      readers:
+                                          household.preferences.socialReaders,
+                                      readerStatus:
+                                          liveSocialReaderStatusStore(),
+                                  },
+                                  {
+                                      householdId: actor.householdId,
+                                      creatorId: actor.userId,
+                                      url: args.url,
+                                      text: args.text,
+                                      credit: args.credit,
+                                      textOrigin: "pasted",
+                                      retry: args.retry === true,
+                                  },
+                              );
+                              const built = {
+                                  status: outcome.status,
+                                  recipe_id: outcome.recipeId,
+                                  recipe_name: outcome.recipeName,
+                                  verification: outcome.verification,
+                                  problems: wireProblems(outcome.problems),
+                                  source: outcome.source
+                                      ? {
+                                            kind: outcome.source.kind,
+                                            url: outcome.source.url,
+                                            label: outcome.source.label,
+                                        }
+                                      : null,
+                                  unresolved_lines: outcome.unresolvedLines,
+                                  reader_failure: outcome.readerFailure,
+                                  message: importOutcomeMessage(outcome),
+                                  from_memory: outcome.fromMemory,
+                                  remembered_until: outcome.rememberedUntil,
+                              };
+                              IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(built);
+                              return built;
+                          })()
+                        : importRecipeFromUrlPausedStructuredContent(args.url);
                     return {
                         content: [
                             {

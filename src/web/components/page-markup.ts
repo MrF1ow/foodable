@@ -5,9 +5,15 @@ import { disclosure, modalTrigger, type ModalFill } from "./ui.js";
 import {
     noticeAction,
     noticeBadge,
+    noticeList,
     type NoticeRouteContext,
 } from "./notices.js";
-import { noticeActionFor, ON_GROCERY_LIST_TEXT } from "../../copy/notices.js";
+import {
+    noticeActionFor,
+    noticeCodeDismissible,
+    ON_GROCERY_LIST_TEXT,
+} from "../../copy/notices.js";
+import { dismissalKey } from "../../domain/notice-dismissals.js";
 
 export function renderExpiringStrip(
     items: { id: string; displayName: string; expiresOn: string }[],
@@ -38,6 +44,8 @@ export function renderGroceryLineRow(opts: {
     putAwayHtml?: string;
     usualProductName?: string | null;
     extraActionsHtml?: string;
+    duplicateNoticeHtml?: string;
+    notices?: readonly Notice[];
 }): string {
     const checked = opts.checked ? "true" : "false";
     const next = opts.checked ? "0" : "1";
@@ -46,17 +54,47 @@ export function renderGroceryLineRow(opts: {
     if (opts.alreadyHaveHtml) {
         metaParts.push(opts.alreadyHaveHtml);
     }
+    for (const notice of opts.notices ?? []) {
+        metaParts.push(noticeBadge(notice));
+    }
     const meta = metaParts.join(" · ");
+    const noticeBlock =
+        opts.notices && opts.notices.length > 0
+            ? noticeList(opts.notices, {
+                  className: "grocery-line-notices",
+                  dismiss: (notice) =>
+                      noticeCodeDismissible(notice.code)
+                          ? {
+                                action: "/needs-attention/dismiss",
+                                hidden: {
+                                    code: notice.code,
+                                    subject_kind: notice.subject.kind,
+                                    subject_id: notice.subject.id,
+                                    return_to: "/kitchen/groceries",
+                                    ...(dismissalKey(notice).relatedKey
+                                        ? {
+                                              related_id:
+                                                  dismissalKey(notice)
+                                                      .relatedKey,
+                                          }
+                                        : {}),
+                                },
+                            }
+                          : null,
+              })
+            : "";
     return `<li class="grocery-line${opts.checked ? " is-checked" : ""}" data-line-id="${escapeHtml(opts.id)}" data-checked="${checked}" data-kind="${opts.kind}">
 <div class="list-row grocery-line-row">
-<form class="grocery-line-check" method="post" action="/grocery/lines/${escapeHtml(opts.id)}/check">
+<form class="grocery-line-check" method="post" action="/kitchen/groceries/lines/${escapeHtml(opts.id)}/check">
 <input type="hidden" name="checked" value="${next}" />
 <button type="submit" class="check-btn" aria-pressed="${checked}"><span class="visually-hidden">${verb} ${escapeHtml(opts.displayName)}</span></button>
 </form>
 <div class="list-row-main">
 <p class="grocery-line-name row-title">${escapeHtml(opts.displayName)}</p>
 ${opts.usualProductName ? `<p class="grocery-line-usual muted">${escapeHtml(opts.usualProductName)}</p>` : ""}
+${opts.duplicateNoticeHtml ? `<p class="grocery-line-notice muted">${opts.duplicateNoticeHtml}</p>` : ""}
 <p class="grocery-line-meta row-meta">${meta}</p>
+${noticeBlock}
 ${opts.extraActionsHtml || opts.putAwayHtml ? `<div class="grocery-line-put-away row-actions">${opts.extraActionsHtml ?? ""}${opts.putAwayHtml ?? ""}</div>` : ""}
 </div>
 </div>
@@ -160,12 +198,16 @@ export function renderRecipeIngredientRow(opts: {
     editFill?: ModalFill;
     deleteFill?: ModalFill;
     usualProductActionHtml?: string;
+    duplicateNoticeHtml?: string;
 }): string {
     const note = opts.note
         ? `<p class="recipe-ingredient-note muted">${escapeHtml(opts.note)}</p>`
         : "";
     const pickUsual = opts.usualProductActionHtml
         ? `<p class="recipe-ingredient-usual">${opts.usualProductActionHtml}</p>`
+        : "";
+    const dupLink = opts.duplicateNoticeHtml
+        ? `<p class="recipe-ingredient-dup">${opts.duplicateNoticeHtml}</p>`
         : "";
     const id = escapeHtml(opts.id);
     const recipeId = escapeHtml(opts.recipeId);
@@ -205,7 +247,7 @@ ${modalTrigger({
 })}
 </div>
 </div>
-${pickUsual}
+${pickUsual}${dupLink}
 ${note}
 </li>`;
 }

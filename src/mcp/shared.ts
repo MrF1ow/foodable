@@ -69,10 +69,25 @@ import {
 } from "../domain/grocery.js";
 import { listRecipes } from "../domain/recipes.js";
 import { effectiveFoodsByIds } from "../domain/foods.js";
-import type { Food } from "../domain/foods.js";
+import type { Food, OnSimilar, SimilarFoodsEntry } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
-import { noticeActionFor, noticeSentence } from "../copy/notices.js";
+import {
+    noticeActionFor,
+    noticeCodeDismissible,
+    noticeDismissLabel,
+    noticeDismissPair,
+    noticeDigestWire,
+    noticeSentence,
+} from "../copy/notices.js";
+import type { FlagName } from "../flags.js";
+import { type McpServer } from "@modelcontextprotocol/server";
+import { getWidgetHtml, widgetTemplateName } from "../widgets.js";
+import {
+    defaultViewerFlags,
+    isViewerFlagOn,
+    type ViewerFlags,
+} from "../viewer-flags.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -82,15 +97,126 @@ import { noticeActionFor, noticeSentence } from "../copy/notices.js";
 // The widget HTML is assembled from shared source partials at startup (see
 // widgets.ts / public/widgets/src). getWidgetHtml(key) returns the fully-inlined,
 // self-contained document for each ui:// resource below.
-export const SUMMARY_WIDGET_URI = "ui://widget/nutrition-summary.html";
 export const APP_UI_MIME_TYPE = "text/html;profile=mcp-app";
-export const GOAL_PROGRESS_WIDGET_URI = "ui://widget/goal-progress.html";
-export const MEAL_LOGGED_WIDGET_URI = "ui://widget/meal-logged.html";
-export const TRENDS_WIDGET_URI = "ui://widget/trends.html";
-export const WEIGHT_TRENDS_WIDGET_URI = "ui://widget/weight-trends.html";
-export const IMPORT_MEALS_WIDGET_URI = "ui://widget/import-meals.html";
-export const GROCERY_LIST_WIDGET_URI = "ui://widget/grocery-list.html";
-export const FRIDGE_WIDGET_URI = "ui://widget/fridge.html";
+
+export function widgetUri(templateName: string, v2 = false): string {
+    return v2
+        ? `ui://widget/v2/${templateName}`
+        : `ui://widget/${templateName}`;
+}
+
+export function widgetUriForKey(widgetKey: string, v2 = false): string {
+    const name = widgetTemplateName(widgetKey, { v2 });
+    if (!name) throw new Error(`unknown widget key: ${widgetKey}`);
+    return widgetUri(name, v2);
+}
+
+export const SUMMARY_WIDGET_URI = widgetUri("nutrition-summary.html");
+export const GOAL_PROGRESS_WIDGET_URI = widgetUri("goal-progress.html");
+export const MEAL_LOGGED_WIDGET_URI = widgetUri("meal-logged.html");
+export const TRENDS_WIDGET_URI = widgetUri("trends.html");
+export const WEIGHT_TRENDS_WIDGET_URI = widgetUri("weight-trends.html");
+export const IMPORT_MEALS_WIDGET_URI = widgetUri("import-meals.html");
+export const GROCERY_LIST_WIDGET_URI = widgetUri("grocery-list.html");
+export const FRIDGE_WIDGET_URI = widgetUri("fridge.html");
+export const ATTENTION_WIDGET_URI = widgetUri("attention.html", true);
+
+export type WidgetResourceDef = {
+    key: string;
+    resourceName: string;
+    title: string;
+    description: string;
+};
+
+export type V2OnlyWidgetResourceDef = WidgetResourceDef & { flag: FlagName };
+
+/** Register a v2-only ui:// resource when `flag` is on for this caller. */
+export function registerV2OnlyWidgetResource(
+    server: McpServer,
+    ctx: ToolContext,
+    def: V2OnlyWidgetResourceDef,
+): void {
+    if (!isViewerFlagOn(ctx.flags, def.flag)) return;
+    const { key, resourceName, title, description } = def;
+    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
+    server.registerResource(
+        resourceName,
+        widgetUriForKey(key, true),
+        listing,
+        async (uri) => ({
+            contents: [
+                {
+                    uri: uri.href,
+                    mimeType: APP_UI_MIME_TYPE,
+                    text: await getWidgetHtml(key, { v2: true }),
+                    _meta: { ui: { prefersBorder: true } },
+                },
+            ],
+        }),
+    );
+}
+
+/** Link a tool to a widget, optionally gated and forced to a v2 URI. */
+export function uiMetaForKey(
+    ctx: Pick<ToolContext, "widgetsEnabled" | "flags">,
+    widgetKey: string,
+    opts?: { v2?: boolean; flag?: FlagName },
+): Record<string, unknown> {
+    if (!ctx.widgetsEnabled) return {};
+    if (opts?.flag && !isViewerFlagOn(ctx.flags, opts.flag)) return {};
+    const uri = widgetUriForKey(
+        widgetKey,
+        opts?.v2 ?? isViewerFlagOn(ctx.flags, "mcp-widgets-v2"),
+    );
+    return {
+        _meta: {
+            ui: { resourceUri: uri },
+            "openai/outputTemplate": uri,
+        },
+    };
+}
+
+/** Register the v1 ui:// resource and, when mcp-widgets-v2 is on, its v2 twin. */
+export function registerWidgetResource(
+    server: McpServer,
+    ctx: ToolContext,
+    def: WidgetResourceDef,
+): void {
+    const { key, resourceName, title, description } = def;
+    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
+    server.registerResource(
+        resourceName,
+        widgetUriForKey(key, false),
+        listing,
+        async (uri) => ({
+            contents: [
+                {
+                    uri: uri.href,
+                    mimeType: APP_UI_MIME_TYPE,
+                    text: await getWidgetHtml(key),
+                    _meta: { ui: { prefersBorder: true } },
+                },
+            ],
+        }),
+    );
+    if (isViewerFlagOn(ctx.flags, "mcp-widgets-v2")) {
+        server.registerResource(
+            `${resourceName}-v2`,
+            widgetUriForKey(key, true),
+            listing,
+            async (uri) => ({
+                contents: [
+                    {
+                        uri: uri.href,
+                        mimeType: APP_UI_MIME_TYPE,
+                        text: await getWidgetHtml(key, { v2: true }),
+                        _meta: { ui: { prefersBorder: true } },
+                    },
+                ],
+            }),
+        );
+    }
+}
 
 const NOTICE_CODE_ENUM = NOTICE_CODES as unknown as [
     NoticeCode,
@@ -140,11 +266,52 @@ export const NOTICE_SCHEMA = z.object({
             "Full sentence for the model and UI, from the notice registry.",
         ),
     action: z.object({ label: z.string() }).nullable(),
+    title: z.string(),
+    detail: z.string().nullable(),
+    group_key: z.string(),
+    group_label: z.string(),
+    dot_tone: z.enum(["over", "warn", "dim"]).nullable(),
+    detail_tone: z.enum(["over", "warn", "dim"]).nullable(),
+    can_dismiss: z.boolean(),
+    dismiss_label: z.string(),
+    dismiss: z
+        .object({
+            code: z.string(),
+            subject_kind: NOTICE_SUBJECT_KIND,
+            subject_id: z.string(),
+            related_id: z.string().nullable(),
+        })
+        .nullable(),
 });
 export type WireNotice = z.infer<typeof NOTICE_SCHEMA>;
 
+export const NOTICE_DIGEST_GROUP_ORDER = [
+    "expiring",
+    "running_low",
+    "recipe_gaps",
+    "household",
+    "other",
+] as const;
+
+function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
+    if (!noticeCodeDismissible(notice.code)) return null;
+    let related_id: string | null = null;
+    if (noticeDismissPair(notice.code)) {
+        const foodRel = notice.related.find((r) => r.kind === "food");
+        related_id = foodRel?.id ?? null;
+    }
+    return {
+        code: notice.code,
+        subject_kind: notice.subject.kind,
+        subject_id: notice.subject.id,
+        related_id,
+    };
+}
+
 export function noticeToWire(notice: Notice): WireNotice {
     const subject = notice.subject;
+    const digest = noticeDigestWire(notice);
+    const canDismiss = noticeCodeDismissible(notice.code);
     return {
         code: notice.code,
         severity: notice.severity,
@@ -164,6 +331,15 @@ export function noticeToWire(notice: Notice): WireNotice {
             const row = noticeActionFor(notice);
             return row ? { label: row.label } : null;
         })(),
+        title: digest.title,
+        detail: digest.detail,
+        group_key: digest.group_key,
+        group_label: digest.group_label,
+        dot_tone: digest.dot_tone,
+        detail_tone: digest.detail_tone,
+        can_dismiss: canDismiss,
+        dismiss_label: noticeDismissLabel(notice.code),
+        dismiss: noticeWireDismiss(notice),
     };
 }
 
@@ -577,32 +753,98 @@ export const TRENDS_DAY_ITEM = TOTALS_ITEM.extend({
 // widget hides the stat line entirely rather than picking a default.
 export const DRINK_UNIT_FIELD = z.enum(["us", "uk"]).nullable();
 
+// "Did you mean…?": the six tools that
+// create a food by name answer status "similar_foods" instead of writing.
+export const SIMILAR_FOOD_CANDIDATE = z.object({
+    food_id: z.string(),
+    name: z.string(),
+    brand: z.string().nullable(),
+    why: z.enum(["same_words", "contains_words", "word_match"]),
+});
+
+export const SIMILAR_FOODS_ENTRY = z.object({
+    name: z.string(),
+    candidates: z.array(SIMILAR_FOOD_CANDIDATE),
+});
+
+export const WRITE_STATUS = z.enum(["ok", "similar_foods"]);
+
+export const ON_SIMILAR_INPUT = z
+    .enum(["ask", "create"])
+    .optional()
+    .describe(
+        'What to do when a new name is probably an existing food. "ask" (default) writes nothing and returns status "similar_foods" with the candidates so you can ask the person. "create" creates the new food anyway; use it only in unattended or scheduled runs, where the pair then shows up under Possible duplicates.',
+    );
+
+export const NEW_FOOD_INPUT = z
+    .boolean()
+    .optional()
+    .describe(
+        "true after the person confirmed this is a new food, not one of the similar_foods candidates. Creates it without asking again.",
+    );
+
+export function similarFoodsWire(
+    entries: SimilarFoodsEntry[],
+): z.infer<typeof SIMILAR_FOODS_ENTRY>[] {
+    return entries.map((entry) => ({
+        name: entry.name,
+        candidates: entry.candidates.map((c) => ({
+            food_id: c.food.id,
+            name: c.food.name,
+            brand: c.food.brand,
+            why: c.why,
+        })),
+    }));
+}
+
+export function similarFoodsText(entries: SimilarFoodsEntry[]): string {
+    const parts = entries.map((entry) => {
+        const names = entry.candidates
+            .map((c) => `${c.food.name} (${c.food.id})`)
+            .join(", ");
+        return `"${entry.name}" → ${names}`;
+    });
+    return `Nothing saved. Did you mean: ${parts.join("; ")}? Ask the person, then call again with that food_id, or with new_food: true if it is a new food.`;
+}
+
+export function onSimilarFor(args: {
+    on_similar?: "ask" | "create";
+    new_food?: boolean;
+}): OnSimilar {
+    if (args.new_food === true) return "create";
+    return args.on_similar ?? "ask";
+}
+
 // log_meal and update_meal share the same MCP Apps widget
 // (public/widgets/meal-logged.html). Both declare this identical output shape
 // and both build their payload via buildMealProgress() below, so the widget can
 // render either result; `action` only changes the header wording.
 export const MEAL_PROGRESS_OUTPUT_SCHEMA = z.object({
     action: z.enum(["logged", "updated"]),
+    status: WRITE_STATUS,
+    similar_foods: z.array(SIMILAR_FOODS_ENTRY),
     date: z.string(),
     drink_unit: DRINK_UNIT_FIELD,
     // The widget's UI language — see the identical field on
     // get_nutrition_summary's outputSchema for why this is z.string() and
     // Widgets are English-only; always the literal "en".
     locale: z.string(),
-    logged_meal: z.object({
-        description: z.string(),
-        meal_type: z.string().nullable(),
-        calories: z.number().nullable(),
-        protein_g: z.number().nullable(),
-        carbs_g: z.number().nullable(),
-        fat_g: z.number().nullable(),
-        fiber_g: z.number().nullable(),
-        sugar_g: z.number().nullable(),
-        alcohol_g: z.number().nullable(),
-        // Milligrams, and null whenever this meal carried no caffeine figure —
-        // which is most meals, and is not the same as a measured zero.
-        caffeine_mg: z.number().nullable(),
-    }),
+    logged_meal: z
+        .object({
+            description: z.string(),
+            meal_type: z.string().nullable(),
+            calories: z.number().nullable(),
+            protein_g: z.number().nullable(),
+            carbs_g: z.number().nullable(),
+            fat_g: z.number().nullable(),
+            fiber_g: z.number().nullable(),
+            sugar_g: z.number().nullable(),
+            alcohol_g: z.number().nullable(),
+            // Milligrams, and null whenever this meal carried no caffeine figure —
+            // which is most meals, and is not the same as a measured zero.
+            caffeine_mg: z.number().nullable(),
+        })
+        .nullable(),
     has_goals: z.boolean(),
     goals: GOALS_ITEM.nullable(),
     totals: TOTALS_ITEM,
@@ -1219,11 +1461,16 @@ export async function householdFoodNames(
 export async function groceryLineExtras(
     householdId: string,
     line: {
+        id: string;
         displayName: string;
         quantity: { amount: number; unit: string };
         foodId?: string | null;
     },
-): Promise<{ alreadyHave: string | null; warning: string | null }> {
+): Promise<{
+    alreadyHave: string | null;
+    allergenText: string | null;
+    notices: Notice[];
+}> {
     const [fridge, allergenMembers] = await Promise.all([
         listFridge(liveFridgeStore(), householdId),
         householdAllergenMembers(householdId),
@@ -1244,7 +1491,9 @@ export async function groceryLineExtras(
         catalog,
     );
     const food = line.foodId ? catalog.get(line.foodId) : undefined;
-    const warning = groceryAllergenWarning(
+    // The same allergen notices list_grocery_lines gives this line.
+    const notices = allergenNotices(
+        { kind: "grocery_line", id: line.id },
         line.displayName,
         allergenMembers,
         food ? food.allergens : null,
@@ -1256,13 +1505,29 @@ export async function groceryLineExtras(
                 : tag.cover === "full"
                   ? "already have"
                   : `already have: have ${tag.have.amount} ${tag.have.unit}, need ${tag.need.amount} ${tag.need.unit}`,
-        warning: warning?.text ?? null,
+        // The text also covers "allergens unknown" for an uncatalogued
+        // food, which has no notice.
+        allergenText:
+            groceryAllergenWarning(
+                line.displayName,
+                allergenMembers,
+                food ? food.allergens : null,
+            )?.text ?? null,
+        notices,
     };
 }
+
+export type GatedToolEntry = {
+    name: string;
+    flag: FlagName;
+    registered: boolean;
+};
 
 export type ToolContext = {
     auth: AuthContext;
     baseUrl: string;
+    flags: ViewerFlags;
+    gatedTools: GatedToolEntry[];
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
     protocolEra?: "legacy" | "modern";
@@ -1299,7 +1564,7 @@ export type ToolContext = {
         householdId: string;
     }>;
     analytics: { userId: string };
-    uiMeta: (resourceUri: string) => Record<string, unknown>;
+    uiMeta: (widgetKey: string) => Record<string, unknown>;
 };
 
 export function createToolContext(
@@ -1309,6 +1574,7 @@ export function createToolContext(
     protocolEra?: "legacy" | "modern",
     baseUrl = "http://localhost",
     hasGoals = true,
+    flags: ViewerFlags = defaultViewerFlags(auth),
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1477,18 +1743,24 @@ export function createToolContext(
     // Apps SDK alias on some surfaces, and hosts that know neither key ignore
     // both. The two values must stay identical — ChatGPT drops the widget
     // silently if the alias points at an unregistered URI.
-    const uiMeta = (resourceUri: string) =>
-        widgetsEnabled
-            ? {
-                  _meta: {
-                      ui: { resourceUri },
-                      "openai/outputTemplate": resourceUri,
-                  },
-              }
-            : {};
+    const uiMeta = (widgetKey: string) => {
+        if (!widgetsEnabled) return {};
+        const uri = widgetUriForKey(
+            widgetKey,
+            isViewerFlagOn(flags, "mcp-widgets-v2"),
+        );
+        return {
+            _meta: {
+                ui: { resourceUri: uri },
+                "openai/outputTemplate": uri,
+            },
+        };
+    };
     return {
         auth,
         baseUrl,
+        flags,
+        gatedTools: [],
         widgetsEnabled,
         alcohol,
         protocolEra,

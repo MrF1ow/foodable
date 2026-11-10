@@ -3,7 +3,9 @@ import {
     blastFloor,
     checkBranch,
     classifyPath,
+    isPolicyPath,
     lintPr,
+    POLICY_PATHS,
     parseTitle,
     SCOPES,
     TYPES,
@@ -84,12 +86,51 @@ describe("classifyPath mapped", () => {
         expect(unmapped).toEqual([]);
     });
 
-    test("agent skill paths are low", () => {
-        expect(classifyPath(".claude/settings.json")).toEqual({
-            level: "low",
-            area: "repo",
+    test("the production rehearsal script is high", () => {
+        for (const path of [
+            "scripts/db-rehearse.ts",
+            "scripts/db-rehearse.test.ts",
+        ]) {
+            expect(classifyPath(path)).toEqual({
+                level: "high",
+                area: "high",
+                mapped: true,
+            });
+        }
+    });
+
+    // The checks that judge a PR are PR-controlled files, so editing one is
+    // high: a weakened check lets the next change through.
+    test.each([
+        "scripts/check-changed.ts",
+        "scripts/typecheck.ts",
+        "scripts/lint-rules/lint.ts",
+        "scripts/lint-rules/rules.test.ts",
+        ".oxlintrc.json",
+        ".claude/settings.json",
+        ".flow/profile.yaml",
+        ".github/agent-context-budget.json",
+        "bunfig.toml",
+    ])("%s is high", (path) => {
+        expect(classifyPath(path)).toEqual({
+            level: "high",
+            area: "high",
             mapped: true,
         });
+        expect(blastFloor([path]).level).toBe("high");
+    });
+
+    test("the rest of .claude/ and scripts/ stays low", () => {
+        expect(classifyPath(".claude/skills/foodable-test/SKILL.md")).toEqual({
+            level: "low",
+            area: "docs",
+            mapped: true,
+        });
+        expect(classifyPath("scripts/check-changed.test.ts").level).toBe("low");
+        expect(classifyPath("scripts/gen-icons.ts").level).toBe("low");
+    });
+
+    test("agent skill paths are low", () => {
         expect(classifyPath(".agents/skills")).toEqual({
             level: "low",
             area: "repo",
@@ -204,6 +245,37 @@ describe("lintPr", () => {
         expect(r.floor).toBe("medium");
     });
 
+    test("dependabot is exempt from the 72-character title limit", () => {
+        const title =
+            "chore(deps): bump the production-dependencies group across 1 directory with 4 updates";
+        expect(title.length).toBeGreaterThan(72);
+        const base = {
+            title,
+            branch: "dependabot/bun/prod-deps",
+            body: "hello",
+            files: ["bun.lock"],
+        };
+        expect(lintPr({ ...base, author: "dependabot[bot]" }).findings).toEqual(
+            [],
+        );
+        expect(
+            lintPr({ ...base, author: "someone" }).findings.some(
+                (f) => f.rule === "title",
+            ),
+        ).toBe(true);
+    });
+
+    test("a dependabot title must still be a conventional title", () => {
+        const r = lintPr({
+            title: "Bump left-pad from 1.0.0 to 1.0.1 in a way that is long enough to pass seventy-two",
+            branch: "dependabot/bun/left-pad",
+            body: "hello",
+            files: ["bun.lock"],
+            author: "dependabot[bot]",
+        });
+        expect(r.findings.some((f) => f.rule === "title")).toBe(true);
+    });
+
     test("empty Migrations section is a finding", () => {
         const r = lintPr({
             title: "feat(fridge): show expiry",
@@ -286,5 +358,48 @@ describe("lintPr", () => {
         const blast = r.findings.find((f) => f.rule === "blast");
         expect(blast).toBeDefined();
         expect(blast!.message).toContain("high");
+    });
+});
+
+describe("POLICY_PATHS", () => {
+    test("names the files the policy workflow runs from main", () => {
+        for (const path of [
+            "scripts/conventions/policy.ts",
+            "scripts/conventions/skill-drift.test.ts",
+            "scripts/migration-safety.ts",
+            "scripts/migration-safety/check.ts",
+            "scripts/data-api-grants.ts",
+            ".github/agent-context-budget.json",
+            ".github/workflows/policy.yml",
+            ".claude/skills/foodable-test/SKILL.md",
+        ]) {
+            expect(isPolicyPath(path)).toBe(true);
+        }
+    });
+
+    test("leaves ordinary files alone", () => {
+        for (const path of [
+            "package.json",
+            "scripts/check-changed.ts",
+            "scripts/release.ts",
+            ".github/workflows/ci.yml",
+            "src/index.ts",
+            "CLAUDE.md",
+        ]) {
+            expect(isPolicyPath(path)).toBe(false);
+        }
+    });
+
+    test("every entry exists in the tree", async () => {
+        const proc = Bun.spawnSync(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            {
+                cwd: import.meta.dir + "/../..",
+            },
+        );
+        const files = proc.stdout.toString().split("\n").filter(Boolean);
+        for (const entry of POLICY_PATHS) {
+            expect(files.some((f) => f.startsWith(entry))).toBe(true);
+        }
     });
 });

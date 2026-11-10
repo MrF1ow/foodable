@@ -1,18 +1,23 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
+import type { MemberRole } from "../household.js";
+import type { ViewerFlags } from "../viewer-flags.js";
 import type { AttentionChrome } from "./attention.js";
 import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut, iconSettings } from "./components/icons.js";
+import { renderAppShellV2 } from "./shell-v2.js";
 
 export { bottomNav, escapeHtml };
 
+import { APP_PATHS } from "./route-map.js";
+
 export const APP_TABS = [
-    { id: "fridge", href: "/fridge", label: "Fridge" },
-    { id: "grocery", href: "/grocery", label: "Groceries" },
-    { id: "nutrition", href: "/", label: "Nutrition" },
-    { id: "recipes", href: "/recipes", label: "Recipes" },
-    { id: "household", href: "/household", label: "Household" },
+    { id: "fridge", href: APP_PATHS.kitchenFridge, label: "Fridge" },
+    { id: "grocery", href: APP_PATHS.kitchenGroceries, label: "Groceries" },
+    { id: "nutrition", href: APP_PATHS.nutrition, label: "Nutrition" },
+    { id: "recipes", href: APP_PATHS.recipes, label: "Recipes" },
+    { id: "household", href: APP_PATHS.settingsHousehold, label: "Household" },
 ] as const;
 
 export type AppTabId = (typeof APP_TABS)[number]["id"];
@@ -26,11 +31,40 @@ export type ViewerChrome = {
     theme: ThemePref;
 };
 
+/** The new shell's navigation ids. Settings is the sidebar item (no phone tab). */
+export type V2NavId =
+    "today" | "kitchen" | "recipes" | "trends" | "settings" | "none";
+
+/** The Kitchen text tabs under the page header (design: Kitchen tabs). */
+export type V2KitchenTab = "fridge" | "groceries" | "usuals";
+
+/** Who is looking and which household, for the new shell's sidebar and account
+ *  chip. Loaded only when `ui-v2` is on for the viewer (`viewerChromeWithAttention`),
+ *  so a viewer on the old shell never pays for the extra queries. */
+export type ShellIdentity = {
+    viewerName: string;
+    viewerRole: MemberRole;
+    householdName: string;
+    memberCount: number;
+};
+
 export type AppChrome = ViewerChrome & {
     title: string;
     active: AppTabId | "none";
     body: string;
     attention: AttentionChrome;
+    /** Which shell renders: `flags.uiV2` picks the new one. */
+    flags: ViewerFlags;
+    /** Set by `viewerChromeWithAttention` when `ui-v2` is on. */
+    identity?: ShellIdentity;
+    /** New shell only: overrides the tab derived from `active` (the usual
+     *  products pages are `active: "household"` in the old shell but belong to
+     *  Kitchen in the new one). The old shell ignores it. */
+    v2Active?: V2NavId;
+    /** New shell only: which Kitchen text tab is current. Defaults from
+     *  `active` (grocery → groceries, anything else → fridge); the usual
+     *  products pages set "usuals". The old shell ignores it. */
+    v2Kitchen?: V2KitchenTab;
 };
 
 export function resolveTheme(theme: string | null | undefined): ThemePref {
@@ -85,10 +119,12 @@ export function appBar(
     return `<header class="app-bar"><a class="app-bar-logo" href="/"${logoTurbo}><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
 }
 
-export function appHead(
+/** Everything in `<head>` before the stylesheet and script tags, which differ
+ *  between the old shell and the new one. */
+export function appHeadMeta(
     title: string,
     theme: ThemePref,
-    themeChrome: ThemeChromeKind = "nav",
+    themeChrome: ThemeChromeKind,
 ): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -102,12 +138,30 @@ ${themeColorMeta(theme, themeChrome)}
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
 <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="manifest" href="/manifest.webmanifest" />`;
+}
+
+export function appHead(
+    title: string,
+    theme: ThemePref,
+    themeChrome: ThemeChromeKind = "nav",
+): string {
+    return `${appHeadMeta(title, theme, themeChrome)}
 <link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
 <script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }
 
+/** The household shell. `flags.uiV2` picks the new one (shell-v2.ts); with the
+ *  flag off the markup is the old shell, byte for byte. */
 export function renderAppShell(chrome: AppChrome): string {
+    return chrome.flags.uiV2
+        ? renderAppShellV2(chrome)
+        : renderLegacyAppShell(chrome);
+}
+
+/** The shell as it was before `ui-v2`. Do not change its output: a test pins
+ *  it. Deleted with the old app. */
+export function renderLegacyAppShell(chrome: AppChrome): string {
     return `<!doctype html>
 ${htmlOpen(chrome.theme)}
 <head>

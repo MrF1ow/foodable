@@ -74,10 +74,10 @@ const STATIC_LABELS: LabelDef[] = [
         description: "Dependency update (e.g. Dependabot)",
     },
     {
-        name: "gate:approved",
+        name: "agent-context-increase",
         color: "0e8a16",
         description:
-            "Code owner approved the gate files at the latest push (apply by hand)",
+            "Allows CLAUDE.md or a skill to grow past the context budget (apply by hand)",
     },
     {
         name: "security",

@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
 import { TOASTS } from "./copy/toasts.js";
@@ -8,6 +9,9 @@ import { renderGroceryPage } from "./web/pages/grocery.js";
 import { renderNutritionPage } from "./web/pages/nutrition.js";
 import { renderRecipesPage } from "./web/pages/recipes.js";
 import type { HouseholdMember } from "./household.js";
+import { utcTodayFromDate } from "./domain/stock.js";
+
+const FRIDGE_PAGE_TODAY = utcTodayFromDate();
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -21,6 +25,7 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 
@@ -127,6 +132,7 @@ test("getAppJs client IIFEs evaluate without ReferenceError when stubbed", async
 
 test("no app page HTML contains a script with a body except widget frames", async () => {
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -142,10 +148,18 @@ test("no app page HTML contains a script with a body except widget frames", asyn
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -169,7 +183,11 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         ],
     });
     const recipes = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: "11111111-1111-4111-8111-111111111111",
@@ -192,7 +210,11 @@ test("no app page HTML contains a script with a body except widget frames", asyn
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -214,6 +236,7 @@ test("no app page HTML contains a script with a body except widget frames", asyn
 
 test("the Fridge page ships the picker logic once", async () => {
     const html = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -229,7 +252,11 @@ test("the Fridge page ships the picker logic once", async () => {
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
     expect(html).not.toContain("/api/foods/search");
@@ -471,7 +498,7 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
     const editButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-edit-food",
-        "data-fill-action": "/fridge/items/it-1",
+        "data-fill-action": "/kitchen/fridge/items/it-1",
         "data-fill-title": `Edit ${hostile}`,
         "data-fill-field-qty_amount": "6",
         "data-fill-field-qty_unit": "each",
@@ -481,13 +508,13 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
     const deleteButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-delete-item",
-        "data-fill-action": "/fridge/items/it-1/delete",
+        "data-fill-action": "/kitchen/fridge/items/it-1/delete",
         "data-fill-message": "Remove Eggs from the fridge?",
     });
     const supplyButton = fakeNode("button", {
         command: "show-modal",
         commandfor: "fridge-edit-supply",
-        "data-fill-action": "/fridge/items/it-sup",
+        "data-fill-action": "/kitchen/fridge/items/it-sup",
         "data-fill-title": "Edit Paper towels",
         "data-fill-field-qty_amount": "3",
         "data-fill-field-qty_unit": "roll",
@@ -521,7 +548,7 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
 
     editButton.click();
     expect(foodDialog.open).toBe(true);
-    expect(foodForm.getAttribute("action")).toBe("/fridge/items/it-1");
+    expect(foodForm.getAttribute("action")).toBe("/kitchen/fridge/items/it-1");
     expect(amount.value).toBe("6");
     expect(unit.value).toBe("each");
     expect(location.value).toBe("loc-1");
@@ -531,12 +558,16 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
 
     deleteButton.click();
     expect(deleteDialog.open).toBe(true);
-    expect(deleteForm.getAttribute("action")).toBe("/fridge/items/it-1/delete");
+    expect(deleteForm.getAttribute("action")).toBe(
+        "/kitchen/fridge/items/it-1/delete",
+    );
     expect(deleteMessage.textContent).toBe("Remove Eggs from the fridge?");
 
     supplyButton.click();
     expect(supplyDialog.open).toBe(true);
-    expect(supplyForm.getAttribute("action")).toBe("/fridge/items/it-sup");
+    expect(supplyForm.getAttribute("action")).toBe(
+        "/kitchen/fridge/items/it-sup",
+    );
     expect(supplyAmount.value).toBe("3");
     expect(supplyUnit.value).toBe("roll");
     expect(supplyLocation.value).toBe("loc-2");
@@ -548,7 +579,7 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
         fn({ source: editButton });
     }
     expect(amount.value).toBe("9");
-    expect(foodForm.getAttribute("action")).toBe("/fridge/items/it-1");
+    expect(foodForm.getAttribute("action")).toBe("/kitchen/fridge/items/it-1");
 
     const close = fakeNode("button", { command: "close" });
     for (const fn of foodDialog.listeners.command ?? []) fn({ source: close });
@@ -568,12 +599,12 @@ test("clicking a fridge row trigger fills the shared dialog", async () => {
         fn({ source: editButton });
     }
     expect(foodDialog.querySelector(".error-banner")?.textContent).toBe("Kept");
-    editButton.setAttribute("data-fill-action", "/fridge/items/it-2");
+    editButton.setAttribute("data-fill-action", "/kitchen/fridge/items/it-2");
     for (const fn of foodDialog.listeners.command ?? []) {
         fn({ source: editButton });
     }
     expect(foodDialog.querySelector(".error-banner")).toBeNull();
-    expect(foodForm.getAttribute("action")).toBe("/fridge/items/it-2");
+    expect(foodForm.getAttribute("action")).toBe("/kitchen/fridge/items/it-2");
 });
 
 test("dialog fill checks boxes and falls back to the first select option", async () => {
@@ -625,7 +656,7 @@ test("dialog fill checks boxes and falls back to the first select option", async
     const button = fakeNode("button", {
         command: "show-modal",
         commandfor: "food-edit",
-        "data-fill-action": "/household/items/f1",
+        "data-fill-action": "/settings/household/items/f1",
         "data-fill-field-allergens": "milk",
         "data-fill-field-archived": "true",
         "data-fill-field-qty_unit": "nope",
@@ -648,7 +679,7 @@ test("dialog fill checks boxes and falls back to the first select option", async
     expect(archived.checked).toBe(true);
     expect(unit.value).toBe("g");
     expect(submit.disabled).toBe(false);
-    expect(form.getAttribute("action")).toBe("/household/items/f1");
+    expect(form.getAttribute("action")).toBe("/settings/household/items/f1");
 });
 
 function fakeTemplate(id: string, build: () => FakeNode[]): FakeNode {
@@ -697,7 +728,7 @@ test("dialog fill copies text, class, and template slots", async () => {
         fakeNode("button", {
             command: "show-modal",
             commandfor: "other",
-            "data-fill-action": "/grocery/lines",
+            "data-fill-action": "/kitchen/groceries/lines",
         }),
     ]);
     const two = fakeTemplate("tpl-two", () => [fakeNode("p", {}, [], "Two")]);
@@ -707,7 +738,7 @@ test("dialog fill copies text, class, and template slots", async () => {
     const button = fakeNode("button", {
         command: "show-modal",
         commandfor: "shared",
-        "data-fill-action": "/grocery/lines",
+        "data-fill-action": "/kitchen/groceries/lines",
         "data-fill-field-qty_amount": "2",
         "data-fill-text-label": "Hello",
         "data-fill-class-label": "btn-primary",
@@ -735,7 +766,7 @@ test("dialog fill copies text, class, and template slots", async () => {
     const filled = body.querySelector("p");
     const cloned = body.querySelector("button");
     expect(dialog.open).toBe(true);
-    expect(form.getAttribute("action")).toBe("/grocery/lines");
+    expect(form.getAttribute("action")).toBe("/kitchen/groceries/lines");
     expect(amount.value).toBe("2");
     expect(label.textContent).toBe("Hello");
     expect(label.getAttribute("class")).toBe("btn-primary");
@@ -792,7 +823,7 @@ test("dialog fill does not parse markup strings", async () => {
 test("dialog fill keeps a same-target allergen retry", async () => {
     const pickerName = fakeNode("input", { name: "food_name", value: "" });
     const pickerStore = fakeNode("input", { name: "store_id", value: "s1" });
-    const picker = fakeNode("form", { action: "/grocery/lines" }, [
+    const picker = fakeNode("form", { action: "/kitchen/groceries/lines" }, [
         pickerStore,
         pickerName,
     ]);
@@ -802,7 +833,7 @@ test("dialog fill keeps a same-target allergen retry", async () => {
     });
     const retry = fakeNode("div", { "data-fill-transient": "" }, [
         fakeNode("p", { class: "allergen-warning" }, [], "Contains peanuts"),
-        fakeNode("form", { action: "/grocery/lines" }, [retryName]),
+        fakeNode("form", { action: "/kitchen/groceries/lines" }, [retryName]),
     ]);
     const banner = fakeNode("p", { class: "error-banner" }, [], "Allergen");
     const dialog = fakeNode("dialog", { id: "shared", class: "modal" }, [

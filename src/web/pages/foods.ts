@@ -149,7 +149,7 @@ ${field({
 function foodFill(view: FoodsSettingsView, food: FoodRow): ModalFill {
     const extra = editProductFieldsTemplate(view, food);
     return {
-        action: `/household/items/${food.id}`,
+        action: `/settings/household/items/${food.id}`,
         title: `Edit ${food.name}`,
         fields: {
             food_id: food.id,
@@ -191,7 +191,7 @@ function belongsFill(view: FoodsSettingsView, product: FoodRow): ModalFill {
         }),
     ].join("");
     return {
-        action: `/household/items/${product.id}/link`,
+        action: `/settings/household/items/${product.id}/link`,
         title: "Belongs to",
         templates: {
             belongs_select: `food-belongs-select-${product.id}`,
@@ -230,7 +230,7 @@ function belongsSelectInner(view: FoodsSettingsView, product: FoodRow): string {
             return `<option value="${escapeHtml(row.id)}"${sel}>${escapeHtml(row.name)}</option>`;
         }),
     ].join("");
-    return `<form method="post" action="/household/items/${escapeHtml(product.id)}/link">
+    return `<form method="post" action="/settings/household/items/${escapeHtml(product.id)}/link">
 ${field({
     id: `food-belongs-food-${product.id}`,
     label: "Food",
@@ -305,7 +305,7 @@ function foodEditForm(
         .join("");
     const archived = food?.archivedAt ? " checked" : "";
     const id = food ? escapeHtml(food.id) : "";
-    return `${modalError ?? ""}<form method="post" action="${food ? `/household/items/${id}` : ""}" class="food-edit">
+    return `${modalError ?? ""}<form method="post" action="${food ? `/settings/household/items/${id}` : ""}" class="food-edit">
 <input type="hidden" name="food_id" value="${id}" />
 ${field({ id: "food-edit-name", label: "Name", control: `<input id="food-edit-name" name="name" value="${escapeHtml(food?.name ?? "")}" required maxlength="120" />` })}
 ${field({ id: "food-edit-brand", label: "Brand", control: `<input id="food-edit-brand" name="brand" value="${escapeHtml(food?.brand ?? "")}" maxlength="80" />` })}
@@ -497,7 +497,7 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
                   id: FOODS_MERGE_MODAL_ID,
                   title: "Merge foods",
                   openOnLoad: modalOpen(view, FOODS_MERGE_MODAL_ID),
-                  body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/household/items/merge" class="food-merge field-grid">
+                  body: `${view.error && modalOpen(view, FOODS_MERGE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/items/merge" class="food-merge field-grid">
 <label>Keep
 <select id="keep_id" name="keep_id">${mergeOptions}</select>
 </label>
@@ -529,7 +529,9 @@ export function renderFoodsSettingsPage(view: FoodsSettingsView): string {
     const body = `
         ${pageHeader({ title: "Items", actions: headerActions })}
         ${pageLevelErrorBanner(view, modalIds)}
-        ${renderHouseholdNav("items")}
+        ${renderHouseholdNav("items", {
+            possibleDuplicates: view.chrome.householdPossibleDuplicates,
+        })}
         ${list || emptyState("No foods in the catalog yet.")}
         ${editModal}
         ${belongsModal}

@@ -6,7 +6,7 @@ import {
     getWaterByDate,
     deleteMeal,
     updateMeal,
-    getNutritionGoals,
+    getGoalsForDate,
     countMeals,
     existingIdempotencyKeys,
     existingMealIds,
@@ -34,12 +34,9 @@ import {
     MAX_CAFFEINE_MG,
     type BulkImportArgs,
 } from "../../domain/import.js";
-import { getWidgetHtml } from "../../widgets.js";
 import {
     NUTRIENT_COVERAGE,
-    APP_UI_MIME_TYPE,
-    MEAL_LOGGED_WIDGET_URI,
-    IMPORT_MEALS_WIDGET_URI,
+    registerWidgetResource,
     sumMeals,
     nutrientPresence,
     sumWater,
@@ -56,7 +53,15 @@ import {
     alcoholHiddenNote,
     missingNutrientNote,
     type AlcoholDisplay,
+    NEW_FOOD_INPUT,
+    ON_SIMILAR_INPUT,
+    onSimilarFor,
+    similarFoodsText,
+    similarFoodsWire,
+    SIMILAR_FOODS_ENTRY,
+    WRITE_STATUS,
 } from "../shared.js";
+import { SimilarFoodsError, type OnSimilar } from "../../domain/foods.js";
 import type { ToolContext } from "../shared.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
@@ -245,18 +250,27 @@ export function startImportPayload(opts: {
 // tools stay in lockstep.
 export async function buildMealProgress(
     userId: string,
-    meal: Meal,
+    meal: Meal | null,
     action: "logged" | "updated",
     alcohol: AlcoholDisplay,
+    opts?: {
+        loggedAtIso?: string;
+        status?: z.infer<typeof WRITE_STATUS>;
+        similarFoods?: z.infer<typeof SIMILAR_FOODS_ENTRY>[];
+    },
 ) {
     const profile = await getProfile(userId);
     const tz = timezoneFromProfile(profile) ?? "UTC";
     const locale = WIDGET_LOCALE;
-    const mealDate = dateInTz(meal.logged_at, tz);
+    const anchorIso = meal?.logged_at ?? opts?.loggedAtIso;
+    if (!anchorIso) {
+        throw new Error("buildMealProgress needs a meal or loggedAtIso");
+    }
+    const mealDate = dateInTz(anchorIso, tz);
     const [meals, waterEntries, goals] = await Promise.all([
         getMealsByDate(userId, mealDate, tz),
         getWaterByDate(userId, mealDate, tz),
-        getNutritionGoals(userId),
+        getGoalsForDate(userId, mealDate),
     ]);
     const totals = sumMeals(meals);
     totals.water_ml = sumWater(waterEntries);
@@ -268,27 +282,28 @@ export async function buildMealProgress(
 
     const structuredContent = {
         action,
+        status: opts?.status ?? ("ok" as const),
+        similar_foods: opts?.similarFoods ?? [],
         date: mealDate,
         drink_unit: alcohol,
         locale,
-        logged_meal: {
-            description: meal.description,
-            meal_type: meal.meal_type ?? null,
-            calories: meal.calories ?? null,
-            protein_g: meal.protein_g ?? null,
-            carbs_g: meal.carbs_g ?? null,
-            fat_g: meal.fat_g ?? null,
-            fiber_g: meal.fiber_g ?? null,
-            sugar_g: meal.sugar_g ?? null,
-            alcohol_g: alcohol ? (meal.alcohol_g ?? null) : null,
-            // Ungated, unlike alcohol_g directly above it: what was stored is
-            // what is shown.
-            caffeine_mg: meal.caffeine_mg ?? null,
-        },
+        logged_meal: meal
+            ? {
+                  description: meal.description,
+                  meal_type: meal.meal_type ?? null,
+                  calories: meal.calories ?? null,
+                  protein_g: meal.protein_g ?? null,
+                  carbs_g: meal.carbs_g ?? null,
+                  fat_g: meal.fat_g ?? null,
+                  fiber_g: meal.fiber_g ?? null,
+                  sugar_g: meal.sugar_g ?? null,
+                  alcohol_g: alcohol ? (meal.alcohol_g ?? null) : null,
+                  caffeine_mg: meal.caffeine_mg ?? null,
+              }
+            : null,
         has_goals: goals != null,
         goals: goalsPayloadOf(goals, alcohol),
         totals: totalsPayloadOf(totals, alcohol, present.caffeine_mg),
-        // Single day → label rows by meal type in the widget, not by date.
         meals: mealBreakdown(meals, null, alcohol),
     };
 
@@ -320,6 +335,7 @@ export const MEAL_ITEM_INPUT_SCHEMA = z.object({
         .positive()
         .optional()
         .describe("Recipe portions. Used when recipe_id is set."),
+    new_food: NEW_FOOD_INPUT,
 });
 
 function specsFromToolItems(
@@ -332,12 +348,14 @@ function specsFromToolItems(
         amount: item.amount,
         unit: item.unit,
         portions: item.portions,
+        newFood: item.new_food,
     }));
 }
 
 export async function mealWriteFromItems(
     householdId: string,
     items: z.infer<typeof MEAL_ITEM_INPUT_SCHEMA>[],
+    onSimilar?: OnSimilar,
 ): Promise<{
     totals: Pick<
         MealInput,
@@ -361,6 +379,7 @@ export async function mealWriteFromItems(
         foods: liveFoodsStore(),
         recipes: liveRecipesStore(),
         items: specs,
+        onSimilar,
     });
     return {
         totals: {
@@ -401,7 +420,7 @@ export function registerNutritionWriteTools(
         uiMeta,
         hasGoals,
     } = ctx;
-    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
+    const mealLoggedUiMeta = hasGoals ? uiMeta("meal-logged") : {};
     server.registerTool(
         "log_meal",
         {
@@ -513,6 +532,7 @@ export function registerNutritionWriteTools(
                     .describe(
                         "Foods and recipe portions that make up this meal. When present, the server computes calories and macros from catalog snapshots and ignores any totals you send (a warning is returned). Omit for a free-text / estimated meal — that path is unchanged.",
                     ),
+                on_similar: ON_SIMILAR_INPUT,
             }),
             outputSchema: MEAL_PROGRESS_OUTPUT_SCHEMA,
             // Link the tool to its progress UI (MCP Apps). update_meal reuses
@@ -520,7 +540,7 @@ export function registerNutritionWriteTools(
             // no goals the link is dropped (ToolContext.hasGoals).
             ...mealLoggedUiMeta,
         },
-        async ({ user_id, target_member, items, ...mealArgs }) => {
+        async ({ user_id, target_member, items, on_similar, ...mealArgs }) => {
             return withAnalytics(
                 "log_meal",
                 async () => {
@@ -529,6 +549,7 @@ export function registerNutritionWriteTools(
                         userId,
                         mealArgs.logged_at,
                     );
+                    const onSimilar = onSimilarFor({ on_similar });
                     let extra = "";
                     let write: MealInput = {
                         ...mealArgs,
@@ -540,6 +561,7 @@ export function registerNutritionWriteTools(
                             const computed = await mealWriteFromItems(
                                 householdId,
                                 items,
+                                onSimilar,
                             );
                             if (callerSentTotals(mealArgs)) {
                                 extra += `\n\n${COMPUTED_TOTALS_WARNING}`;
@@ -556,6 +578,31 @@ export function registerNutritionWriteTools(
                                 item_digest: computed.item_digest,
                             };
                         } catch (err) {
+                            if (err instanceof SimilarFoodsError) {
+                                const wire = similarFoodsWire(err.entries);
+                                const { progressSection, structuredContent } =
+                                    await buildMealProgress(
+                                        userId,
+                                        null,
+                                        "logged",
+                                        alcohol,
+                                        {
+                                            loggedAtIso:
+                                                iso ?? new Date().toISOString(),
+                                            status: "similar_foods",
+                                            similarFoods: wire,
+                                        },
+                                    );
+                                return {
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: `${similarFoodsText(err.entries)}${progressSection}`,
+                                        },
+                                    ],
+                                    structuredContent,
+                                };
+                            }
                             if (err instanceof MealItemsError) {
                                 throw new Error(err.message);
                             }
@@ -696,30 +743,13 @@ export function registerNutritionWriteTools(
         },
     );
 
-    // UI resource for the import widget. Registered unconditionally, like every
-    // other widget resource — only the tool's _meta.ui link is gated per user.
-    server.registerResource(
-        "import-meals-widget",
-        IMPORT_MEALS_WIDGET_URI,
-        {
-            title: "Import Meals",
-            description:
-                "Interactive importer for a meal-history export: reads the file in the browser, maps its columns, previews the rows, then writes them via bulk_import_meals.",
-            mimeType: APP_UI_MIME_TYPE,
-        },
-        async (uri) => {
-            return {
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml("import-meals"),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            };
-        },
-    );
+    registerWidgetResource(server, ctx, {
+        key: "import-meals",
+        resourceName: "import-meals-widget",
+        title: "Import Meals",
+        description:
+            "Interactive importer for a meal-history export: reads the file in the browser, maps its columns, previews the rows, then writes them via bulk_import_meals.",
+    });
 
     server.registerTool(
         "start_meal_import",
@@ -735,7 +765,7 @@ export function registerNutritionWriteTools(
                 destructiveHint: false,
                 idempotentHint: true,
             },
-            ...uiMeta(IMPORT_MEALS_WIDGET_URI),
+            ...uiMeta("import-meals"),
         },
         async (args) => {
             return withAnalytics(
@@ -971,7 +1001,7 @@ export function registerNutritionEditTools(
         uiMeta,
         hasGoals,
     } = ctx;
-    const mealLoggedUiMeta = hasGoals ? uiMeta(MEAL_LOGGED_WIDGET_URI) : {};
+    const mealLoggedUiMeta = hasGoals ? uiMeta("meal-logged") : {};
     server.registerTool(
         "delete_meal",
         {

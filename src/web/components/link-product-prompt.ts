@@ -26,7 +26,7 @@ export function renderLinkProductPrompt(
         }),
     ].join("");
     const body = `${view.error ? errorBanner(view.error) : ""}<p>${escapeHtml(view.product.name)}${brand} looks like a product. Link it to a food you already use?</p>
-<form method="post" action="/household/items/${escapeHtml(view.product.id)}/link">
+<form method="post" action="/settings/household/items/${escapeHtml(view.product.id)}/link">
 <input type="hidden" name="from" value="${escapeHtml(view.from)}" />
 ${field({
     id: "link-product-food",

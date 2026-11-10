@@ -205,6 +205,40 @@ describe("duplicatePairs", () => {
         expect(skipped).toHaveLength(0);
     });
 
+    test("Milk variants merge when macros match and saturated fat differs", async () => {
+        const store = createMemoryFoodsStore();
+        const macros = {
+            calories: 50,
+            proteinG: 3.2,
+            carbsG: 4.8,
+            fatG: 1.8,
+        };
+        await insert(
+            store,
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Milk",
+                saturatedFatG: null,
+                ...macros,
+            }),
+        );
+        await insert(
+            store,
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "milk",
+                saturatedFatG: 1.2,
+                ...macros,
+            }),
+        );
+        const foods = await store.listFoods(HH);
+        const { merges, skipped } = duplicatePairs(foods, new Map());
+        expect(skipped).toHaveLength(0);
+        expect(merges).toHaveLength(1);
+    });
+
     test("same loose name food vs supply → different groups", async () => {
         const store = createMemoryFoodsStore();
         await insert(

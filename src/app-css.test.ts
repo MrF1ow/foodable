@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { getAppCss } from "./widgets.js";
 import { renderAppShell } from "./web/shell.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -14,10 +15,11 @@ function shellPage(
         theme,
         body: `<h1>${title}</h1>`,
         attention: { count: 0, tabs: {} },
+        flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
 
-const SHARED = ["tokens.css", "base.css", "form.css", "table.css", "seg.css"];
+const APP_PARTIALS = ["base.css", "form.css", "table.css", "seg.css"];
 
 test("app.css assembles with no unresolved include markers", async () => {
     const css = await getAppCss();
@@ -25,12 +27,14 @@ test("app.css assembles with no unresolved include markers", async () => {
     expect(css).toContain(".bottom-nav");
 });
 
-test("app.css inlines each shared partial in full", async () => {
+test("app.css inlines tokens from the shared partial and app-owned partials in full", async () => {
     const css = await getAppCss();
-    for (const partial of SHARED) {
-        const src = await Bun.file(
-            `./public/widgets/src/shared/${partial}`,
-        ).text();
+    const tokens = await Bun.file(
+        "./public/widgets/src/shared/tokens.css",
+    ).text();
+    expect(css, "tokens.css").toContain(tokens.trim());
+    for (const partial of APP_PARTIALS) {
+        const src = await Bun.file(`./public/app/${partial}`).text();
         expect(css, partial).toContain(src.trim());
     }
 });
@@ -51,7 +55,7 @@ test("the hidden attribute beats component display rules", async () => {
 });
 
 test("native control hooks have zero specificity so component classes win", async () => {
-    const form = await Bun.file("./public/widgets/src/shared/form.css").text();
+    const form = await Bun.file("./public/app/form.css").text();
     expect(form).toContain(":where(.native button)");
     expect(form).toContain(":where(.native select)");
     // A bare `.native button` (one not wrapped in :where) would outrank
@@ -62,7 +66,7 @@ test("native control hooks have zero specificity so component classes win", asyn
 });
 
 test("seg buttons accept aria-selected as the active state", async () => {
-    const seg = await Bun.file("./public/widgets/src/shared/seg.css").text();
+    const seg = await Bun.file("./public/app/seg.css").text();
     expect(seg).toContain('.seg-btn[aria-selected="true"]');
 });
 

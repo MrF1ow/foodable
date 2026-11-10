@@ -1,3 +1,4 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import {
     NUTRITION_ARRANGE_MODAL_ID,
@@ -44,7 +45,11 @@ async function renderOrder(order: NutritionCard[], peer = false) {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: order,
         viewMemberId: peer ? bob.userId : undefined,
     });
@@ -98,7 +103,11 @@ test("Arrange modal lists every card with disabled ends", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -171,7 +180,11 @@ test("log meal validation error reopens the log meal modal only", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",
@@ -203,7 +216,11 @@ test("a layout error reopens the Arrange modal only", async () => {
         goals: { locale: "en" },
         trends: { locale: "en" },
         weight: { locale: "en" },
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         cardOrder: [
             "nutrition-summary",
             "goal-progress",

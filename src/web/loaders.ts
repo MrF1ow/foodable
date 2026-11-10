@@ -1,3 +1,4 @@
+import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
     dashboardAccess,
@@ -24,6 +25,12 @@ import {
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
+import { authUserCount } from "../db/users.js";
+import {
+    canSignUp,
+    getSignupPolicy,
+    signupPolicyForRoutes,
+} from "../domain/signup.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveGroceryStore } from "../db/grocery.js";
@@ -58,7 +65,10 @@ import {
     suggestFoodFor,
     usualProductRows,
     type Food,
+    type MergePairPickField,
 } from "../domain/foods.js";
+import { possibleDuplicateNoticesByFoodId } from "../domain/notices-for.js";
+import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
 import {
     plainFoodIdForUsualPicker,
     safeReturnPath,
@@ -68,8 +78,8 @@ import type { Notice } from "../domain/notices.js";
 import { listFridge } from "../domain/fridge.js";
 import {
     allergenNotices,
-    groceryAllergenWarning,
     listGrocery,
+    matchGroceryAllergens,
 } from "../domain/grocery.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import {
@@ -90,10 +100,14 @@ import {
 import {
     loadHouseholdNotices,
     viewerChromeWithAttention,
+    viewerFlagsFor,
 } from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
+import { householdToday } from "../db/restock.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
+import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
+import { groceryRestockNotices } from "../domain/restock.js";
 import {
     dismissNotice,
     undoDismissal,
@@ -153,9 +167,22 @@ type MemberGate =
     | { status: 200; html: string; create: true };
 
 async function memberGate(viewerUserId: string): Promise<MemberGate> {
-    const viewer = await getHouseholdMembership(viewerUserId);
+    const stashed = peekSiteMembership();
+    // Reuse the middleware's lookup only for the same user and only when it
+    // found a membership: a request can create a household after the lookup.
+    const viewer =
+        stashed && stashed.userId === viewerUserId
+            ? stashed
+            : await getHouseholdMembership(viewerUserId);
     if (viewer == null) {
-        if (!(await householdExists())) {
+        const policy = signupPolicyForRoutes(getSignupPolicy());
+        const createHousehold = canSignUp(policy, {
+            userCount: await authUserCount(),
+            householdExists: await householdExists(),
+            mode: "create-household",
+            callerHasHousehold: false,
+        });
+        if (createHousehold.ok) {
             return {
                 status: 200,
                 html: createHouseholdFormHtml(),
@@ -220,7 +247,7 @@ export async function renderDashboardPage(
             weight,
             chrome: await viewerChromeWithAttention(
                 viewerProfile,
-                access.subject.householdId,
+                access.viewer,
             ),
             cardOrder: orderCards(viewerProfile?.nutrition_layout),
             viewMemberId,
@@ -236,14 +263,20 @@ export async function renderFridgeInventoryPage(
     error?: string,
     openModalId?: string,
     linkProductId?: string,
+    extras?: {
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
+    },
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const snapshot = await listFridge(liveFridgeStore(), householdId);
-    const allFoods = await liveFoodsStore().listFoods(householdId);
-    const groceryLines = await liveGroceryStore().listLines(householdId);
+    const [snapshot, allFoods, groceryLines, today] = await Promise.all([
+        listFridge(liveFridgeStore(), householdId),
+        liveFoodsStore().listFoods(householdId),
+        liveGroceryStore().listLines(householdId),
+        householdToday(householdId),
+    ]);
     const foodsById = new Map(
         allFoods.map((row) => [
             row.id,
@@ -254,7 +287,7 @@ export async function renderFridgeInventoryPage(
         ? linkProductPromptFromFoods(
               allFoods,
               linkProductId,
-              "/fridge",
+              "/kitchen/fridge",
               true,
               error,
           )
@@ -263,9 +296,15 @@ export async function renderFridgeInventoryPage(
         status: 200,
         html: renderFridgePage({
             ...snapshot,
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            today,
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                await loadHouseholdNotices(householdId, { today }),
+            ),
             error,
             openModalId,
+            didYouMean: extras?.didYouMean,
             linkProductPrompt,
             groceryLines,
             foodsById,
@@ -279,6 +318,7 @@ export async function renderGroceryListPage(
         error?: string;
         allergenNotices?: Notice[];
         allergenRetry?: GroceryAllergenRetry;
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
         openModalId?: string;
         linkProductId?: string;
     } = {},
@@ -322,6 +362,19 @@ export async function renderGroceryListPage(
         ...snapshot.lines.map((line) => line.foodId),
         ...fridge.items.map((item) => item.foodId),
     ]);
+    const today = await householdToday(householdId);
+    const dismissals =
+        await liveNoticeDismissalsStore().listForHousehold(householdId);
+    const dismissed = dismissedKeySet(dismissals);
+    const restockByLine = new Map<string, Notice[]>();
+    for (const notice of groceryRestockNotices(
+        snapshot.lines,
+        fridge.items,
+        today,
+    )) {
+        if (isDismissedIn(notice, dismissed)) continue;
+        restockByLine.set(notice.subject.id, [notice]);
+    }
     const stores = snapshot.stores.map((store) => {
         const storeLines = snapshot.lines.filter(
             (line) => line.storeId === store.id,
@@ -367,6 +420,7 @@ export async function renderGroceryListPage(
                                 : null;
                         return {
                             ...line,
+                            notices: restockByLine.get(line.id) ?? [],
                             alreadyHave: alreadyHaveTag(
                                 line,
                                 fridge.items,
@@ -391,7 +445,7 @@ export async function renderGroceryListPage(
                                               (row) => row.id === line.foodId,
                                           ),
                                       ),
-                                      "/grocery",
+                                      "/kitchen/groceries",
                                   )
                                 : null,
                             putAwayProducts,
@@ -407,31 +461,42 @@ export async function renderGroceryListPage(
     });
     const unknownAllergen = snapshot.lines.some((line) => {
         const food = line.foodId ? catalog.get(line.foodId) : null;
-        const warning = groceryAllergenWarning(
-            line.displayName,
-            memberAllergens,
-            food ? food.allergens : null,
+        return (
+            matchGroceryAllergens(
+                line.displayName,
+                memberAllergens,
+                food ? food.allergens : null,
+            ) === "unknown"
         );
-        return warning != null && !warning.blocking;
     });
     const linkProductPrompt = opts.linkProductId
         ? linkProductPromptFromFoods(
               allFoods,
               opts.linkProductId,
-              "/grocery",
+              "/kitchen/groceries",
               true,
               opts.error,
           )
         : null;
+    const noticeResult = await loadHouseholdNotices(householdId, { today });
+    const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
+        noticeResult.notices,
+    );
     return {
         status: 200,
         html: renderGroceryPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            foodDuplicateNotices,
             stores,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
             allergenNotices: opts.allergenNotices,
             allergenRetry: opts.allergenRetry,
+            didYouMean: opts.didYouMean,
             unknownAllergen: unknownAllergen && !opts.allergenNotices?.length,
             openModalId: opts.openModalId,
             locations: fridge.locations.map((loc) => ({
@@ -467,6 +532,7 @@ export async function renderSettingsAccountPage(
         status: 200,
         html: renderSettingsPage({
             chrome,
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
             timezone: profile?.timezone ?? "",
@@ -490,6 +556,7 @@ export async function renderSettingsHelpRoute(
         status: 200,
         html: renderSettingsHelpPageHtml({
             chrome: viewerChromeFromProfile(profile),
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
         }),
     };
@@ -520,6 +587,7 @@ export async function renderSettingsHouseholdRoute(
         status: 200,
         html: renderHouseholdSettingsPrefsPage({
             chrome: viewerChromeFromProfile(profile),
+            flags: await viewerFlagsFor(gate.viewer),
             backHref: opts.backHref ?? "/",
             member: gate.viewer,
             preferences: config.preferences,
@@ -587,7 +655,7 @@ export async function renderSettingsFoodsPage(
         ...food,
         aliases: aliasMap.get(food.id) ?? [],
     }));
-    const from = safeReturnPath(opts.from, "/household/items");
+    const from = safeReturnPath(opts.from, "/settings/household/items");
     const linkProductPrompt = opts.linkProductId
         ? linkProductPromptFromFoods(
               foods,
@@ -599,10 +667,15 @@ export async function renderSettingsFoodsPage(
         : null;
     const settings = liveSettingsStore();
     const stores = await settings.listStores(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
             foods: withAliases,
             stores,
             error: opts.error,
@@ -636,10 +709,15 @@ export async function renderUsualProductsListPage(
             truncated: matched.length > 20,
         };
     }
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderUsualProductsListHtml({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
             rows,
             addable,
             from: opts.from,
@@ -670,7 +748,7 @@ export async function renderUsualProductsPickerPage(
     const products = foods
         .filter((row) => row.genericFoodId === foodId && !row.archivedAt)
         .sort((a, b) => a.name.localeCompare(b.name));
-    const from = safeReturnPath(opts.from, "/household/usual-products");
+    const from = safeReturnPath(opts.from, "/kitchen/usuals");
     const listed = foods;
     const catalog = new Map(listed.map((row) => [row.id, row]));
     const usualId = food.usualProductId;
@@ -691,10 +769,15 @@ export async function renderUsualProductsPickerPage(
         ? usualProduct.usualAmount
         : food.usualAmount;
     const stores = await liveSettingsStore().listStores(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
             food,
             products,
             usualProductId: food.usualProductId,
@@ -755,15 +838,20 @@ export async function renderHouseholdSettingsRoute(
     const fetchRefusals = refusalsBatch.slice(0, 20);
     const fetchRefusalsShowMore =
         refusalsBatch.length > 20
-            ? `/household?refusals_after=${encodeURIComponent(
+            ? `/settings/household?refusals_after=${encodeURIComponent(
                   `${fetchRefusals.at(-1)!.refusedAt}|${fetchRefusals.at(-1)!.host}`,
               )}`
             : null;
 
+    const noticeResult = await loadHouseholdNotices(householdId);
     return {
         status: 200,
         html: renderHouseholdSettingsPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
             householdName: config.name,
             location: location ?? "",
             members,
@@ -889,7 +977,7 @@ export async function renderRecipesListPage(
     return {
         status: 200,
         html: renderRecipesPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(profile, gate.viewer),
             recipes,
             members: members.map((member) => ({
                 userId: member.userId,
@@ -933,6 +1021,7 @@ export async function renderRecipeDetailRoute(
         error?: string;
         openModalId?: string;
         linkProductId?: string;
+        didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -1031,10 +1120,19 @@ export async function renderRecipeDetailRoute(
         };
     });
     const importRow = await liveRecipesStore().getImport(householdId, recipeId);
+    const noticeResult = await loadHouseholdNotices(householdId);
+    const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
+        noticeResult.notices,
+    );
     return {
         status: 200,
         html: renderRecipeDetailPage({
-            chrome: await viewerChromeWithAttention(profile, householdId),
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            foodDuplicateNotices,
             recipe: view,
             notices,
             noticeContext: {
@@ -1068,6 +1166,7 @@ export async function renderRecipeDetailRoute(
             isOwner: gate.viewer.role === "owner",
             error: opts.error,
             openModalId: opts.openModalId,
+            didYouMean: opts.didYouMean,
             linkProductPrompt,
         }),
     };
@@ -1102,6 +1201,7 @@ export async function renderNeedsAttentionInventoryPage(
     const householdId = gate.viewer.householdId;
     let pageError = error;
     let redirect = false;
+    let today: string | undefined;
 
     if (post?.member) {
         const deps = noticeDeps();
@@ -1110,12 +1210,19 @@ export async function renderNeedsAttentionInventoryPage(
                 await undoDismissal(deps, householdId, post.undoDismissalId);
                 redirect = true;
             } else if (post.code && post.subjectKind && post.subjectId) {
-                await dismissNotice(deps, householdId, post.member.userId, {
-                    code: post.code as NoticeCode,
-                    subjectKind: post.subjectKind as NoticeSubjectKind,
-                    subjectId: post.subjectId,
-                    relatedId: post.relatedId,
-                });
+                today = await householdToday(householdId);
+                await dismissNotice(
+                    deps,
+                    householdId,
+                    post.member.userId,
+                    {
+                        code: post.code as NoticeCode,
+                        subjectKind: post.subjectKind as NoticeSubjectKind,
+                        subjectId: post.subjectId,
+                        relatedId: post.relatedId,
+                    },
+                    { today },
+                );
                 redirect = true;
             }
         } catch (err) {
@@ -1128,10 +1235,10 @@ export async function renderNeedsAttentionInventoryPage(
         }
     }
 
-    const result = await loadHouseholdNotices(householdId);
+    const result = await loadHouseholdNotices(householdId, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
-        householdId,
+        gate.viewer,
         result,
     );
     const html = renderNeedsAttentionPage({
@@ -1146,5 +1253,45 @@ export async function renderNeedsAttentionInventoryPage(
     return {
         status: pageError ? 400 : 200,
         html,
+    };
+}
+
+export async function renderPossibleDuplicatesRoute(
+    viewerUserId: string,
+    opts: {
+        error?: string;
+        openModalId?: string;
+        mergePost?: {
+            foodA: string;
+            foodB: string;
+            keepId: string;
+            picks: Partial<Record<MergePairPickField, string>>;
+        };
+    } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const store = liveFoodsStore();
+    const refCounts = await store.countFoodRefs(householdId);
+    const noticeResult = await loadHouseholdNotices(householdId, {
+        refCounts,
+    });
+    const pairs = noticeResult.possibleDuplicatePairs;
+    return {
+        status: 200,
+        html: renderPossibleDuplicatesPage({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            pairs,
+            refCounts,
+            error: opts.error,
+            openModalId: opts.openModalId,
+            mergePost: opts.mergePost,
+        }),
     };
 }

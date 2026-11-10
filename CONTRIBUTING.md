@@ -37,19 +37,23 @@ Then re-clone or refresh the worktree. The repo will link [AGENTS.md](AGENTS.md)
 Run what CI runs. A PR that fails any of these can't merge:
 
 ```bash
-bun run gen:all        # regenerate login HTML and tokens
-bun run format:check   # Prettier, 4-space indent (`bun run format` fixes it)
-bun run typecheck      # src/ only
-bun test
+bun run gen:all         # regenerate login HTML and tokens
+bun run check:changed   # what CI's check job runs for your changes
 ```
 
-If you touched `db/migrations/`, also run `bun run db:dryrun` (see below).
+`check:changed` picks format (Prettier, 4-space indent; `bun run format` fixes it), `bun run lint` (oxlint with the repo's rules in `scripts/lint-rules/`), `bun run typecheck` (the whole project), the tests that import what you changed, and migration safety plus `bun run db:dryrun` when you touched `db/migrations/`. `--list` shows the plan and `--all` runs everything. A push to `main` runs every check, listed directly in `ci.yml`.
 
-### Gate files
+### Policy checks
 
-Some files control CI and the repo's own guardrails: `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun*`, and `package.json`. A PR that touches any of them fails the **gate** check until a code owner (see `.github/CODEOWNERS`) adds the `gate:approved` label. The label has to go on after the latest push: every push removes it, and an approval older than the head commit does not count.
+Three CI jobs enforce the repo's own rules, and one required check, **policy**, sums them up. They run from `main`, never from your branch, and read your PR through the GitHub API:
 
-It is a label and not an approving review because GitHub does not let a PR's author approve it, and the code owner opens most PRs here. The rule lives in `scripts/conventions/gate.ts` and runs from the base branch, so a PR cannot change the check it is judged by.
+- **PR conventions and migration safety** (`scripts/conventions/policy.ts`): the title, branch name, body sections and blast level, and the rules for `db/migrations/` files. Check the conventions locally with `bun run pr:check body.md [--title "<title>"]`; without `--title` it uses the open PR's title, else the latest commit's subject, and prints which.
+- **skill-drift:** a skill lists the files it describes in its frontmatter `watches:`. A PR that changes a watched file without touching that skill's folder fails; update the skill (or its `watches:`) in the same PR. An entry can name one top-level JSON key (`package.json#scripts`): it then counts only when that key differs between your branch point and your head, so a version bump or a dependency update does not trigger it. `bun run scripts/conventions/skill-drift.ts` checks your working tree.
+- **agent-context-budget:** `CLAUDE.md` and each `.claude/skills/<name>` folder have a size baseline in `.github/agent-context-budget.json`. A PR that grows one past it, or adds a skill folder, fails unless it carries the `agent-context-increase` label, and with the label it must also commit a regenerated baseline (`bun run scripts/conventions/context-budget.ts --write`, which counts tracked files only), or the next PR would start from the old sizes.
+
+Because main's copy does the judging, a PR that edits these scripts (`scripts/conventions/`, `scripts/migration-safety*`, `scripts/data-api-grants.ts`, the budget file, `policy.yml`, the skills) is still held to the old rules, and its edit takes effect after it merges. The policy job lists such files in its log. **policy** is the check a PR cannot change: it never checks out or runs the PR's code. The `migrations` job in `ci.yml` also runs the safety rules from the base branch's copy (with the base's `bunfig.toml`, so a PR's `preload` cannot touch it), but that is defence in depth, since `pull_request` runs the PR's own `ci.yml` and a PR can edit that job.
+
+When every required check is green, a PR merges without a review or a label (the budget label above only matters when a PR grows the agent context).
 
 ## How the code is laid out
 
@@ -128,7 +132,7 @@ Example: `fix(fridge): ignore expired lines in grocery sync`.
 
 Railway deploys `main`, so a release is not what ships code. It marks a point on `main` that a self-hosted deploy can safely update to.
 
-- **Cut one** with `bun run release` on an up-to-date `main`. It reads the labels on the PRs merged since the last tag, suggests a level, bumps `version` in `package.json` on a `chore/repo-release-<version>` branch, and opens `chore(repo): release <version>` listing those PRs. Pass `patch`, `minor` or `major` to override the suggestion, and `--dry-run` to see the PR without opening it. When the PR merges, the **Release** workflow tags the commit `v<version>` and publishes a GitHub release. `package.json` is a gate file, so the code owner signs off on every release.
+- **Cut one** with `bun run release` on an up-to-date `main`. It reads the labels on the PRs merged since the last tag, suggests a level, bumps `version` in `package.json` on a `chore/repo-release-<version>` branch, and opens `chore(repo): release <version>` listing those PRs. Pass `patch`, `minor` or `major` to override the suggestion, and `--dry-run` to see the PR without opening it. When the PR merges, the **Release** workflow tags the commit `v<version>` and publishes a GitHub release.
 - **Level:** while the version is `0.y.z`, a `breaking` PR, a contract migration or a feature that touches the product (any area besides `repo`, `docs`, `test` and `deps`) bumps the minor version, and anything else bumps the patch version. Major is never suggested: going to `1.0.0` is a deliberate call. From then on, breaking changes and contract migrations suggest major.
 - **Notes** are generated from PR titles and grouped by the labels CI already applies. Breaking changes and contract migrations come first because they are what a forker has to read before updating.
 - **Don't cut one** in the middle of an expand → contract sequence. Release once the code that reads the new shape has merged.
@@ -141,11 +145,11 @@ Every PR declares how risky the change is. In the **Blast radius** section, set 
 
 The floor comes from path rules (see `scripts/conventions/`). In short:
 
-| Floor      | Examples                                                                                                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **high**   | `db/`, `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun/`, `package.json` |
-| **medium** | Each product area (`fridge`, `grocery`, `nutrition`, …) spans `src/domain/`, `src/mcp/tools/`, and `src/web/` for that pillar; `bun.lock` counts as `deps`               |
-| **low**    | Docs, copy, and other paths not mapped to a pillar                                                                                                                       |
+| Floor      | Examples                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **high**   | `db/`, `.github/workflows/`, `.github/rulesets/`, `.github/CODEOWNERS`, `scripts/conventions/`, `scripts/migration-safety/`, `scripts/migration-dryrun/`, `package.json`, and what decides what green means: `scripts/check-changed.ts`, `scripts/typecheck.ts`, `scripts/lint-rules/`, `.oxlintrc.json`, `.claude/settings.json`, `.flow/profile.yaml`, `.github/agent-context-budget.json` |
+| **medium** | Each product area (`fridge`, `grocery`, `nutrition`, …) spans `src/domain/`, `src/mcp/tools/`, and `src/web/` for that pillar; `bun.lock` counts as `deps`                                                                                                                                                                                                                                   |
+| **low**    | Docs, copy, and other paths not mapped to a pillar                                                                                                                                                                                                                                                                                                                                           |
 
 If a PR touches two different **medium** areas (for example fridge and grocery), the floor becomes **high** even when no single path is in the high table.
 

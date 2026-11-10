@@ -2,7 +2,7 @@
  * Headless browser check for Turbo-driven in-app navigation (P8).
  * Starts the fixture server, drives Chromium over CDP, exits non-zero on failure.
  */
-import { spawn } from "node:child_process";
+import { spawn } from "bun";
 import { join } from "node:path";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../src/tokens.js";
 
@@ -29,8 +29,7 @@ function record(name: string, pass: boolean, detail: unknown) {
 }
 
 const fixture = spawn(
-    "bun",
-    ["run", join(import.meta.dir, "nav-check-fixture.ts")],
+    ["bun", "run", join(import.meta.dir, "nav-check-fixture.ts")],
     {
         cwd: join(import.meta.dir, ".."),
         stdout: "inherit",
@@ -56,8 +55,8 @@ async function waitFixture() {
 }
 
 const chrome = spawn(
-    CHROME,
     [
+        CHROME,
         "--headless=new",
         "--no-sandbox",
         "--disable-gpu",
@@ -222,7 +221,10 @@ async function clickSel(sel: string) {
         returnByValue: true,
     })) as { result?: { value?: boolean } };
     if (!res.result?.value) {
-        throw new Error(`clickSel: no element matches ${sel}`);
+        const where = await ev<string>(
+            `location.href + " | " + document.title + " | " + (document.body?.className ?? "") + " | " + (document.body?.innerText ?? "").slice(0, 120)`,
+        );
+        throw new Error(`clickSel: no element matches ${sel} (at ${where})`);
     }
 }
 async function setMarker() {
@@ -249,7 +251,7 @@ try {
     await goto("/");
     await setMarker();
     await prepScroll();
-    await clickSel('nav.bottom-nav a[href="/fridge"]');
+    await clickSel('nav.bottom-nav a[href="/kitchen/fridge"]');
     await sleep(200);
     const fridge = await snap();
     await clickSel('nav.bottom-nav a[href="/recipes"]');
@@ -273,11 +275,11 @@ try {
     await clickSel('a[href="/?member=u2"]');
     await sleep(200);
     const member = await snap();
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await prepScroll();
     const yFridge = (await snap()).scrollY;
-    await clickSel('nav.bottom-nav a[href="/grocery"]');
+    await clickSel('nav.bottom-nav a[href="/kitchen/groceries"]');
     await sleep(150);
     await ev(`history.back()`);
     await sleep(250);
@@ -294,13 +296,13 @@ try {
             member.marker === "stay" &&
             member.href.includes("member=u2") &&
             back.marker === "stay" &&
-            back.href.endsWith("/fridge") &&
+            back.href.endsWith("/kitchen/fridge") &&
             Math.abs(back.scrollY - yFridge) < 80,
         { fridge, recipe, filtered, member, back, yFridge, ex: drain() },
     );
 
     await control("post=ok&delay=0&reset=posts&modal=");
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await prepScroll();
     const yDel = (await snap()).scrollY;
@@ -332,7 +334,7 @@ try {
     );
 
     await control("post=ok&delay=0&reset=posts");
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await clickSel('button[aria-label="Edit Eggs"]');
     await sleep(40);
@@ -421,7 +423,9 @@ try {
     await sleep(700);
     const afterEdit = await snap();
     const editPosts = await stats();
-    const editPost = editPosts.posts.find((p) => p.path === "/fridge/items/i2");
+    const editPost = editPosts.posts.find(
+        (p) => p.path === "/kitchen/fridge/items/i2",
+    );
     const eggsQty = await ev<string | null>(
         `document.querySelector('li.fridge-item[data-item-id="i2"] .fridge-item-qty')?.textContent ?? null`,
     );
@@ -434,7 +438,7 @@ try {
         "fridge shared edit dialog",
         eggsEdit.open === true &&
             eggsEdit.dialogs === 1 &&
-            eggsEdit.action === "/fridge/items/i2" &&
+            eggsEdit.action === "/kitchen/fridge/items/i2" &&
             eggsEdit.amount === "6" &&
             eggsEdit.unit === "each" &&
             eggsEdit.location === "l1" &&
@@ -442,21 +446,21 @@ try {
             eggsEdit.expires === eggsEdit.expectedExpires &&
             !!eggsEdit.expires &&
             supplyEdit.open === true &&
-            supplyEdit.action === "/fridge/items/i6" &&
+            supplyEdit.action === "/kitchen/fridge/items/i6" &&
             supplyEdit.amount === "3" &&
             supplyEdit.unit === "roll" &&
             supplyEdit.location === "l2" &&
             supplyEdit.expires === "" &&
             supplyEdit.title === "Edit Paper towels" &&
             yogurtEdit.open === true &&
-            yogurtEdit.action === "/fridge/items/i3" &&
+            yogurtEdit.action === "/kitchen/fridge/items/i3" &&
             yogurtEdit.amount === "2" &&
             yogurtEdit.unit === "each" &&
             yogurtEdit.location === "l1" &&
             yogurtEdit.title === "Edit Yogurt" &&
             yogurtEdit.error == null &&
             afterEdit.marker === "stay" &&
-            afterEdit.href.endsWith("/fridge") &&
+            afterEdit.href.endsWith("/kitchen/fridge") &&
             afterEdit.open.length === 0 &&
             editPost !== undefined &&
             editPost.entries.some(
@@ -481,7 +485,7 @@ try {
     );
 
     await control("post=fail&modal=fridge-edit-i2&reset=posts&delay=0");
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await clickSel('button[aria-label="Edit Eggs"]');
     await sleep(40);
@@ -509,7 +513,7 @@ try {
     record(
         "fridge shared edit server error",
         editError.open === true &&
-            editError.action === "/fridge/items/i2" &&
+            editError.action === "/kitchen/fridge/items/i2" &&
             editError.amount === "6" &&
             editError.title === "Edit Eggs" &&
             editError.error === "Name is required" &&
@@ -522,11 +526,11 @@ try {
     const legacyFoodsPath = await ev<string>("location.pathname");
     record(
         "legacy /settings/foods redirects to household items",
-        legacyFoodsPath === "/household/items",
+        legacyFoodsPath === "/settings/household/items",
         { legacyFoodsPath, ex: drain() },
     );
 
-    await goto("/household/items");
+    await goto("/settings/household/items");
     await setMarker();
     await clickSel('button[data-fill-title="Edit Eggs"]');
     await sleep(40);
@@ -555,7 +559,7 @@ try {
     record(
         "foods shared edit dialog",
         milkEdit.open === true &&
-            milkEdit.action === "/household/items/f2" &&
+            milkEdit.action === "/settings/household/items/f2" &&
             milkEdit.name === "Milk" &&
             milkEdit.calories === "64" &&
             milkEdit.title === "Edit Milk" &&
@@ -564,7 +568,7 @@ try {
     );
     await ev(`document.getElementById("food-edit")?.close()`);
     await control("post=fail&modal=food-edit-f1&reset=posts&delay=0");
-    await goto("/household/items");
+    await goto("/settings/household/items");
     await clickSel('button[data-fill-title="Edit Eggs"]');
     await sleep(40);
     await clickSel("#food-edit button[type='submit']");
@@ -591,7 +595,7 @@ try {
     record(
         "foods shared edit server error",
         foodEditError.open === true &&
-            foodEditError.action === "/household/items/f1" &&
+            foodEditError.action === "/settings/household/items/f1" &&
             foodEditError.name === "Eggs" &&
             foodEditError.title === "Edit Eggs" &&
             foodEditError.error === "Name is required" &&
@@ -700,7 +704,7 @@ try {
     );
     await control("post=ok&modal=&reset=posts&delay=0");
 
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await clickSel(
         '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
     );
@@ -813,12 +817,12 @@ try {
     })()`);
     await ev(`document.getElementById("fridge-add-supply")?.close()`);
     await clickSel(
-        '[data-location-id="l1"] button[data-fill-action="/fridge/locations/l1/delete"]',
+        '[data-location-id="l1"] button[data-fill-action="/kitchen/fridge/locations/l1/delete"]',
     );
     await sleep(40);
     await ev(`document.getElementById("fridge-remove-location")?.close()`);
     await clickSel(
-        '[data-location-id="l2"] button[data-fill-action="/fridge/locations/l2/delete"]',
+        '[data-location-id="l2"] button[data-fill-action="/kitchen/fridge/locations/l2/delete"]',
     );
     await sleep(40);
     const pantryRemove = await ev<{
@@ -848,7 +852,9 @@ try {
             same(pantryFood.names, "") &&
             same(pantryFood.barcodes, "") &&
             pantryFood.actions.length > 0 &&
-            pantryFood.actions.every((action) => action === "/fridge/items") &&
+            pantryFood.actions.every(
+                (action) => action === "/kitchen/fridge/items",
+            ) &&
             pantryFood.search === "" &&
             pantryFood.searchResults === "" &&
             pantryFood.barcodeResults === "" &&
@@ -857,20 +863,20 @@ try {
             pantryHits.includes("Eggs") &&
             pantrySupply.open === true &&
             pantrySupply.title === "Add household item to Pantry" &&
-            pantrySupply.action === "/fridge/items" &&
+            pantrySupply.action === "/kitchen/fridge/items" &&
             pantrySupply.location === "l2" &&
             pantrySupply.kind === "supply" &&
             pantrySupply.name === "" &&
             pantrySupply.unit === "roll" &&
             pantrySupply.amount === "" &&
             pantryRemove.open === true &&
-            pantryRemove.action === "/fridge/locations/l2/delete" &&
+            pantryRemove.action === "/kitchen/fridge/locations/l2/delete" &&
             pantryRemove.message === "Remove Pantry and everything in it?",
         { pantryFood, pantryHits, pantrySupply, pantryRemove, ex: drain() },
     );
     await ev(`document.getElementById("fridge-remove-location")?.close()`);
     await control("post=fail&modal=fridge-add-food-l1&reset=posts&delay=0");
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await clickSel(
         '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
     );
@@ -921,7 +927,7 @@ try {
     );
     await control("post=ok&modal=&reset=posts&delay=0");
 
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");
     await clickSel('button[commandfor="fridge-add-location"]');
@@ -936,13 +942,13 @@ try {
     record(
         "add location empty name 400",
         addLoc.marker === "stay" &&
-            addLoc.href.endsWith("/fridge") &&
+            addLoc.href.endsWith("/kitchen/fridge") &&
             addLoc.open.includes("fridge-add-location") &&
             addLoc.error === "Name is required",
         { addLoc, ex: drain() },
     );
 
-    await goto("/grocery");
+    await goto("/kitchen/groceries");
     await control("post=ok&reset=posts");
     await clickSel(
         '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
@@ -967,7 +973,7 @@ try {
     await sleep(400);
     const groceryPosts = await stats();
     const linePost = groceryPosts.posts.find(
-        (p) => p.path === "/grocery/lines",
+        (p) => p.path === "/kitchen/groceries/lines",
     );
     record(
         "grocery add with Produce section_id",
@@ -978,7 +984,7 @@ try {
         { entries: linePost?.entries ?? [], ex: drain() },
     );
 
-    await goto("/grocery");
+    await goto("/kitchen/groceries");
     await control("post=ok&reset=posts");
     await clickSel(
         '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
@@ -1024,7 +1030,7 @@ try {
     await sleep(500);
     const groceryPosts2 = await stats();
     const linePosts = groceryPosts2.posts.filter(
-        (p) => p.path === "/grocery/lines",
+        (p) => p.path === "/kitchen/groceries/lines",
     );
     record(
         "grocery two adds after morph both carry section_id",
@@ -1035,7 +1041,7 @@ try {
         { linePosts: linePosts.map((p) => p.entries), ex: drain() },
     );
 
-    await goto("/grocery");
+    await goto("/kitchen/groceries");
     await clickSel(
         '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
     );
@@ -1104,7 +1110,7 @@ try {
     );
     await ev(`document.getElementById("grocery-add-food")?.close()`);
 
-    await goto("/household");
+    await goto("/settings/household");
     await clickSel('button[data-fill-title="Manage Sam"]');
     await sleep(40);
     await clickSel(
@@ -1203,7 +1209,7 @@ try {
             rileyManage.role === "member" &&
             rileyManage.label === "Make member" &&
             rileyManage.className === "" &&
-            rileyManage.action === "/household/members/u3/role" &&
+            rileyManage.action === "/settings/household/members/u3/role" &&
             rileyOwner.includes("Riley becomes the owner") &&
             !rileyOwner.includes("Sam becomes the owner") &&
             rileyRemove.title === "Remove Riley" &&
@@ -1211,8 +1217,8 @@ try {
                 "Delete Riley's login and their meals, water, weight and goals. This can't be undone." &&
             rileyRemove.label === "Remove Riley" &&
             rileyRemove.checked === false &&
-            rileyOwnerAction === "/household/members/u3/make-owner" &&
-            rileyRemove.action === "/household/members/u3/remove",
+            rileyOwnerAction === "/settings/household/members/u3/make-owner" &&
+            rileyRemove.action === "/settings/household/members/u3/remove",
         {
             samOwner,
             samRemove,
@@ -1229,7 +1235,7 @@ try {
     await goto("/");
     await ev(`new Promise((resolve) => {
         document.addEventListener("turbo:load", resolve, { once: true });
-        document.querySelector('nav.bottom-nav a[href="/fridge"]').click();
+        document.querySelector('nav.bottom-nav a[href="/kitchen/fridge"]').click();
     })`);
     // A revisit must render once: a cached-snapshot preview followed by the
     // fresh page replays the entrance animation, so the tab "loads twice".
@@ -1381,7 +1387,7 @@ try {
         ex: drain(),
     });
 
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await ev(`(() => {
         const a = document.createElement("a");
@@ -1400,7 +1406,7 @@ try {
         { expiredGet, hasAppNavGet, ex: drain() },
     );
 
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     await control("post=login&reset=posts&session=guest");
     await clickSel('button[aria-label="Delete Expired milk"]');
@@ -1518,7 +1524,7 @@ try {
             contents: metas.map((m) => m.getAttribute("content")),
         };
     })()`);
-    await clickSel('nav.bottom-nav a[href="/fridge"]');
+    await clickSel('nav.bottom-nav a[href="/kitchen/fridge"]');
     await sleep(200);
     const fridgeTheme = await themeSnap();
     const fridgeMeta = await themeMetaContents();
@@ -1703,12 +1709,12 @@ try {
         return ok;
     }
     const fridgeDark = await scrollBottomShot(
-        "/fridge",
+        "/kitchen/fridge",
         "dark",
         "./tmp/nav-fridge-dark-bottom.png",
     );
     const fridgeLight = await scrollBottomShot(
-        "/fridge",
+        "/kitchen/fridge",
         "light",
         "./tmp/nav-fridge-light-bottom.png",
     );
@@ -1747,7 +1753,7 @@ try {
         mobile: false,
     });
     await control("session=app");
-    await goto("/fridge");
+    await goto("/kitchen/fridge");
     await setMarker();
     const floatSnap = () =>
         ev<{
@@ -1813,6 +1819,264 @@ try {
         logout.marker == null && logout.out === "logged out",
         logout,
     );
+
+    // ---- The new shell (flag ui-v2): phone nav, desktop chrome, Turbo ----
+    await control("session=app&shell=v2&theme=dark");
+    const v2Snap = () =>
+        ev<{
+            tabs: string;
+            sidebar: string;
+            topbar: string;
+            active: string | null;
+            side: string | null;
+            h1: string | null;
+            marker: string | null;
+            themeColor: string | null;
+            themeChrome: string | null;
+            navW: number;
+            navH: number;
+            navGap: number;
+            navCentre: number;
+            chrome: string | null;
+            chip: string | null;
+            tracked: number;
+            open: string[];
+            hash: string;
+            bottomNav: boolean;
+        }>(`(() => {
+            const q = (s) => document.querySelector(s);
+            const disp = (s) => (q(s) ? getComputedStyle(q(s)).display : "missing");
+            const nav = q(".fd-tabs");
+            const r = nav ? nav.getBoundingClientRect() : { width: 0, height: 0, bottom: 0, left: 0 };
+            return {
+                tabs: disp(".fd-tabs"),
+                sidebar: disp(".fd-sidebar"),
+                topbar: disp(".fd-topbar"),
+                active: q(".fd-tabs a[aria-current='page']")?.getAttribute("aria-label") ?? null,
+                side: q(".fd-sidenav a.fd-sidelink[aria-current] .fd-sidelink-label")?.textContent ?? null,
+                h1: q("h1")?.textContent?.trim() ?? null,
+                marker: window.__marker ?? null,
+                themeColor: q("meta[name='theme-color']")?.getAttribute("content") ?? null,
+                themeChrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
+                navW: Math.round(r.width),
+                navH: Math.round(r.height),
+                navGap: Math.round(innerHeight - r.bottom),
+                navCentre: Math.round(r.left + r.width / 2 - document.documentElement.clientWidth / 2),
+                chrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
+                chip: q(".fd-chip")?.getAttribute("href") ?? null,
+                tracked: document.querySelectorAll("link[rel='stylesheet'][data-turbo-track='reload'], script[data-turbo-track='reload']").length,
+                open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+                hash: location.hash,
+                bottomNav: !!q("nav.bottom-nav"),
+            };
+        })()`);
+
+    await goto("/");
+    await setMarker();
+    const v2Today = await v2Snap();
+    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
+    await sleep(250);
+    const v2Kitchen = await v2Snap();
+    await clickSel('.fd-tabs a[href="/recipes"]');
+    await sleep(250);
+    const v2Recipes = await v2Snap();
+    record(
+        "v2 shell phone: floating nav, Turbo tab visits keep the page",
+        v2Today.tabs === "flex" &&
+            v2Today.sidebar === "none" &&
+            v2Today.topbar === "none" &&
+            v2Today.active === "Today" &&
+            v2Today.navW === 278 &&
+            v2Today.navH === 58 &&
+            v2Today.navGap >= 24 &&
+            Math.abs(v2Today.navCentre) <= 1 &&
+            v2Today.tracked === 4 &&
+            !v2Today.bottomNav &&
+            v2Kitchen.marker === "stay" &&
+            v2Kitchen.active === "Kitchen" &&
+            /fridge/i.test(v2Kitchen.h1 || "") &&
+            v2Recipes.marker === "stay" &&
+            v2Recipes.active === "Recipes",
+        { v2Today, v2Kitchen, v2Recipes, ex: drain() },
+    );
+    record(
+        "v2 shell browser chrome: page colour, honest meta, kept across visits",
+        v2Today.themeChrome === "page" &&
+            v2Today.themeColor === THEME_COLOR.dark &&
+            v2Kitchen.themeColor === THEME_COLOR.dark &&
+            v2Recipes.themeColor === THEME_COLOR.dark,
+        { v2Today, v2Kitchen, v2Recipes },
+    );
+
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 960,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/recipes");
+    await setMarker();
+    const v2Desktop = await v2Snap();
+    const sidebarW = await ev<number>(
+        `Math.round(document.querySelector(".fd-sidebar").getBoundingClientRect().width)`,
+    );
+    const exposedNavs = await ev<number>(
+        `[...document.querySelectorAll("nav.fd-tabs, nav.fd-sidenav")].filter((n) => getComputedStyle(n).display !== "none").length`,
+    );
+    await clickSel('.fd-sidenav a[href="/kitchen/fridge"]');
+    await sleep(250);
+    const v2DesktopKitchen = await v2Snap();
+    record(
+        "v2 shell desktop: sidebar and top bar replace the phone nav",
+        v2Desktop.tabs === "none" &&
+            v2Desktop.sidebar === "flex" &&
+            v2Desktop.topbar === "flex" &&
+            v2Desktop.side === "Recipes" &&
+            sidebarW === 248 &&
+            exposedNavs === 1 &&
+            v2DesktopKitchen.marker === "stay" &&
+            v2DesktopKitchen.side === "Kitchen",
+        { v2Desktop, sidebarW, exposedNavs, v2DesktopKitchen, ex: drain() },
+    );
+    await goto("/recipes");
+    await setMarker();
+    await clickSel("a.fd-household");
+    await sleep(500);
+    const sidebarHousehold = await ev<{ path: string; side: string | null }>(`({
+        path: location.pathname,
+        side: document.querySelector(".fd-sidenav a.fd-sidelink[aria-current] .fd-sidelink-label")?.textContent ?? null,
+    })`);
+    record(
+        "v2 sidebar Household block opens the members page",
+        sidebarHousehold.path === "/settings/household" &&
+            sidebarHousehold.side === "Settings",
+        { sidebarHousehold, ex: drain() },
+    );
+    await clickSel('.fd-sidenav a[href="/settings"]');
+    await sleep(400);
+    const v2SidebarSettings = await v2Snap();
+    record(
+        "v2 sidebar Settings opts out of Turbo (full load)",
+        v2SidebarSettings.marker == null &&
+            (await ev<string>(`location.pathname`)) === "/settings",
+        { v2SidebarSettings },
+    );
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+
+    await goto("/");
+    await setMarker();
+    await clickSel(".fd-chip");
+    await sleep(400);
+    const chipNav = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    record(
+        "v2 account chip opens Settings with a full load",
+        chipNav.marker == null && chipNav.path === "/settings",
+        chipNav,
+    );
+
+    // Groceries and Usuals are reached from the Kitchen text tabs; Household
+    // from Settings (phone) or the sidebar's Household block (desktop).
+    await goto("/kitchen/fridge");
+    await setMarker();
+    const kitchenRow = () =>
+        ev<{
+            tabs: string[];
+            current: string | null;
+            h1: string | null;
+            marker: string | null;
+            phoneCurrent: string | null;
+        }>(`({
+            tabs: [...document.querySelectorAll(".fd-kitchen-tab")].map((a) => a.getAttribute("href")),
+            current: document.querySelector(".fd-kitchen-tab[aria-current='page']")?.textContent ?? null,
+            h1: document.querySelector("h1")?.textContent?.trim() ?? null,
+            marker: window.__marker ?? null,
+            phoneCurrent: document.querySelector(".fd-tabs a[aria-current='page']")?.getAttribute("aria-label") ?? null,
+        })`);
+    const kFridge = await kitchenRow();
+    await clickSel('.fd-kitchen-tab[href="/kitchen/groceries"]');
+    await sleep(300);
+    const kGroceries = await kitchenRow();
+    record(
+        "v2 Kitchen text tabs reach Groceries over Turbo",
+        kFridge.current === "Fridge" &&
+            kFridge.tabs.join() ===
+                "/kitchen/fridge,/kitchen/groceries,/kitchen/usuals" &&
+            kGroceries.marker === "stay" &&
+            kGroceries.current === "Groceries" &&
+            /groceries/i.test(kGroceries.h1 || "") &&
+            kGroceries.phoneCurrent === "Kitchen",
+        { kFridge, kGroceries, ex: drain() },
+    );
+
+    await goto("/settings");
+    await setMarker();
+    const membersLink = await ev<string | null>(
+        `[...document.querySelectorAll("nav.subnav a")].find((a) => a.textContent === "Members")?.getAttribute("href") ?? null`,
+    );
+    await clickSel(
+        'nav.subnav a[href^="/settings/household?"], nav.subnav a[href="/settings/household"]',
+    );
+    await sleep(500);
+    const members = await ev<{ path: string; h1: string | null }>(`({
+        path: location.pathname,
+        h1: document.querySelector("h1")?.textContent?.trim() ?? null,
+    })`);
+    record(
+        "v2 Settings sub-nav reaches the household members page",
+        membersLink != null &&
+            membersLink.startsWith("/settings/household") &&
+            members.path === "/settings/household",
+        { membersLink, members, ex: drain() },
+    );
+
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await clickSel("a.fd-log");
+    await sleep(500);
+    const v2Log = await v2Snap();
+    await goto("/");
+    await setMarker();
+    const trendsBefore = await ev<number>(
+        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
+    );
+    await clickSel('.fd-tabs a[href="/#trends"]');
+    await sleep(400);
+    const v2Trends = await v2Snap();
+    const trendsTop = await ev<number>(
+        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
+    );
+    record(
+        "v2 Log opens the log-meal dialog; Trends scrolls to its card",
+        v2Log.marker === "stay" &&
+            v2Log.open.includes("nutrition-log-meal") &&
+            v2Log.hash === "" &&
+            v2Trends.marker === "stay" &&
+            v2Trends.active === "Today" &&
+            v2Trends.hash === "" &&
+            trendsTop < trendsBefore - 300,
+        { v2Log, v2Trends, trendsBefore, trendsTop, ex: drain() },
+    );
+
+    await goto("/");
+    await setMarker();
+    await control("shell=old");
+    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
+    await sleep(600);
+    const toOld = await v2Snap();
+    record(
+        "switching shells is one full reload (tracked assets differ)",
+        toOld.marker == null && toOld.bottomNav && toOld.tabs === "missing",
+        { toOld, ex: drain() },
+    );
+    await control("shell=old&session=app&theme=dark");
 
     const ex = drain();
     record("no uncaught console errors", ex.length === 0, { ex });

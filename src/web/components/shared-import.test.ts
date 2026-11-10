@@ -1,3 +1,5 @@
+import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
+import { recipeMacrosFixture } from "../../test-support/recipe-macros.js";
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +12,9 @@ import {
     runBarcodeLookupAction,
 } from "./food-picker.js";
 import { renderFridgePage } from "../pages/fridge.js";
+import { utcTodayFromDate } from "../../domain/stock.js";
+
+const FRIDGE_PAGE_TODAY = utcTodayFromDate();
 import { renderGroceryPage } from "../pages/grocery.js";
 import { renderRecipeDetailPage, renderRecipesPage } from "../pages/recipes.js";
 import { renderMemberMultiSelect } from "./member-multi-select.js";
@@ -67,6 +72,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(recipesSrc).toContain('from "../components/member-multi-select.js"');
 
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -76,10 +82,18 @@ test("fridge page and grocery page import the same quantity-field and food-picke
             },
         ],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -114,7 +128,11 @@ test("fridge page and grocery page import the same quantity-field and food-picke
     expect(fridge).toContain("Add household item");
     expect(fridge).toContain("fridge-add-supply");
     const recipes = renderRecipeDetailPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipe: {
             id: "r1",
             householdId: "hh-1",
@@ -141,18 +159,7 @@ test("fridge page and grocery page import the same quantity-field and food-picke
         viewerId: FIXTURE_MEMBERS[0]!.userId,
         filterUserId: FIXTURE_MEMBERS[0]!.userId,
         portionCount: 1,
-        macros: {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: true,
-            incompleteReasons: [],
-            gaps: [],
-        },
+        macros: recipeMacrosFixture({ incomplete: true }),
         isOwner: true,
     });
     expect(recipes).toContain('class="quantity-field"');
@@ -197,6 +204,7 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(nutritionSrc).not.toContain("page-markup.js");
 
     const fridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [
             {
                 id: "loc-1",
@@ -216,7 +224,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
                 foodId: null,
             },
         ],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         error: "Enter a location name.",
     });
     expect(fridge).toContain('class="error-banner"');
@@ -226,16 +238,25 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(fridge).not.toContain('class="empty-fridge"');
 
     const emptyFridge = renderFridgePage({
+        today: FRIDGE_PAGE_TODAY,
         locations: [],
         items: [],
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
     });
     expect(emptyFridge).toContain(
         '<p class="empty-fridge">Add a location, then add an item.</p>',
     );
 
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [],
         canManage: true,
         error: "Enter a store name.",
@@ -249,7 +270,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(grocery).not.toContain("<h3>Add supply</h3>");
 
     const groceryWithLine = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
@@ -292,7 +317,11 @@ test("household pages call shared markup helpers for banners, empty states, and 
     expect(groceryWithLine).toContain("Cottage Cheese");
 
     const recipes = renderRecipesPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         recipes: [],
         members: [],
         viewerId: "11111111-1111-4111-8111-111111111111",
@@ -401,14 +430,14 @@ test("food picker HTML has barcode, search, and manual tabs", () => {
 
 test("post picker search hits submit food_id or barcode with hidden fields and qty", () => {
     const html = renderFoodPicker({
-        action: "/fridge/items",
+        action: "/kitchen/fridge/items",
         method: "post",
         hiddenFields: { kind: "food", location_id: "loc-1" },
         includeQuantity: true,
     });
     const form = searchFormHtml(html);
     expect(form).toContain('method="post"');
-    expect(form).toContain('action="/fridge/items"');
+    expect(form).toContain('action="/kitchen/fridge/items"');
     expect(form).toContain('name="kind" value="food"');
     expect(form).toContain('name="location_id" value="loc-1"');
     expect(form).toContain('name="qty_amount"');
@@ -473,7 +502,7 @@ test("get picker search hits stay non-submitting text", () => {
 
 test("post picker without quantity still posts food_id and hidden fields", () => {
     const html = renderFoodPicker({
-        action: "/fridge/items",
+        action: "/kitchen/fridge/items",
         method: "post",
         hiddenFields: { kind: "food", location_id: "loc-1" },
     });
@@ -495,7 +524,11 @@ test("member multi-select, already-have, and store sections still render", () =>
     expect(members).toContain("Alice");
     expect(members).toContain("Bob");
     const grocery = renderGroceryPage({
-        chrome: { theme: "light", attention: { count: 0, tabs: {} } },
+        chrome: {
+            theme: "light",
+            attention: { count: 0, tabs: {} },
+            flags: FIXTURE_APP_CHROME_FLAGS,
+        },
         stores: [
             {
                 id: "st-1",
