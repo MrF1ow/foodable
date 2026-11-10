@@ -754,3 +754,45 @@ test("ranOutInWindow still sees zero after a decimal restock", async () => {
     );
     expect(ranOut.map((r) => r.reason)).toEqual(["eat"]);
 });
+
+test("ranOutInWindow counts supplies still in stock", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, "hh-1", "Pantry");
+    const paper = await findOrCreateManualFood(
+        foods,
+        "hh-1",
+        "supply",
+        "Toilet paper",
+    );
+    await applyMovement(fridge, stock, foods, {
+        householdId: "hh-1",
+        foodId: paper.id,
+        delta: 10,
+        unit: "roll",
+        reason: "purchase",
+        locationId: loc.id,
+        now: new Date("2026-06-03T09:00:00Z"),
+    });
+    const item = (await fridge.listItems("hh-1"))[0]!;
+    await applyMovement(fridge, stock, foods, {
+        householdId: "hh-1",
+        foodId: paper.id,
+        delta: -2,
+        unit: "roll",
+        reason: "adjust",
+        fridgeItemId: item.id,
+        now: new Date("2026-06-04T09:00:00Z"),
+    });
+    const ranOut = ranOutInWindow(
+        {
+            movements: await stock.listMovements("hh-1"),
+            fridgeItems: await fridge.listItems("hh-1"),
+            displayNameByFoodId: new Map(),
+        },
+        { from: "2026-06-01", to: "2026-06-07" },
+        "UTC",
+    );
+    expect(ranOut).toEqual([]);
+});

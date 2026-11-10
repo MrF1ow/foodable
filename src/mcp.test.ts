@@ -4760,6 +4760,26 @@ describe("household config tools", () => {
             });
         });
 
+        test("no alcohol goal notice while alcohol display is off", async () => {
+            db.goals = goals({ daily_calories: 2000, daily_alcohol_g: 20 });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Lager",
+                alcoholG: 4,
+                gramsPerEach: 330,
+            });
+            await db.foodsStore.insertFood(food);
+            await withRateProductFlag(true, async (call) => {
+                const r = await call("rate_product", { food_id: food.id });
+                const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const messages = out.checks[0]!.notices.map((n) => n.message);
+                expect(messages.some((m) => m.includes("alcohol"))).toBe(false);
+            });
+        });
+
         test("missing food_id returns found false", async () => {
             const missing = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
             await withRateProductFlag(true, async (call) => {

@@ -267,10 +267,12 @@ const GOAL_REMAINING: {
 function todayRemaining(
     goals: NutritionGoals | null,
     totals: DailyTotals,
+    showAlcohol: boolean,
 ): ProductCheckToday["remaining"] {
     if (goals == null) return {};
     const remaining: ProductCheckToday["remaining"] = {};
     for (const row of GOAL_REMAINING) {
+        if (row.nutrient === "alcohol_g" && !showAlcohol) continue;
         const target = goals[row.goal];
         if (typeof target !== "number") continue;
         const used = totals[row.total];
@@ -387,6 +389,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
         callerHouseholdId,
         requireHouseholdMemberId,
         analytics,
+        alcohol,
     } = ctx;
 
     gatedTool(
@@ -470,7 +473,19 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             getGoalsForDate(memberId, day),
                         ]);
                         const totals = sumMeals(meals);
-                        return { remaining: todayRemaining(goals, totals) };
+                        // Alcohol stays hidden, as in get_goal_progress and
+                        // the digest, unless the caller shows it and the
+                        // member tracks it.
+                        const showAlcohol =
+                            alcohol != null &&
+                            (profile?.alcohol_tracking_enabled ?? false);
+                        return {
+                            remaining: todayRemaining(
+                                goals,
+                                totals,
+                                showAlcohol,
+                            ),
+                        };
                     };
 
                     if (hasFood) {

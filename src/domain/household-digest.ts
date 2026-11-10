@@ -228,7 +228,8 @@ function currentStockByFoodUnit(
 ): Map<string, number> {
     const totals = new Map<string, number>();
     for (const item of items) {
-        if (item.kind !== "food" || item.foodId == null) continue;
+        // Supplies write ledger movements too, so they count as stock.
+        if (item.foodId == null) continue;
         const key = unitKey(item.foodId, item.quantity.unit);
         totals.set(key, (totals.get(key) ?? 0) + item.quantity.amount);
     }
