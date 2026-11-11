@@ -90,6 +90,11 @@ import {
     kitchenUsualRowMeta,
     renderKitchenUsualsV2Page,
 } from "../src/web/pages/v2/kitchen-usuals.js";
+import {
+    buildPreviewProductPageView,
+    renderProductBarcodeUnknownPage,
+    renderProductV2Page,
+} from "../src/web/pages/v2/product.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -1575,6 +1580,52 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       "weigh-in",
                   ),
                   "trends-v2": previewTrendsPage(chrome),
+                  "product-full": renderProductV2Page(
+                      buildPreviewProductPageView(
+                          chrome,
+                          food("f-product-full", "Greek yogurt, plain 2%", 59, {
+                              brand: "Fage",
+                              proteinG: 10,
+                              carbsG: 4,
+                              fatG: 0.4,
+                              fiberG: 0,
+                              sugarG: 4,
+                              gramsPerEach: 170,
+                          }),
+                          {
+                              barcodes: ["5201054017463"],
+                              stock: [
+                                  {
+                                      locationName: "Fridge",
+                                      quantityLabel: "2",
+                                  },
+                              ],
+                          },
+                      ),
+                  ),
+                  "product-partial": renderProductV2Page(
+                      buildPreviewProductPageView(
+                          chrome,
+                          food("f-product-partial", "Trail mix", 120, {
+                              proteinG: null,
+                              carbsG: null,
+                              fatG: null,
+                              fiberG: null,
+                              sugarG: null,
+                          }),
+                      ),
+                  ),
+                  "product-none": renderProductV2Page(
+                      buildPreviewProductPageView(
+                          chrome,
+                          food("f-product-none", "Spice blend", null),
+                      ),
+                  ),
+                  "product-barcode-unknown": renderProductBarcodeUnknownPage({
+                      chrome,
+                      barcode: "9999999999999",
+                      backHref: "/kitchen/fridge",
+                  }),
               }
             : {}),
     };
