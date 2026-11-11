@@ -35,6 +35,7 @@ import {
     iconChevronRight,
     iconPlus,
     iconRepeat,
+    iconTrash,
 } from "../../components/v2/icons.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import {
@@ -501,6 +502,7 @@ function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
                       },
                       trail: {
                           label: "Delete",
+                          icon: iconTrash(),
                           form: {
                               action: `/meals/${row.mealId}/delete`,
                               fields: {

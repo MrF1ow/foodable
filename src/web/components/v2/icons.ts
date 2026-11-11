@@ -32,6 +32,13 @@ export function iconChevronRight(): Html {
     return icon('<path d="M9 6l6 6-6 6"/>');
 }
 
+/** Trash can for the row Delete action (FigCraft 42193 desktop hover). */
+export function iconTrash(): Html {
+    return icon(
+        '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>',
+    );
+}
+
 /** Repeat arrow for the swipe "Again" action (FigCraft 19380). */
 export function iconRepeat(): Html {
     return icon(

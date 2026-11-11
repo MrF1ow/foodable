@@ -681,12 +681,41 @@
         display: block;
     }
 
-    .fd-recipe-back__btn {
+    /* Beats `.fd-settings-phone-back { display: flex }`, which the round
+       button also carries and which loads after this sheet. */
+    .fd-recipe-back .fd-recipe-back__btn {
         display: none;
     }
 
     .fd-recipe-back__link {
         display: inline-flex;
+        color: var(--text-secondary);
+    }
+
+    /* FigCraft 48815: Per serving and Ingredients cards on the left, Steps
+       on the right, each a white card with a sentence-case title. */
+    .fd-recipe-section {
+        padding: var(--fd-s-14) var(--fd-s-14);
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-recipe-section-head {
+        border-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .fd-recipe-section-head__title,
+    .fd-recipe-section--macros .fd-recipe-macros-kicker {
+        font: 600 15px/20px var(--font-body);
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--text-primary);
+    }
+
+    .fd-recipe-section--macros .fd-recipe-macros-kicker {
+        margin-bottom: var(--fd-s-10);
     }
 
     .fd-recipes-add-link:focus-visible {

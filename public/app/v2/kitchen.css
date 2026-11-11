@@ -216,11 +216,28 @@
     color: var(--status-over);
 }
 
+/* FigCraft 21714: Expires and Kept in sit together in one white card. */
 .fd-kitchen-sheet-rows {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-2);
     margin-top: var(--fd-s-4);
+    padding: 0 var(--fd-s-14);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row {
+    gap: var(--fd-s-12);
+    min-height: 56px;
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row:first-child {
+    border-top: 0;
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row__meta {
+    color: var(--text-tertiary);
 }
 
 .fd-kitchen-sheet-row,

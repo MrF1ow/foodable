@@ -342,9 +342,11 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
 <p class="fd-recipe-meta fd-recipe-meta--you">${esc(portionNote)}</p>
 </header>
-${macrosBlock(view.macrosPerPortion, view.gapReasons)}
 <div class="fd-recipe-layout">
 <div class="fd-recipe-col fd-recipe-col--primary">
+<section class="fd-recipe-section fd-recipe-section--macros" aria-label="Per serving">
+${macrosBlock(view.macrosPerPortion, view.gapReasons)}
+</section>
 <section class="fd-recipe-section" aria-labelledby="fd-recipe-ingredients-heading">
 <span class="fd-sr" id="fd-recipe-ingredients-heading">Ingredients</span>
 ${ingredientGroupsHtml(view.ingredientGroups)}

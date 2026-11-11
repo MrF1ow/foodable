@@ -70,34 +70,36 @@ export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
             value: floorGoal(goals.daily_fat_g, (n) => `${n} g`),
             dotKey: "fat",
         },
+    ];
+    rows.push(
         {
-            label: "Fiber",
+            label: "Water",
+            value: floorGoal(goals.daily_water_ml, formatWaterGoal),
+        },
+        {
+            label: "Fiber, at least",
             value: floorGoal(goals.daily_fiber_g, (n) => `${n} g`),
             dotKey: "fiber",
         },
         {
-            label: "Sugar (max)",
+            label: "Sugar, at most",
             value: ceilingGoal(goals.daily_sugar_g, (n) => `${n} g`),
             dotKey: "sugar",
         },
-    ];
+        {
+            label: "Caffeine, at most",
+            value: ceilingGoal(goals.daily_caffeine_mg, (n) => `${n} mg`),
+            dotKey: "caffeine",
+        },
+    );
     if (view.alcohol) {
         rows.push({
-            label: "Alcohol (max)",
+            label: "Alcohol, at most",
             value: ceilingGoal(goals.daily_alcohol_g, (n) =>
                 formatAlcohol(n, view.alcohol!),
             ),
         });
     }
-    rows.push({
-        label: "Caffeine (max)",
-        value: ceilingGoal(goals.daily_caffeine_mg, (n) => `${n} mg`),
-        dotKey: "caffeine",
-    });
-    rows.push({
-        label: "Water",
-        value: floorGoal(goals.daily_water_ml, (n) => `${n} ml`),
-    });
     rows.push({
         label: "Target weight",
         value:
@@ -110,11 +112,16 @@ export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
 
 const MACRO_GOAL_LABELS = new Set(["Calories", "Protein", "Carbs", "Fat"]);
 const LIMIT_GOAL_LABELS = new Set([
-    "Fiber",
-    "Sugar (max)",
-    "Caffeine (max)",
     "Water",
+    "Fiber, at least",
+    "Sugar, at most",
+    "Caffeine, at most",
 ]);
+
+/** Water goals read in litres, like the Today water line (2500 → "2.5 L"). */
+function formatWaterGoal(ml: number): string {
+    return `${Math.round(ml / 100) / 10} L`;
+}
 
 function goalRowMarkup(row: GoalRow): string {
     const dt =
@@ -124,9 +131,21 @@ function goalRowMarkup(row: GoalRow): string {
     return `<div class="fd-settings-member-dl__row">${dt}<dd>${esc(row.value)}</dd></div>`;
 }
 
-function goalsCard(title: string, rows: GoalRow[]): string {
+/**
+ * One white card of goal rows under a section label (FigCraft 23562). The
+ * macros card has no visible label in the frame, so its title is screen-reader
+ * only.
+ */
+function goalsCard(
+    title: string,
+    rows: GoalRow[],
+    opts: { hideTitle?: boolean } = {},
+): string {
     if (rows.length === 0) return "";
-    return `<section class="fd-settings-goals-card" aria-label="${esc(title)}"><h2 class="fd-settings-goals-card__title">${esc(title)}</h2><dl class="fd-settings-member-dl fd-settings-goals-dl">${rows.map((row) => goalRowMarkup(row)).join("")}</dl></section>`;
+    const titleClass = opts.hideTitle
+        ? "fd-settings-goals-card__title fd-sr"
+        : "fd-settings-goals-card__title";
+    return `<section class="fd-settings-goals-card" aria-label="${esc(title)}"><h2 class="${titleClass}">${esc(title)}</h2><dl class="fd-settings-member-dl fd-settings-goals-dl">${rows.map((row) => goalRowMarkup(row)).join("")}</dl></section>`;
 }
 
 export function renderSettingsGoalsV2Body(view: SettingsGoalsV2View): string {
@@ -140,7 +159,7 @@ export function renderSettingsGoalsV2Body(view: SettingsGoalsV2View): string {
     const intro =
         rows.length === 0
             ? `<p class="fd-settings-goals-empty">No nutrition goals set yet.</p>`
-            : `<p class="fd-settings-goals-date muted">For ${esc(view.goalDate)}</p>${goalsCard("Macros", macroRows)}${goalsCard("Limits and minimums", limitRows)}${
+            : `<p class="fd-settings-goals-date muted">For ${esc(view.goalDate)}</p>${goalsCard("Macros", macroRows, { hideTitle: true })}${goalsCard("Limits and minimums", limitRows)}${
                   extraRows.length > 0
                       ? goalsCard("Other targets", extraRows)
                       : ""

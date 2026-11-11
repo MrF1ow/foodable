@@ -424,11 +424,25 @@
 .fd-swipe-btn--danger {
     color: var(--status-over);
 }
+/* The phone swipe shows Delete as text only (FigCraft 19279). */
+.fd-row__action--trail .fd-swipe-btn .fd-icon {
+    display: none;
+}
 
+/*
+ * Desktop hover (FigCraft 42193): the row tints and the actions appear as
+ * icon-only buttons at its right edge. The label stays in the button as
+ * visually hidden text, so the accessible name is unchanged.
+ */
 @media (hover: hover) and (pointer: fine) {
     .fd-row--swipe:not([data-swipe-open]) {
         overflow: visible;
         background: var(--surface-bg);
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover,
+    .fd-row--swipe:not([data-swipe-open]):focus-within {
+        border-radius: var(--radius-md);
+        background: var(--surface-raised);
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__body {
         transform: none;
@@ -438,8 +452,7 @@
         bottom: auto;
         z-index: 2;
         width: auto;
-        padding: var(--fd-s-6) var(--fd-s-12);
-        border-radius: var(--radius-pill);
+        padding: 0;
         background: var(--surface-raised);
         opacity: 0;
         pointer-events: none;
@@ -447,11 +460,29 @@
         transition: opacity 0.15s ease;
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action--trail {
-        right: 0;
+        right: var(--fd-s-6);
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action--lead {
         left: auto;
-        right: calc(var(--fd-action-w) + var(--space-gap));
+        right: calc(var(--fd-s-6) + 30px);
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn {
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: var(--radius-pill);
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn .fd-icon {
+        display: block;
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn__text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
     }
     .fd-row--swipe:not([data-swipe-open]):hover .fd-row__action,
     .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__action {
