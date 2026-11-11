@@ -45,3 +45,10 @@ export function iconRepeat(): Html {
         '<path d="M20 12a8 8 0 1 1-2.6-5.9L20 8.5"/><path d="M20 4v4.5h-4.5"/>',
     );
 }
+
+/** Shopping cart for product and grocery actions (FigCraft Icon/cart 21094). */
+export function iconCart(): Html {
+    return icon(
+        '<path d="M3 4h2l2 11h11l2-8H6.5"/><path d="M7.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/><path d="M14.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/>',
+    );
+}

@@ -95,6 +95,7 @@ const db: {
     settingsStore: ReturnType<typeof createMemorySettingsStore>;
     rulesStore: ReturnType<typeof createMemoryRulesStore>;
     barcodeFoods: Record<string, FoodResult>;
+    barcodeLookupThrows: boolean;
 } = {
     profile: PROFILE,
     members: [
@@ -125,6 +126,7 @@ const db: {
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    barcodeLookupThrows: false,
 };
 
 mock.module("../../db/foods.js", () => ({
@@ -208,7 +210,12 @@ mock.module("../../db/profiles.js", () => ({
 }));
 mock.module("../../foods.js", () => ({
     ...realFoods,
-    lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
+    lookupBarcode: async (barcode: string) => {
+        if (db.barcodeLookupThrows) {
+            throw new Error("Network down");
+        }
+        return db.barcodeFoods[barcode] ?? null;
+    },
 }));
 
 afterAll(() => {
@@ -231,6 +238,7 @@ const { householdRoutes } = await import("./household.js");
 const { settingsRoutes } = await import("./settings.js");
 const { groceryRoutes } = await import("./grocery.js");
 const { fridgeRoutes } = await import("./fridge.js");
+const { foodsRoutes } = await import("./foods.js");
 const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
 
 function cookieFor(userId: string): string {
@@ -282,6 +290,7 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.barcodeLookupThrows = false;
     db.profile = { ...PROFILE };
     db.members = [
         {
@@ -1999,6 +2008,130 @@ describe("kitchen usuals ui-v2", () => {
         expect(r.status).toBe(400);
         const html = await r.text();
         expect(html).toContain(`name="return_to" value="${back}"`);
+        resetFlagsForTests();
+    });
+});
+
+const PRODUCT_BARCODE = "737628064502";
+
+function productApp() {
+    const hono = new Hono();
+    hono.route("/", foodsRoutes);
+    return hono;
+}
+
+function offProduct(): FoodResult {
+    return {
+        name: "OFF Greek Yogurt",
+        brand: "Fage",
+        serving: "170 g",
+        serving_quantity: 170,
+        serving_quantity_unit: "g",
+        calories: 59,
+        protein_g: 10,
+        carbs_g: 4,
+        fat_g: 0.4,
+        fiber_g: 0,
+        sugar_g: 4,
+        alcohol_g: null,
+        nutriscore_grade: "a",
+        nova_group: 1,
+        source: `off:${PRODUCT_BARCODE}`,
+        source_name: "openfoodfacts" as const,
+        barcode: PRODUCT_BARCODE,
+    };
+}
+
+describe("product routes (v2 foods)", () => {
+    beforeEach(async () => {
+        await createGroceryStore(db.settingsStore, HH, "Safeway");
+    });
+
+    test("GET /foods/:id 404 for archived food", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Archived" }),
+        );
+        await db.foodsStore.updateFoodRow({
+            ...food,
+            archivedAt: "2026-01-01T00:00:00.000Z",
+        });
+        const res = await productApp().request(`http://x/foods/${food.id}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(res.status).toBe(404);
+        resetFlagsForTests();
+    });
+
+    test("POST add-to-grocery returns 400 when no store", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.settingsStore = createMemorySettingsStore();
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const res = await productApp().request(
+            `http://x/foods/${food.id}/add-to-grocery`,
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(ALICE) },
+            },
+        );
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("Add a store first");
+        resetFlagsForTests();
+    });
+
+    test("GET by-barcode lookup error shows retry copy not OFF empty", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.barcodeLookupThrows = true;
+        const res = await productApp().request(
+            `http://x/foods/by-barcode/${PRODUCT_BARCODE}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("Could not look up this barcode");
+        expect(html).not.toContain("Open Food Facts does not know");
+        resetFlagsForTests();
+    });
+
+    test("POST by-barcode twice is duplicate-safe", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const code = "8880001112222";
+        const post = () =>
+            productApp().request(`http://x/foods/by-barcode/${code}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Trail+mix",
+            });
+        const first = await post();
+        const second = await post();
+        expect(first.status).toBe(303);
+        expect(second.status).toBe(303);
+        expect(first.headers.get("location")).toBe(
+            second.headers.get("location"),
+        );
+        expect((await db.foodsStore.listFoods(HH)).length).toBe(1);
+        resetFlagsForTests();
+    });
+
+    test("GET by-barcode known food redirects without duplicating catalog", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const existing = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Household food" }),
+        );
+        await db.foodsStore.setBarcode(HH, PRODUCT_BARCODE, existing.id);
+        db.barcodeFoods[PRODUCT_BARCODE] = offProduct();
+        const res = await productApp().request(
+            `http://x/foods/by-barcode/${PRODUCT_BARCODE}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/foods/${existing.id}`);
+        expect((await db.foodsStore.listFoods(HH)).length).toBe(1);
         resetFlagsForTests();
     });
 });
