@@ -893,7 +893,7 @@ function bindOpeners() {
         "click",
         (event) => {
             const open = event.target.closest?.(
-                "a.fd-log[data-fd-open-sheet], a.fd-search[data-fd-open-sheet], a.fd-logfood[data-fd-open-sheet]",
+                "a.fd-log[data-fd-open-sheet], a.fd-search[data-fd-open-sheet], a.fd-scan[data-fd-open-sheet], a.fd-logfood[data-fd-open-sheet]",
             );
             if (
                 !open ||
