@@ -350,6 +350,9 @@ const db = {
         issuedBy: string | null;
     }[],
     household: null as HouseholdConfig | null,
+    pluralsSameFood: false,
+    pluralsSameFoodWrites: 0,
+    householdConfigWrites: 0,
     fridgeStore: createMemoryFridgeStore(),
     stockStore: createMemoryStockStore(),
     groceryStore: createMemoryGroceryStore(),
@@ -665,8 +668,15 @@ mock.module("./db/household.js", () => ({
         _householdId: string,
         config: HouseholdConfig,
     ) => {
+        db.householdConfigWrites += 1;
         db.household = structuredClone(config);
         return structuredClone(db.household);
+    },
+    getPluralsSameFood: async () => db.pluralsSameFood,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) => {
+        db.pluralsSameFoodWrites += 1;
+        db.pluralsSameFood = enabled;
+        return enabled;
     },
     transferHouseholdOwnership: async (
         householdId: string,
@@ -877,6 +887,9 @@ beforeEach(() => {
         recipeSearchPlaces: [],
         preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
     };
+    db.pluralsSameFood = false;
+    db.pluralsSameFoodWrites = 0;
+    db.householdConfigWrites = 0;
     db.members = [
         {
             householdId: "hh-1",
@@ -3915,7 +3928,31 @@ describe("household config tools", () => {
                 restock_weekday: 6,
                 restock_time: "07:00",
                 restock_last_run_on: null,
+                plurals_same_food: false,
             });
+        });
+    });
+
+    test("plurals_same_food round-trips through config tools", async () => {
+        await withHousehold(async (call) => {
+            const written = await call("update_household_config", {
+                plurals_same_food: true,
+            });
+            expect(written.isError).toBeFalsy();
+            expect(written.structuredContent?.plurals_same_food).toBe(true);
+            expect(db.pluralsSameFood).toBe(true);
+            const got = await call("get_household_config");
+            expect(got.structuredContent?.plurals_same_food).toBe(true);
+        });
+    });
+
+    test("plurals_only update does not write household config", async () => {
+        await withHousehold(async (call) => {
+            db.household!.name = "Concurrent";
+            db.householdConfigWrites = 0;
+            await call("update_household_config", { plurals_same_food: true });
+            expect(db.householdConfigWrites).toBe(0);
+            expect(db.household!.name).toBe("Concurrent");
         });
     });
 
@@ -7954,6 +7991,28 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
         .find((l) => l.startsWith("data:"));
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
+
+describe("household config plurals_same_food over HTTP", () => {
+    test.each(ERAS)("update and get round-trip (%p)", async (era) => {
+        db.pluralsSameFood = false;
+        await withHttpClient("u1", era, async (client) => {
+            const written = (await client.callTool({
+                name: "update_household_config",
+                arguments: { plurals_same_food: true },
+            })) as ToolResult;
+            expect(written.isError).toBeFalsy();
+            expect(written.structuredContent).toMatchObject({
+                plurals_same_food: true,
+            });
+            const got = (await client.callTool({
+                name: "get_household_config",
+            })) as ToolResult;
+            expect(got.structuredContent).toMatchObject({
+                plurals_same_food: true,
+            });
+        });
+    });
+});
 
 describe("set_nutrition_goals over HTTP", () => {
     test.each(ERAS)(

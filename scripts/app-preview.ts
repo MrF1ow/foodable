@@ -1308,6 +1308,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                           },
                           duplicatePairs: dupPairs,
                           refCounts: new Map(),
+                          pluralsSameFood: true,
                       } as never);
                   })(),
                   "settings-household-v2-member": renderSettingsMemberV2Page({

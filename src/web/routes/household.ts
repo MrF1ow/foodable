@@ -48,6 +48,7 @@ import {
     setHouseholdMemberRole,
     transferHouseholdOwnership,
     removeHouseholdMemberAccount,
+    setPluralsSameFood,
     updateHouseholdConfig,
     updateSocialReaderEnabled,
 } from "../../db/household.js";
@@ -637,6 +638,24 @@ householdRoutes.post(
                 ? "household.social-reader.on"
                 : "household.social-reader.off",
             { platform: SOCIAL_READER_LABELS[reader] },
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/plurals-same-food",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        const enabled = formText(body, "plurals_same_food") === "true";
+        await setPluralsSameFood(manager.householdId, enabled);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "household.plurals-same-food.saved",
         );
     },
 );

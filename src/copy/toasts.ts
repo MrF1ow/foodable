@@ -180,6 +180,10 @@ export const TOASTS = {
         kind: "success",
         text: "Recipe settings saved",
     },
+    "household.plurals-same-food.saved": {
+        kind: "success",
+        text: "Food name matching updated",
+    },
     "household.fetch-refusal.cleared": {
         kind: "success",
         text: "{host} can be read again",

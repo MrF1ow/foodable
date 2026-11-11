@@ -71,6 +71,7 @@ export type SettingsHouseholdV2View = {
         keepId: string;
         picks: Partial<Record<string, string>>;
     };
+    pluralsSameFood?: boolean;
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
@@ -176,6 +177,22 @@ function storeRows(stores: GroceryStore[]): Html {
     });
 }
 
+const PLURALS_SAME_FOOD_LABEL = "Treat singular and plural as the same food";
+
+function pluralsSameFoodBlock(view: SettingsHouseholdV2View): Html {
+    const enabled = view.pluralsSameFood === true;
+    if (view.canManage) {
+        const checked = enabled ? " checked" : "";
+        return raw(
+            `<form method="post" action="/settings/household/plurals-same-food" class="fd-settings-form fd-settings-form--inline fd-settings-form--prefs"><span class="fd-settings-check"><input type="checkbox" name="plurals_same_food" value="true" id="plurals_same_food"${checked} /><span class="fd-settings-check__text">${esc(PLURALS_SAME_FOOD_LABEL)}</span></span>${settingsPrimarySubmit("Save")}</form>`,
+        );
+    }
+    const state = enabled ? "On" : "Off";
+    return raw(
+        `<li class="fd-row fd-row--prefs"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(PLURALS_SAME_FOOD_LABEL)}</span><span class="fd-row__meta">${esc(state)}</span></span></div></div></li>`,
+    );
+}
+
 function socialReaderV2Rows(view: SettingsHouseholdV2View): Html {
     const readers: SocialReaderId[] = ["tiktok", "facebook"];
     const socialReaders = view.socialReaders ?? DEFAULT_SOCIAL_READERS;
@@ -264,8 +281,19 @@ export function renderSettingsHouseholdV2Body(
         socialReaders: view.socialReaders,
     });
 
+    const pluralsBlock = view.canManage
+        ? pluralsSameFoodBlock(view)
+        : raw(
+              `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(rowList([pluralsSameFoodBlock(view)], { label: PLURALS_SAME_FOOD_LABEL }))}`,
+          );
+
     const sections = join([
         raw(`${nameField}${token}`),
+        view.canManage
+            ? raw(
+                  `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(pluralsBlock)}`,
+              )
+            : pluralsBlock,
         raw(
             `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(rowList(memberRows(view), { label: "Members" }))}`,
         ),

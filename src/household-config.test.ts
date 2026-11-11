@@ -34,6 +34,17 @@ const current: HouseholdConfig = {
     },
 };
 
+test("plurals_same_food parses as boolean", () => {
+    expect(parseHouseholdConfigPatch({ plurals_same_food: true })).toEqual({
+        ok: true,
+        value: { pluralsSameFood: true },
+    });
+    expect(parseHouseholdConfigPatch({ plurals_same_food: "yes" })).toEqual({
+        ok: false,
+        error: expect.stringContaining("singular and plural"),
+    });
+});
+
 test("parse rejects an unknown recipe place kind and leaves merge unused", () => {
     const parsed = parseHouseholdConfigPatch({
         recipe_search_places: [

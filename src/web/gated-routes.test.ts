@@ -131,6 +131,12 @@ describe("gated route harness on composed app", () => {
             },
             {
                 method: "POST",
+                path: "/settings/household/plurals-same-food",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
                 path: "/settings/household/items/:id/archive",
                 flag: "ui-v2",
                 notFound: true,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { HOUSEHOLD_CANNOT_DELETE_ACCOUNT } from "../../auth-context.js";
 import {
     MEMBER_ROLES,
+    type HouseholdConfigPatch,
     householdConfigToWire,
     householdTimezone,
     mergeHouseholdConfig,
@@ -13,6 +14,8 @@ import {
     listHouseholdMembers,
     getHouseholdConfig,
     getHouseholdOwnerProfile,
+    getPluralsSameFood,
+    setPluralsSameFood,
     updateHouseholdConfig,
 } from "../../db/household.js";
 import {
@@ -124,15 +127,33 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         restock_weekday: z.number(),
         restock_time: z.string(),
         restock_last_run_on: z.string().nullable(),
+        plurals_same_food: z.boolean(),
     });
+
+    function pluralsSameFoodLine(enabled: boolean): string {
+        return enabled
+            ? "Plural names: treated as the same food."
+            : "Plural names: kept as separate foods.";
+    }
+
+    function patchTouchesStoredConfig(patch: HouseholdConfigPatch): boolean {
+        return (
+            patch.name !== undefined ||
+            patch.recipeSearchPlaces !== undefined ||
+            patch.preferences !== undefined
+        );
+    }
 
     async function householdConfigWire(
         householdId: string,
         config: Awaited<ReturnType<typeof getHouseholdConfig>>,
+        pluralsSameFood?: boolean,
     ) {
         const ownerProfile = await getHouseholdOwnerProfile(householdId);
         const effective = householdTimezone(config.preferences, ownerProfile);
-        return householdConfigToWire(config, effective);
+        const plurals =
+            pluralsSameFood ?? (await getPluralsSameFood(householdId));
+        return householdConfigToWire(config, effective, plurals);
     }
 
     server.registerTool(
@@ -140,7 +161,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Household Config",
             description:
-                "Read the household name, recipe search places, shared preferences, IANA timezone, effective timezone, and restock schedule (enabled, weekday, local time, last run date). A household bot token and any household member may call this. Writes are household-scoped, not a person user_id.",
+                "Read the household name, recipe search places, shared preferences, IANA timezone, effective timezone, restock schedule (enabled, weekday, local time, last run date), and whether singular and plural food names count as one food. A household bot token and any household member may call this. Writes are household-scoped, not a person user_id.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -166,7 +187,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${config.name}\nTimezone: ${config.effective_timezone}\n${restockLine}\nPlaces: ${config.recipe_search_places.map((place) => place.name).join(", ") || "(none)"}`,
+                                text: `${config.name}\nTimezone: ${config.effective_timezone}\n${restockLine}\n${pluralsSameFoodLine(config.plurals_same_food)}\nPlaces: ${config.recipe_search_places.map((place) => place.name).join(", ") || "(none)"}`,
                             },
                         ],
                         structuredContent: config,
@@ -182,7 +203,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Update Household Config",
             description:
-                "Merge household name, recipe search places, shared preferences, timezone, or restock schedule (restock_enabled, restock_weekday 0–6, restock_time HH:MM). Only the household owner, an admin, or the household bot may call this. Places are labels only, not a recipe table.",
+                "Merge household name, recipe search places, shared preferences, timezone, restock schedule (restock_enabled, restock_weekday 0–6, restock_time HH:MM), or plurals_same_food (whether Egg and Eggs count as one food). Only the household owner, an admin, or the household bot may call this. Places are labels only, not a recipe table.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -220,6 +241,12 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                     .string()
                     .optional()
                     .describe("HH:MM, 24-hour, household local time"),
+                plurals_same_food: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "When true, singular and plural names (Egg / Eggs) resolve to one food.",
+                    ),
             }),
             outputSchema: HOUSEHOLD_CONFIG_OUTPUT_SCHEMA,
         },
@@ -231,13 +258,23 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                     if (!parsed.ok) throw new Error(parsed.error);
                     const householdId = await callerManagerHouseholdId();
                     const current = await getHouseholdConfig(householdId);
-                    const updated = await updateHouseholdConfig(
-                        householdId,
-                        mergeHouseholdConfig(current, parsed.value),
-                    );
+                    const updated = patchTouchesStoredConfig(parsed.value)
+                        ? await updateHouseholdConfig(
+                              householdId,
+                              mergeHouseholdConfig(current, parsed.value),
+                          )
+                        : current;
+                    let pluralsSameFood: boolean | undefined;
+                    if (parsed.value.pluralsSameFood !== undefined) {
+                        pluralsSameFood = await setPluralsSameFood(
+                            householdId,
+                            parsed.value.pluralsSameFood,
+                        );
+                    }
                     const config = await householdConfigWire(
                         householdId,
                         updated,
+                        pluralsSameFood,
                     );
                     const restockLine = config.restock_enabled
                         ? `Restock on (${config.effective_timezone})`
@@ -246,7 +283,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Updated ${config.name}. Timezone: ${config.effective_timezone}. ${restockLine}.`,
+                                text: `Updated ${config.name}. Timezone: ${config.effective_timezone}. ${restockLine}. ${pluralsSameFoodLine(config.plurals_same_food)}`,
                             },
                         ],
                         structuredContent: config,

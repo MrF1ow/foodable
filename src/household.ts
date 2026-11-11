@@ -79,6 +79,8 @@ export const HOUSEHOLD_TZ_ERROR = "Enter a valid IANA timezone.";
 export const RESTOCK_WEEKDAY_ERROR = "Pick a day from Sunday to Saturday.";
 export const RESTOCK_ENABLED_ERROR =
     "Restock must be on or off (true or false).";
+export const PLURALS_SAME_FOOD_ERROR =
+    "Treat singular and plural as the same food must be on or off (true or false).";
 export const RESTOCK_TIME_ERROR = "Enter a time as HH:MM, 24-hour.";
 
 export type HouseholdConfig = {
@@ -118,6 +120,7 @@ export type HouseholdConfigWire = {
     restock_weekday: number;
     restock_time: string;
     restock_last_run_on: string | null;
+    plurals_same_food: boolean;
 };
 
 export type ParseResult<T> =
@@ -140,6 +143,7 @@ export type HouseholdConfigPatch = {
     name?: string;
     recipeSearchPlaces?: RecipeSearchPlace[];
     preferences?: HouseholdPreferencesPatch;
+    pluralsSameFood?: boolean;
 };
 
 export type RequireMemberResult =
@@ -785,6 +789,7 @@ export function recipePlacesToWire(
 export function householdConfigToWire(
     config: HouseholdConfig,
     effectiveTimezone: string,
+    pluralsSameFood = false,
 ): HouseholdConfigWire {
     return {
         name: config.name,
@@ -806,6 +811,7 @@ export function householdConfigToWire(
         restock_weekday: config.preferences.restock.weekday,
         restock_time: config.preferences.restock.time,
         restock_last_run_on: config.preferences.restock.lastRunOn,
+        plurals_same_food: pluralsSameFood,
     };
 }
 
@@ -984,6 +990,7 @@ export function parseHouseholdConfigPatch(
         restock_weekday?: unknown;
         restock_time?: unknown;
         restock_last_run_on?: unknown;
+        plurals_same_food?: unknown;
     };
     const patch: HouseholdConfigPatch = {};
     if (record.name !== undefined) {
@@ -1038,6 +1045,12 @@ export function parseHouseholdConfigPatch(
     }
     if (prefTouched) {
         patch.preferences = prefPatch;
+    }
+    if (record.plurals_same_food !== undefined) {
+        if (typeof record.plurals_same_food !== "boolean") {
+            return { ok: false, error: PLURALS_SAME_FOOD_ERROR };
+        }
+        patch.pluralsSameFood = record.plurals_same_food;
     }
     return { ok: true, value: patch };
 }
