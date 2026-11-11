@@ -110,16 +110,16 @@
 }
 
 .fd-log-online {
-    display: block;
+    flex: none;
     width: 100%;
     margin-top: var(--space-section);
-    padding: var(--space-row) 0;
-    border: 0;
-    background: none;
-    color: var(--accent-text);
-    font: 500 15px/20px var(--font-body);
-    text-align: center;
-    cursor: pointer;
+    gap: var(--fd-s-10);
+}
+
+.fd-log-online .fd-icon {
+    flex: none;
+    width: 20px;
+    height: 20px;
 }
 
 .fd-log-amount-form {
@@ -196,7 +196,8 @@
 @media (prefers-reduced-motion: reduce) {
     .fd-log-filter,
     .fd-log-recent,
-    .fd-log-search-clear {
+    .fd-log-search-clear,
+    .fd-quick-tile {
         transition: none;
     }
 }
@@ -460,11 +461,5 @@
 
     .fd-quick-tile__label {
         white-space: nowrap;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .fd-quick-tile {
-        transition: none;
     }
 }

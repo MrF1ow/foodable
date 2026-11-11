@@ -418,6 +418,7 @@ function previewResultRows(): string {
         }),
         searchResultRow({
             title: "Chicken noodle soup",
+            score: 41,
             subtitle: "Campbell's · 1 cup · 90 kcal",
             macros: { protein: 5, carbs: 12, fat: 2 },
             add: {
@@ -531,12 +532,13 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;
+    const onlineHidden = showResults ? "" : " hidden";
     const body = `<div class="fd-log-search-panel">
 ${searchFieldHtml(query)}
 ${filterChipsHtml(!showResults)}
 <div class="fd-log-search-results" data-fd-log-results${resultsHidden}>${resultsBody}</div>
 <div class="fd-log-search-empty" data-fd-log-empty${emptyHidden}>${emptyBody}</div>
-<button type="button" class="fd-log-online" data-fd-log-online hidden>Search online</button>
+<button type="button" class="fd-btn fd-btn--primary fd-log-online" data-fd-log-online${onlineHidden}>${fdIcon("search", 2)}<span>Search online</span></button>
 </div>`;
     return sheet({
         id: FD_LOG_SEARCH_SHEET_ID,

@@ -179,6 +179,18 @@ describe("renderLogSheets", () => {
         expect(html).toContain("Scrambled eggs");
     });
 
+    test("preview results mode shows the online search fallback", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            searchOpenOnLoad: true,
+            previewSearch: "results",
+            previewQuery: "chick",
+        });
+        expect(html).toContain("fd-log-online");
+        expect(html).toMatch(/data-fd-log-online[^>]*(?<! hidden)/);
+        expect(html).toContain("Search online");
+    });
+
     test("preview results mode renders filter chips and search rows", () => {
         const html = renderLogSheets({
             timezone: "UTC",
