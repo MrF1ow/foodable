@@ -352,6 +352,64 @@ export async function listHouseholdsForRecipeSweep(): Promise<
     });
 }
 
+function pluralsSameFoodFromRow(value: unknown): boolean {
+    return value === true;
+}
+
+export async function getPluralsSameFood(
+    householdId: string,
+): Promise<boolean> {
+    return run(async (tx) => {
+        let data;
+        try {
+            data = await maybeOne<{ plurals_same_food: unknown }>(
+                tx,
+                tx`
+                    select plurals_same_food
+                    from ${tx.unsafe(HOUSEHOLDS)}
+                    where id = ${householdId}
+                `,
+                "load plurals_same_food",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to load plurals_same_food: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to load plurals_same_food");
+        }
+        return pluralsSameFoodFromRow(data.plurals_same_food);
+    });
+}
+
+export async function setPluralsSameFood(
+    householdId: string,
+    enabled: boolean,
+): Promise<boolean> {
+    return run(async (tx) => {
+        let data;
+        try {
+            data = await maybeOne<{ plurals_same_food: unknown }>(
+                tx,
+                tx`
+                    update ${tx.unsafe(HOUSEHOLDS)}
+                    set plurals_same_food = ${enabled}
+                    where id = ${householdId}
+                    returning plurals_same_food
+                `,
+                "update plurals_same_food",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to update plurals_same_food: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to update plurals_same_food");
+        }
+        return pluralsSameFoodFromRow(data.plurals_same_food);
+    });
+}
+
 export async function getHouseholdConfig(
     householdId: string,
 ): Promise<HouseholdConfig> {
