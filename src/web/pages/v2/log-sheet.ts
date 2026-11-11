@@ -551,7 +551,9 @@ ${filterChipsHtml(!showResults)}
         showClose: true,
     }).replace(
         'class="fd-sheet fd-sheet--edit" id="fd-log-search"',
-        'class="fd-sheet fd-sheet--edit fd-log-search-sheet" id="fd-log-search"',
+        // Focus goes to the panel; log-sheet.js focuses the search field only
+        // with a fine pointer, so a phone's keyboard waits for a tap.
+        'class="fd-sheet fd-sheet--edit fd-log-search-sheet" id="fd-log-search" data-fd-sheet-focus="panel"',
     );
 }
 
