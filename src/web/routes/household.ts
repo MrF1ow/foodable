@@ -1179,6 +1179,7 @@ householdRoutes.post(
 householdRoutes.post(
     "/settings/household/items/:id/archive",
     requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);
