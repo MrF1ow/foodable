@@ -659,8 +659,9 @@ button.fd-kitchen-sheet-row {
 }
 
 .fd-kitchen-put-loc .fd-chip__input:checked + .fd-chip__face {
-    background: var(--accent-fill);
-    color: var(--accent-on);
+    border-color: var(--text-primary);
+    background: var(--text-primary);
+    color: var(--surface-bg);
 }
 
 .fd-kitchen-put-date {
