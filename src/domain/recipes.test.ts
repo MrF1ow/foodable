@@ -51,6 +51,7 @@ import {
     createProduct,
     effectiveFoodsByIds,
     findOrCreateManualFood,
+    newFood,
     setUsualProduct,
     updateFood,
 } from "./foods.js";
@@ -1071,6 +1072,52 @@ test("listRecipesFiltered matches tag, can-make-now, and safe-for", async () => 
         },
     });
     expect(safe.map((row) => row.name)).toEqual(["Pasta"]);
+});
+
+test("importRecipeFromText links prep-sized ingredient lines via lookup variants", async () => {
+    const store = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    foods.setPluralsSameFood(HH, true);
+    const eggs = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    const mozzarella = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Fresh mozzarella" }),
+    );
+
+    const result = await importRecipeFromText(
+        store,
+        foods,
+        {
+            householdId: HH,
+            creatorId: ALICE,
+            text: "Caprese",
+            instructions: "Assemble.",
+            name: "Caprese",
+            ingredients: [
+                { name: "large eggs (beaten)" },
+                { name: "chopped fresh mozzarella" },
+            ],
+        },
+        { lookup: async () => null },
+    );
+
+    expect(result.ingredients).toHaveLength(2);
+    const eggRow = result.ingredients.find(
+        (row) => row.displayName === eggs.name,
+    );
+    const mozRow = result.ingredients.find(
+        (row) => row.displayName === mozzarella.name,
+    );
+    expect(eggRow?.foodId).toBe(eggs.id);
+    expect(mozRow?.foodId).toBe(mozzarella.id);
+    expect((await foods.getFood(HH, eggs.id))?.name).toBe("Eggs");
+    expect((await foods.getFood(HH, mozzarella.id))?.name).toBe(
+        "Fresh mozzarella",
+    );
+    expect(
+        (await foods.listFoods(HH)).filter((f) => !f.archivedAt),
+    ).toHaveLength(2);
 });
 
 test("importRecipeFromText find-or-creates foods and reports nutrition gaps", async () => {
