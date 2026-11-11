@@ -6,13 +6,21 @@ const WEEK_SWIPE_MIN = 48;
 const mq = (q) =>
     typeof window.matchMedia === "function" && window.matchMedia(q).matches;
 
+// Same-origin paths only: DOM hrefs never reach navigation raw.
 function visit(href) {
-    if (!href) return;
-    if (typeof window.Turbo !== "undefined" && window.Turbo.visit) {
-        window.Turbo.visit(href);
+    let url;
+    try {
+        url = new URL(href, location.origin);
+    } catch {
         return;
     }
-    window.location.assign(href);
+    if (!href || url.origin !== location.origin) return;
+    const path = url.pathname + url.search + url.hash;
+    if (typeof window.Turbo !== "undefined" && window.Turbo.visit) {
+        window.Turbo.visit(path);
+        return;
+    }
+    window.location.assign(path);
 }
 
 /**
