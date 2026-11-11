@@ -79,6 +79,7 @@ test("itemMacrosAtAmount scales recipe item by portions", () => {
     const m = itemMacrosAtAmount(
         {
             recipe_id: "r1",
+            food_id: null,
             amount: null,
             portions: 2,
             calories: 400,
@@ -117,6 +118,7 @@ test("itemMacrosAtAmount scales item macros", () => {
     const m = itemMacrosAtAmount(
         {
             recipe_id: null,
+            food_id: null,
             amount: 100,
             portions: null,
             calories: 200,
@@ -132,4 +134,36 @@ test("itemMacrosAtAmount scales item macros", () => {
     );
     expect(m.calories).toBe(300);
     expect(m.protein_g).toBe(30);
+});
+
+test("a row whose recipe was deleted still steps and scales by portions", () => {
+    const item = {
+        id: "i1",
+        meal_id: "m1",
+        household_id: "hh",
+        food_id: null,
+        recipe_id: null,
+        label: "Chili",
+        amount: null,
+        unit: null,
+        grams: null,
+        portions: 2,
+        calories: 500,
+        protein_g: 30,
+        carbs_g: 40,
+        fat_g: 20,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        sort_order: 0,
+        user_id: "u1",
+        created_at: "",
+    };
+    expect(editItemQuantity(item)).toEqual({
+        value: 2,
+        unit: "portion(s)",
+        mode: "portions",
+    });
+    expect(itemMacrosAtAmount(item, 4).calories).toBe(1000);
 });

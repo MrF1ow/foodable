@@ -24,8 +24,21 @@ export type EditItemQuantity = {
 };
 
 /** Stepper display value and unit for a meal_items row. */
+/**
+ * Recipe rows step in portions. So does a row whose recipe (or food) was
+ * deleted after logging: `on delete set null` clears the reference but keeps
+ * `portions`, and with no amount there is nothing else to scale by.
+ */
+function editsByPortions(
+    item: Pick<MealItem, "recipe_id" | "food_id" | "amount">,
+): boolean {
+    return (
+        item.recipe_id != null || (item.food_id == null && item.amount == null)
+    );
+}
+
 export function editItemQuantity(item: MealItem): EditItemQuantity {
-    if (item.recipe_id != null) {
+    if (editsByPortions(item)) {
         const portions = item.portions ?? 1;
         return { value: portions, unit: "portion(s)", mode: "portions" };
     }
@@ -140,6 +153,7 @@ export function itemMacrosAtAmount(
         | "amount"
         | "portions"
         | "recipe_id"
+        | "food_id"
         | "calories"
         | "protein_g"
         | "carbs_g"
@@ -156,7 +170,7 @@ export function itemMacrosAtAmount(
     alcohol_g: number | null;
     caffeine_mg: number | null;
 } {
-    const base = item.recipe_id != null ? item.portions : item.amount;
+    const base = editsByPortions(item) ? (item.portions ?? 1) : item.amount;
     if (base == null || !Number.isFinite(base) || base <= 0) {
         return {
             calories: item.calories,
@@ -255,6 +269,20 @@ function scaledFreeTextItemWrite(
     newAmount: number,
 ): MealItemWrite {
     const scaled = itemMacrosAtAmount(item, newAmount);
+    if (editsByPortions(item)) {
+        return {
+            ...mealItemToWriteRow(item),
+            portions: newAmount,
+            calories: scaled.calories,
+            protein_g: scaled.protein_g,
+            carbs_g: scaled.carbs_g,
+            fat_g: scaled.fat_g,
+            fiber_g: scaled.fiber_g,
+            sugar_g: scaled.sugar_g,
+            alcohol_g: scaled.alcohol_g,
+            caffeine_mg: scaled.caffeine_mg,
+        };
+    }
     const baseAmount = item.amount ?? 1;
     const grams =
         item.grams != null && baseAmount > 0
@@ -280,8 +308,11 @@ function specForChangedItem(item: MealItem, newAmount: number): MealItemSpec {
         return { recipeId: item.recipe_id, portions: newAmount };
     }
     if (item.food_id) {
+        // Keep the name it was logged under: the snapshot labels the row with
+        // it, and the web log path folds it into the digest a re-log writes.
         return {
             foodId: item.food_id,
+            name: item.label,
             amount: newAmount,
             unit: item.unit?.trim() || "g",
         };

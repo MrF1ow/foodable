@@ -271,6 +271,61 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         resetFlagsForTests();
     });
 
+    test("amount edit keeps the name the item was logged under", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+            grams_per_each: 50,
+        });
+        const spec = (amount: number) => [
+            { foodId, name: "Scrambled eggs", amount, unit: "each" },
+        ];
+        const mealInput = (
+            c: Awaited<ReturnType<typeof mealWriteFromItems>>,
+        ) => ({
+            meal_type: "lunch" as const,
+            logged_at: "2026-03-03T12:34:56.789Z",
+            description: c.description,
+            ...c.totals,
+            items: c.items,
+            item_digest: c.item_digest,
+        });
+        const { meal } = await insertMeal(
+            userId,
+            mealInput(await mealWriteFromItems(householdId, spec(1))),
+        );
+        const before = await getMealById(userId, meal.id);
+        const itemId = before!.items![0]!.id;
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:34",
+                [`item_amount_${itemId}`]: "2",
+                date: "2026-03-03",
+                return_to: "/?date=2026-03-03",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        expect(after!.items![0]!.label).toBe("Scrambled eggs");
+        const relog = await insertMeal(
+            userId,
+            mealInput(await mealWriteFromItems(householdId, spec(2))),
+        );
+        expect(relog.deduplicated).toBe(true);
+        resetFlagsForTests();
+    });
+
     test("amount edit stores the key a re-log at the new amount writes", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
