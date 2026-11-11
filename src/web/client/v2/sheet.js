@@ -202,9 +202,11 @@ function initSheet(dialog) {
         // initSheets already counted and focused an open-on-load sheet; the
         // toggle event that follows must not focus a second time.
         if (markOpen(dialog)) focusFirstField(dialog);
+        fitSheetsToKeyboard();
     };
     const onClosed = () => {
         markClosed(dialog);
+        unfitSheet(dialog);
         resetDrag();
         const back = invoker;
         invoker = null;
@@ -326,8 +328,52 @@ function initSheets(root) {
             // Don't wait for the async toggle event.
             markOpen(dialog);
             focusFirstField(dialog);
+            fitSheetsToKeyboard();
         }
     });
+}
+
+// iOS covers the page with the keyboard instead of shrinking it, so an open
+// bottom sheet stays under it and Safari pans its field off screen. Fit open
+// bottom sheets to the visual viewport; cleared when nothing is covered.
+const SHEET_VIEWPORT_SHARE = 0.9; // matches max-height: 90dvh in sheet.css
+
+function unfitSheet(dialog) {
+    dialog.style.bottom = "";
+    dialog.style.maxHeight = "";
+}
+
+function fitSheetsToKeyboard() {
+    const vv = window.visualViewport;
+    if (!vv || !document || typeof document.querySelectorAll !== "function") {
+        return;
+    }
+    // Not innerHeight: iOS shrinks it with the keyboard.
+    const layout =
+        (document.documentElement && document.documentElement.clientHeight) ||
+        window.innerHeight ||
+        0;
+    const covered = Math.max(
+        0,
+        Math.round(layout - (vv.offsetTop + vv.height)),
+    );
+    const fit = covered >= 1 && !mq(MQ_PANEL);
+    document.querySelectorAll("dialog.fd-sheet[open]").forEach((dialog) => {
+        if (!fit) {
+            unfitSheet(dialog);
+            return;
+        }
+        dialog.style.bottom = `${covered}px`;
+        dialog.style.maxHeight = `${Math.floor(vv.height * SHEET_VIEWPORT_SHARE)}px`;
+    });
+}
+
+if (
+    window.visualViewport &&
+    typeof window.visualViewport.addEventListener === "function"
+) {
+    window.visualViewport.addEventListener("resize", fitSheetsToKeyboard);
+    window.visualViewport.addEventListener("scroll", fitSheetsToKeyboard);
 }
 
 window.FoodableApp.onLoad(initSheets);

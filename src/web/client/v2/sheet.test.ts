@@ -150,7 +150,12 @@ class FakeDoc extends FakeEl {
 }
 
 function setup(
-    media: { coarse?: boolean; wide?: boolean; reduced?: boolean } = {},
+    media: {
+        coarse?: boolean;
+        wide?: boolean;
+        reduced?: boolean;
+        viewport?: boolean;
+    } = {},
 ) {
     focusLog.length = 0;
     const state = { coarse: true, wide: false, reduced: false, ...media };
@@ -158,7 +163,21 @@ function setup(
     const scrolls: Array<[number, number]> = [];
     const dispatched: Array<{ type: string; detail: unknown }> = [];
     const hooks: Array<(root: FakeDoc) => void> = [];
+    // A fake visualViewport (844px tall page; the keyboard shrinks `height`).
+    const viewport = media.viewport
+        ? Object.assign(new FakeEl("visualviewport"), {
+              height: 844,
+              offsetTop: 0,
+          })
+        : undefined;
+    // The layout viewport stays 844px; iOS shrinks innerHeight with the
+    // keyboard, so the module must not read it (set lower here on purpose).
+    if (viewport) {
+        (doc as any).documentElement = { clientHeight: 844 };
+    }
     const window = {
+        innerHeight: 600,
+        visualViewport: viewport,
         FoodableApp: {
             onLoad: (fn: (root: FakeDoc) => void) => {
                 hooks.push(fn);
@@ -176,7 +195,7 @@ function setup(
         dispatchEvent: (e: { type: string; detail: unknown }) =>
             dispatched.push({ type: e.type, detail: e.detail }),
     };
-    return { doc, window, state, scrolls, dispatched, hooks };
+    return { doc, window, state, scrolls, dispatched, hooks, viewport };
 }
 
 const source = await Bun.file("./src/web/client/v2/sheet.js").text();
@@ -666,4 +685,70 @@ test("a second sheet takes the lock once modal.js has let it go", () => {
     expect(ctx.doc.body.style.position).toBe("fixed");
     first.close();
     expect(ctx.doc.body.style.position).toBe("");
+});
+
+// The on-screen keyboard (iOS covers the page instead of shrinking it).
+function keyboard(
+    r: ReturnType<typeof rig>,
+    height: number,
+    offsetTop = 0,
+    event: "resize" | "scroll" = "resize",
+) {
+    const vv = r.viewport!;
+    Object.assign(vv, { height: 844 - height - offsetTop, offsetTop });
+    vv.fire(event);
+}
+
+test("an open bottom sheet is lifted above the keyboard and fits what is left", () => {
+    const r = rig({ viewport: true }, { field: true });
+    openIt(r.dialog);
+    expect(r.dialog.style.bottom ?? "").toBe("");
+    keyboard(r, 300);
+    expect(r.dialog.style.bottom).toBe("300px");
+    expect(r.dialog.style.maxHeight).toBe(`${Math.floor(544 * 0.9)}px`);
+});
+
+test("a Safari pan of the visual viewport is accounted for", () => {
+    const r = rig({ viewport: true }, { field: true });
+    openIt(r.dialog);
+    // 300px keyboard, view panned 120px down: 424px visible, from y=120.
+    keyboard(r, 300, 120, "scroll");
+    expect(r.dialog.style.bottom).toBe("300px");
+    expect(r.dialog.style.maxHeight).toBe(`${Math.floor(424 * 0.9)}px`);
+});
+
+test("the fit is cleared when the keyboard goes away and when the sheet closes", () => {
+    const r = rig({ viewport: true }, { field: true });
+    openIt(r.dialog);
+    keyboard(r, 300);
+    keyboard(r, 0);
+    expect(r.dialog.style.bottom).toBe("");
+    expect(r.dialog.style.maxHeight).toBe("");
+    keyboard(r, 300);
+    r.dialog.close();
+    expect(r.dialog.style.bottom).toBe("");
+    expect(r.dialog.style.maxHeight).toBe("");
+});
+
+test("a sheet opened while the keyboard is already up is fitted on open", () => {
+    const r = rig({ viewport: true }, { field: true });
+    keyboard(r, 250);
+    openIt(r.dialog);
+    expect(r.dialog.style.bottom).toBe("250px");
+});
+
+test("no keyboard fit at the panel breakpoint", () => {
+    const r = rig({ viewport: true, wide: true }, { field: true });
+    openIt(r.dialog);
+    keyboard(r, 300);
+    expect(r.dialog.style.bottom).toBe("");
+});
+
+test("closed sheets and browsers without visualViewport are left alone", () => {
+    const r = rig({ viewport: true }, { field: true });
+    keyboard(r, 300);
+    expect(r.dialog.style.bottom).toBeUndefined();
+    const bare = rig({}, { field: true });
+    openIt(bare.dialog);
+    expect(bare.dialog.style.bottom).toBeUndefined();
 });
