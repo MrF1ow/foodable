@@ -185,12 +185,13 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
                 protein_g: loaded!.protein_g ?? undefined,
                 carbs_g: loaded!.carbs_g ?? undefined,
                 fat_g: loaded!.fat_g ?? undefined,
-                item_digest: itemListDigest(
-                    itemSpecsFromStoredItems(loaded!.items!),
-                ),
+                // The digest a fresh log of the same items writes, not one
+                // rebuilt from the stored rows: that is what a re-log compares.
+                item_digest: computed.item_digest,
             },
             new Date(loaded!.logged_at).toISOString(),
         );
+        expect(loaded!.idempotency_key).toBe(relogKey);
         const app = new Hono();
         app.route("/", nutritionRoutes);
         const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
@@ -216,6 +217,61 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
             "56.789",
         );
         expect(after!.idempotency_key).toBe(relogKey);
+        resetFlagsForTests();
+    });
+
+    test("amount edit stores the key a re-log at the new amount writes", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+            grams_per_each: 50,
+        });
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 1, unit: "each" },
+        ]);
+        const loggedAt = "2026-03-02T12:34:56.789Z";
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: loggedAt,
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        const loaded = await getMealById(userId, meal.id);
+        const itemId = loaded!.items![0]!.id;
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:34",
+                [`item_amount_${itemId}`]: "2",
+                date: "2026-03-02",
+                return_to: "/?date=2026-03-02",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const relog = await mealWriteFromItems(householdId, [
+            { foodId, amount: 2, unit: "each" },
+        ]);
+        const { deduplicated } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: loggedAt,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        expect(deduplicated).toBe(true);
         resetFlagsForTests();
     });
 

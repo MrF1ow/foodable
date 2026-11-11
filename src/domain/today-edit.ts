@@ -184,7 +184,10 @@ export function itemMacrosAtAmount(
 }
 
 export function itemSpecsFromStoredItems(
-    items: readonly MealItem[],
+    items: readonly Pick<
+        MealItem,
+        "food_id" | "recipe_id" | "label" | "amount" | "unit" | "portions"
+    >[],
 ): MealItemSpec[] {
     return items.map((item) => {
         if (item.recipe_id) {
@@ -194,8 +197,12 @@ export function itemSpecsFromStoredItems(
             };
         }
         if (item.food_id) {
+            // The label is the name the item was logged under, which is what
+            // the logging path folds into the digest; without it the key would
+            // stop matching a re-log of the same items.
             return {
                 foodId: item.food_id,
+                name: item.label,
                 amount: item.amount ?? 1,
                 unit: item.unit?.trim() || "g",
             };
@@ -308,14 +315,12 @@ export async function mealEditPatchFromItemAmounts(
     >
 > {
     const writes: MealItemWrite[] = [];
-    const digestSpecs: MealItemSpec[] = [];
     for (const item of items) {
         const newAmount = amounts.get(item.id);
         if (newAmount == null) {
             throw new Error("Missing item amount.");
         }
         const prior = editItemQuantity(item).value;
-        digestSpecs.push(specForChangedItem(item, newAmount));
         if (newAmount === prior) {
             writes.push(mealItemToWriteRow(item));
             continue;
@@ -364,7 +369,9 @@ export async function mealEditPatchFromItemAmounts(
         alcohol_g: totals.alcohol_g ?? undefined,
         caffeine_mg: totals.caffeine_mg ?? undefined,
         items: writes,
-        item_digest: itemListDigest(digestSpecs),
+        // Built from the rows as written, so a re-log of the same items at the
+        // new amounts produces the same digest.
+        item_digest: itemListDigest(itemSpecsFromStoredItems(writes)),
     };
 }
 
