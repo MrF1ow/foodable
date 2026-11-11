@@ -915,7 +915,8 @@ export async function putAwayGroceryLines(
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
-    const selected = input.lineIds.map((lineId) => {
+    // A line is put away once per call, however often its id is repeated.
+    const selected = [...new Set(input.lineIds)].map((lineId) => {
         const line = lines.find((row) => row.id === lineId);
         if (!line) throw new StockInputError("Unknown grocery line.");
         if (!line.foodId) {
@@ -1352,6 +1353,9 @@ export async function discardFridgeItem(
         );
     }
     const amount = input.amount ?? current.quantity.amount;
+    if (!Number.isFinite(amount) || !(roundAmount(amount) > 0)) {
+        throw new StockInputError("Enter an amount greater than zero.");
+    }
     return applyMovement(fridge, stock, foods, {
         householdId: input.householdId,
         foodId: current.foodId,

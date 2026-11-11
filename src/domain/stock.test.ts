@@ -755,6 +755,33 @@ test("eatFridgeItem rejects a non-positive amount", async () => {
     expect(await stock.listMovements(HH)).toHaveLength(1);
 });
 
+test("discardFridgeItem rejects a non-positive amount", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const rice = await findOrCreateManualFood(foods, HH, "food", "Rice");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: rice.id,
+        amount: 100,
+        unit: "g",
+        locationId: loc.id,
+    });
+    for (const amount of [-5, 0, Number.NaN]) {
+        await expect(
+            discardFridgeItem(fridge, stock, foods, {
+                householdId: HH,
+                itemId: added.item!.id,
+                amount,
+            }),
+        ).rejects.toThrow(/greater than zero/);
+    }
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(100);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
+});
+
 test("manual delete writes an adjust movement and the ledger matches stock", async () => {
     const fridge = createMemoryFridgeStore();
     const stock = createMemoryStockStore();
@@ -900,6 +927,32 @@ test("putAwayGroceryLines rejects sub-tenth-gram amount before any write", async
     expect((await listGrocery(grocery, settings, HH)).lines).toHaveLength(2);
     expect((await listFridge(fridge, HH)).items).toHaveLength(0);
     expect(await stock.listMovements(HH)).toHaveLength(0);
+});
+
+test("putAwayGroceryLines puts a repeated line id away once", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const milk = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    await putAwayGroceryLines(grocery, fridge, stock, foods, {
+        householdId: HH,
+        lineIds: [milk.id, milk.id],
+        locationId: loc.id,
+    });
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.quantity.amount).toBe(1);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
 });
 
 test("putAwayGroceryLines with a bad line in the middle writes nothing", async () => {
