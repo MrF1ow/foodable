@@ -154,7 +154,8 @@ describe("/app-v2.js", () => {
         // +~0.5 KB usual product row sync and "No amount".
         // +~0.8 KB Recipes list desktop/phone search field swap.
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
-        expect(js.length).toBeLessThan(87_500);
+        // +~0.2 KB log search waits for a tap on touch screens.
+        expect(js.length).toBeLessThan(87_800);
     });
 });
 

@@ -18,6 +18,13 @@ describe("renderLogSheets", () => {
         expect(html).toContain(`id="${FD_LOG_AMOUNT_SHEET_ID}"`);
     });
 
+    test("search opens on its panel, so a phone keyboard waits for a tap", () => {
+        const html = renderLogSheets({ timezone: "UTC" });
+        expect(html).toContain(
+            `id="${FD_LOG_SEARCH_SHEET_ID}" data-fd-sheet-focus="panel"`,
+        );
+    });
+
     test("ids are unique and the time field is not submitted in Today mode", () => {
         const html = renderLogSheets({ timezone: "UTC" });
         const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);

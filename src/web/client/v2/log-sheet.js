@@ -340,11 +340,15 @@ function openSheet(id, opener) {
     }
 }
 
+// Touch: no auto-focus, so the keyboard waits for a tap (sheet.js focused the panel).
 function focusLogSearchInput(dialog, query) {
     const input = dialog?.querySelector(".fd-log-search-input");
     if (!(input instanceof HTMLInputElement)) return;
     if (query != null && query !== "") input.value = query;
-    input.focus();
+    const touch =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches;
+    if (!touch) input.focus();
 }
 
 function visibleLogOpener() {
