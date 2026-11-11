@@ -730,6 +730,31 @@ test("eatFridgeItem on a supply writes an eat movement and the ledger matches", 
     expect(fridgeEatLogsMeal(towels)).toBe(false);
 });
 
+test("eatFridgeItem rejects a non-positive amount", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const rice = await findOrCreateManualFood(foods, HH, "food", "Rice");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: rice.id,
+        amount: 100,
+        unit: "g",
+        locationId: loc.id,
+    });
+    await expect(
+        eatFridgeItem(fridge, stock, foods, {
+            householdId: HH,
+            itemId: added.item!.id,
+            amount: -50,
+        }),
+    ).rejects.toThrow(/greater than zero/);
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(100);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
+});
+
 test("manual delete writes an adjust movement and the ledger matches stock", async () => {
     const fridge = createMemoryFridgeStore();
     const stock = createMemoryStockStore();

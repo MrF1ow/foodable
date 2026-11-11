@@ -452,6 +452,58 @@ describe("fridge routes", () => {
         expect(blankHtml).toContain("data-sheet-open-on-load");
     });
 
+    test("POST eat with negative qty_amount is 400 and leaves stock", async () => {
+        fridgeStore = createMemoryFridgeStore();
+        foodsStore = createMemoryFoodsStore();
+        stockStore = createMemoryStockStore();
+        const loc = await fridgeStore.insertLocation({
+            id: "loc-fridge",
+            householdId: HH,
+            name: "Fridge",
+            sortOrder: 0,
+        });
+        const food = await findOrCreateManualFood(
+            foodsStore,
+            HH,
+            "food",
+            "Rice",
+        );
+        const added = await addFridgeItemAdjust(
+            fridgeStore,
+            stockStore,
+            foodsStore,
+            {
+                householdId: HH,
+                foodId: food.id,
+                amount: 100,
+                unit: "g",
+                locationId: loc.id,
+            },
+        );
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const res = await app.request(
+            `http://x/kitchen/fridge/items/${added.item!.id}/eat`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    qty_amount: "-50",
+                    return_to: "/kitchen/fridge",
+                }).toString(),
+            },
+        );
+        expect(res.status).toBe(400);
+        const row = (await fridgeStore.listItems(HH)).find(
+            (i) => i.id === added.item!.id,
+        )!;
+        expect(row.quantity.amount).toBe(100);
+        const movements = await stockStore.listMovements(HH);
+        expect(movements.filter((m) => m.reason === "eat")).toHaveLength(0);
+    });
+
     test("similar food name renders did you mean in the add sheet", async () => {
         fridgeStore = createMemoryFridgeStore();
         foodsStore = createMemoryFoodsStore();

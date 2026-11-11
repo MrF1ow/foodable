@@ -1182,6 +1182,9 @@ export async function eatFridgeItem(
         );
     }
     const amount = input.amount ?? current.quantity.amount;
+    if (!Number.isFinite(amount) || !(roundAmount(amount) > 0)) {
+        throw new StockInputError("Enter an amount greater than zero.");
+    }
     const result = await applyMovement(fridge, stock, foods, {
         householdId: input.householdId,
         foodId: current.foodId,
