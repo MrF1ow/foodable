@@ -13,6 +13,10 @@ import { stepper } from "../../components/v2/stepper.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { sheet } from "../../components/v2/sheet.js";
 import { searchResultRow } from "../../components/v2/rows.js";
+import {
+    FD_BARCODE_SCAN_SHEET_ID,
+    renderBarcodeScannerSheet,
+} from "./scanner-sheet.js";
 
 export const FD_LOG_SEARCH_SHEET_ID = "fd-log-search";
 export const FD_LOG_AMOUNT_SHEET_ID = "fd-log-amount";
@@ -117,7 +121,17 @@ export type RenderLogSheetsOpts = {
     previewSearch?: "empty" | "results";
     /** Preview-only: pre-filled search query (e.g. "chick"). */
     previewQuery?: string;
+    /** Kill switch `barcode-camera`: when false, hide Scan actions. */
+    barcodeCamera?: boolean;
+    /** Lazy decoder chunk URLs for the scanner sheet. */
+    scannerZxingHref?: string;
+    scannerWasmHref?: string;
+    /** Preview-only: static scanner sheet. */
+    previewScanner?: boolean;
+    scannerOpenOnLoad?: boolean;
 };
+
+export { FD_BARCODE_SCAN_SHEET_ID };
 
 function datetimeLocalValue(raw: string): string {
     const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(raw.trim());
@@ -248,15 +262,22 @@ function quickIconWater(): string {
     return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3c-4.5 6-7 9.8-7 13a7 7 0 1 0 14 0c0-3.2-2.5-7-7-13z"/></svg>`;
 }
 
+function quickIconScan(): string {
+    return fdIcon("scan");
+}
+
 function quickIconScale(): string {
     return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 20h12M7 20v-2h10v2M8.5 18V10a3.5 3.5 0 0 1 7 0v8"/><path d="M10 8h4"/></svg>`;
 }
 
-function quickActionsHtml(): string {
+function quickActionsHtml(barcodeCamera: boolean): string {
     const water = `<form class="fd-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250" /><input type="hidden" name="return_to" value="/" /><button type="submit" class="fd-quick-tile"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconWater()}</span><span class="fd-quick-tile__label">Water +250 ml</span></button></form>`;
     const cal = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconBolt()}</span><span class="fd-quick-tile__label">Quick calories</span></button>`;
     const weight = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScale()}</span><span class="fd-quick-tile__label">Weigh in</span></button>`;
-    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}</div>`;
+    const scan = barcodeCamera
+        ? `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Scan barcode</span></button>`
+        : `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Enter barcode</span></button>`;
+    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}${scan}</div>`;
 }
 
 function macroField(
@@ -528,7 +549,8 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
     const searchError = opts.searchError
         ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
         : "";
-    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml()}`;
+    const cameraOn = opts.barcodeCamera !== false;
+    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn)}`;
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;
@@ -686,7 +708,14 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
 
 /** Search and amount sheets included once in the v2 shell. */
 export function renderLogSheets(opts: RenderLogSheetsOpts): string {
-    return `${logSearchSheet(opts)}${logAmountSheet(opts)}${logQuickCaloriesSheet(opts)}${logWeighInSheet(opts)}`;
+    const scanner = renderBarcodeScannerSheet({
+        barcodeCamera: opts.barcodeCamera,
+        previewStatic: opts.previewScanner,
+        openOnLoad: opts.scannerOpenOnLoad,
+        zxingScriptHref: opts.scannerZxingHref,
+        wasmHref: opts.scannerWasmHref,
+    });
+    return `${logSearchSheet(opts)}${logAmountSheet(opts)}${logQuickCaloriesSheet(opts)}${logWeighInSheet(opts)}${scanner}`;
 }
 
 /** For tests: unit chips offered on the amount sheet for the given factors. */
