@@ -1,0 +1,1002 @@
+/* Today (phone) */
+
+.fd-today-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-today-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    min-width: 0;
+}
+
+.fd-today-top {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-today-page .fd-settings-error,
+.fd-today-main > .fd-settings-error {
+    margin-bottom: calc(-1 * var(--fd-s-6));
+}
+
+.fd-today-header {
+    padding-top: var(--space-gap);
+    padding-right: 48px;
+}
+
+.fd-today-title {
+    margin: 0;
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-today-title-desk {
+    display: none;
+    margin: 0;
+}
+
+.fd-today-subtitle,
+.fd-today-peer {
+    margin: var(--fd-s-4) 0 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-week {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--fd-s-4);
+}
+
+.fd-today-week__chev {
+    display: none;
+}
+
+.fd-today-week__chev--prev .fd-icon {
+    transform: rotate(180deg);
+}
+
+.fd-today-week__grid {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.fd-today-week__labels {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: var(--fd-s-2);
+    text-align: center;
+}
+
+.fd-today-week__label {
+    font: 500 11px/14px var(--font-body);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--text-tertiary);
+}
+
+.fd-today-week__days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: var(--fd-s-2);
+}
+
+.fd-today-week__day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: var(--fd-s-4) 0;
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--text-secondary);
+}
+
+.fd-today-week__day--today:not(.fd-today-week__day--selected)
+    .fd-today-week__num {
+    font-weight: 700;
+    box-shadow: 0 0 0 1.5px var(--text-tertiary);
+    border-radius: var(--radius-pill);
+    padding: 0 4px;
+}
+
+.fd-today-week__day--selected .fd-today-week__num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+
+html[data-theme="dark"] .fd-today-week__day--selected .fd-today-week__num {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+
+html[data-theme="light"] .fd-today-week__day--selected .fd-today-week__num,
+html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+
+.fd-today-week__num {
+    font: 600 15px/20px var(--font-display);
+    color: var(--text-primary);
+}
+
+.fd-today-week__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--surface-track);
+}
+
+.fd-today-week__dot[data-fd-dot="hit"] {
+    background: var(--accent-fill);
+}
+
+.fd-today-week__dot[data-fd-dot="off"] {
+    background: var(--macro-calories);
+}
+
+.fd-today-week__dot[data-fd-dot="empty"] {
+    background: var(--surface-track);
+}
+
+.fd-today-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-today-gauge {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 auto;
+}
+
+.fd-today-gauge__svg {
+    display: block;
+    overflow: visible;
+    width: 100%;
+    max-width: 196px;
+    height: auto;
+}
+
+.fd-today-gauge__track {
+    stroke: var(--surface-track);
+}
+
+.fd-today-gauge__seg--protein {
+    stroke: var(--macro-protein);
+}
+
+.fd-today-gauge__seg--carbs {
+    stroke: var(--macro-carbs);
+}
+
+.fd-today-gauge__seg--fat {
+    stroke: var(--macro-fat);
+}
+
+.fd-today-gauge__center {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.fd-today-gauge__hero {
+    font: 600 28px/32px var(--font-display);
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+}
+
+.fd-today-gauge__hero--over {
+    color: var(--status-over);
+}
+
+.fd-today-gauge__caption {
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.fd-today-gauge__caption--over {
+    color: var(--status-over);
+}
+
+.fd-today-macros {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--fd-s-10);
+}
+
+.fd-today-macro {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+    min-width: 0;
+}
+
+.fd-today-macro__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-4);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-today-macro__nums {
+    font: 500 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-macro__actual {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fd-today-macro__nums--over .fd-today-macro__actual {
+    color: var(--status-over);
+}
+
+.fd-today-macro__goal {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.fd-today-macro__hint {
+    margin: var(--fd-s-4) 0 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-macro__hint--over {
+    color: var(--status-over);
+}
+
+.fd-today-macro__track {
+    position: relative;
+    height: var(--fd-bar-h, 4px);
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    overflow: hidden;
+}
+
+.fd-today-macro__fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent-fill);
+}
+
+.fd-today-macro--protein .fd-today-macro__fill {
+    background: var(--macro-protein);
+}
+
+.fd-today-macro--carbs .fd-today-macro__fill {
+    background: var(--macro-carbs);
+}
+
+.fd-today-macro--fat .fd-today-macro__fill {
+    background: var(--macro-fat);
+}
+
+.fd-today-macro__marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1.5px;
+    margin-left: -0.75px;
+    background: var(--text-tertiary);
+    pointer-events: none;
+}
+
+.fd-today-also {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--fd-s-6);
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-also__line {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fd-today-also__item + .fd-today-also__item {
+    margin-left: var(--fd-s-10);
+}
+
+.fd-today-also__item--water::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: var(--fd-s-6);
+    border-radius: 50%;
+    background: var(--nutrient-water);
+    vertical-align: middle;
+}
+
+.fd-today-also__link {
+    flex-shrink: 0;
+    display: flex;
+    color: var(--text-tertiary);
+    text-decoration: none;
+}
+
+.fd-today-also-grid.fd-today-also--desk,
+.fd-today-macro__hint {
+    display: none;
+}
+
+.fd-today-also-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--fd-s-10);
+}
+
+.fd-today-also-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+    min-width: 0;
+}
+
+.fd-today-also-col__label {
+    font: 500 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-also-col__nums {
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.fd-today-also-col__track {
+    height: 3px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    overflow: hidden;
+}
+
+.fd-today-also-col__fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+}
+
+.fd-today-also-col--water .fd-today-also-col__fill {
+    background: var(--nutrient-water);
+}
+
+.fd-today-also-col--fiber .fd-today-also-col__fill {
+    background: var(--nutrient-fiber);
+}
+
+.fd-today-also-col--sugar .fd-today-also-col__fill {
+    background: var(--nutrient-sugar);
+}
+
+.fd-today-also-col--caffeine .fd-today-also-col__fill {
+    background: var(--nutrient-caffeine);
+}
+
+.fd-today-also-col--alcohol .fd-today-also-col__fill {
+    background: var(--macro-calories);
+}
+
+.fd-today-meals {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-today-section__head {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--fd-s-6);
+    padding-bottom: var(--fd-s-7);
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-today-section__title {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-today-section__macros {
+    font: 400 12px/16px var(--font-body);
+}
+
+.fd-today-section__kcal {
+    margin-left: auto;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-section__empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-today-section__empty-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-10);
+    padding: var(--fd-s-6) 0;
+}
+
+.fd-today-section__add {
+    color: var(--text-secondary);
+}
+
+.fd-today-section__head-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: var(--fd-s-4);
+    margin-left: auto;
+    text-align: right;
+}
+
+.fd-today-section__add-food {
+    display: none;
+}
+
+.fd-today-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-s-10);
+    padding: var(--space-section) var(--fd-s-10);
+    text-align: center;
+}
+
+.fd-today-empty__text {
+    margin: 0;
+    font: 400 15px/22px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-empty .fd-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border-radius: var(--radius-pill);
+    font: 500 15px/20px var(--font-body);
+    text-decoration: none;
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+.fd-today-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-today-edit-item__label {
+    margin: 0 0 var(--fd-s-4);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-today-edit-field__label {
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-edit-error {
+    margin: 0;
+    color: var(--text-secondary);
+    font: 400 14px/20px var(--font-body);
+}
+
+.fd-today-edit-macros {
+    margin-top: var(--fd-s-4);
+}
+
+[data-fd-meal-row] {
+    cursor: pointer;
+}
+
+[data-fd-meal-row]:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+.fd-today-rail {
+    display: none;
+}
+
+.fd-today-card__head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--fd-s-4);
+    margin-bottom: var(--fd-s-10);
+}
+
+.fd-today-card__title {
+    margin: 0;
+    flex: none;
+    font: 600 18px/22px var(--font-display);
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+}
+
+.fd-today-card__count {
+    margin-left: auto;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-card__action {
+    margin-left: auto;
+    font: 400 13px/17px var(--font-body);
+    color: var(--accent-text);
+    text-decoration: none;
+}
+
+.fd-today-card__head .fd-today-card__count + .fd-today-card__action {
+    margin-left: var(--fd-s-6);
+}
+
+.fd-today-card__empty,
+.fd-today-week-empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-today-rail-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.fd-today-rail-row {
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-today-rail-row:last-child {
+    border-bottom: none;
+}
+
+.fd-today-rail-row__link {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--fd-s-6);
+    padding: var(--space-row) 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-today-rail-row:not(:has(.fd-today-rail-row__link)) {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--fd-s-6);
+    padding: var(--space-row) 0;
+}
+
+.fd-today-rail-row__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--fd-s-6);
+}
+
+.fd-today-rail-dot {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+}
+
+.fd-today-rail-dot--high {
+    background: var(--status-over);
+}
+
+.fd-today-rail-dot--medium {
+    background: var(--status-warn);
+}
+
+.fd-today-rail-dot--low {
+    background: var(--text-tertiary);
+}
+
+.fd-today-rail-row__title {
+    font: 400 14px/18px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-today-rail-row__meta {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-rail-row__when {
+    flex-shrink: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-rail-row__when--high {
+    color: var(--status-over);
+}
+
+.fd-today-rail-row__when--medium {
+    color: var(--status-warn);
+}
+
+.fd-today-rail-row__action,
+.fd-today-rail-row__action-form button {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--accent-text);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fd-today-weight__chart {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.fd-today-weight__chart .fd-today-weight__chart__line,
+.fd-today-weight__chart__line {
+    stroke: var(--accent-fill);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.fd-today-weight__chart .fd-today-weight__chart__area,
+.fd-today-weight__chart__area {
+    fill: color-mix(in srgb, var(--accent-fill) 22%, transparent);
+}
+
+.fd-today-weight__hero-row {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--fd-s-4);
+    margin-top: var(--fd-s-10);
+}
+
+.fd-today-weight__hero {
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-today-weight__unit {
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-weight__change {
+    margin-left: auto;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-weight__date {
+    margin: var(--fd-s-4) 0 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-today-weight__chart__dot,
+.fd-today-weight__chart .fd-today-weight__chart__dot {
+    fill: var(--accent-fill);
+}
+
+.fd-today-summary__layout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-today-summary__side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+    min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-today-week__day,
+    .fd-today-macro__fill {
+        transition: none;
+    }
+}
+
+@media (min-width: 1024px) {
+    .fd-today-page {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 360px);
+        grid-template-rows: auto auto 1fr;
+        gap: var(--space-section);
+        align-items: start;
+    }
+
+    .fd-today-main {
+        display: contents;
+    }
+
+    .fd-today-page .fd-settings-error,
+    .fd-today-main > .fd-settings-error {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
+
+    .fd-today-top {
+        grid-column: 1;
+        grid-row: 1;
+        flex-direction: row;
+        /* The week strip drops under the title when the column is narrow. */
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--fd-s-10);
+    }
+
+    .fd-today-page:has(.fd-settings-error) {
+        grid-template-rows: auto auto auto 1fr;
+    }
+
+    .fd-today-page:has(.fd-settings-error) .fd-today-top {
+        grid-row: 2;
+    }
+
+    .fd-today-summary {
+        grid-column: 1;
+        grid-row: 2;
+        box-sizing: border-box;
+        padding: 26px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-today-page:has(.fd-settings-error) .fd-today-summary {
+        grid-row: 3;
+    }
+
+    .fd-today-meals {
+        grid-column: 1;
+        grid-row: 3;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: var(--space-section);
+        align-items: start;
+    }
+
+    .fd-today-page:has(.fd-settings-error) .fd-today-meals {
+        grid-row: 4;
+    }
+
+    .fd-today-rail {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-section);
+        grid-column: 2;
+        grid-row: 2 / 4;
+        align-self: start;
+    }
+
+    .fd-today-page:has(.fd-settings-error) .fd-today-rail {
+        grid-row: 3 / 5;
+    }
+
+    .fd-today-card {
+        box-sizing: border-box;
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-today-summary__layout {
+        flex-direction: row;
+        /* The bars move under the gauge when the column is narrow. */
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: var(--fd-s-10);
+    }
+
+    .fd-today-summary__side {
+        flex: 1 1 280px;
+        min-width: 0;
+    }
+
+    .fd-today-gauge {
+        flex-shrink: 0;
+        margin: 0;
+        transform: none;
+    }
+
+    .fd-today-gauge__svg {
+        width: 250px;
+        max-width: 250px;
+        height: auto;
+    }
+
+    .fd-today-macros {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--fd-s-10);
+    }
+
+    .fd-today-also--phone {
+        display: none;
+    }
+
+    .fd-today-also-grid.fd-today-also--desk {
+        display: grid;
+    }
+
+    .fd-today-macro__hint {
+        display: block;
+    }
+
+    /* Columns wrap instead of overlapping when the main column narrows. */
+    .fd-today-also-grid.fd-today-also--desk {
+        grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+    }
+
+    /* On desktop each card has its own "Add food" row. */
+    .fd-today-section__empty-row .fd-today-section__add {
+        display: none;
+    }
+
+    .fd-today-section {
+        box-sizing: border-box;
+        padding: 20px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .fd-today-section__head {
+        border-bottom: none;
+        padding-bottom: var(--fd-s-6);
+        flex-wrap: nowrap;
+    }
+
+    .fd-today-section__title {
+        font: 600 18px/22px var(--font-display);
+        letter-spacing: -0.3px;
+        text-transform: none;
+        color: var(--text-primary);
+        flex: none;
+    }
+
+    .fd-today-section__head-meta {
+        font: 400 13px/18px var(--font-body);
+    }
+
+    .fd-today-section__kcal {
+        margin-left: 0;
+        color: var(--text-secondary);
+    }
+
+    .fd-today-section__add-food {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--fd-s-6);
+        margin-top: auto;
+        padding-top: var(--fd-s-10);
+        border-top: 1px solid var(--line);
+        font: 400 14px/20px var(--font-body);
+        color: var(--text-secondary);
+        text-decoration: none;
+    }
+
+    /* Desktop shows the combined line below; the h1 stays for assistive tech. */
+    .fd-today-title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .fd-today-title-desk {
+        display: block;
+        font: 600 22px/28px var(--font-display);
+        letter-spacing: -0.35px;
+        color: var(--text-primary);
+    }
+
+    .fd-today-subtitle {
+        display: none;
+    }
+
+    .fd-today-header {
+        padding-right: 0;
+        flex: 1 1 220px;
+        min-width: 0;
+    }
+
+    .fd-today-week {
+        flex: none;
+        max-width: min(520px, 48vw);
+    }
+
+    .fd-today-week__chev {
+        display: flex;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin-top: 14px;
+        border-radius: var(--radius-pill);
+        color: var(--text-secondary);
+        text-decoration: none;
+    }
+}

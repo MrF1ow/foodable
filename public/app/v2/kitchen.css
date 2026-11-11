@@ -1,0 +1,1039 @@
+/* Kitchen · Fridge (phone) */
+
+.fd-kitchen-fridge-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-kitchen-fridge-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding-top: var(--space-gap);
+    padding-right: 48px;
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-kitchen-fridge-count {
+    font: 400 14px/20px var(--font-body);
+    letter-spacing: 0;
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-fridge-top {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: calc(-1 * (28px + var(--space-gap) + 20px));
+    margin-bottom: var(--space-gap);
+    padding-right: 0;
+    min-height: 44px;
+    pointer-events: none;
+}
+
+.fd-kitchen-fridge-add {
+    flex-shrink: 0;
+    pointer-events: auto;
+}
+
+.fd-kitchen-use-soon {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-use-soon__scroll {
+    display: flex;
+    flex-direction: row;
+    gap: var(--fd-s-6);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: var(--fd-s-2);
+    margin: 0 calc(-1 * var(--space-gutter));
+    padding-left: var(--space-gutter);
+    padding-right: var(--space-gutter);
+    scroll-padding-inline: var(--space-gutter);
+}
+
+.fd-kitchen-use-card {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 128px;
+    min-height: 96px;
+    padding: 13px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    box-shadow: 0 4px 14px var(--overlay-scrim);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.fd-kitchen-use-card__title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    font: 600 14px/18px var(--font-body);
+}
+
+.fd-kitchen-use-card__meta {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-use-card__when {
+    margin-top: auto;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-use-card__when.fd-today-rail-row__when--high {
+    color: var(--status-over);
+}
+
+.fd-kitchen-use-card__when.fd-today-rail-row__when--medium {
+    color: var(--status-warn);
+}
+
+.fd-kitchen-fridge-loc + .fd-kitchen-fridge-loc {
+    margin-top: var(--fd-s-2);
+}
+
+.fd-row__date--high {
+    color: var(--status-over);
+}
+
+.fd-row__date--medium {
+    color: var(--status-warn);
+}
+
+.fd-row__date--low {
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-fridge-empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+    text-align: center;
+    padding: var(--fd-s-10) var(--space-gutter);
+}
+
+.fd-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.fd-kitchen-item-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-kitchen-item-expiry {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-4);
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-item-expiry.fd-today-rail-row__when--high {
+    color: var(--status-over);
+}
+
+.fd-kitchen-item-expiry.fd-today-rail-row__when--medium {
+    color: var(--status-warn);
+}
+
+.fd-kitchen-item-expiry__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.fd-kitchen-round-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--fd-s-4);
+}
+
+.fd-kitchen-round-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-s-2);
+    padding: var(--fd-s-4) var(--fd-s-2);
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.fd-kitchen-round-action--danger {
+    color: var(--status-over);
+}
+
+.fd-kitchen-round-action__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--surface-track);
+}
+
+.fd-kitchen-round-action--danger .fd-kitchen-round-action__icon {
+    background: color-mix(in srgb, var(--status-over) 12%, transparent);
+}
+
+.fd-kitchen-round-action__label {
+    font: 400 11px/14px var(--font-body);
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-round-action--danger .fd-kitchen-round-action__label {
+    color: var(--status-over);
+}
+
+/* FigCraft 21714: Expires and Kept in sit together in one white card. */
+.fd-kitchen-sheet-rows {
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--fd-s-4);
+    padding: 0 var(--fd-s-14);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row {
+    gap: var(--fd-s-12);
+    min-height: 56px;
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row:first-child {
+    border-top: 0;
+}
+
+.fd-kitchen-sheet-rows .fd-kitchen-sheet-row__meta {
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-sheet-row,
+.fd-kitchen-sheet-row--link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-4);
+    min-height: 48px;
+    padding: var(--fd-s-2) 0;
+    border-top: 1px solid var(--line);
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-kitchen-sheet-row__icon {
+    display: flex;
+    flex: none;
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-sheet-row__icon .fd-icon {
+    width: 20px;
+    height: 20px;
+}
+
+.fd-kitchen-sheet-row__label {
+    font: 400 16px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-sheet-row__value {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-2);
+    margin-left: auto;
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-sheet-row__meta {
+    font: 400 16px/22px var(--font-body);
+    pointer-events: none;
+}
+
+.fd-kitchen-sheet-row__chev {
+    display: flex;
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-sheet-row__control {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    border: none;
+    background: transparent;
+}
+
+.fd-did-you-mean-block {
+    margin: 0 0 var(--fd-s-6);
+    padding: var(--fd-s-4);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+.fd-did-you-mean-heading {
+    margin: 0 0 var(--fd-s-4);
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-did-you-mean-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-did-you-mean-candidates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--fd-s-2);
+}
+
+.fd-kitchen-sheet-label {
+    margin: 0 0 var(--fd-s-4);
+    font: 600 12px/16px var(--font-body);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-date-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-date-field input {
+    font: 400 16px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-sheet-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+}
+
+.fd-kitchen-sheet-link {
+    display: block;
+    width: 100%;
+    padding: var(--fd-s-6) 0;
+    border: none;
+    background: transparent;
+    font: 400 16px/22px var(--font-body);
+    color: var(--accent-text);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fd-kitchen-sheet-link--danger {
+    color: var(--status-over);
+}
+
+.fd-kitchen-sheet-error,
+.fd-kitchen-sheet-readonly {
+    margin: 0 0 var(--fd-s-6);
+    font: 400 14px/20px var(--font-body);
+    color: var(--status-over);
+}
+
+.fd-kitchen-freeze {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--fd-s-10);
+    margin: var(--fd-s-12) 0 0;
+}
+
+.fd-kitchen-freeze__field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Kitchen · Groceries (phone) */
+
+.fd-kitchen-groceries-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-kitchen-grocery-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding-top: var(--space-gap);
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-kitchen-grocery-count {
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-grocery-stores {
+    margin: 0 calc(-1 * var(--space-gutter));
+    padding: 0 var(--space-gutter);
+}
+
+.fd-kitchen-grocery-store + .fd-kitchen-grocery-store {
+    margin-top: var(--space-section);
+}
+
+.fd-kitchen-grocery-store__title {
+    margin: 0 0 var(--fd-s-4);
+    font: 600 17px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-grocery-section + .fd-kitchen-grocery-section {
+    margin-top: var(--fd-s-4);
+}
+
+.fd-kitchen-grocery-unknown-allergen {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--status-over);
+}
+
+.fd-kitchen-grocery-add {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.fd-kitchen-grocery-add__label {
+    flex: 1;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-grocery-put-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-4);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: 500 15px/20px var(--font-body);
+    color: var(--accent-text);
+    cursor: pointer;
+}
+
+.fd-kitchen-grocery-put-link__chev .fd-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.fd-kitchen-grocery-footnote {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-grocery-footnote a {
+    color: var(--accent-text);
+    text-decoration: none;
+}
+
+.fd-kitchen-grocery-clear-quiet {
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usuals-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-kitchen-usual-stores {
+    margin: 0;
+    padding: 0;
+}
+
+.fd-kitchen-usual-intro {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-add-wrap {
+    display: flex;
+    justify-content: center;
+    padding: var(--fd-s-4) 0;
+}
+
+.fd-kitchen-usual-add-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--fd-s-6);
+    min-height: 44px;
+    padding: 0 var(--fd-s-10);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--accent-text);
+    font: 500 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+/* A sheet row that is a button looks like the link rows in the fridge
+   sheet, not like a native button. */
+button.fd-kitchen-sheet-row {
+    width: 100%;
+    margin: 0;
+    padding: var(--fd-s-12) 0;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: none;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* "+ Add a usual" is a quiet accent link, as in the design. */
+.fd-kitchen-usual-add-btn::before {
+    content: "+";
+    font: 400 22px/1 var(--font-body);
+}
+
+.fd-kitchen-usual-amount {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usual-unit {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 9rem;
+    min-height: 40px;
+    padding: 0 var(--fd-s-6);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    font: 500 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-usual-head.fd-kitchen-overview-head {
+    display: none;
+}
+
+.fd-chips--stack {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.fd-chips--stack .fd-chip--choice {
+    width: 100%;
+}
+
+.fd-kitchen-usual-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usual-add__results {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-kitchen-usual-add__result {
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-kitchen-usual-add__choose {
+    display: block;
+    padding: var(--fd-s-6) 0;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.fd-kitchen-usual-add__hint,
+.fd-kitchen-usual-add__empty {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-sheet-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usuals-page .fd-row--usual .fd-row__body--link {
+    cursor: pointer;
+}
+
+.fd-kitchen-put-row {
+    padding: var(--fd-s-10) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-kitchen-put-row:first-child {
+    padding-top: 0;
+}
+
+.fd-kitchen-put-row__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--fd-s-10);
+    margin-bottom: var(--fd-s-10);
+}
+
+.fd-kitchen-put-row__title {
+    font: 600 16px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-put-row__amount {
+    flex: none;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-put-row__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-10);
+}
+
+.fd-kitchen-put-loc .fd-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+}
+
+.fd-kitchen-put-loc .fd-chip--choice .fd-chip__face {
+    padding: 6px 12px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--radius-pill);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-put-loc .fd-chip__input:checked + .fd-chip__face {
+    border-color: var(--text-primary);
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+
+.fd-kitchen-put-date {
+    position: relative;
+    flex: none;
+}
+
+.fd-kitchen-put-date__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fd-s-6);
+    margin: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    font: 500 13px/18px var(--font-body);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-kitchen-put-date__input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.fd-kitchen-grocery-empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-sheet-kvs {
+    margin: 0;
+    display: grid;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-sheet-kvs dt {
+    margin: 0;
+    font: 600 12px/16px var(--font-body);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-sheet-kvs dd {
+    margin: 0;
+    font: 400 16px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-put-line {
+    margin: 0 0 var(--fd-s-12);
+    padding: 0;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-put-line__title {
+    padding: 0;
+    font: 600 16px/22px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-grocery-put-note {
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-kitchen-use-soon__scroll {
+        scroll-behavior: auto;
+    }
+}
+
+.fd-kitchen-overview-columns {
+    display: contents;
+}
+
+.fd-kitchen-overview-locs {
+    display: contents;
+}
+
+.fd-kitchen-overview-groceries {
+    display: none;
+}
+
+.fd-kitchen-overview-loc--empty {
+    display: none;
+}
+
+.fd-kitchen-overview-head {
+    display: none;
+}
+
+.fd-kitchen-fridge-count--desktop {
+    display: none;
+}
+
+.fd-kitchen-fridge-title--phone {
+    display: flex;
+}
+
+.fd-kitchen-use-card--desktop-only {
+    display: none;
+}
+
+@media (min-width: 1024px) {
+    .fd-kitchen-fridge-page {
+        max-width: none;
+        margin: 0;
+        padding-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-overview-head {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--fd-s-10);
+        margin-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-overview-head__tools {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--fd-s-10);
+    }
+
+    .fd-kitchen-overview-head__title {
+        flex: 1 1 auto;
+        min-width: min(100%, 280px);
+    }
+
+    .fd-kitchen-overview-seg {
+        flex: none;
+    }
+
+    .fd-kitchen-overview-add {
+        flex: none;
+        text-decoration: none;
+    }
+
+    .fd-kitchen-fridge-title--phone,
+    .fd-kitchen-fridge-count--phone {
+        display: none;
+    }
+
+    .fd-kitchen-fridge-count--desktop {
+        display: inline;
+    }
+
+    .fd-kitchen-fridge-title {
+        padding-right: 0;
+    }
+
+    .fd-kitchen-fridge-top {
+        display: none;
+    }
+
+    .fd-kitchen-use-soon__scroll {
+        margin: 0;
+        padding-left: 0;
+        padding-right: 0;
+        flex-wrap: nowrap;
+        overflow: visible;
+        gap: var(--fd-s-6);
+    }
+
+    .fd-kitchen-use-card {
+        flex: 1 1 0;
+        width: auto;
+        min-width: 0;
+    }
+
+    .fd-kitchen-use-card--desktop-only {
+        display: flex;
+    }
+
+    .fd-kitchen-use-card__title {
+        -webkit-line-clamp: 1;
+    }
+
+    /* Locations flow into up to two columns (Fridge, then Freezer and
+       Pantry stacked), the Groceries card is the last column. Narrow
+       desktop windows drop the locations to one column. */
+    .fd-kitchen-overview-columns {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) min(380px, 36%);
+        gap: var(--space-section);
+        align-items: start;
+    }
+
+    .fd-kitchen-overview-locs {
+        display: block;
+        columns: 2 280px;
+        column-gap: var(--space-section);
+    }
+
+    .fd-kitchen-overview-loc {
+        break-inside: avoid;
+        margin-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-overview-loc .fd-section-head__title {
+        font: 600 18px/22px var(--font-display);
+        letter-spacing: -0.3px;
+        text-transform: none;
+        color: var(--text-primary);
+    }
+
+    .fd-kitchen-overview-groceries {
+        grid-column: 2;
+    }
+
+    .fd-kitchen-overview-loc--empty {
+        display: flex;
+        flex-direction: column;
+        gap: var(--fd-s-6);
+    }
+
+    .fd-kitchen-fridge-loc.fd-kitchen-overview-loc {
+        box-sizing: border-box;
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-kitchen-fridge-loc + .fd-kitchen-fridge-loc {
+        margin-top: 0;
+    }
+
+    .fd-kitchen-overview-loc-empty {
+        margin: 0;
+        font: 400 14px/20px var(--font-body);
+        color: var(--text-secondary);
+        text-align: center;
+        padding: var(--fd-s-10) 0;
+    }
+
+    .fd-kitchen-overview-groceries {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        box-sizing: border-box;
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-kitchen-overview-groceries__head {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .fd-kitchen-overview-groceries__title {
+        margin: 0;
+        font: 600 18px/24px var(--font-body);
+        color: var(--text-primary);
+    }
+
+    .fd-kitchen-overview-groceries__count {
+        margin: 0;
+        font: 400 14px/20px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-kitchen-overview-groceries .fd-kitchen-grocery-stores {
+        margin: 0;
+        padding: 0;
+    }
+
+    .fd-kitchen-overview-grocery-section .fd-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .fd-kitchen-overview-groceries .fd-row--swipe .fd-row__action {
+        display: none;
+    }
+
+    .fd-kitchen-overview-groceries .fd-row--swipe {
+        --fd-swipe-pad: 0;
+    }
+
+    .fd-kitchen-overview-groceries__empty {
+        margin: 0;
+        font: 400 14px/20px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-kitchen-overview-grocery-put {
+        width: 100%;
+        text-align: center;
+        text-decoration: none;
+    }
+
+    .fd-kitchen-fridge-loc .fd-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .fd-kitchen-groceries-page {
+        width: 100%;
+        padding-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-grocery-stores {
+        margin: 0;
+        padding: 0;
+    }
+
+    .fd-kitchen-usuals-page {
+        width: 100%;
+        padding-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-usual-stores {
+        margin: 0;
+        padding: 0;
+    }
+
+    .fd-kitchen-usual-head.fd-kitchen-overview-head {
+        display: flex;
+    }
+
+    .fd-kitchen-usual-title.fd-kitchen-fridge-title--phone {
+        display: none;
+    }
+}

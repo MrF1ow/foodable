@@ -6,9 +6,21 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
     renderSettingsAccountPage,
+    renderSettingsAccountV2Route,
+    renderSettingsDisplayV2Route,
+    renderSettingsExportV2Route,
+    renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
+    renderSettingsHomeRoute,
     renderSettingsHouseholdRoute,
+    renderSettingsSavedV2Route,
 } from "../loaders.js";
+import { liveExportArchiveStore } from "../../db/exports.js";
+import { exportAllData } from "../../domain/export.js";
+import { checkRateLimit } from "../../rate-limit.js";
+import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
+import { viewerFlagsFor } from "../attention.js";
+import { gatedRoute } from "../gated.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -58,12 +70,131 @@ function resolveBackHref(c: Context) {
 }
 
 settingsRoutes.get("/settings", requireSiteUser, async (c) => {
+    const userId = c.get("userId");
+    const member = await getHouseholdMembership(userId);
+    const flags = member ? await viewerFlagsFor(member) : null;
+    if (flags?.uiV2) {
+        const page = await renderSettingsHomeRoute(userId);
+        return c.html(page.html, page.status);
+    }
     const backHref = resolveBackHref(c);
-    const page = await renderSettingsAccountPage(c.get("userId"), {
-        backHref,
-    });
+    const page = await renderSettingsAccountPage(userId, { backHref });
     return c.html(page.html, page.status);
 });
+
+settingsRoutes.get(
+    "/settings/account",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const backHref = resolveBackHref(c);
+        const page = await renderSettingsAccountV2Route(c.get("userId"), {
+            backHref,
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/display",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsDisplayV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/goals",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsGoalsV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/saved",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsSavedV2Route(c.get("userId"), {
+            q: c.req.query("q"),
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.get(
+    "/settings/export",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsExportV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.post(
+    "/settings/export",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const limited = await checkRateLimit(userId);
+        if (!limited.allowed) {
+            return c.text("Too many requests. Try again in a minute.", 429, {
+                "Retry-After": String(limited.retryAfterSeconds ?? 60),
+            });
+        }
+        const origin = getBaseUrl(c);
+        const result = await exportAllData(
+            userId,
+            liveExportArchiveStore(),
+            origin,
+        );
+        if (!result.downloadPath) {
+            const page = await renderSettingsExportV2Route(userId, {
+                error: "Nothing to export yet.",
+            });
+            // A non-member gets the membership page with its own status.
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // toast: none
+        return c.redirect(result.downloadPath, 303);
+    },
+);
+
+settingsRoutes.post(
+    "/settings/display",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const body = await c.req.parseBody();
+        const themeRaw = formText(body, "theme");
+        if (!isValidDisplayTheme(themeRaw)) {
+            const page = await renderSettingsDisplayV2Route(userId, {
+                error: "Choose Auto, Light, or Dark.",
+            });
+            return c.html(page.html, 400);
+        }
+        const appearance = parseAppearanceInput({
+            theme: themeRaw === "system" ? "system" : themeRaw,
+        });
+        await upsertProfile(userId, appearance);
+        // The inline control on Settings home comes back to it; only that
+        // exact path is honoured.
+        const back =
+            formText(body, "return") === "/settings"
+                ? "/settings"
+                : "/settings/display";
+        // toast: none full reload refreshes theme chrome on this page
+        return c.redirect(back, 303);
+    },
+);
 
 settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
     const backHref = resolveBackHref(c);
@@ -186,8 +317,10 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         await upsertProfile(userId, prefs);
         return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
     }
-    const appearance = parseAppearanceInput({ theme: body.theme });
-    await upsertProfile(userId, appearance);
+    if ("theme" in body) {
+        const appearance = parseAppearanceInput({ theme: body.theme });
+        await upsertProfile(userId, appearance);
+    }
     const displayName = formText(body, "display_name").trim();
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);

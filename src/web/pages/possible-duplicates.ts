@@ -198,6 +198,40 @@ function mergeFill(pair: PossibleDuplicatePair): ModalFill {
     };
 }
 
+function mergeSubmitClass(v2: boolean): string {
+    return v2 ? "fd-settings-btn fd-settings-btn--danger" : "btn-danger";
+}
+
+function mergeFormBodyV2(
+    pair: PossibleDuplicatePair,
+    refCounts: ReadonlyMap<string, number>,
+    post?: PossibleDuplicatesView["mergePost"],
+): string {
+    return mergeFormBody(pair, refCounts, post).replace(
+        'class="btn-danger"',
+        `class="${mergeSubmitClass(true)}"`,
+    );
+}
+
+function pairRowV2(
+    pair: PossibleDuplicatePair,
+    view: PossibleDuplicatesView,
+): string {
+    const rowId = `dup-${pair.subject.id}-${pair.related.id}`;
+    const mergeBtn = modalTrigger({
+        target: DUP_MERGE_MODAL_ID,
+        label: "Merge…",
+        className: "fd-settings-btn fd-settings-btn--sm",
+        fill: mergeFill(pair),
+    });
+    const keepSeparate = `<form method="post" action="/settings/household/possible-duplicates/keep-separate" class="fd-settings-inline-form">
+<input type="hidden" name="subject_id" value="${escapeHtml(pair.subject.id)}" />
+<input type="hidden" name="related_id" value="${escapeHtml(pair.related.id)}" />
+<button type="submit" class="fd-settings-btn fd-settings-btn--sm">Keep separate</button>
+</form>`;
+    return `<li class="fd-row fd-row--dup" id="${escapeHtml(rowId)}"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${escapeHtml(pairRowTitle(pair))}</span><span class="fd-row__meta">${escapeHtml(ruleLabel(pair.rule))}</span></span></div><div class="fd-row__actions fd-row__actions--wrap">${mergeBtn}${keepSeparate}</div></div></li>`;
+}
+
 function pairRow(
     pair: PossibleDuplicatePair,
     view: PossibleDuplicatesView,
@@ -219,6 +253,79 @@ function pairRow(
         meta: ruleLabel(pair.rule),
         actions: `${mergeBtn}\n${keepSeparate}`,
     })}</li>`;
+}
+
+export type PossibleDuplicatesBlockOpts = {
+    v2?: boolean;
+};
+
+/** Inline block for the v2 household page (list + merge modal). */
+export function renderPossibleDuplicatesBlock(
+    view: PossibleDuplicatesView,
+    opts: PossibleDuplicatesBlockOpts = {},
+): {
+    listHtml: string;
+    modalsHtml: string;
+} {
+    const v2 = opts.v2 === true;
+    const openMerge = view.openModalId === DUP_MERGE_MODAL_ID;
+    const activePair =
+        view.mergePost &&
+        view.pairs.find(
+            (p) =>
+                (p.subject.id === view.mergePost!.foodA &&
+                    p.related.id === view.mergePost!.foodB) ||
+                (p.subject.id === view.mergePost!.foodB &&
+                    p.related.id === view.mergePost!.foodA),
+        );
+    const mergeError = openMerge && view.error ? errorBanner(view.error) : "";
+    const mergeBody = (() => {
+        if (openMerge && activePair) {
+            const tid = `dup-merge-${activePair.subject.id}-${activePair.related.id}`;
+            const html = v2
+                ? mergeFormBodyV2(activePair, view.refCounts, view.mergePost)
+                : mergeFormBody(activePair, view.refCounts, view.mergePost);
+            return `${mergeError}<div data-fill-slot="body" data-filled-template="${escapeHtml(tid)}">${html}</div>`;
+        }
+        return `${mergeError}<div data-fill-slot="body"></div>`;
+    })();
+    const mergeModal =
+        view.pairs.length > 0
+            ? modal({
+                  id: DUP_MERGE_MODAL_ID,
+                  title: activePair
+                      ? `Merge ${activePair.subject.name} · ${activePair.related.name}`
+                      : "Merge",
+                  openOnLoad: openMerge,
+                  body: mergeBody,
+                  submitDisabled: !openMerge,
+              })
+            : "";
+    const templates = view.pairs
+        .map((p) => {
+            if (!v2) return mergeTemplate(p, view);
+            const tid = `dup-merge-${p.subject.id}-${p.related.id}`;
+            const post =
+                view.mergePost &&
+                ((view.mergePost.foodA === p.subject.id &&
+                    view.mergePost.foodB === p.related.id) ||
+                    (view.mergePost.foodA === p.related.id &&
+                        view.mergePost.foodB === p.subject.id))
+                    ? view.mergePost
+                    : undefined;
+            return `<template id="${escapeHtml(tid)}">${mergeFormBodyV2(p, view.refCounts, post)}</template>`;
+        })
+        .join("");
+    const rows = view.pairs
+        .map((p) => (v2 ? pairRowV2(p, view) : pairRow(p, view)))
+        .join("");
+    const listHtml =
+        view.pairs.length === 0
+            ? emptyState("No possible duplicates.")
+            : v2
+              ? `<ul class="fd-list">${rows}</ul>${templates}`
+              : `<ul class="list">${rows}</ul>${templates}`;
+    return { listHtml, modalsHtml: mergeModal };
 }
 
 export function renderPossibleDuplicatesPage(

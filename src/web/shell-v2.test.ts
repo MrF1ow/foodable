@@ -131,15 +131,18 @@ describe("flag on: the new shell", () => {
         );
         expect(navs).toEqual(["Main navigation", "Main tabs"]);
         expect(new Set(navs).size).toBe(navs.length);
-        // The desktop top bar is the only <header> the shell adds; the account
-        // chip is a link inside <main>, and the sidebar a plain container.
-        expect(html.match(/<header\b/g)?.length).toBe(1);
+        // The desktop top bar is the only page-level header; log sheets add
+        // `<header class="fd-sheet-head">` inside their dialogs.
         expect(html).toContain('<header class="fd-topbar">');
+        const pageHeaders = [...html.matchAll(/<header class="([^"]+)"/g)]
+            .map((m) => m[1])
+            .filter((cls) => cls === "fd-topbar");
+        expect(pageHeaders).toEqual(["fd-topbar"]);
         expect(html).not.toContain("fd-phonebar");
         expect(html).not.toContain("<aside");
         expect(html).toContain('<div class="fd-sidebar">');
         expect(html).toContain(
-            '<main class="app-main native fd-main"><a class="fd-chip"',
+            '<main class="app-main native fd-main"><a class="fd-account-chip"',
         );
     });
 
@@ -177,7 +180,7 @@ describe("flag on: the new shell", () => {
             "fd-sidelink-settings",
             "fd-side-dot",
             "fd-account",
-            "fd-chip",
+            "fd-account-chip",
             "fd-topbar",
             "fd-search",
             "fd-scan",
@@ -289,7 +292,7 @@ describe("flag on: the new shell", () => {
 
     test("account chip links to Settings, with the viewer's initials", () => {
         const html = v2Html();
-        const chip = between(html, /<a class="fd-chip"/, "</a>");
+        const chip = between(html, /<a class="fd-account-chip"/, "</a>");
         expect(chip).toContain('href="/settings"');
         expect(chip).toContain('data-turbo="false"');
         expect(chip).toContain(
@@ -388,8 +391,10 @@ describe("flag on: the new shell", () => {
         const scan = between(top, /<a class="fd-scan"/, "</a>");
         expect(scan).toContain(`href="${FD_LOG_HREF}"`);
         expect(scan).toContain('aria-label="Scan a barcode"');
+        expect(scan).toContain('data-fd-open-sheet="fd-log-search"');
         const log = between(top, /<a class="fd-logfood"/, "</a>");
         expect(log).toContain(`href="${FD_LOG_HREF}"`);
+        expect(log).toContain('data-fd-open-sheet="fd-log-search"');
         expect(log).toContain("<span>Log food</span>");
         expect(top).not.toContain("disabled");
         expect(top).not.toContain("aria-disabled");
@@ -398,6 +403,34 @@ describe("flag on: the new shell", () => {
     describe("Kitchen text tabs", () => {
         const kitchenNav = (html: string) =>
             between(html, /<nav class="fd-kitchen-tabs"/, "</nav>");
+
+        test("Groceries tab shows the open-line count when chrome carries it", () => {
+            const nav = between(
+                v2Html({
+                    active: "grocery",
+                    v2Kitchen: "groceries",
+                    v2KitchenGroceriesCount: 8,
+                    body: "<h1>Groceries</h1>",
+                }),
+                /<nav class="fd-kitchen-tabs"/,
+                "</nav>",
+            );
+            expect(nav).toContain("Groceries · 8");
+        });
+
+        test("Fridge tab shows the groceries count from chrome", () => {
+            const nav = between(
+                v2Html({
+                    active: "fridge",
+                    v2Kitchen: "fridge",
+                    v2KitchenGroceriesCount: 4,
+                    body: "<h1>Fridge</h1>",
+                }),
+                /<nav class="fd-kitchen-tabs"/,
+                "</nav>",
+            );
+            expect(nav).toContain("Groceries · 4");
+        });
 
         test("Fridge, Groceries, Usuals as links; the current one is marked", () => {
             const cases: [Partial<AppChrome>, string][] = [
@@ -466,7 +499,7 @@ describe("flag on: the new shell", () => {
             expect(bareH1).toContain("</nav><section>x</section></main>");
             const none = v2Html({ active: "fridge", body: "<p>x</p>" });
             expect(none).toContain(
-                '"><a class="fd-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
+                '"><a class="fd-account-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
             );
         });
 
@@ -640,16 +673,13 @@ describe("Settings sub-nav under ui-v2", () => {
         ].map((m) => `${m[2]} ${m[1]}`);
     const on = { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true };
 
-    test("flag on: Members links to the members page, Household stays preferences", () => {
+    test("flag on: legacy household prefs still expose v2 sub-nav", () => {
         const expected = [
             "Account /settings?from=%2Fkitchen%2Ffridge",
             "Household /settings/household-settings?from=%2Fkitchen%2Ffridge",
             "Members /settings/household?from=%2Fkitchen%2Ffridge",
             "Help /settings/help?from=%2Fkitchen%2Ffridge",
         ];
-        expect(
-            labels(renderSettingsAccountPage({ ...view, flags: on })),
-        ).toEqual(expected);
         expect(
             labels(
                 renderSettingsHelpPage({

@@ -10385,16 +10385,37 @@ describe("authenticated dashboard HTTP", () => {
         const bobId = (bobCreate.headers.get("location") ?? "").slice(
             "/recipes/".length,
         );
+        // From the Settings › Saved page, Delete returns there.
         const ownerDel = await siteApp.request(
             `http://x/recipes/${bobId}/delete`,
             {
                 method: "POST",
-                headers: { cookie: cookieFor(alice) },
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "from=%2Fsettings%2Fsaved",
             },
         );
         expect(ownerDel.status).toBe(303);
+        expect(ownerDel.headers.get("location")).toBe("/settings/saved");
         const left = await db.recipesStore.listRecipes("hh-1");
         expect(left.map((row) => row.id)).toEqual([recipeId]);
+
+        // Any other settings or off-site path falls back to /recipes.
+        const offsite = await siteApp.request(
+            `http://x/recipes/${recipeId}/delete`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "from=%2F%2Fevil.com",
+            },
+        );
+        expect(offsite.status).toBe(303);
+        expect(offsite.headers.get("location")).toBe("/recipes");
     });
 
     test("GET /recipes is 403 for a non-member", async () => {

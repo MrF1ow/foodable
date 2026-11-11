@@ -15,6 +15,9 @@ import {
 export const WINDOW_MS = 60_000;
 // Per-user limit for authenticated MCP traffic, keyed by user id.
 export const LIMIT_PER_WINDOW = 60;
+// Per-user limit for the household app's log search, which may call Open Food
+// Facts; its own bucket so typing in the search never eats the MCP budget.
+export const WEB_SEARCH_LIMIT_PER_WINDOW = 120;
 // Tighter per-IP limit for the unauthenticated OAuth endpoints. Users have no
 // user id yet at this stage, so we key on client IP. A full login flow is only
 // a handful of requests (authorize → approve → token), so this leaves ample
@@ -362,6 +365,21 @@ async function bucketFailOpen(
 export async function checkRateLimit(userId: string): Promise<RateLimitResult> {
     return bucketFailOpen("checkRateLimit", LIMIT_PER_WINDOW, () =>
         activeStore.checkBucket(`user:${userId}`, LIMIT_PER_WINDOW, WINDOW_MS),
+    );
+}
+
+export async function checkWebSearchRateLimit(
+    userId: string,
+): Promise<RateLimitResult> {
+    return bucketFailOpen(
+        "checkWebSearchRateLimit",
+        WEB_SEARCH_LIMIT_PER_WINDOW,
+        () =>
+            activeStore.checkBucket(
+                `web-search:${userId}`,
+                WEB_SEARCH_LIMIT_PER_WINDOW,
+                WINDOW_MS,
+            ),
     );
 }
 

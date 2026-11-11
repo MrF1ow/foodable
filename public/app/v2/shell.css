@@ -50,7 +50,7 @@ html:has(body.fd-body) {
 
 /* Account chip, top right over the title row (design: Header > Account chip,
    38 x 29 at y = 8 in the header). */
-.fd-chip {
+.fd-account-chip {
     box-sizing: border-box;
     position: absolute;
     z-index: 2;
@@ -190,7 +190,7 @@ body.fd-body .toast-region {
 
 /* Keyboard focus on every fd- control. */
 :is(
-    .fd-chip,
+    .fd-account-chip,
     .fd-household,
     .fd-kitchen-tab,
     .fd-tab,
@@ -220,7 +220,7 @@ body.fd-body .toast-region {
 /* ---- Desktop: 1024px and up -------------------------------------------- */
 @media (min-width: 1024px) {
     .fd-tabs,
-    .fd-chip,
+    .fd-account-chip,
     .fd-kitchen-tabs {
         display: none;
     }
@@ -392,6 +392,9 @@ body.fd-body .toast-region {
     }
     .fd-main.app-main {
         flex: none;
+        /* app.css caps .app-main at 760px for the old phone-first pages; the
+           desktop column fills the space beside the sidebar instead. */
+        max-inline-size: none;
         margin: 0;
         padding: 0;
     }

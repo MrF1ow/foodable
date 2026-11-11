@@ -32,6 +32,11 @@ import {
     renderRecipeDetailPage,
     renderRecipesPage,
 } from "../src/web/pages/recipes.js";
+import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
+import {
+    groupRecipeIngredientsByPlace,
+    renderRecipeDetailV2Page,
+} from "../src/web/pages/v2/recipes-page.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import {
     renderFoodsSettingsPage,
@@ -61,6 +66,44 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
+import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
+import {
+    buildPreviewTrendsPageData,
+    renderTrendsV2Page,
+} from "../src/web/pages/v2/trends.js";
+import {
+    buildPreviewTodayPageData,
+    buildPreviewTodayViewWithRail,
+    renderTodayV2Page,
+} from "../src/web/pages/v2/today.js";
+import {
+    buildPreviewKitchenFridgeView,
+    renderKitchenFridgeV2Page,
+} from "../src/web/pages/v2/kitchen-fridge.js";
+import { buildKitchenFridgeGroceryOverview } from "../src/web/pages/v2/kitchen-overview.js";
+import {
+    buildPreviewKitchenGroceriesView,
+    renderKitchenGroceriesV2Page,
+} from "../src/web/pages/v2/kitchen-groceries.js";
+import {
+    buildPreviewKitchenUsualsView,
+    kitchenUsualRowMeta,
+    renderKitchenUsualsV2Page,
+} from "../src/web/pages/v2/kitchen-usuals.js";
+import { defaultFreezeExpiry } from "../src/domain/fridge.js";
+import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
+import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
+import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
+import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
+import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
+import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
+import { goalsResolver } from "../src/domain/insights.js";
+import type { NutritionGoals } from "../src/db/nutrition.js";
+import { pageHeader } from "../src/web/components/ui.js";
+import { renderAppShell } from "../src/web/shell.js";
 import { isNutritionCard } from "../src/domain/layout.js";
 import {
     didYouMeanView,
@@ -87,7 +130,8 @@ import { buildFlagContext, initFlags } from "../src/flags.js";
 import { evaluateViewerFlags } from "../src/viewer-flags.js";
 
 const OUT = "./tmp/app-preview";
-const PORT = 4787;
+// PREVIEW_PORT lets two checkouts shoot at once.
+const PORT = Number(process.env.PREVIEW_PORT ?? 4787);
 const H = "hh-1";
 const ME = {
     householdId: H,
@@ -103,6 +147,73 @@ const PREVIEW_STORES = [
 
 // The widget templates carry a SAMPLE payload for standalone preview; reuse it
 // so the nutrition page shows real cards.
+const PREVIEW_TRENDS_GOALS: NutritionGoals = {
+    user_id: "u1",
+    daily_calories: 2200,
+    daily_protein_g: 160,
+    daily_carbs_g: 220,
+    daily_fat_g: 70,
+    daily_fiber_g: 30,
+    daily_sugar_g: 45,
+    daily_alcohol_g: 0,
+    daily_caffeine_mg: 400,
+    daily_water_ml: 2500,
+    target_weight_g: null,
+    updated_at: "2026-01-01T00:00:00Z",
+};
+
+function previewTrendsDays(today: string) {
+    const days = [];
+    for (let i = 364; i >= 0; i--) {
+        const d = new Date(`${today}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - i);
+        const date = d.toISOString().slice(0, 10);
+        const logged = i % 9 !== 0 && i % 17 !== 0;
+        const wobble = Math.sin(i / 5);
+        days.push({
+            date,
+            calories: logged ? Math.round(2050 + wobble * 220) : 0,
+            protein_g: logged ? Math.round(140 + wobble * 12) : 0,
+            carbs_g: logged ? Math.round(210 + wobble * 20) : 0,
+            fat_g: logged ? Math.round(68 + wobble * 8) : 0,
+            logged,
+        });
+    }
+    return days;
+}
+
+function previewTrendsPage(chrome: ReturnType<typeof previewChrome>) {
+    const today = "2026-11-09";
+    const data = buildPreviewTrendsPageData(
+        chrome as Parameters<typeof buildPreviewTrendsPageData>[0],
+        previewTrendsDays(today),
+        goalsResolver(PREVIEW_TRENDS_GOALS, [
+            {
+                user_id: "u1",
+                date: "2026-10-15",
+                updated_at: "x",
+                daily_calories: 1900,
+                daily_protein_g: null,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+            },
+        ]),
+        [
+            { date: "2026-10-01", weight_g: 81_500 },
+            { date: "2026-10-20", weight_g: 80_200 },
+            { date: "2026-11-05", weight_g: 79_800 },
+        ],
+        today,
+        "kg",
+    );
+    return renderTrendsV2Page(data);
+}
+
 async function widgetSample(key: string): Promise<unknown> {
     const src = await Bun.file(
         `./public/widgets/src/templates/${key}.html`,
@@ -155,7 +266,11 @@ function fridgeView(chrome: unknown) {
     return {
         chrome,
         today,
-        locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
+        locations: [
+            loc("l1", "Fridge", 0),
+            loc("l3", "Freezer", 1),
+            loc("l2", "Pantry", 2),
+        ],
         items: [
             item(
                 "i1",
@@ -202,7 +317,7 @@ function fridgeView(chrome: unknown) {
 function restockLine() {
     const today = utcTodayFromDate();
     const row = {
-        id: "g4",
+        id: "g-restock",
         householdId: H,
         storeId: "s1",
         sectionId: "sec2",
@@ -227,6 +342,74 @@ function restockLine() {
         today,
     );
     return { ...row, alreadyHave: null, notices };
+}
+
+function previewGrocerySnapshot(): import("../src/domain/grocery.js").GrocerySnapshot {
+    const legacy = groceryView(null) as {
+        stores: {
+            id: string;
+            householdId: string;
+            name: string;
+            sortOrder: number;
+            sections: {
+                id: string;
+                householdId: string;
+                storeId: string;
+                name: string;
+                sortOrder: number;
+                hidden: boolean;
+                isOther: boolean;
+                lines: ReturnType<typeof previewGroceryLines>;
+            }[];
+        }[];
+    };
+    return {
+        stores: legacy.stores.map((store) => ({
+            id: store.id,
+            householdId: store.householdId,
+            name: store.name,
+            sortOrder: store.sortOrder,
+        })),
+        sections: legacy.stores.flatMap((store) =>
+            store.sections.map((section) => ({
+                id: section.id,
+                householdId: section.householdId,
+                storeId: section.storeId,
+                name: section.name,
+                sortOrder: section.sortOrder,
+                hidden: section.hidden,
+                isOther: section.isOther,
+            })),
+        ),
+        lines: previewGroceryLines(),
+    };
+}
+
+function previewGroceryLines() {
+    type LegacyLine = {
+        id: string;
+        householdId: string;
+        storeId: string;
+        sectionId: string;
+        kind: "food" | "supply";
+        displayName: string;
+        quantity: { amount: number; unit: string };
+        foodId: string;
+        checked: boolean;
+    };
+    const legacy = groceryView(null) as {
+        stores: {
+            sections: { lines: LegacyLine[] }[];
+        }[];
+    };
+    return legacy.stores
+        .flatMap((store) => store.sections.flatMap((section) => section.lines))
+        .map((line) => ({
+            ...line,
+            source: "manual" as const,
+            sourceFridgeItemId: null,
+            note: null,
+        }));
 }
 
 function groceryView(chrome: unknown) {
@@ -346,6 +529,21 @@ const RECIPE = {
     notes: null,
     prepMinutes: 10,
     cookMinutes: 20,
+    verification: "verified" as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const RECIPE_LIST_MACROS = {
+    calories: 320,
+    protein_g: 48,
+    carbs_g: 62,
+    fat_g: 22,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    incomplete: false,
+    incompleteReasons: [] as string[],
+    gaps: [],
 };
 
 const RECIPE_TWO = {
@@ -360,6 +558,8 @@ const RECIPE_TWO = {
     notes: null,
     prepMinutes: 5,
     cookMinutes: 10,
+    verification: "verified" as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 const MACROS = {
@@ -442,6 +642,41 @@ function previewFoodCatalog() {
     ];
     const usual = usualProductRows({ foods: catalog });
     return { catalog, usual };
+}
+
+function previewKitchenUsualsView(
+    chrome: unknown,
+    overrides: Partial<ReturnType<typeof buildPreviewKitchenUsualsView>> = {},
+): ReturnType<typeof buildPreviewKitchenUsualsView> {
+    const { catalog, usual } = previewFoodCatalog();
+    const stores = PREVIEW_STORES;
+    const storesById = new Map(stores.map((row) => [row.id, row]));
+    const foodsById = new Map(
+        catalog.map((row) => [
+            row.id,
+            { id: row.id, genericFoodId: row.genericFoodId },
+        ]),
+    );
+    const rowMeta = new Map(
+        usual.rows.map((row) => [
+            row.food.id,
+            kitchenUsualRowMeta(row, {
+                storesById,
+                groceryLines: previewGroceryLines(),
+                foodsById,
+            }),
+        ]),
+    );
+    return buildPreviewKitchenUsualsView({
+        chrome: chrome as never,
+        rows: usual.rows,
+        stores,
+        rowMeta,
+        addable: usual.addable,
+        openGroceriesCount: previewGroceryLines().filter((l) => !l.checked)
+            .length,
+        ...overrides,
+    });
 }
 
 /** The household-wide notices the preview pages share: the real fridge
@@ -527,21 +762,32 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const eggProducts = catalog
         .filter((row) => row.genericFoodId === "f-eggs")
         .sort((a, b) => a.name.localeCompare(b.name));
-    const nutrition = await renderNutritionPage({
-        access: { ok: true, mode: "self", viewer: ME, subject: ME },
-        members: [ME, SAM],
-        summary: await widgetSample("nutrition-summary"),
-        goals: await widgetSample("goal-progress"),
-        trends: await widgetSample("trends"),
-        weight: await widgetSample("weight-trends"),
-        chrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    } as never);
+    const nutrition = V2
+        ? renderTodayV2Page({
+              ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+              view: buildPreviewTodayViewWithRail("2026-11-10"),
+          })
+        : await renderNutritionPage({
+              access: { ok: true, mode: "self", viewer: ME, subject: ME },
+              members: [ME, SAM],
+              summary: await widgetSample("nutrition-summary"),
+              goals: await widgetSample("goal-progress"),
+              trends: await widgetSample("trends"),
+              weight: await widgetSample("weight-trends"),
+              chrome,
+              cardOrder: [
+                  "nutrition-summary",
+                  "goal-progress",
+                  "trends",
+                  "weight-trends",
+              ],
+          } as never);
+    const nutritionEditSheet = V2
+        ? renderTodayV2Page({
+              ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+              openEditMealId: "m3",
+          })
+        : "";
     const nutritionPeer = await renderNutritionPage({
         access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
         members: [ME, SAM],
@@ -648,9 +894,191 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     };
     return {
         nutrition,
+        ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
         "nutrition-peer": nutritionPeer,
-        fridge: renderFridgePage(fridgeView(chrome) as never),
-        grocery: renderGroceryPage(groceryView(chrome) as never),
+        fridge: (() => {
+            const snap = fridgeView(chrome);
+            return V2
+                ? renderKitchenFridgeV2Page(
+                      buildPreviewKitchenFridgeView(
+                          chrome as never,
+                          snap.today,
+                          {
+                              locations: snap.locations,
+                              items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
+                              foodsById: new Map(
+                                  [...snap.foodsById.entries()].map(
+                                      ([id, row]) => [
+                                          id,
+                                          { ...row, usualAmount: null },
+                                      ],
+                                  ),
+                              ),
+                              freezeDefaultExpiry: defaultFreezeExpiry(
+                                  snap.today,
+                              ),
+                              groceryLines: previewGroceryLines(),
+                              groceryOverview:
+                                  buildKitchenFridgeGroceryOverview(
+                                      previewGrocerySnapshot(),
+                                  ),
+                          },
+                      ),
+                  )
+                : renderFridgePage(snap as never);
+        })(),
+        ...(V2
+            ? {
+                  "kitchen-fridge-item": renderKitchenFridgeV2Page(
+                      buildPreviewKitchenFridgeView(
+                          chrome as never,
+                          fridgeView(chrome).today,
+                          {
+                              locations: fridgeView(chrome).locations,
+                              items: fridgeView(chrome)
+                                  .items as import("../src/domain/fridge.js").FridgeItem[],
+                              foodsById: new Map(
+                                  [
+                                      ...fridgeView(chrome).foodsById.entries(),
+                                  ].map(([id, row]) => [
+                                      id,
+                                      { ...row, usualAmount: null },
+                                  ]),
+                              ),
+                              openItemId: "i2",
+                              freezeDefaultExpiry: defaultFreezeExpiry(
+                                  fridgeView(chrome).today,
+                              ),
+                              groceryLines: previewGroceryLines(),
+                              groceryOverview:
+                                  buildKitchenFridgeGroceryOverview(
+                                      previewGrocerySnapshot(),
+                                  ),
+                          },
+                      ),
+                  ),
+              }
+            : {}),
+        grocery: V2
+            ? renderKitchenGroceriesV2Page(
+                  buildPreviewKitchenGroceriesView(chrome as never, {
+                      ...((): Partial<
+                          import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
+                      > => {
+                          const legacy = groceryView(chrome) as never as {
+                              stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                              locations: { id: string; name: string }[];
+                          };
+                          const checked = legacy.stores.flatMap((s) =>
+                              s.sections.flatMap((sec) =>
+                                  sec.lines.filter((row) => row.checked),
+                              ),
+                          );
+                          const open = legacy.stores.flatMap((s) =>
+                              s.sections.flatMap((sec) =>
+                                  sec.lines.filter((row) => !row.checked),
+                              ),
+                          );
+                          return {
+                              stores: legacy.stores.map((store) => ({
+                                  ...store,
+                                  sections: store.sections.map((section) => ({
+                                      ...section,
+                                      lines: section.lines,
+                                  })),
+                              })),
+                              checkedLines: checked,
+                              locations: legacy.locations,
+                              openLineCount: open.length,
+                              lineMeta: new Map(
+                                  legacy.stores.flatMap((store) =>
+                                      store.sections.flatMap((section) =>
+                                          section.lines.map((row) => [
+                                              row.id,
+                                              {
+                                                  plainFoodName:
+                                                      row.usualProductName
+                                                          ? "Eggs"
+                                                          : null,
+                                                  isUsual:
+                                                      !!row.usualProductName,
+                                                  allergenWarning: null,
+                                                  storeName: store.name,
+                                                  sectionName: section.name,
+                                              },
+                                          ]),
+                                      ),
+                                  ),
+                              ),
+                          };
+                      })(),
+                  }),
+              )
+            : renderGroceryPage(groceryView(chrome) as never),
+        ...(V2
+            ? {
+                  "grocery-put-away": renderKitchenGroceriesV2Page(
+                      buildPreviewKitchenGroceriesView(chrome as never, {
+                          ...((): Partial<
+                              import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
+                          > => {
+                              const legacy = groceryView(chrome) as never as {
+                                  stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                                  locations: { id: string; name: string }[];
+                              };
+                              const checked = legacy.stores
+                                  .flatMap((s) =>
+                                      s.sections.flatMap((sec) => sec.lines),
+                                  )
+                                  .filter((row) => row.checked);
+                              return {
+                                  stores: legacy.stores.map((store) => ({
+                                      ...store,
+                                      sections: store.sections.map((s) => ({
+                                          ...s,
+                                          lines: [],
+                                      })),
+                                  })),
+                                  checkedLines: checked.length
+                                      ? checked
+                                      : [
+                                            {
+                                                id: "g2",
+                                                householdId: H,
+                                                storeId: "s1",
+                                                sectionId: "sec1",
+                                                kind: "food" as const,
+                                                displayName: "Spinach",
+                                                quantity: {
+                                                    amount: 300,
+                                                    unit: "g",
+                                                },
+                                                foodId: "f-g2",
+                                                checked: true,
+                                                source: "manual" as const,
+                                                sourceFridgeItemId: null,
+                                                note: null,
+                                                alreadyHave: null,
+                                                lastLocationId: "l1",
+                                            },
+                                        ],
+                                  locations: legacy.locations,
+                                  openLineCount: 0,
+                                  openPutAway: true,
+                              };
+                          })(),
+                      }),
+                  ),
+                  "kitchen-usuals": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never),
+                  ),
+                  "kitchen-usual-edit": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          openFoodId: "f-eggs",
+                      }),
+                  ),
+              }
+            : {}),
         "grocery-allergen-modal": renderGroceryPage({
             ...(groceryView(chrome) as object),
             allergenNotices: [
@@ -692,13 +1120,113 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 { kind: "food", location_id: "l1" },
             ),
         } as never),
-        recipes: renderRecipesPage({
-            chrome,
-            recipes: [RECIPE, RECIPE_TWO],
-            members: [ME, SAM],
-            viewerId: "u1",
-        } as never),
-        recipe: renderRecipeDetailPage(recipeView as never),
+        recipes: V2
+            ? renderRecipesListV2Page({
+                  chrome,
+                  query: "",
+                  filter: "",
+                  totalCount: 2,
+                  cookableCount: 1,
+                  cards: [
+                      {
+                          recipe: RECIPE,
+                          flags: {
+                              cookable: true,
+                              highProtein: false,
+                              quick: true,
+                              missingCount: 0,
+                              hasIngredients: true,
+                          },
+                          macrosPerPortion: RECIPE_LIST_MACROS,
+                          missingNames: [],
+                      },
+                      {
+                          recipe: RECIPE_TWO,
+                          flags: {
+                              cookable: false,
+                              highProtein: false,
+                              quick: true,
+                              missingCount: 2,
+                              hasIngredients: true,
+                          },
+                          macrosPerPortion: RECIPE_LIST_MACROS,
+                          missingNames: ["Avocado", "Lime"],
+                      },
+                  ],
+              })
+            : renderRecipesPage({
+                  chrome,
+                  recipes: [RECIPE, RECIPE_TWO],
+                  members: [ME, SAM],
+                  viewerId: "u1",
+              } as never),
+        recipe: V2
+            ? renderRecipeDetailV2Page({
+                  chrome,
+                  recipe: recipeView.recipe,
+                  ingredients: recipeView.ingredients as never,
+                  ingredientGroups: groupRecipeIngredientsByPlace(
+                      recipeView.ingredients,
+                      [
+                          {
+                              id: "ri-eggs",
+                              householdId: H,
+                              locationId: "l1",
+                              kind: "food",
+                              displayName: "Eggs",
+                              quantity: { amount: 6, unit: "each" },
+                              foodId: "f-eggs",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 4),
+                          },
+                          {
+                              id: "ri-flour",
+                              householdId: H,
+                              locationId: "l2",
+                              kind: "food",
+                              displayName: "All-purpose flour",
+                              quantity: { amount: 1, unit: "kg" },
+                              foodId: "f2",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 30),
+                          },
+                          {
+                              id: "ri-sugar",
+                              householdId: H,
+                              locationId: "l2",
+                              kind: "food",
+                              displayName: "Sugar",
+                              quantity: { amount: 500, unit: "g" },
+                              foodId: "f3",
+                              expiresOn: addUtcDays(utcTodayFromDate(), 90),
+                          },
+                      ],
+                      [
+                          {
+                              id: "l1",
+                              householdId: H,
+                              name: "Fridge",
+                              sortOrder: 0,
+                          },
+                          {
+                              id: "l2",
+                              householdId: H,
+                              name: "Pantry",
+                              sortOrder: 1,
+                          },
+                      ],
+                      new Map(
+                          ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
+                              id,
+                              { id, genericFoodId: null },
+                          ]),
+                      ),
+                  ),
+                  macrosPerPortion: MACROS as never,
+                  gapReasons: [],
+                  members: recipeView.members,
+                  viewerId: recipeView.viewerId,
+                  portionCount: recipeView.portionCount,
+              })
+            : renderRecipeDetailPage(recipeView as never),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,
             openModalId: "recipe-add-ingredient-r1",
@@ -708,17 +1236,105 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 {},
             ),
         } as never),
-        settings: renderSettingsPage({
-            chrome,
-            flags: PREVIEW_FLAGS,
-            backHref: "/kitchen/fridge",
-            displayName: "Ethan",
-            timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
-        } as never),
+        settings: V2
+            ? renderSettingsHomeV2Page({
+                  chrome,
+                  displayName: "Ethan Flow",
+                  email: "ethan@example.com",
+              })
+            : renderSettingsPage({
+                  chrome,
+                  flags: PREVIEW_FLAGS,
+                  backHref: "/kitchen/fridge",
+                  displayName: "Ethan",
+                  timezone: "America/Los_Angeles",
+                  weightUnit: "kg",
+                  widgetsEnabled: true,
+                  alcoholTrackingEnabled: false,
+                  drinkUnit: "",
+              } as never),
+        ...(V2
+            ? {
+                  "settings-account": renderSettingsAccountV2Page({
+                      chrome,
+                      backHref: "/kitchen/fridge",
+                      displayName: "Ethan Flow",
+                      timezone: "America/Los_Angeles",
+                      weightUnit: "kg",
+                      widgetsEnabled: true,
+                      alcoholTrackingEnabled: false,
+                      drinkUnit: "",
+                  }),
+                  "settings-display": renderSettingsDisplayV2Page({
+                      chrome,
+                      storedTheme: null,
+                  }),
+                  "settings-household-v2": (() => {
+                      const dupPairs = possibleDuplicates(
+                          catalog.filter(
+                              (f) => !f.archivedAt && !f.genericFoodId,
+                          ),
+                          new Map(),
+                          new Set(),
+                          new Set(),
+                      );
+                      return renderSettingsHouseholdV2Page({
+                          chrome,
+                          householdName: "The Flow household",
+                          members: [ME, SAM] as never,
+                          stores: PREVIEW_STORES,
+                          isOwner: true,
+                          canManage: true,
+                          viewerUserId: ME.userId,
+                          socialReaders:
+                              EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+                          timezone: "America/Los_Angeles",
+                          noticeResult: {
+                              notices: previewNotices(),
+                              dismissals: [],
+                              subjectNames: new Map(),
+                              subjectTimes: new Map(),
+                              noticeFoods: new Map(),
+                              catalogFoods: catalog,
+                              aliasMap: new Map(),
+                              barcodedIds: new Set(),
+                              possibleDuplicatePairs: dupPairs,
+                              recipesListPrefetch: {
+                                  recipes: [],
+                                  allIngredients: [],
+                                  fridgeItems: [],
+                                  foodsById: new Map(),
+                              },
+                          },
+                          duplicatePairs: dupPairs,
+                          refCounts: new Map(),
+                      } as never);
+                  })(),
+                  "settings-household-v2-member": renderSettingsMemberV2Page({
+                      chrome,
+                      member: SAM as never,
+                      viewer: ME as never,
+                      todayHref: `/?member=${SAM.userId}`,
+                  }),
+                  "settings-goals": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_TRENDS_GOALS,
+                      goalDate: "2026-11-09",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                  }),
+                  "settings-saved": renderSettingsSavedV2Page({
+                      chrome,
+                      foods: catalog.map((f) => ({
+                          ...f,
+                          aliases: [] as string[],
+                      })),
+                      recipes: [RECIPE, RECIPE_TWO],
+                      searchQuery: "",
+                  }),
+                  "settings-export": renderSettingsExportV2Page({ chrome }),
+              }
+            : {}),
         household: renderHouseholdSettingsPage({
             chrome,
             householdName: "Flow house",
@@ -835,11 +1451,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
-        help: renderSettingsHelpPage({
-            chrome,
-            flags: PREVIEW_FLAGS,
-            backHref: "/kitchen/fridge",
-        } as never),
+        help: V2
+            ? renderSettingsHelpV2Page({ chrome })
+            : renderSettingsHelpPage({
+                  chrome,
+                  flags: PREVIEW_FLAGS,
+                  backHref: "/kitchen/fridge",
+              } as never),
         "needs-attention": (() => {
             const fridgeItems = fridgeView(null).items;
             return renderNeedsAttentionPage({
@@ -935,6 +1553,29 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
+        ...(V2
+            ? {
+                  "dev-gallery-v2": renderDevGalleryV2Page(chrome),
+                  "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-log-results": await logSheetPreview(
+                      theme,
+                      "results",
+                  ),
+                  "nutrition-log-amount": await logSheetPreview(
+                      theme,
+                      "amount",
+                  ),
+                  "nutrition-log-quick-cal": await logSheetPreview(
+                      theme,
+                      "quick-cal",
+                  ),
+                  "nutrition-log-weigh-in": await logSheetPreview(
+                      theme,
+                      "weigh-in",
+                  ),
+                  "trends-v2": previewTrendsPage(chrome),
+              }
+            : {}),
     };
 }
 
@@ -961,6 +1602,80 @@ function findChromium(): string | null {
         if (path) return path;
     }
     return null;
+}
+
+async function logSheetPreview(
+    theme: "light" | "dark",
+    mode: "empty" | "results" | "amount" | "quick-cal" | "weigh-in",
+): Promise<string> {
+    const chrome = {
+        ...previewChrome(theme),
+        v2Timezone: "America/Los_Angeles",
+    };
+    const base = {
+        ...chrome,
+        title: "Nutrition",
+        active: "nutrition" as const,
+        body: pageHeader({ title: "Ethan Flow" }),
+    };
+    if (mode === "amount") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                amountOpenOnLoad: true,
+                amount: {
+                    name: "Chicken breast, grilled",
+                    food_id: "f-chicken",
+                    unit_hints: ["g", "each"],
+                    amount: 150,
+                    unit: "g",
+                    meal_type: "dinner",
+                    kcal_per_100g: 165,
+                    protein_per_100g: 31,
+                    carbs_per_100g: 0,
+                    fat_per_100g: 3.3,
+                },
+            },
+        });
+    }
+    if (mode === "quick-cal") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                quickCaloriesOpenOnLoad: true,
+                quickCalories: {
+                    calories: 350,
+                    protein_g: 12,
+                    carbs_g: 40,
+                    fat_g: 14,
+                    description: "Coffee & pastry",
+                    meal_type: "snack",
+                },
+            },
+        });
+    }
+    if (mode === "weigh-in") {
+        return renderAppShell({
+            ...base,
+            v2LogSheet: {
+                weighInOpenOnLoad: true,
+                weighIn: {
+                    weight: 182.4,
+                    unit: "lb",
+                    lastWeightG: 83007,
+                    lastLoggedAt: "2026-11-04T19:00:00.000Z",
+                },
+            },
+        });
+    }
+    return renderAppShell({
+        ...base,
+        v2LogSheet: {
+            searchOpenOnLoad: true,
+            previewSearch: mode,
+            previewQuery: mode === "results" ? "chick" : "",
+        },
+    });
 }
 
 async function nutritionWithModal(
@@ -1049,6 +1764,9 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
         `grocery-did-you-mean-${theme}`,
+        ...(V2
+            ? [`grocery-put-away-${theme}`, `kitchen-usual-edit-${theme}`]
+            : []),
         `fridge-did-you-mean-${theme}`,
         `recipe-did-you-mean-${theme}`,
     );
@@ -1131,10 +1849,29 @@ if (process.argv.includes("--shots")) {
         console.log(`${OUT}/${name}-wide.png`);
         if (V2) {
             // The new shell's two layouts: the phone nav at 390 wide, the
-            // sidebar and top bar at the design's 1440.
-            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
+            // sidebar and top bar at the design's 1440. The dev gallery is
+            // one long page — use a tall window so --shots capture every block.
+            const shotBase = name.replace(/-(?:light|dark)$/, "");
+            const galleryFullPage =
+                shotBase.startsWith("dev-gallery-v2") ||
+                shotBase.startsWith("trends-v2") ||
+                shotBase === "nutrition" ||
+                shotBase === "settings" ||
+                shotBase === "settings-account" ||
+                shotBase === "settings-display" ||
+                shotBase === "settings-household-v2" ||
+                shotBase === "settings-household-v2-member" ||
+                shotBase === "settings-goals" ||
+                shotBase === "settings-saved" ||
+                shotBase === "settings-export" ||
+                shotBase === "help" ||
+                shotBase === "recipes" ||
+                shotBase === "recipe";
+            const v2Phone = galleryFullPage ? "390,5400" : "390,844";
+            const v2Desktop = galleryFullPage ? "1440,5400" : "1440,960";
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-390.png http://localhost:${PORT}/${name}.html`.quiet();
             console.log(`${OUT}/${name}-v2-390.png`);
-            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=1440,960 --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
+            await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${v2Desktop} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-v2-1440.png http://localhost:${PORT}/${name}.html`.quiet();
             console.log(`${OUT}/${name}-v2-1440.png`);
         }
     }

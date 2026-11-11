@@ -22,19 +22,57 @@ async function shortHash(text: string): Promise<string> {
         .slice(0, 12);
 }
 
+function customPropertiesDefined(css: string): Set<string> {
+    const names = new Set<string>();
+    for (const m of css.matchAll(/--([a-zA-Z0-9-]+)\s*:/g)) {
+        names.add(`--${m[1]}`);
+    }
+    return names;
+}
+
+function undefinedVarRefs(css: string): string[] {
+    const defined = customPropertiesDefined(css);
+    const missing = new Set<string>();
+    for (const m of css.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)(\s*,|\s*\))/g)) {
+        const name = m[1];
+        const tail = m[2];
+        if (!name || !tail) continue;
+        if (tail.trim().startsWith(",")) continue;
+        if (!defined.has(name)) missing.add(name);
+    }
+    return [...missing].sort();
+}
+
 describe("/app-v2.css", () => {
+    test("every var() without a fallback references a property defined in the bundle", async () => {
+        const css = await getAppV2Css();
+        expect(undefinedVarRefs(css)).toEqual([]);
+    });
+
     test("assembles tokens first, then the shell partial, with no unresolved include", async () => {
         const css = await getAppV2Css();
         expect(css).not.toContain("/*@include");
         const tokens = readFileSync("./public/app/v2/tokens.css", "utf8");
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
+        const components = readFileSync(
+            "./public/app/v2/components.css",
+            "utf8",
+        );
+        const sheet = readFileSync("./public/app/v2/sheet.css", "utf8");
         expect(css).toContain(tokens.trim());
         expect(css).toContain(shell.trim());
+        expect(css).toContain(components.trim());
+        expect(css).toContain(sheet.trim());
         expect(css.indexOf(tokens.trim())).toBeLessThan(
             css.indexOf(shell.trim()),
         );
+        expect(css.indexOf(shell.trim())).toBeLessThan(
+            css.indexOf(components.trim()),
+        );
         expect(css).toContain("--surface-bg: #0d0f0e");
         expect(css).toContain(".fd-tabs");
+        expect(css).toContain(".fd-row--swipe");
+        expect(css).toContain(".fd-sheet");
     });
 
     test("is content-hashed", async () => {
@@ -106,7 +144,16 @@ describe("/app-v2.js", () => {
         const js = await getAppV2Js();
         expect(js).toContain("window.FoodableApp.onLoad(");
         expect(js).not.toContain("Turbo.start");
-        expect(js.length).toBeLessThan(10_000);
+        // +~1.8 KB amount Enter helpers, step-any stepping, listbox rows;
+        // +~0.5 KB Trends subtitle and month-link range sync;
+        // +~7 KB Today week swipe, edit sheet and live macro tiles;
+        // +~1.5 KB Kitchen fridge rows and the Freeze date panel;
+        // +~1.2 KB Kitchen groceries put-away date chips.
+        // +~0.6 KB Kitchen Overview grocery rows open their line.
+        // +~0.9 KB Kitchen usuals rows, unit select and add sheet;
+        // +~0.5 KB usual product row sync and "No amount".
+        // +~0.8 KB Recipes list desktop/phone search field swap.
+        expect(js.length).toBeLessThan(86_000);
     });
 });
 

@@ -37,17 +37,52 @@ function syncStepper(root, input) {
     );
 }
 
+function buttonStepSize(root, input) {
+    const attr =
+        typeof root.getAttribute === "function"
+            ? root.getAttribute("data-fd-button-step")
+            : null;
+    if (attr != null && attr !== "") return attr;
+    return input.step == null || input.step === "" ? "1" : input.step;
+}
+
 function step(root, input, direction) {
     const min = numberOrNull(input.min);
     const max = numberOrNull(input.max);
-    if (direction < 0) input.stepDown();
-    else input.stepUp();
-    let value = numberOrNull(input.value);
-    if (value == null) return;
-    if (min != null && value < min) value = min;
-    if (max != null && value > max) value = max;
-    const decimals = Math.max(decimalsOf(input.step), decimalsOf(input.min));
-    input.value = String(Number(value.toFixed(decimals)));
+    const buttonStep = buttonStepSize(root, input);
+    if (
+        input.step === "any" &&
+        typeof root.hasAttribute === "function" &&
+        root.hasAttribute("data-fd-button-step")
+    ) {
+        const typed = input.value;
+        let value = numberOrNull(typed);
+        if (value == null) value = min != null && min > 0 ? min : 0;
+        const delta = Number(buttonStep);
+        if (!Number.isFinite(delta)) return;
+        value += direction < 0 ? -delta : delta;
+        if (min != null && value < min) value = min;
+        if (max != null && value > max) value = max;
+        // Keep a typed value's own precision: 100.5 + 1 is 101.5, not 102.
+        const decimals = Math.max(
+            decimalsOf(buttonStep),
+            decimalsOf(input.min),
+            Math.min(decimalsOf(typed), 3),
+        );
+        input.value = String(Number(value.toFixed(decimals)));
+    } else {
+        if (direction < 0) input.stepDown();
+        else input.stepUp();
+        let value = numberOrNull(input.value);
+        if (value == null) return;
+        if (min != null && value < min) value = min;
+        if (max != null && value > max) value = max;
+        const decimals = Math.max(
+            decimalsOf(buttonStep),
+            decimalsOf(input.min),
+        );
+        input.value = String(Number(value.toFixed(decimals)));
+    }
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     syncStepper(root, input);

@@ -33,6 +33,7 @@ import {
 import type { RecipesStore } from "./recipes.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
 import { assertRecipeVerified } from "./recipe-import.js";
+import { isCalendarDate } from "./insights.js";
 
 export type StockReason = "purchase" | "cook" | "eat" | "discard" | "adjust";
 
@@ -303,6 +304,22 @@ function expirySortKey(item: FridgeItem): number {
     return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY;
 }
 
+export type FamilyFoodRow = Pick<Food, "id" | "genericFoodId">;
+
+/** Same family match {@link decrementFrom} uses when choosing fridge rows to deduct. */
+export function fridgeItemMatchesFood(
+    itemFoodId: string | null | undefined,
+    needFoodId: string,
+    familyFoodMap: ReadonlyMap<string, FamilyFoodRow>,
+): boolean {
+    if (!itemFoodId) return false;
+    const needRow = familyFoodMap.get(needFoodId);
+    const needFamily = needRow ? familyOf(needRow) : needFoodId;
+    const row = familyFoodMap.get(itemFoodId);
+    if (!row) return itemFoodId === needFoodId;
+    return familyOf(row) === needFamily;
+}
+
 export async function lastUsedLocationId(
     fridge: FridgeStore,
     householdId: string,
@@ -458,16 +475,16 @@ async function decrementFrom(
         gramsPerMl: needFood.gramsPerMl ?? null,
     };
     let useSingleMovementForm = true;
-    const needFamily = familyOf(needFood);
     const pool = (
         input.fridgeItemId
             ? items.filter((item) => item.id === input.fridgeItemId)
-            : items.filter((item) => {
-                  if (!item.foodId) return false;
-                  const row = familyFoodMap.get(item.foodId);
-                  if (!row) return item.foodId === input.foodId;
-                  return familyOf(row) === needFamily;
-              })
+            : items.filter((item) =>
+                  fridgeItemMatchesFood(
+                      item.foodId,
+                      input.foodId,
+                      familyFoodMap,
+                  ),
+              )
     ).slice();
     if (input.fridgeItemId) {
         const target = pool[0];
@@ -890,10 +907,16 @@ export async function putAwayGroceryLines(
             string,
             { amount: number; unit?: string | null }
         >;
+        /** Per-line location and expiry; each field falls back to the shared input. */
+        perLine?: Record<
+            string,
+            { locationId?: string | null; expiresOn?: string | null }
+        >;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
-    const selected = input.lineIds.map((lineId) => {
+    // A line is put away once per call, however often its id is repeated.
+    const selected = [...new Set(input.lineIds)].map((lineId) => {
         const line = lines.find((row) => row.id === lineId);
         if (!line) throw new StockInputError("Unknown grocery line.");
         if (!line.foodId) {
@@ -942,49 +965,123 @@ export async function putAwayGroceryLines(
         plans.push({ line, chosenId: chosen });
     }
     const fridgeItems = await fridge.listItems(input.householdId);
-    const results: PutAwayResult[] = [];
+    const locations = await fridge.listLocations(input.householdId);
+    const locationIds = new Set(locations.map((loc) => loc.id));
+
+    type ResolvedPutAway = {
+        line: GroceryLine;
+        chosenId: string;
+        locationId: string;
+        expiresOn: string | null | undefined;
+        delta: number;
+        unit: string;
+    };
+    const resolved: ResolvedPutAway[] = [];
+
     for (const { line, chosenId } of plans) {
-        let locationId = input.locationId;
+        const override = input.amountOverrides?.[line.id];
+        if (line.note?.trim() && override == null) {
+            throw new NotedGroceryLineAmountRequiredError(line.displayName);
+        }
+        if (override) {
+            if (!Number.isFinite(override.amount)) {
+                throw new StockInputError(
+                    `Enter an amount greater than zero for ${line.displayName}.`,
+                );
+            }
+            const effectiveOverride = roundAmount(override.amount);
+            if (!(effectiveOverride > 0)) {
+                throw new StockInputError(
+                    `Enter an amount greater than zero for ${line.displayName}.`,
+                );
+            }
+        }
+
+        const lineOpts = input.perLine?.[line.id];
+        const explicitLoc =
+            lineOpts?.locationId != null && lineOpts.locationId !== ""
+                ? lineOpts.locationId
+                : input.locationId != null && input.locationId !== ""
+                  ? input.locationId
+                  : null;
+        let locationId = explicitLoc;
         if (!locationId) {
             locationId =
                 recentLocationForFood(fridgeItems, chosenId) ??
                 recentLocationForFood(fridgeItems, line.foodId!) ??
                 (await lastUsedLocationId(fridge, input.householdId, chosenId));
         }
-        const override = input.amountOverrides?.[line.id];
-        if (line.note?.trim() && override == null) {
-            throw new NotedGroceryLineAmountRequiredError(line.displayName);
+        if (!locationId) {
+            throw new StockInputError("Add a fridge location first.");
         }
+        if (!locationIds.has(locationId)) {
+            throw new FridgeInputError("Unknown location.");
+        }
+
+        const rawExpiry =
+            lineOpts?.expiresOn !== undefined
+                ? lineOpts.expiresOn
+                : input.expiresOn;
+        const expiresOn =
+            rawExpiry === undefined
+                ? undefined
+                : rawExpiry === null || rawExpiry === ""
+                  ? null
+                  : rawExpiry;
         if (
-            override &&
-            !(Number.isFinite(override.amount) && override.amount > 0)
+            expiresOn != null &&
+            expiresOn !== "" &&
+            !isCalendarDate(expiresOn)
         ) {
             throw new StockInputError(
-                `Enter an amount greater than zero for ${line.displayName}.`,
+                `Enter a valid expiry date for ${line.displayName}.`,
             );
         }
+
         const delta = override?.amount ?? line.quantity.amount;
         const unit =
             override?.unit != null && override.unit !== ""
                 ? override.unit
                 : line.quantity.unit;
-        const applied = await applyMovement(fridge, stock, foods, {
-            householdId: input.householdId,
-            foodId: chosenId,
+
+        resolved.push({
+            line,
+            chosenId,
+            locationId,
+            expiresOn,
             delta,
             unit,
-            reason: "purchase",
-            locationId,
-            groceryLineId: line.id,
-            actorUserId: input.actorUserId,
-            expiresOn: input.expiresOn,
         });
-        await grocery.deleteLine(input.householdId, line.id);
+    }
+
+    for (const row of resolved) {
+        const effectiveAmount = roundAmount(row.delta);
+        if (!(effectiveAmount > 0)) {
+            throw new StockInputError(
+                `Enter an amount greater than zero for ${row.line.displayName}.`,
+            );
+        }
+    }
+
+    const results: PutAwayResult[] = [];
+    for (const row of resolved) {
+        const applied = await applyMovement(fridge, stock, foods, {
+            householdId: input.householdId,
+            foodId: row.chosenId,
+            delta: row.delta,
+            unit: row.unit,
+            reason: "purchase",
+            locationId: row.locationId,
+            groceryLineId: row.line.id,
+            actorUserId: input.actorUserId,
+            expiresOn: row.expiresOn,
+        });
+        await grocery.deleteLine(input.householdId, row.line.id);
         results.push({
-            line,
+            line: row.line,
             movement: applied.movement,
             item: applied.item,
-            productFoodId: chosenId,
+            productFoodId: row.chosenId,
         });
     }
     return results;
@@ -1086,6 +1183,9 @@ export async function eatFridgeItem(
         );
     }
     const amount = input.amount ?? current.quantity.amount;
+    if (!Number.isFinite(amount) || !(roundAmount(amount) > 0)) {
+        throw new StockInputError("Enter an amount greater than zero.");
+    }
     const result = await applyMovement(fridge, stock, foods, {
         householdId: input.householdId,
         foodId: current.foodId,
@@ -1253,6 +1353,9 @@ export async function discardFridgeItem(
         );
     }
     const amount = input.amount ?? current.quantity.amount;
+    if (!Number.isFinite(amount) || !(roundAmount(amount) > 0)) {
+        throw new StockInputError("Enter an amount greater than zero.");
+    }
     return applyMovement(fridge, stock, foods, {
         householdId: input.householdId,
         foodId: current.foodId,

@@ -730,6 +730,58 @@ test("eatFridgeItem on a supply writes an eat movement and the ledger matches", 
     expect(fridgeEatLogsMeal(towels)).toBe(false);
 });
 
+test("eatFridgeItem rejects a non-positive amount", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const rice = await findOrCreateManualFood(foods, HH, "food", "Rice");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: rice.id,
+        amount: 100,
+        unit: "g",
+        locationId: loc.id,
+    });
+    await expect(
+        eatFridgeItem(fridge, stock, foods, {
+            householdId: HH,
+            itemId: added.item!.id,
+            amount: -50,
+        }),
+    ).rejects.toThrow(/greater than zero/);
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(100);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
+});
+
+test("discardFridgeItem rejects a non-positive amount", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const rice = await findOrCreateManualFood(foods, HH, "food", "Rice");
+    const added = await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: rice.id,
+        amount: 100,
+        unit: "g",
+        locationId: loc.id,
+    });
+    for (const amount of [-5, 0, Number.NaN]) {
+        await expect(
+            discardFridgeItem(fridge, stock, foods, {
+                householdId: HH,
+                itemId: added.item!.id,
+                amount,
+            }),
+        ).rejects.toThrow(/greater than zero/);
+    }
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items[0]?.quantity.amount).toBe(100);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
+});
+
 test("manual delete writes an adjust movement and the ledger matches stock", async () => {
     const fridge = createMemoryFridgeStore();
     const stock = createMemoryStockStore();
@@ -789,4 +841,161 @@ test("manual update rejects an amount that rounds to zero", async () => {
         { amount: 1, unit: "g" },
     ]);
     expect(await stock.listMovements(HH, salt.id)).toHaveLength(1);
+});
+
+test("putAwayGroceryLines accepts per-line location and expiry", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const fridgeLoc = await addLocation(fridge, HH, "Fridge");
+    const pantryLoc = await addLocation(fridge, HH, "Pantry");
+    const apples = await findOrCreateManualFood(foods, HH, "food", "Apples");
+    const oats = await findOrCreateManualFood(foods, HH, "food", "Oats");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const lineA = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Apples",
+        amount: 3,
+        unit: "each",
+    });
+    const lineB = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Oats",
+        amount: 500,
+        unit: "g",
+    });
+    await putAwayGroceryLines(grocery, fridge, stock, foods, {
+        householdId: HH,
+        lineIds: [lineA.id, lineB.id],
+        perLine: {
+            [lineA.id]: {
+                locationId: fridgeLoc.id,
+                expiresOn: "2026-07-01",
+            },
+            [lineB.id]: {
+                locationId: pantryLoc.id,
+                expiresOn: "2026-12-31",
+            },
+        },
+    });
+    const listed = await listFridge(fridge, HH);
+    expect(listed.items).toHaveLength(2);
+    const byFood = new Map(listed.items.map((item) => [item.foodId, item]));
+    expect(byFood.get(apples.id)?.locationId).toBe(fridgeLoc.id);
+    expect(byFood.get(apples.id)?.expiresOn).toBe("2026-07-01");
+    expect(byFood.get(oats.id)?.locationId).toBe(pantryLoc.id);
+    expect(byFood.get(oats.id)?.expiresOn).toBe("2026-12-31");
+    expect((await listGrocery(grocery, settings, HH)).lines).toEqual([]);
+    const movements = await stock.listMovements(HH);
+    expect(ledgerMatchesStock(listed.items, movements, apples)).toBe(true);
+    expect(ledgerMatchesStock(listed.items, movements, oats)).toBe(true);
+});
+
+test("putAwayGroceryLines rejects sub-tenth-gram amount before any write", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const milk = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    const salt = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Salt",
+        amount: 0.04,
+        unit: "g",
+    });
+    await expect(
+        putAwayGroceryLines(grocery, fridge, stock, foods, {
+            householdId: HH,
+            lineIds: [milk.id, salt.id],
+            locationId: loc.id,
+        }),
+    ).rejects.toThrow(/greater than zero/);
+    expect((await listGrocery(grocery, settings, HH)).lines).toHaveLength(2);
+    expect((await listFridge(fridge, HH)).items).toHaveLength(0);
+    expect(await stock.listMovements(HH)).toHaveLength(0);
+});
+
+test("putAwayGroceryLines puts a repeated line id away once", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const milk = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    await putAwayGroceryLines(grocery, fridge, stock, foods, {
+        householdId: HH,
+        lineIds: [milk.id, milk.id],
+        locationId: loc.id,
+    });
+    const items = (await listFridge(fridge, HH)).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.quantity.amount).toBe(1);
+    expect(await stock.listMovements(HH)).toHaveLength(1);
+});
+
+test("putAwayGroceryLines with a bad line in the middle writes nothing", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const first = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    const second = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Bread",
+        amount: 1,
+        unit: "each",
+    });
+    const third = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Butter",
+        amount: 200,
+        unit: "g",
+    });
+    await expect(
+        putAwayGroceryLines(grocery, fridge, stock, foods, {
+            householdId: HH,
+            lineIds: [first.id, second.id, third.id],
+            perLine: {
+                [first.id]: { locationId: loc.id },
+                [second.id]: { locationId: "missing-loc" },
+                [third.id]: { locationId: loc.id },
+            },
+        }),
+    ).rejects.toThrow(/Unknown location/);
+    expect((await listGrocery(grocery, settings, HH)).lines).toHaveLength(3);
+    expect((await listFridge(fridge, HH)).items).toHaveLength(0);
+    expect(await stock.listMovements(HH)).toHaveLength(0);
 });

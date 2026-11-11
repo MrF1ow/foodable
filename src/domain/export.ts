@@ -484,6 +484,8 @@ export interface FullExportResult {
     profile: boolean;
     /** Absent only when the account has nothing at all to export. */
     url?: string;
+    /** Same archive as `url`, without a host — safe to redirect to. */
+    downloadPath?: string;
 }
 
 /**
@@ -587,19 +589,20 @@ export async function exportAllData(
     // One row per user in export_archives: each export overwrites the last. The
     // row cascades away when the account is deleted.
     await store.put(userId, archive, EXPORT_TTL_SECONDS);
-    const url = baseUrl
-        ? `${baseUrl}/exports/${signExportToken(
-              userId,
-              Date.now() + EXPORT_TTL_SECONDS * 1000,
-              resolveSessionSigningSecret(),
-          )}`
-        : undefined;
+    const token = signExportToken(
+        userId,
+        Date.now() + EXPORT_TTL_SECONDS * 1000,
+        resolveSessionSigningSecret(),
+    );
+    const downloadPath = `/exports/${token}`;
+    const url = baseUrl ? `${baseUrl}${downloadPath}` : undefined;
 
     return {
         counts,
         goals: goals !== null,
         profile: profile !== null,
         url,
+        downloadPath,
     };
 }
 

@@ -50,7 +50,15 @@ export type RowSwipe = {
     lead?: SwipeAction;
     trail?: SwipeAction;
     open?: "lead" | "trail";
+    /** `id` of the row's `dialog.fd-sheet` (accessible actions path). */
+    sheetId?: string;
 };
+
+/** Stable gesture descriptor for `data-swipe-right` / `data-swipe-left`. */
+function swipeDataAttr(action: SwipeAction, side: "left" | "right"): string {
+    const url = action.form?.action ?? "";
+    return ` data-swipe-${side}="${esc(`${url}\t${action.label}`)}"`;
+}
 
 type RowBase = {
     /** Leading dot or caller markup (avatar, icon). Built by `dot()` / v2 helpers only. */
@@ -101,6 +109,14 @@ function rowShell(opts: ShellOpts): Html {
     const hasSwipe = !!(swipe?.lead || swipe?.trail);
     const open =
         hasSwipe && swipe?.open ? ` data-swipe-open="${swipe.open}"` : "";
+    const swipeData =
+        swipe?.lead != null ? swipeDataAttr(swipe.lead, "right") : "";
+    const swipeDataTrail =
+        swipe?.trail != null ? swipeDataAttr(swipe.trail, "left") : "";
+    const sheetLink =
+        hasSwipe && swipe?.sheetId
+            ? ` data-sheet-id="${esc(swipe.sheetId)}" aria-controls="${esc(swipe.sheetId)}"`
+            : "";
     const id = opts.id ? ` id="${esc(opts.id)}"` : "";
     const body = [
         leadSlot(opts.lead),
@@ -117,7 +133,7 @@ function rowShell(opts: ShellOpts): Html {
             hasSwipe && "fd-row--swipe",
             opts.extraClass,
             opts.className,
-        )}"${id}${open}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}</li>`,
+        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}</li>`,
     );
 }
 
@@ -173,6 +189,7 @@ export function foodRow(
     opts: RowBase & {
         title: Text;
         meta?: Text;
+        subtitle?: Text;
         macros?: Macros;
         trailing?: Text;
         href?: string;
@@ -180,6 +197,9 @@ export function foodRow(
 ): Html {
     const main = join([
         titleLine(opts.title, metaSpan(opts.meta)),
+        opts.subtitle != null && opts.subtitle !== ""
+            ? `<span class="fd-row__sub">${esc(opts.subtitle)}</span>`
+            : "",
         opts.macros ? macroLine(opts.macros) : "",
     ]);
     return rowShell({
@@ -300,15 +320,18 @@ export function fridgeRow(
         qty?: Text;
         date?: Text;
         dateTime?: string;
+        /** Extra class on the date cell (expiry tone). */
+        dateClass?: string;
         href?: string;
     },
 ): Html {
+    const dateExtra = opts.dateClass ? ` ${opts.dateClass}` : "";
     const date =
         opts.date == null || opts.date === ""
             ? ""
             : opts.dateTime
-              ? `<time class="fd-row__date" datetime="${esc(opts.dateTime)}">${esc(opts.date)}</time>`
-              : `<span class="fd-row__date">${esc(opts.date)}</span>`;
+              ? `<time class="fd-row__date${dateExtra}" datetime="${esc(opts.dateTime)}">${esc(opts.date)}</time>`
+              : `<span class="fd-row__date${dateExtra}">${esc(opts.date)}</span>`;
     return rowShell({
         ...opts,
         variant: "fridge",
@@ -331,7 +354,8 @@ export function usualRow(
         title: Text;
         meta?: Text;
         parts?: readonly UsualPart[];
-        href: string;
+        /** When omitted the row is not a link (sheet / script opens it). */
+        href?: string;
     },
 ): Html {
     const parts = (opts.parts ?? [])

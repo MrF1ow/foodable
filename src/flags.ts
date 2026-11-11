@@ -176,6 +176,13 @@ function resolveEnvName(env?: Record<string, string | undefined>): string {
     return trimmed ? trimmed : "local";
 }
 
+/** Dev-only routes: not Railway production and not NODE_ENV=production (Docker self-host). */
+export function isLocalDev(env?: Record<string, string | undefined>): boolean {
+    const source = env ?? process.env;
+    if (source.NODE_ENV === "production") return false;
+    return resolveEnvName(source) === "local";
+}
+
 function resolveHouseholdId(
     auth: AuthContext,
     member?: HouseholdMember | null,

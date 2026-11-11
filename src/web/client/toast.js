@@ -76,10 +76,16 @@ function showToastMessage(opts) {
     const region = getToastRegion();
     if (!region || !opts || !opts.text) return;
     const kind = toastKind(opts.kind);
+    const hasAction = Boolean(opts.actionForm);
+    const dismissMs =
+        typeof opts.dismissMs === "number" && opts.dismissMs > 0
+            ? opts.dismissMs
+            : TOAST_AUTO_DISMISS_MS;
 
-    const el = document.createElement("button");
-    el.type = "button";
+    const el = document.createElement(hasAction ? "div" : "button");
+    if (!hasAction) el.type = "button";
     el.className = "toast-item toast-item--" + kind;
+    if (hasAction) el.setAttribute("role", "status");
 
     const icon = document.createElement("span");
     icon.className = "toast-icon";
@@ -91,6 +97,18 @@ function showToastMessage(opts) {
     msg.className = "toast-text";
     msg.textContent = opts.text;
     el.appendChild(msg);
+
+    if (opts.actionForm) {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = opts.actionForm;
+        const form = wrap.firstElementChild;
+        if (form) {
+            form.addEventListener("submit", function () {
+                dismissToast(el, region);
+            });
+            el.appendChild(form);
+        }
+    }
 
     region.insertBefore(el, region.firstChild);
     stackToasts(region);
@@ -114,7 +132,7 @@ function showToastMessage(opts) {
         if (paused) return;
         timer = window.setTimeout(function () {
             dismissToast(el, region);
-        }, TOAST_AUTO_DISMISS_MS);
+        }, dismissMs);
     }
 
     function pause() {
@@ -133,9 +151,11 @@ function showToastMessage(opts) {
     el.addEventListener("mouseleave", resume);
     el.addEventListener("focusin", pause);
     el.addEventListener("focusout", resume);
-    el.addEventListener("click", function () {
-        dismissToast(el, region);
-    });
+    if (!hasAction) {
+        el.addEventListener("click", function () {
+            dismissToast(el, region);
+        });
+    }
 
     scheduleDismiss();
 }
@@ -146,11 +166,19 @@ function consumeToastSeed(root) {
     if (!seed) return;
     const kind = seed.getAttribute("data-toast-kind");
     const text = seed.getAttribute("data-toast-text");
+    const dismissRaw = seed.getAttribute("data-toast-dismiss-ms");
+    const dismissMs = dismissRaw ? Number(dismissRaw) : undefined;
+    const actionForm =
+        seed.getAttribute("data-toast-has-action") === "1"
+            ? (seed.querySelector(".toast-action")?.outerHTML ?? "")
+            : "";
     seed.remove();
     if (!text) return;
     showToastMessage({
         kind: toastKind(kind),
         text: text,
+        dismissMs: dismissMs,
+        actionForm: actionForm || undefined,
     });
 }
 

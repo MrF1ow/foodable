@@ -164,6 +164,31 @@ export function liveFoodsStore(): FoodsStore {
                 }
             });
         },
+        async getFoodsByIds(householdId, ids) {
+            const unique = [...new Set(ids)];
+            if (unique.length === 0) return new Map();
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(FOOD_COLS)}
+                            from ${tx.unsafe(FOODS)}
+                            where household_id = ${householdId}
+                              and id = any(${tx.array(unique, "uuid")})
+                        `,
+                    );
+                    const out = new Map<string, Food>();
+                    for (const row of data) {
+                        const food = foodFromRow(row as never);
+                        out.set(food.id, food);
+                    }
+                    return out;
+                } catch (err) {
+                    throw pgError("load foods by ids", err);
+                }
+            });
+        },
         async insertFood(row) {
             return run(async (tx) => {
                 const data = await insertReturning<Record<string, unknown>>(

@@ -70,6 +70,8 @@ async function setup(init: Parameters<typeof makeInput>[0]) {
     const props: Record<string, string> = {};
     const root = el({
         style: { setProperty: (k: string, v: string) => (props[k] = v) },
+        getAttribute: () => null,
+        hasAttribute: () => false,
         contains: () => true,
         querySelector: (sel: string) =>
             sel === "input"
@@ -176,6 +178,39 @@ test("a disabled button does nothing", async () => {
     s.click(s.minus);
     expect(s.input.value).toBe("0");
     expect(s.fired).toEqual([]);
+});
+
+test("step any uses data-fd-button-step for plus and minus", async () => {
+    const { input, fired, click, plus, root } = await setup({
+        value: "100",
+        min: "0",
+        step: "any",
+    });
+    root.setAttribute = (name: string, value: string) => {
+        if (name === "data-fd-button-step") root._buttonStep = value;
+    };
+    root.getAttribute = (name: string) =>
+        name === "data-fd-button-step" ? "1" : null;
+    root.hasAttribute = (name: string) => name === "data-fd-button-step";
+    click(plus);
+    expect(input.value).toBe("101");
+    expect(fired).toEqual(["input", "change"]);
+});
+
+test("step any keeps a typed value's precision", async () => {
+    const { input, click, plus, minus, root } = await setup({
+        value: "100.5",
+        min: "0",
+        step: "any",
+    });
+    root.getAttribute = (name: string) =>
+        name === "data-fd-button-step" ? "1" : null;
+    root.hasAttribute = (name: string) => name === "data-fd-button-step";
+    click(plus);
+    expect(input.value).toBe("101.5");
+    click(minus);
+    click(minus);
+    expect(input.value).toBe("99.5");
 });
 
 test("running onLoad again does not bind a second time", async () => {

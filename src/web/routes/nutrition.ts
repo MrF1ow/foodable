@@ -27,8 +27,12 @@ import {
     NUTRITION_LOG_WEIGHT_MODAL_ID,
 } from "../pages/nutrition.js";
 import { redirectWithToast } from "../components/toast.js";
+import { todayMealsRoutes } from "./today-meals.js";
+import { todayAgainRoutes } from "./today-again.js";
 
 export const nutritionRoutes = new Hono();
+nutritionRoutes.route("/", todayMealsRoutes);
+nutritionRoutes.route("/", todayAgainRoutes);
 
 function nutritionReturnPath(member: string | undefined): string {
     if (member?.trim()) {
@@ -54,6 +58,10 @@ nutritionRoutes.get("/", requireSiteUser, async (c) => {
     const page = await renderDashboardPage(
         c.get("userId"),
         c.req.query("member"),
+        undefined,
+        undefined,
+        undefined,
+        c.req.query("date"),
     );
     return c.html(page.html, page.status);
 });

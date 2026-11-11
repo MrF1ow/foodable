@@ -17,8 +17,13 @@ export type StepperOpts = {
     /** Accessible name of the input and in the button names ("Amount" → "Decrease Amount"). */
     label: string;
     value: number;
-    /** Default 1. Use a decimal ("0.1") for weights. */
+    /** Default 1. Use a decimal ("0.1") for weights. Drives the − / + buttons. */
     step?: number;
+    /**
+     * When set, the input's `step` attribute (often `"any"` so typed values are not
+     * grid-snapped). Buttons still step by `step` via `data-fd-button-step`.
+     */
+    inputStep?: number | "any";
     min?: number;
     max?: number;
     /** Shown beside the value ("g", "lb"); also `aria-describedby` of the input. */
@@ -57,7 +62,15 @@ function chars(value: number): number {
 }
 
 export function stepper(opts: StepperOpts): Html {
-    const step = num("step", opts.step ?? 1);
+    const buttonStep = num("step", opts.step ?? 1);
+    const inputStep =
+        opts.inputStep === "any"
+            ? "any"
+            : opts.inputStep != null
+              ? num("inputStep", opts.inputStep)
+              : buttonStep;
+    const buttonStepAttr =
+        opts.inputStep != null ? ` data-fd-button-step="${buttonStep}"` : "";
     const value = num("value", opts.value);
     const id = opts.id ?? `fd-stepper-${opts.name}`;
     const unitId = `${id}-unit`;
@@ -76,8 +89,8 @@ export function stepper(opts: StepperOpts): Html {
     const unit = opts.unit
         ? `<span class="fd-stepper__unit" id="${esc(unitId)}">${esc(opts.unit)}</span>`
         : "";
-    const input = `<input class="fd-stepper__input" id="${esc(id)}" type="number" name="${esc(opts.name)}" value="${value}"${numAttr("min", opts.min)}${numAttr("max", opts.max)} step="${step}" inputmode="decimal" aria-label="${esc(opts.label)}"${opts.unit ? ` aria-describedby="${esc(unitId)}"` : ""}>`;
+    const input = `<input class="fd-stepper__input" id="${esc(id)}" type="number" name="${esc(opts.name)}" value="${value}"${numAttr("min", opts.min)}${numAttr("max", opts.max)} step="${inputStep}" inputmode="decimal" aria-label="${esc(opts.label)}"${opts.unit ? ` aria-describedby="${esc(unitId)}"` : ""}>`;
     return raw(
-        `<div class="fd-stepper${opts.className ? ` ${esc(opts.className)}` : ""}" data-fd-stepper style="--fd-chars:${chars(opts.value)}">${button("down")}<div class="fd-stepper__value">${input}${unit}</div>${button("up")}</div>`,
+        `<div class="fd-stepper${opts.className ? ` ${esc(opts.className)}` : ""}" data-fd-stepper${buttonStepAttr} style="--fd-chars:${chars(opts.value)}">${button("down")}<div class="fd-stepper__value">${input}${unit}</div>${button("up")}</div>`,
     );
 }

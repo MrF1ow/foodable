@@ -1,10 +1,10 @@
-/* v2 shared components (UI-5): hairline rows, chips, stepper, stat tiles, score
- * badge. Server markup lives in src/web/components/v2/; every class here starts
- * with `fd-`. Colours, radii and the spacing that has a token come only from
+/* v2 shared components: hairline rows, chips, stepper, stat tiles, score badge.
+ * Server markup lives in src/web/components/v2/; every class here starts with
+ * `fd-`. Colours, radii and the spacing that has a token come only from
  * tokens.css (light and dark follow it). Only the values the FigCraft variables
  * do not have are local, defined once just below, each with its FigCraft node.
  * src/web/components/v2/components-css.test.ts fails on a colour literal or a
- * class that is not `fd-`. Nothing loads this file yet; UI-3 adds it to /app-v2.css. */
+ * class that is not `fd-`. Included from /app-v2.css via @include. */
 
 :root {
     /* Spacing steps the design uses that tokens.css has no variable for. */
@@ -296,7 +296,13 @@
     box-sizing: border-box;
     flex: none;
     width: 22px;
+    min-width: 22px;
+    max-width: 22px;
     height: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0;
+    aspect-ratio: 1;
     border: 1.5px solid var(--text-tertiary);
     border-radius: var(--radius-pill);
     background: transparent;
@@ -364,6 +370,7 @@
     background: var(--surface-raised);
 }
 .fd-row--swipe .fd-row__body {
+    touch-action: pan-y;
     background: var(--surface-bg);
     transform: translateX(var(--fd-swipe-x, 0));
     transition: transform 0.2s ease;
@@ -417,34 +424,74 @@
 .fd-swipe-btn--danger {
     color: var(--status-over);
 }
+/* The phone swipe shows Delete as text only (FigCraft 19279). */
+.fd-row__action--trail .fd-swipe-btn .fd-icon {
+    display: none;
+}
 
+/*
+ * Desktop hover (FigCraft 42193): the row tints and the actions appear as
+ * icon-only buttons at its right edge. The label stays in the button as
+ * visually hidden text, so the accessible name is unchanged.
+ */
 @media (hover: hover) and (pointer: fine) {
     .fd-row--swipe:not([data-swipe-open]) {
         overflow: visible;
-        background: var(--surface-bg);
+        background: transparent;
     }
+    /* No swipe on a mouse, so the body need not cover the actions; it takes
+       the card's surface and tints on hover. */
     .fd-row--swipe:not([data-swipe-open]) .fd-row__body {
         transform: none;
+        border-radius: var(--radius-md);
+        background: transparent;
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover .fd-row__body,
+    .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__body {
+        background: var(--surface-raised);
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover .fd-row__value,
+    .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__value {
+        visibility: hidden;
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action {
         top: 50%;
         bottom: auto;
         z-index: 2;
         width: auto;
-        padding: var(--fd-s-6) var(--fd-s-12);
-        border-radius: var(--radius-pill);
-        background: var(--surface-raised);
+        padding: 0;
+        background: transparent;
         opacity: 0;
         pointer-events: none;
         transform: translateY(-50%);
         transition: opacity 0.15s ease;
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action--trail {
-        right: 0;
+        right: var(--fd-s-6);
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action--lead {
         left: auto;
-        right: calc(var(--fd-action-w) + var(--space-gap));
+        right: calc(var(--fd-s-6) + 34px);
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn {
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        min-height: 0;
+        padding: 0;
+        border-radius: var(--radius-pill);
+        background: var(--surface-panel);
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn .fd-icon {
+        display: block;
+    }
+    .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn__text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
     }
     .fd-row--swipe:not([data-swipe-open]):hover .fd-row__action,
     .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__action {

@@ -5,6 +5,7 @@ import {
     computeWeeklyDigest,
     computeWeightTrend,
     goalsResolver,
+    loggingStreakFromDates,
     type DailyBucket,
     type GoalDayOverride,
 } from "./insights.js";
@@ -782,4 +783,11 @@ test("computeWeeklyDigest prints a shared target exactly as stored", () => {
     expect(out).toContain("/ 150.25g target");
     expect(out).toContain("/ 30.05g target");
     expect(computeWeeklyDigest(buckets, goalsResolver(g, []))).toBe(out);
+});
+
+test("loggingStreakFromDates ends yesterday when today is empty", () => {
+    const dates = new Set(["2026-03-01", "2026-03-02", "2026-03-03"]);
+    expect(loggingStreakFromDates(dates, "2026-03-04")).toBe(3);
+    dates.add("2026-03-04");
+    expect(loggingStreakFromDates(dates, "2026-03-04")).toBe(4);
 });

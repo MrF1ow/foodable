@@ -8,8 +8,12 @@ import {
     existingMealIds,
     getAllMealItems,
     getMealsByDate,
+    getMealLoggedLocalDatesInRange,
     getMealsInRange,
+    getMealsInRangeWithoutItems,
+    getWaterLoggedLocalDatesInRange,
     insertMeal,
+    insertWater,
     listMealItems,
     searchMeals,
     updateMeal,
@@ -255,6 +259,51 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
         expect(range.map((m) => m.description)).toEqual(["A", "B"]);
     });
 
+    test("logged local dates in range without meal_items", async () => {
+        await insertMeal(userId, {
+            description: "A",
+            meal_type: "breakfast",
+            logged_at: "2024-07-01T12:00:00.000Z",
+        });
+        await insertMeal(userId, {
+            description: "B",
+            meal_type: "lunch",
+            logged_at: "2024-07-01T20:00:00.000Z",
+        });
+        await insertMeal(userId, {
+            description: "C",
+            meal_type: "dinner",
+            logged_at: "2024-07-02T12:00:00.000Z",
+        });
+        expect(
+            await getMealLoggedLocalDatesInRange(
+                userId,
+                "2024-07-01",
+                "2024-07-02",
+                "UTC",
+            ),
+        ).toEqual(["2024-07-01", "2024-07-02"]);
+        const without = await getMealsInRangeWithoutItems(
+            userId,
+            "2024-07-01",
+            "2024-07-02",
+            "UTC",
+        );
+        expect(without.every((m) => m.items === undefined)).toBe(true);
+        await insertWater(userId, {
+            amount_ml: 200,
+            logged_at: "2024-07-03T12:00:00.000Z",
+        });
+        expect(
+            await getWaterLoggedLocalDatesInRange(
+                userId,
+                "2024-07-01",
+                "2024-07-03",
+                "UTC",
+            ),
+        ).toEqual(["2024-07-03"]);
+    });
+
     test("meals scoped by user_id", async () => {
         await insertMeal(userId, {
             description: "Mine",
@@ -399,6 +448,17 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
             notes: null,
         } as unknown as Partial<MealInput>);
         expect(cleared.notes).toBeNull();
+    });
+
+    test("updateMeal writes null calories", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Known cals",
+            meal_type: "lunch",
+            logged_at: "2024-10-03T12:00:00.000Z",
+            calories: 100,
+        });
+        const updated = await updateMeal(userId, meal.id, { calories: null });
+        expect(updated.calories).toBeNull();
     });
 
     test("updateMeal replaces items", async () => {

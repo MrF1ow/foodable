@@ -1,4 +1,9 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+    createMemoryFlags,
+    resetFlagsForTests,
+    setFlagsForTests,
+} from "../../flags.js";
 import { Hono } from "hono";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
@@ -590,5 +595,77 @@ describe("possible-duplicates routes", () => {
         expect(
             result.notices.some((n) => n.code === "food.possible_duplicate"),
         ).toBe(true);
+    });
+});
+
+describe("possible-duplicates routes ui-v2", () => {
+    afterAll(() => {
+        resetFlagsForTests();
+    });
+
+    test("keep-separate success redirects to household settings when ui-v2 is on", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { egg, eggs } = await seedDuplicatePair();
+        const keep = await app().request(
+            "http://x/settings/household/possible-duplicates/keep-separate",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: `subject_id=${encodeURIComponent(egg.id)}&related_id=${encodeURIComponent(eggs.id)}`,
+            },
+        );
+        expect(keep.status).toBe(303);
+        expect(keep.headers.get("location")).toBe("/settings/household");
+    });
+
+    test("keep-separate success still goes to the standalone page when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { egg, eggs } = await seedDuplicatePair();
+        const keep = await app().request(
+            "http://x/settings/household/possible-duplicates/keep-separate",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: `subject_id=${encodeURIComponent(egg.id)}&related_id=${encodeURIComponent(eggs.id)}`,
+            },
+        );
+        expect(keep.status).toBe(303);
+        expect(keep.headers.get("location")).toBe(
+            "/settings/household/possible-duplicates",
+        );
+    });
+
+    test("merge validation with ui-v2 re-renders household settings", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { egg, eggs } = await seedDuplicatePair();
+        const solo = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "solo" }),
+        );
+        const res = await app().request(
+            "http://x/settings/household/possible-duplicates/merge",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    food_a: egg.id,
+                    food_b: eggs.id,
+                    keep_id: solo.id,
+                }).toString(),
+            },
+        );
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain('data-fd-settings-page="household"');
+        expect(html).toContain(`id="${DUP_MERGE_MODAL_ID}"`);
+        expect(html).toContain("data-modal-open-on-load");
     });
 });

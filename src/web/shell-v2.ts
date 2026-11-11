@@ -29,17 +29,22 @@ import {
     type V2KitchenTab,
     type V2NavId,
 } from "./shell.js";
+import {
+    FD_LOG_SEARCH_SHEET_ID,
+    renderLogSheets,
+} from "./pages/v2/log-sheet.js";
 
 /** The nutrition page's log-meal dialog (`NUTRITION_LOG_MEAL_MODAL_ID`) and its
  *  Trends card (`data-nutrition-card="trends"`). Search, Scan and Log food link
- *  to the dialog by fragment; the Trends tab links to the card. v2/shell.js
- *  acts on the fragment (opens the dialog, scrolls to the card). A test pins
- *  both against their sources. */
+ *  to the dialog by fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
+ *  v2/shell.js acts on the log-meal fragment only. A test pins both against
+ *  their sources. */
 export const FD_LOG_MEAL_HASH = "nutrition-log-meal";
 export const FD_TRENDS_HASH = "trends";
 
 export const FD_LOG_HREF = `${APP_PATHS.nutrition}#${FD_LOG_MEAL_HASH}`;
-export const FD_TRENDS_HREF = `${APP_PATHS.nutrition}#${FD_TRENDS_HASH}`;
+export const FD_TRENDS_PATH = "/trends";
+export const FD_TRENDS_HREF = FD_TRENDS_PATH;
 
 type FdTab = {
     id: Exclude<V2NavId, "settings" | "none">;
@@ -81,9 +86,9 @@ export const FD_TABS: readonly FdTab[] = [
     },
 ];
 
-/** The Kitchen text tabs (design: Kitchen tabs). The groceries count in the
- *  design ("Groceries · 8") is not shown: the open-line count is not in the
- *  chrome and this shell adds no query for it. */
+/** The Kitchen text tabs (design: Kitchen tabs). Open grocery line count comes
+ *  from `chrome.v2KitchenGroceriesCount` (a cheap listLines count on Kitchen
+ *  tab pages). */
 export const FD_KITCHEN_TABS: readonly {
     id: V2KitchenTab;
     label: string;
@@ -109,7 +114,11 @@ function sidebarKitchenSubs(chrome: AppChrome): string {
     const current = kitchenTabFor(chrome);
     return FD_KITCHEN_TABS.map((t) => {
         const on = t.id === current ? ' aria-current="page"' : "";
-        return `<a class="fd-sidesub" href="${escapeHtml(t.href)}"${on}>${SIDEBAR_KITCHEN_LABELS[t.id]}</a>`;
+        const label =
+            t.id === "groceries" && chrome.v2KitchenGroceriesCount != null
+                ? `${SIDEBAR_KITCHEN_LABELS[t.id]} · ${chrome.v2KitchenGroceriesCount}`
+                : SIDEBAR_KITCHEN_LABELS[t.id];
+        return `<a class="fd-sidesub" href="${escapeHtml(t.href)}"${on}>${escapeHtml(label)}</a>`;
     }).join("");
 }
 
@@ -150,7 +159,11 @@ function kitchenTabs(chrome: AppChrome): string {
     const current = kitchenTabFor(chrome);
     const links = FD_KITCHEN_TABS.map((t) => {
         const on = t.id === current ? ' aria-current="page"' : "";
-        return `<a class="fd-kitchen-tab" href="${escapeHtml(t.href)}"${on}>${t.label}</a>`;
+        const label =
+            t.id === "groceries" && chrome.v2KitchenGroceriesCount != null
+                ? `${t.label} · ${chrome.v2KitchenGroceriesCount}`
+                : t.label;
+        return `<a class="fd-kitchen-tab" href="${escapeHtml(t.href)}"${on}>${escapeHtml(label)}</a>`;
     }).join("");
     return `<nav class="fd-kitchen-tabs" aria-label="Kitchen sections">${links}</nav>`;
 }
@@ -208,7 +221,7 @@ function phoneTabs(chrome: AppChrome, active: V2NavId): string {
         return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${ariaLabel(t.label, attention)}">${fdIcon(t.icon)}<span class="${dotClass("fd-tab-dot", attention)}" aria-hidden="true"></span></a>`;
     };
     const [today, kitchen, recipes, trends] = FD_TABS;
-    const log = `<a class="fd-log" href="${FD_LOG_HREF}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
+    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
     return `<nav class="fd-tabs" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`;
 }
 
@@ -255,13 +268,13 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
 function accountChip(chrome: AppChrome): string {
     const name = chrome.identity?.viewerName ?? "";
     const label = name ? `Settings, signed in as ${name}` : "Settings";
-    return `<a class="fd-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
+    return `<a class="fd-account-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 
 /** The page's own header is what `pageHeader` (components/ui.ts) writes first:
  *  a bare <h1>, or a <header class="dash-head">. */
 const LEADING_PAGE_HEADER =
-    /^\s*(?:<h1>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>)/;
+    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>)/;
 
 /** The Kitchen text tabs go directly under the page header, as in the design.
  *  A body that does not start with one gets them first. */
@@ -272,7 +285,7 @@ function withKitchenTabs(body: string, chrome: AppChrome): string {
 }
 
 function topBar(): string {
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
 /** Head for the new shell: the shared meta, then the old stylesheet and script
@@ -306,6 +319,7 @@ ${topBar()}
 </div>
 ${phoneTabs(chrome, active)}
 </div>
+${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", ...chrome.v2LogSheet }) : ""}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

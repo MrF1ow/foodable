@@ -79,6 +79,17 @@ test("the close button is a native close command with an accessible name", () =>
     expect(custom).toContain('aria-label="Fermer &quot;x&quot;"');
 });
 
+test("showClose false omits the close button", () => {
+    const html = sheet({
+        id: "no-x",
+        kind: "edit",
+        title: "T",
+        body: "",
+        showClose: false,
+    });
+    expect(html).not.toContain("fd-sheet-close");
+});
+
 test("openOnLoad adds the reopen attribute", () => {
     expect(edit()).not.toContain("data-sheet-open-on-load");
     const html = sheet({

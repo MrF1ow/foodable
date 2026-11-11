@@ -3,6 +3,7 @@ import { formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { renderNeedsAttentionInventoryPage } from "../loaders.js";
 import { canonicalAppPath } from "../route-map.js";
+import { isSafeAppBackPath } from "../settings-back.js";
 
 export const needsAttentionRoutes = new Hono();
 
@@ -15,6 +16,13 @@ function dismissReturnTo(raw: string | undefined): string {
     const path = raw ? canonicalAppPath(raw) : raw;
     if (path && DISMISS_RETURN_ALLOWLIST.has(path)) return path;
     return "/needs-attention";
+}
+
+function undoReturnTo(raw: string | undefined): string {
+    const path = raw ? canonicalAppPath(raw) : raw;
+    if (!path) return "/needs-attention?show=dismissed";
+    if (path === "/settings/household" || isSafeAppBackPath(path)) return path;
+    return "/needs-attention?show=dismissed";
 }
 
 needsAttentionRoutes.get("/needs-attention", requireSiteUser, async (c) => {
@@ -76,6 +84,6 @@ needsAttentionRoutes.post(
             return c.html(page.html, page.status);
         }
         // toast: none
-        return c.redirect("/needs-attention?show=dismissed", 303);
+        return c.redirect(undoReturnTo(formText(body, "return_to")), 303);
     },
 );

@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
 
 import { formAmount, formOptionalNumber, formText } from "../form.js";
+import { gatedRoute } from "../gated.js";
+import { safeReturnPath } from "../usual-products-path.js";
+import type { PutAwayDraft } from "../pages/v2/kitchen-groceries.js";
 import {
     requireMember,
     requireManager,
@@ -48,10 +51,26 @@ import {
 
 export const groceryRoutes = new Hono();
 
+function storeFilterFromReturnTo(returnTo: string): string | undefined {
+    try {
+        const u = new URL(returnTo, "http://foodable.local");
+        const store = u.searchParams.get("store");
+        return store && store.trim() !== "" ? store : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 async function groceryFormError(
     userId: string,
     err: unknown,
     openModalId?: string,
+    extras?: {
+        openPutAway?: boolean;
+        putAwayDraft?: PutAwayDraft;
+        openLineId?: string;
+        returnTo?: string;
+    },
 ) {
     const message =
         err instanceof GroceryInputError
@@ -66,13 +85,42 @@ async function groceryFormError(
     const page = await renderGroceryListPage(userId, {
         error: message,
         openModalId,
+        openPutAway: extras?.openPutAway,
+        putAwayDraft: extras?.putAwayDraft,
+        openLineId: extras?.openLineId,
+        storeFilter: extras?.returnTo
+            ? storeFilterFromReturnTo(extras.returnTo)
+            : undefined,
     });
     return { html: page.html, status: 400 as const };
+}
+
+function groceryReturnTo(body: Record<string, string | File>) {
+    return safeReturnPath(formText(body, "return_to"), "/kitchen/groceries");
+}
+
+function putAwayDraftFromBody(
+    body: Record<string, string | File | (string | File)[]>,
+    lineIds: string[],
+): PutAwayDraft {
+    const draft: PutAwayDraft = {};
+    for (const id of lineIds) {
+        draft[id] = {
+            locationId: formText(body, `location_id_${id}`) || undefined,
+            expiresOn: formText(body, `expires_on_${id}`) || undefined,
+            productFoodId: formText(body, `product_food_id_${id}`) || undefined,
+            putAwayAmount: formText(body, `put_away_amount_${id}`) || undefined,
+        };
+    }
+    return draft;
 }
 
 groceryRoutes.get("/kitchen/groceries", requireSiteUser, async (c) => {
     const page = await renderGroceryListPage(c.get("userId"), {
         linkProductId: c.req.query("link_product"),
+        storeFilter: c.req.query("store"),
+        openLineId: c.req.query("line"),
+        openPutAway: c.req.query("put-away") === "1",
     });
     return c.html(page.html, page.status);
 });
@@ -263,15 +311,17 @@ groceryRoutes.post(
             );
             if (!line) {
                 // toast: none (no-op)
-                return c.redirect("/kitchen/groceries", 303);
+                return c.redirect(groceryReturnTo(body), 303);
             }
         } catch (err) {
-            const page = await groceryFormError(userId, err);
+            const page = await groceryFormError(userId, err, undefined, {
+                returnTo: groceryReturnTo(body),
+            });
             return c.html(page.html, page.status);
         }
         return redirectWithToast(
             c,
-            "/kitchen/groceries",
+            groceryReturnTo(body),
             groceryLineCheckToastKey(checked),
         );
     },
@@ -283,6 +333,7 @@ groceryRoutes.post(
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);
+        const body = await c.req.parseBody();
         try {
             await clearCheckedLines(liveGroceryStore(), member.householdId);
         } catch (err) {
@@ -295,8 +346,87 @@ groceryRoutes.post(
         }
         return redirectWithToast(
             c,
-            "/kitchen/groceries",
+            groceryReturnTo(body),
             "grocery.checked.cleared",
+        );
+    },
+);
+
+groceryRoutes.post(
+    "/kitchen/groceries/put-away",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const lineIds = formText(body, "line_ids")
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean);
+        const draft = putAwayDraftFromBody(body, lineIds);
+        try {
+            const productFoodIds: Record<string, string> = {};
+            const perLine: Record<
+                string,
+                { locationId?: string; expiresOn?: string }
+            > = {};
+            const amountOverrides: Record<
+                string,
+                { amount: number; unit?: string | null }
+            > = {};
+            for (const lineId of lineIds) {
+                const row = draft[lineId];
+                if (!row) continue;
+                perLine[lineId] = {
+                    locationId: row.locationId,
+                    expiresOn: row.expiresOn || undefined,
+                };
+                if (row.productFoodId) {
+                    productFoodIds[lineId] = row.productFoodId;
+                }
+                const amt = row.putAwayAmount
+                    ? formOptionalNumber(
+                          { [`put_away_amount_${lineId}`]: row.putAwayAmount },
+                          `put_away_amount_${lineId}`,
+                      )
+                    : null;
+                if (amt != null) {
+                    amountOverrides[lineId] = { amount: amt };
+                }
+            }
+            await putAwayGroceryLines(
+                liveGroceryStore(),
+                liveFridgeStore(),
+                liveStockStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    lineIds,
+                    actorUserId: userId,
+                    perLine,
+                    productFoodIds:
+                        Object.keys(productFoodIds).length > 0
+                            ? productFoodIds
+                            : undefined,
+                    amountOverrides:
+                        Object.keys(amountOverrides).length > 0
+                            ? amountOverrides
+                            : undefined,
+                },
+            );
+        } catch (err) {
+            const page = await groceryFormError(userId, err, undefined, {
+                openPutAway: true,
+                putAwayDraft: draft,
+                returnTo: groceryReturnTo(body),
+            });
+            return c.html(page.html, page.status);
+        }
+        return redirectWithToast(
+            c,
+            groceryReturnTo(body),
+            "grocery.line.put-away",
         );
     },
 );

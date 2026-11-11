@@ -63,6 +63,12 @@ const emptyNotices: NoticesForResult = {
     aliasMap: new Map(),
     barcodedIds: new Set(),
     possibleDuplicatePairs: [],
+    recipesListPrefetch: {
+        recipes: [],
+        allIngredients: [],
+        fridgeItems: [],
+        foodsById: new Map(),
+    },
 };
 
 afterEach(() => {
@@ -70,14 +76,149 @@ afterEach(() => {
 });
 
 describe("gated route harness on composed app", () => {
-    test("gated invite routes redirect when ui-v2 is off", async () => {
+    test("gated routes are off while ui-v2 is off", async () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
-        expect(routes.map((r) => r.path).sort()).toEqual([
+        const invites = routes.filter((r) =>
+            r.path.startsWith("/settings/household/invites"),
+        );
+        expect(invites.map((r) => r.path).sort()).toEqual([
             "/settings/household/invites",
             "/settings/household/invites",
             "/settings/household/invites/revoke",
+        ]);
+        expect(
+            routes.filter(
+                (r) => !r.path.startsWith("/settings/household/invites"),
+            ),
+        ).toEqual([
+            {
+                method: "POST",
+                path: "/meals/:id/edit",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/meals/:id/delete",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/meals/undo",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/meals/:id/again",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/kitchen/fridge/items/:id/freeze",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/kitchen/groceries/put-away",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/household/items/:id/archive",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/account",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/display",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/goals",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/saved",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/export",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/export",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/display",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/dev/gallery-v2",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/api/log/search",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log/quick",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log/water",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/log/weight",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/trends",
+                flag: "ui-v2",
+                notFound: true,
+            },
         ]);
     });
 });

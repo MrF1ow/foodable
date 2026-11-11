@@ -48,6 +48,20 @@ import {
     getEmbedWidgetHtml,
 } from "../src/widgets.js";
 import { defaultViewerFlags } from "../src/viewer-flags.js";
+import {
+    buildPreviewTrendsPageData,
+    renderTrendsV2Page,
+} from "../src/web/pages/v2/trends.js";
+import {
+    buildPreviewTodayPageData,
+    renderTodayV2Page,
+} from "../src/web/pages/v2/today.js";
+import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
+import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
+import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
+import { goalsResolver } from "../src/domain/insights.js";
+import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
 import {
     settingsBackHref,
@@ -296,6 +310,53 @@ function food(id: string, name: string, calories: number | null) {
 // typecheck covers src/ only) and the fixtures only carry what renderers read.
 // The shell the page renders in: the old one, or the new one (flag ui-v2) for
 // the -v2 renders the v2 scenarios navigate.
+const FIXTURE_TRENDS_GOALS: NutritionGoals = {
+    user_id: "u1",
+    daily_calories: 2200,
+    daily_protein_g: 160,
+    daily_carbs_g: 220,
+    daily_fat_g: 70,
+    daily_fiber_g: 30,
+    daily_sugar_g: 45,
+    daily_alcohol_g: 0,
+    daily_caffeine_mg: 400,
+    daily_water_ml: 2500,
+    target_weight_g: null,
+    updated_at: "2026-01-01T00:00:00Z",
+};
+
+function fixtureTrendsDays(today: string) {
+    const days = [];
+    for (let i = 364; i >= 0; i--) {
+        const d = new Date(`${today}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - i);
+        const date = d.toISOString().slice(0, 10);
+        const logged = i % 9 !== 0;
+        days.push({
+            date,
+            calories: logged ? 2100 : 0,
+            protein_g: logged ? 150 : 0,
+            carbs_g: logged ? 200 : 0,
+            fat_g: logged ? 65 : 0,
+            logged,
+        });
+    }
+    return days;
+}
+
+function previewTrendsPage(chrome: ReturnType<typeof fixtureChrome>) {
+    const today = "2026-11-09";
+    const data = buildPreviewTrendsPageData(
+        chrome as Parameters<typeof buildPreviewTrendsPageData>[0],
+        fixtureTrendsDays(today),
+        goalsResolver(FIXTURE_TRENDS_GOALS, []),
+        [{ date: "2026-11-01", weight_g: 79_000 }],
+        today,
+        "kg",
+    );
+    return renderTrendsV2Page(data);
+}
+
 function fixtureChrome(theme: "light" | "dark", v2: boolean) {
     return {
         ...viewerChromeFromProfile({ theme }),
@@ -319,21 +380,25 @@ async function pages(
     v2 = false,
 ): Promise<Record<string, string>> {
     const chrome = fixtureChrome(theme, v2);
-    const nutrition = await renderNutritionPage({
-        access: { ok: true, mode: "self", viewer: ME, subject: ME },
-        members: [ME, SAM],
-        summary: await widgetSample("nutrition-summary"),
-        goals: await widgetSample("goal-progress"),
-        trends: await widgetSample("trends"),
-        weight: await widgetSample("weight-trends"),
-        chrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    } as never);
+    const nutrition = v2
+        ? renderTodayV2Page(
+              buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+          )
+        : await renderNutritionPage({
+              access: { ok: true, mode: "self", viewer: ME, subject: ME },
+              members: [ME, SAM],
+              summary: await widgetSample("nutrition-summary"),
+              goals: await widgetSample("goal-progress"),
+              trends: await widgetSample("trends"),
+              weight: await widgetSample("weight-trends"),
+              chrome,
+              cardOrder: [
+                  "nutrition-summary",
+                  "goal-progress",
+                  "trends",
+                  "weight-trends",
+              ],
+          } as never);
     const nutritionPeer = await renderNutritionPage({
         access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
         members: [ME, SAM],
@@ -362,17 +427,41 @@ async function pages(
             viewerId: "u1",
         } as never),
         recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
-        settings: renderSettingsPage({
-            chrome,
-            flags: chrome.flags,
-            backHref: "/kitchen/fridge",
-            displayName: "Ethan",
-            timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
-        } as never),
+        settings: v2
+            ? renderSettingsHomeV2Page({
+                  chrome: chrome as never,
+                  displayName: "Ethan Flow",
+                  email: "ethan@example.com",
+              })
+            : renderSettingsPage({
+                  chrome,
+                  flags: chrome.flags,
+                  backHref: "/kitchen/fridge",
+                  displayName: "Ethan",
+                  timezone: "America/Los_Angeles",
+                  weightUnit: "kg",
+                  widgetsEnabled: true,
+                  alcoholTrackingEnabled: false,
+                  drinkUnit: "",
+              } as never),
+        ...(v2
+            ? {
+                  "settings-account": renderSettingsAccountV2Page({
+                      chrome: chrome as never,
+                      backHref: "/kitchen/fridge",
+                      displayName: "Ethan Flow",
+                      timezone: "America/Los_Angeles",
+                      weightUnit: "kg",
+                      widgetsEnabled: true,
+                      alcoholTrackingEnabled: false,
+                      drinkUnit: "",
+                  }),
+                  "settings-display": renderSettingsDisplayV2Page({
+                      chrome: chrome as never,
+                      storedTheme: null,
+                  }),
+              }
+            : {}),
         household: renderHouseholdSettingsPage({
             chrome,
             householdName: "Flow house",
@@ -404,11 +493,13 @@ async function pages(
             isOwner: true,
         } as never),
         foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
-        help: renderSettingsHelpPage({
-            chrome,
-            flags: chrome.flags,
-            backHref: "/kitchen/fridge",
-        } as never),
+        help: v2
+            ? renderSettingsHelpV2Page({ chrome: chrome as never })
+            : renderSettingsHelpPage({
+                  chrome,
+                  flags: chrome.flags,
+                  backHref: "/kitchen/fridge",
+              } as never),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
             flags: chrome.flags,
@@ -422,6 +513,7 @@ async function pages(
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
+        ...(v2 ? { trends: previewTrendsPage(chrome) } : {}),
     };
 }
 
@@ -477,7 +569,10 @@ const ROUTE_BASE: Record<string, string> = {
     "/kitchen/fridge": "fridge",
     "/kitchen/groceries": "grocery",
     "/recipes": "recipes",
+    "/trends": "trends",
     "/settings": "settings",
+    "/settings/account": "settings-account",
+    "/settings/display": "settings-display",
     "/settings/help": "help",
     "/settings/household-settings": "settings-household",
     "/settings/household": "household",

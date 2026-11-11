@@ -1,0 +1,370 @@
+import { describe, expect, test } from "bun:test";
+import type { Meal } from "../../../db/nutrition.js";
+import { mealRows, todayDayTotals } from "../../../domain/today.js";
+import {
+    sundayWeekStart,
+    weekDates,
+    annotateWeekDays,
+} from "../../../domain/today.js";
+import { shiftLocalDate } from "../../../domain/tz.js";
+import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
+import { noticeHref } from "../../components/notices.js";
+import type { Notice } from "../../../domain/notices.js";
+import {
+    buildPreviewTodayPageData,
+    buildPreviewTodayView,
+    buildPreviewTodayViewWithRail,
+    parseTodayDateParam,
+    renderTodayBody,
+    renderTodayV2Page,
+    todayHref,
+} from "./today.js";
+import {
+    formatExpiryWhen,
+    renderTodayRail,
+    weightChange30d,
+} from "./today-rail.js";
+
+describe("parseTodayDateParam", () => {
+    test("invalid date falls back to today", () => {
+        expect(parseTodayDateParam("2026-02-30", "2026-11-10")).toBe(
+            "2026-11-10",
+        );
+        expect(parseTodayDateParam("nope", "2026-11-10")).toBe("2026-11-10");
+    });
+
+    test("valid date is kept", () => {
+        expect(parseTodayDateParam("2026-08-03", "2026-11-10")).toBe(
+            "2026-08-03",
+        );
+    });
+});
+
+describe("todayHref", () => {
+    test("builds member and date query", () => {
+        expect(todayHref({ date: "2026-08-03", member: "u2" })).toBe(
+            "/?date=2026-08-03&member=u2",
+        );
+    });
+});
+
+describe("renderTodayV2Page", () => {
+    const today = "2026-11-10";
+    const data = buildPreviewTodayPageData(
+        {
+            theme: "light",
+            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            attention: { count: 0, tabs: {} },
+        },
+        today,
+    );
+
+    test("pins fd- classes and semantic structure", () => {
+        const html = renderTodayV2Page(data);
+        expect(html).toContain("fd-today-page");
+        expect(html).toContain("fd-today-week");
+        expect(html).toContain("fd-today-gauge");
+        expect(html).toContain("fd-today-macros");
+        expect(html).toContain("fd-today-also");
+        expect(html).toContain("fd-today-section");
+        expect(html).toContain('aria-current="date"');
+        expect(html).toContain("fd-account-chip");
+    });
+
+    test("gauge's accessible name matches its hero number", () => {
+        const html = renderTodayV2Page(data);
+        const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];
+        const label = html.match(
+            /class="fd-today-gauge" role="img" aria-label="([^"]+)"/,
+        )?.[1];
+        expect(hero).toBeTruthy();
+        expect(label?.startsWith(`${hero} kcal`)).toBe(true);
+    });
+
+    test("renders week dot states", () => {
+        const body = String(renderTodayBody(data));
+        expect(body).toContain('data-fd-dot="hit"');
+        expect(body).toContain('data-fd-dot="off"');
+        expect(body).toContain('data-fd-dot="empty"');
+    });
+
+    test("null macros render as em dash", () => {
+        const view = buildPreviewTodayView(today);
+        const meal: Meal = {
+            id: "x",
+            user_id: "u",
+            logged_at: "2026-11-10T12:00:00.000Z",
+            meal_type: "snack",
+            description: "Mystery",
+            calories: 100,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            notes: null,
+            idempotency_key: null,
+            items: [],
+        };
+        view.meals = mealRows([meal]);
+        const html = String(
+            renderTodayBody({
+                ...data,
+                view,
+            }),
+        );
+        expect(html).toContain("—");
+        expect(html).not.toMatch(/fd-macro[^>]+>P 0/);
+    });
+
+    test("escapes hostile meal text", () => {
+        const view = buildPreviewTodayView(today);
+        view.meals = mealRows([
+            {
+                id: "bad",
+                user_id: "u",
+                logged_at: "2026-11-10T12:00:00.000Z",
+                meal_type: "lunch",
+                description: '<img src=x onerror="alert(1)">',
+                calories: 50,
+                protein_g: 1,
+                carbs_g: 2,
+                fat_g: 3,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                caffeine_mg: null,
+                notes: null,
+                idempotency_key: null,
+                items: [],
+            },
+        ]);
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).not.toContain("<img");
+        expect(html).toContain("&lt;img");
+    });
+
+    test("multi-item meal shows item list subtitle", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toContain("Chicken breast");
+        expect(html).toContain("data-fd-meal-id=");
+    });
+
+    test("selected calendar date uses UTC weekday title regardless of member tz", () => {
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const view = buildPreviewTodayView("2026-11-10");
+        view.date = "2026-11-09";
+        view.timezone = "Pacific/Auckland";
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).toContain('fd-today-title">Monday</');
+        expect(html).not.toContain("Tuesday");
+    });
+
+    test("gauge shows em dash when calories are unknown", () => {
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const view = buildPreviewTodayView("2026-11-10");
+        view.totals = { ...view.totals, calories: null };
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).toContain('fd-today-gauge__hero">—</');
+        expect(html).not.toContain("2,421 left");
+    });
+
+    test("multi-item meal list uses fd-row__sub not fd-row__meta", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toContain("fd-row__sub");
+        expect(html).toContain("Chicken breast");
+    });
+
+    test("desktop rail escapes expiring item names", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).not.toContain("<spinach>");
+        expect(rail).toContain("&lt;spinach&gt;");
+        expect(rail).toContain("Salmon");
+        expect(rail).toContain('href="/kitchen/fridge"');
+    });
+
+    test("notice action href matches needs-attention routes", () => {
+        const notice: Notice = {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: { kind: "fridge_item", id: "fr-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                amount: 6,
+                unit: "each",
+                expiresOn: "2026-11-10",
+                daysLeft: 0,
+                onGroceryList: "no",
+            },
+        };
+        const href = noticeHref(notice, { from: "/", foods: new Map() });
+        const view = buildPreviewTodayView("2026-11-10");
+        view.attention = {
+            count: 1,
+            notices: [notice],
+            noticeFoods: new Map(),
+        };
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 1, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(href).toBe("/kitchen/fridge/items/fr-eggs/add-to-grocery");
+        expect(rail).toContain("/kitchen/fridge/items/fr-eggs/add-to-grocery");
+    });
+
+    test("weight card uses lb and includes sparkline", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        view.preferredWeightUnit = "lb";
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("fd-today-weight__chart");
+        expect(rail).toContain('fd-today-weight__unit">lb</');
+        expect(rail).toContain("182.1");
+        expect(weightChange30d(view.weight.series30d, "lb")).not.toBeNull();
+    });
+
+    test("rail empty states and this week placeholder", () => {
+        const view = buildPreviewTodayView("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("Nothing expiring soon");
+        expect(rail).toContain("Nothing needs attention");
+        expect(rail).toContain("Nothing planned");
+        expect(rail).toContain("No weigh-ins yet");
+    });
+
+    test("peer view shows weight only", () => {
+        const view = buildPreviewTodayViewWithRail("2026-11-10");
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+                subjectLabel: "Sam",
+            },
+            "2026-11-10",
+        );
+        const rail = String(renderTodayRail({ ...data, view }));
+        expect(rail).toContain("fd-today-card--weight");
+        expect(rail).not.toContain("Use soon");
+        expect(rail).not.toContain("Needs attention");
+        expect(rail).not.toContain("This week");
+    });
+
+    test("meal section titles are title case in markup", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toContain('fd-today-section__title">Breakfast</');
+        expect(html).not.toContain(">BREAKFAST</");
+    });
+
+    test("phone layout keeps fd-today-top and section gap wrapper", () => {
+        const body = String(renderTodayBody(data));
+        expect(body).toContain("fd-today-top");
+        expect(body).toContain("fd-today-main");
+        const page = body.indexOf("fd-today-page");
+        const main = body.indexOf("fd-today-main");
+        const header = body.indexOf("fd-today-header");
+        const week = body.indexOf("fd-today-week");
+        expect(page).toBeLessThan(main);
+        expect(main).toBeLessThan(header);
+        expect(header).toBeLessThan(week);
+    });
+
+    test("body keeps phone structure with rail wrapper", () => {
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            "2026-11-10",
+        );
+        const body = String(renderTodayBody(data));
+        expect(body).toContain("fd-today-main");
+        expect(body).toContain("fd-today-week");
+        expect(body).toContain("fd-today-gauge");
+        expect(body).toContain("fd-today-rail");
+    });
+
+    test("formatExpiryWhen labels tomorrow", () => {
+        expect(formatExpiryWhen("2026-11-10", "2026-11-11")).toBe("Tomorrow");
+    });
+
+    test("empty day still renders meal sections and remaining calories", () => {
+        const weekStart = sundayWeekStart(today);
+        const dates = weekDates(weekStart);
+        const view = {
+            ...buildPreviewTodayView(today),
+            meals: [],
+            totals: todayDayTotals([], 0),
+            week: {
+                ...annotateWeekDays(dates, today, today, {
+                    prevWeekStart: shiftLocalDate(weekStart, -7),
+                    nextWeekStart: shiftLocalDate(weekStart, 7),
+                }),
+                dots: dates.map((date) => ({ date, state: "empty" as const })),
+            },
+        };
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).not.toContain("fd-today-empty");
+        expect(html).toContain('id="fd-today-breakfast"');
+        expect(html).toContain('id="fd-today-lunch"');
+        expect(html).toContain('id="fd-today-dinner"');
+        expect(html).toContain('id="fd-today-snack"');
+        expect(html).toContain("Nothing yet");
+        const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];
+        expect(hero).not.toBe("—");
+        expect(html).toContain('fd-today-macro__actual">0</');
+    });
+
+    test("meal row swipe exposes Again", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toMatch(/data-swipe-right="\/meals\/[^"]+\/again\tAgain"/);
+        expect(html).toContain("fd-swipe-btn--accent");
+    });
+});

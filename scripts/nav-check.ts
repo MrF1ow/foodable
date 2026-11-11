@@ -1863,7 +1863,7 @@ try {
                 navGap: Math.round(innerHeight - r.bottom),
                 navCentre: Math.round(r.left + r.width / 2 - document.documentElement.clientWidth / 2),
                 chrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
-                chip: q(".fd-chip")?.getAttribute("href") ?? null,
+                chip: q(".fd-account-chip")?.getAttribute("href") ?? null,
                 tracked: document.querySelectorAll("link[rel='stylesheet'][data-turbo-track='reload'], script[data-turbo-track='reload']").length,
                 open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
                 hash: location.hash,
@@ -1909,6 +1909,24 @@ try {
     );
 
     await send("Emulation.setDeviceMetricsOverride", {
+        width: 1024,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/");
+    await setMarker();
+    const v2Breakpoint = await v2Snap();
+    record(
+        "v2 shell at 1024px: sidebar and top bar, phone tab bar hidden",
+        v2Breakpoint.tabs === "none" &&
+            v2Breakpoint.sidebar === "flex" &&
+            v2Breakpoint.topbar === "flex" &&
+            !v2Breakpoint.bottomNav,
+        { v2Breakpoint, ex: drain() },
+    );
+
+    await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
         height: 960,
         deviceScaleFactor: 1,
@@ -1938,6 +1956,76 @@ try {
             v2DesktopKitchen.side === "Kitchen",
         { v2Desktop, sidebarW, exposedNavs, v2DesktopKitchen, ex: drain() },
     );
+
+    await goto("/");
+    await setMarker();
+    const v2TodayDesk = await ev<string>(
+        `document.querySelector(".fd-today-rail") ? getComputedStyle(document.querySelector(".fd-today-rail")).display : "missing"`,
+    );
+    const v2TodayGrid = await ev<string>(
+        `document.querySelector(".fd-today-page") ? getComputedStyle(document.querySelector(".fd-today-page")).display : "missing"`,
+    );
+    record(
+        "v2 today at 1440px: two-column layout and right-hand rail",
+        v2TodayDesk === "flex" && v2TodayGrid === "grid",
+        { v2TodayDesk, v2TodayGrid, ex: drain() },
+    );
+
+    const modK = process.platform === "darwin" ? 4 : 2;
+    await send("Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        modifiers: modK,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        nativeVirtualKeyCode: 75,
+    });
+    await sleep(400);
+    const v2CmdK = await ev<{
+        open: string[];
+        activeId: string | null;
+    }>(`({
+        open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+        activeId: document.activeElement?.id ?? null,
+    })`);
+    record(
+        "v2 desktop ⌘K/Ctrl+K opens log search with the query field focused",
+        v2CmdK.open.includes("fd-log-search") &&
+            v2CmdK.activeId === "fd-log-search-q",
+        { v2CmdK, ex: drain() },
+    );
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await sleep(200);
+
     await goto("/recipes");
     await setMarker();
     await clickSel("a.fd-household");
@@ -1970,7 +2058,7 @@ try {
 
     await goto("/");
     await setMarker();
-    await clickSel(".fd-chip");
+    await clickSel(".fd-account-chip");
     await sleep(400);
     const chipNav = await ev<{ marker: string | null; path: string }>(`({
         marker: window.__marker ?? null,
@@ -2018,23 +2106,33 @@ try {
 
     await goto("/settings");
     await setMarker();
-    const membersLink = await ev<string | null>(
-        `[...document.querySelectorAll("nav.subnav a")].find((a) => a.textContent === "Members")?.getAttribute("href") ?? null`,
-    );
-    await clickSel(
-        'nav.subnav a[href^="/settings/household?"], nav.subnav a[href="/settings/household"]',
-    );
-    await sleep(500);
-    const members = await ev<{ path: string; h1: string | null }>(`({
+    const settingsHome = await ev<{
+        page: string | null;
+        hasMenu: boolean;
+        marker: string | null;
+    }>(`({
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        hasMenu: !!document.querySelector(".fd-settings-menu a[href='/settings/account']"),
+        marker: window.__marker ?? null,
+    })`);
+    await clickSel(".fd-settings-menu a[href='/settings/account']");
+    await sleep(400);
+    const accountPage = await ev<{
+        path: string;
+        backTurbo: string | null;
+        marker: string | null;
+    }>(`({
         path: location.pathname,
-        h1: document.querySelector("h1")?.textContent?.trim() ?? null,
+        backTurbo: document.querySelector(".fd-settings-back")?.getAttribute("data-turbo") ?? null,
+        marker: window.__marker ?? null,
     })`);
     record(
-        "v2 Settings sub-nav reaches the household members page",
-        membersLink != null &&
-            membersLink.startsWith("/settings/household") &&
-            members.path === "/settings/household",
-        { membersLink, members, ex: drain() },
+        "v2 Settings home and account menu navigation",
+        settingsHome.page === "home" &&
+            settingsHome.hasMenu &&
+            accountPage.path === "/settings/account" &&
+            accountPage.backTurbo === "false",
+        { settingsHome, accountPage, ex: drain() },
     );
 
     await goto("/kitchen/fridge");
@@ -2044,25 +2142,36 @@ try {
     const v2Log = await v2Snap();
     await goto("/");
     await setMarker();
-    const trendsBefore = await ev<number>(
-        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
-    );
-    await clickSel('.fd-tabs a[href="/#trends"]');
-    await sleep(400);
+    await clickSel('.fd-tabs a[href="/trends"]');
+    await sleep(500);
     const v2Trends = await v2Snap();
-    const trendsTop = await ev<number>(
-        `Math.round(document.querySelector('[data-nutrition-card="trends"]').getBoundingClientRect().top)`,
-    );
+    const trendsPage = await ev<{ path: string; title: string | null }>(`({
+        path: location.pathname,
+        title: document.querySelector(".fd-trends-title")?.textContent?.trim() ?? null,
+    })`);
+    await clickSel('[data-fd-trends-range="7"]');
+    await sleep(200);
+    const trends7d = await ev<{
+        pressed: string | null;
+        panel: string | null;
+        hidden30: boolean;
+    }>(`({
+        pressed: document.querySelector('[data-fd-trends-range][aria-pressed="true"]')?.getAttribute("data-fd-trends-range") ?? null,
+        panel: document.querySelector("[data-fd-trends-panel]:not([hidden])")?.getAttribute("data-fd-trends-panel") ?? null,
+        hidden30: document.querySelector('[data-fd-trends-panel="30"]')?.hasAttribute("hidden") ?? false,
+    })`);
     record(
-        "v2 Log opens the log-meal dialog; Trends scrolls to its card",
+        "v2 Log opens the search sheet; Trends tab reaches /trends",
         v2Log.marker === "stay" &&
-            v2Log.open.includes("nutrition-log-meal") &&
+            v2Log.open.includes("fd-log-search") &&
             v2Log.hash === "" &&
-            v2Trends.marker === "stay" &&
-            v2Trends.active === "Today" &&
-            v2Trends.hash === "" &&
-            trendsTop < trendsBefore - 300,
-        { v2Log, v2Trends, trendsBefore, trendsTop, ex: drain() },
+            v2Trends.active === "Trends" &&
+            trendsPage.path === "/trends" &&
+            trendsPage.title === "Trends" &&
+            trends7d.pressed === "7" &&
+            trends7d.panel === "7" &&
+            trends7d.hidden30,
+        { v2Log, v2Trends, trendsPage, trends7d, ex: drain() },
     );
 
     await goto("/");

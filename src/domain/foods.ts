@@ -92,6 +92,10 @@ export type FoodsStore = {
     /** Counts referring rows per food id in fridge, grocery, recipe, meals, and stock (household-scoped). */
     countFoodRefs(householdId: string): Promise<Map<string, number>>;
     getFood(householdId: string, id: string): Promise<Food | null>;
+    getFoodsByIds(
+        householdId: string,
+        ids: readonly string[],
+    ): Promise<Map<string, Food>>;
     insertFood(row: Food): Promise<Food>;
     updateFoodRow(row: Food): Promise<Food | null>;
     getByNormalizedName(
@@ -675,6 +679,18 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 (food) => food.householdId === householdId && food.id === id,
             );
             return row ? copyFood(row) : null;
+        },
+        async getFoodsByIds(householdId, ids) {
+            const unique = [...new Set(ids)];
+            const out = new Map<string, Food>();
+            for (const id of unique) {
+                const row = foods.find(
+                    (food) =>
+                        food.householdId === householdId && food.id === id,
+                );
+                if (row) out.set(id, copyFood(row));
+            }
+            return out;
         },
         async insertFood(row) {
             const key = foodKey(row);
@@ -1540,13 +1556,8 @@ export async function foodsByIds(
             [...ids].filter((id): id is string => Boolean(id && id.trim())),
         ),
     ];
-    const entries = await Promise.all(
-        unique.map(async (id) => {
-            const food = await store.getFood(householdId, id);
-            return food ? ([id, food] as const) : null;
-        }),
-    );
-    return new Map(entries.filter((entry) => entry != null));
+    if (unique.length === 0) return new Map();
+    return store.getFoodsByIds(householdId, unique);
 }
 
 export type FoodProductRef = { id: string; name: string; brand: string | null };
@@ -1755,8 +1766,11 @@ export function foodNameTokens(text: string): string[] {
         .map(singularizeNameToken);
 }
 
+/** The fields word matching reads; recipes and stock rows can be matched too. */
+export type WordMatchable = Pick<Food, "id" | "name" | "brand" | "archivedAt">;
+
 function foodSearchTokenSet(
-    food: Food,
+    food: WordMatchable,
     aliases: readonly string[],
 ): { set: Set<string>; list: string[] } {
     const parts = [food.name, food.brand ?? "", ...aliases];
@@ -1780,17 +1794,17 @@ function queryTokensMatchFood(
     return foodTokens.list.some((token) => token.startsWith(last));
 }
 
-export function matchFoodsByWords(
+export function matchFoodsByWords<T extends WordMatchable = Food>(
     query: string,
-    foods: readonly Food[],
+    foods: readonly T[],
     aliasesByFoodId: ReadonlyMap<string, string[]>,
-): Food[] {
+): T[] {
     const queryTokens = foodNameTokens(query);
     if (queryTokens.length === 0) return [];
     const queryNorm = normalizeFoodName(query);
     const queryLoose = looseFoodKey(query);
     const queryTokenSet = new Set(queryTokens);
-    const hits: Food[] = [];
+    const hits: T[] = [];
     // A food every query word names outright ranks ahead of one reached only
     // by the last word's prefix, so "eggs" puts Duck eggs before Eggplant.
     const needsPrefix = new Map<string, number>();
@@ -1805,10 +1819,10 @@ export function matchFoodsByWords(
             queryTokens.every((token) => tokens.set.has(token)) ? 0 : 1,
         );
     }
-    const nameTokens = (food: Food) => foodNameTokens(food.name);
-    const extraNameTokens = (food: Food) =>
+    const nameTokens = (food: T) => foodNameTokens(food.name);
+    const extraNameTokens = (food: T) =>
         nameTokens(food).filter((token) => !queryTokenSet.has(token)).length;
-    const exactRank = (food: Food) => {
+    const exactRank = (food: T) => {
         if (normalizeFoodName(food.name) === queryNorm) return 0;
         if (looseFoodKey(food.name) === queryLoose) return 0;
         return 1;

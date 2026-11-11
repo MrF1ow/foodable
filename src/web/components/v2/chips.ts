@@ -21,13 +21,15 @@ export function chipLink(opts: {
     count?: ChipLabel;
     selected?: boolean;
     className?: string;
+    title?: string;
 }): Html {
     const count =
         opts.count != null && opts.count !== ""
             ? `<span class="fd-chip__count">${esc(opts.count)}</span>`
             : "";
+    const title = opts.title ? ` title="${esc(opts.title)}"` : "";
     return raw(
-        `<a class="${cls("fd-chip", opts.selected && "fd-chip--selected", opts.className)}" href="${safeHref(opts.href)}"${opts.selected ? ' aria-current="true"' : ""}><span class="fd-chip__label">${esc(opts.label)}</span>${count}</a>`,
+        `<a class="${cls("fd-chip", opts.selected && "fd-chip--selected", opts.className)}" href="${safeHref(opts.href)}"${opts.selected ? ' aria-current="true"' : ""}${title}><span class="fd-chip__label">${esc(opts.label)}</span>${count}</a>`,
     );
 }
 
