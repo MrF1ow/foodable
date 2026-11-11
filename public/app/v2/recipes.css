@@ -17,7 +17,46 @@
 .fd-recipes-header__top {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: var(--fd-s-4);
+}
+
+.fd-recipes-header__titles {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+    min-width: 0;
+}
+
+.fd-recipes-subtitle__cookable {
+    display: none;
+}
+
+.fd-recipes-add-link {
+    display: none;
+}
+
+.fd-recipes-search-link {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.fd-recipes-search-link:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.fd-recipes-import-link:not([open]) .fd-recipes-import-link__form {
+    display: none;
 }
 
 .fd-recipes-title {
@@ -195,6 +234,10 @@
 
 .fd-recipes-import-link {
     margin: 0;
+}
+
+.fd-recipes-import-link:not([open]) .fd-recipes-import-link__summary {
+    display: none;
 }
 
 .fd-recipes-import-link__summary {
@@ -542,6 +585,42 @@
 }
 
 @media (min-width: 1024px) {
+    .fd-recipes-header__top {
+        flex-direction: row;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--space-section);
+    }
+
+    .fd-recipes-subtitle__cookable {
+        display: inline;
+    }
+
+    .fd-recipes-add-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        margin: 0 0 2px;
+        padding: var(--fd-s-10) var(--fd-s-14);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        background: var(--surface-panel);
+        color: var(--text-primary);
+        font: 500 14px/18px var(--font-body);
+        cursor: pointer;
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-recipes-add-link:focus-visible {
+        outline: 2px solid var(--accent-fill);
+        outline-offset: 2px;
+    }
+
+    .fd-recipes-search-link {
+        display: none;
+    }
+
     .fd-recipes-search-field {
         min-height: 46px;
         padding: 11px var(--fd-s-14);

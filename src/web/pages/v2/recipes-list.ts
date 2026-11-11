@@ -253,11 +253,19 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 </details>`;
     const savedLabel =
         view.totalCount === 1 ? "1 saved" : `${view.totalCount} saved`;
+    const cookableSuffix =
+        view.cookableCount != null && view.cookableCount > 0
+            ? `<span class="fd-recipes-subtitle__cookable"> · ${esc(String(view.cookableCount))} cookable now</span>`
+            : "";
+    const recipesLinkIcon = `<svg class="fd-icon fd-recipes-search-link__icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 13a5 5 0 0 1 7.07 0l1.42 1.42a5 5 0 0 1-7.08 7.07l-1.41-1.41"/><path d="M14 11a5 5 0 0 1-7.07 0L5.51 9.59a5 5 0 1 1 7.07-7.07l1.42 1.41"/></svg>`;
     return `<div class="fd-recipes-page">
 <header class="fd-recipes-header">
 <div class="fd-recipes-header__top">
+<div class="fd-recipes-header__titles">
 <h1 class="fd-recipes-title">Recipes</h1>
-<p class="fd-recipes-subtitle">${esc(savedLabel)}</p>
+<p class="fd-recipes-subtitle">${esc(savedLabel)}${cookableSuffix}</p>
+</div>
+<button type="button" class="fd-recipes-add-link" data-fd-recipes-add-link>Add from link</button>
 </div>
 </header>
 ${importDuplicate}
@@ -267,6 +275,7 @@ ${importPasteBlock(view)}
 <div class="fd-recipes-search-field">
 ${fdIcon("search")}
 <input class="fd-recipes-search-input" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search or paste a link" value="${q}" aria-label="Search or paste a recipe link" />
+<button type="button" class="fd-recipes-search-link" data-fd-recipes-add-link aria-label="Add from link">${recipesLinkIcon}</button>
 </div>
 ${filterHidden}
 <button type="submit" class="fd-sr">Search</button>

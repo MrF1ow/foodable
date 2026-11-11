@@ -1,7 +1,20 @@
 // Recipes list: paste a link in search → POST /recipes/import (ui-v2).
 const searchBound = new WeakSet();
+let addLinkBound = false;
 
 FoodableApp.onLoad((root) => {
+    // On document, once: survives Turbo visits and morphs.
+    if (!addLinkBound) {
+        addLinkBound = true;
+        document.addEventListener("click", (e) => {
+            if (!e.target.closest?.("[data-fd-recipes-add-link]")) return;
+            const d = document.querySelector(".fd-recipes-import-link");
+            const url = d?.querySelector("[name=url]");
+            if (!url) return;
+            d.open = true;
+            url.focus();
+        });
+    }
     const searchForm = root.querySelector("[data-fd-recipes-search]");
     if (!searchForm || searchBound.has(searchForm)) return;
     const input = searchForm.querySelector(".fd-recipes-search-input");

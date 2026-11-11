@@ -113,6 +113,23 @@ describe("recipes list v2 page", () => {
         expect(html).toContain("Cookable now");
     });
 
+    test("header and search expose link-import affordances", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            cards: [],
+            totalCount: 3,
+            cookableCount: 2,
+        });
+        expect(html).toContain("fd-recipes-add-link");
+        expect(html).toContain("data-fd-recipes-add-link");
+        expect(html).toContain("fd-recipes-search-link");
+        expect(html).toContain("fd-recipes-subtitle__cookable");
+        expect(html).toContain("2 cookable now");
+        expect(html).toContain('placeholder="Search or paste a link"');
+    });
+
     test("empty states for no recipes and no matches", () => {
         const none = renderRecipesListBody({
             chrome,
