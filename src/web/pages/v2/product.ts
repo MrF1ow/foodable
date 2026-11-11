@@ -26,8 +26,11 @@ import {
     servingGramsForFood,
     type ProductNutritionTable,
 } from "./product-nutrition.js";
-
-export const FD_PRODUCT_SCORE_SLOT_CLASS = "fd-product-score-slot";
+import type { ProductScoreSection } from "./product-score.js";
+import {
+    loadProductScoreSection,
+    renderProductScoreSection,
+} from "./product-score.js";
 
 export type ProductStockLine = {
     locationName: string;
@@ -41,6 +44,7 @@ export type ProductPageView = {
     stock: ProductStockLine[];
     nutrition: ProductNutritionTable;
     servingLabel: string | null;
+    score: ProductScoreSection | null;
     backHref: string;
     error?: string;
 };
@@ -183,8 +187,9 @@ function stockSection(stock: ProductStockLine[]): string {
     return `${String(sectionHeader({ title: "In the kitchen", level: 2 }))}${String(rowList(rows))}`;
 }
 
-function scoreSlot(): string {
-    return `<div class="${FD_PRODUCT_SCORE_SLOT_CLASS}" hidden data-fd-product-score-slot aria-hidden="true"></div>`;
+function scoreBlock(view: ProductPageView): string {
+    if (!view.score) return "";
+    return renderProductScoreSection(view.food, view.score);
 }
 
 function productActions(view: ProductPageView): string {
@@ -215,7 +220,7 @@ ${subtitle ? `<p class="fd-product-subtitle">${esc(subtitle)}</p>` : ""}
 </header>
 ${error}
 ${stockFirst}
-${scoreSlot()}
+${scoreBlock(view)}
 ${nutritionSection(view)}
 ${productActions(view)}
 </article>`;
@@ -299,6 +304,11 @@ export async function loadProductPageData(
     const barcodes = await foods.listBarcodes(member.householdId, foodId);
     const fridge = await listFridge(liveFridgeStore(), member.householdId);
     const stock = productStockForFood(fridge, foodId);
+    const score = await loadProductScoreSection(
+        member.householdId,
+        food,
+        userId,
+    );
     return {
         chrome,
         food,
@@ -306,6 +316,7 @@ export async function loadProductPageData(
         stock,
         nutrition: buildProductNutritionTable(food),
         servingLabel: servingBasisLabel(food),
+        score,
         backHref,
     };
 }
@@ -340,6 +351,7 @@ export function buildPreviewProductPageView(
     opts: {
         barcodes?: string[];
         stock?: ProductStockLine[];
+        score?: ProductScoreSection | null;
         backHref?: string;
     } = {},
 ): ProductPageView {
@@ -350,6 +362,7 @@ export function buildPreviewProductPageView(
         stock: opts.stock ?? [],
         nutrition: buildProductNutritionTable(food),
         servingLabel: servingBasisLabel(food),
+        score: opts.score ?? null,
         backHref: opts.backHref ?? PRODUCT_DEFAULT_BACK,
     };
 }

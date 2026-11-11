@@ -95,6 +95,10 @@ import {
     renderProductBarcodeUnknownPage,
     renderProductV2Page,
 } from "../src/web/pages/v2/product.js";
+import {
+    buildProductScoreSection,
+    previewMemberCards,
+} from "../src/web/pages/v2/product-score.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -1580,19 +1584,59 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       "weigh-in",
                   ),
                   "trends-v2": previewTrendsPage(chrome),
-                  "product-full": renderProductV2Page(
-                      buildPreviewProductPageView(
-                          chrome,
-                          food("f-product-full", "Greek yogurt, plain 2%", 59, {
+                  "product-full": (() => {
+                      const previewMembers = [
+                          {
+                              id: "u-ethan",
+                              name: "Ethan",
+                              allergens: [] as const,
+                              dislikes: [],
+                          },
+                          {
+                              id: "u-sam",
+                              name: "Sam",
+                              allergens: ["milk"] as const,
+                              dislikes: [],
+                          },
+                          {
+                              id: "u-jordan",
+                              name: "Jordan",
+                              allergens: ["tree_nut"] as const,
+                              dislikes: [],
+                          },
+                      ];
+                      const fullFood = food(
+                          "f-product-full",
+                          "Greek yogurt, plain 2%",
+                          59,
+                          {
                               brand: "Fage",
                               proteinG: 10,
                               carbsG: 4,
                               fatG: 0.4,
                               fiberG: 0,
                               sugarG: 4,
+                              saturatedFatG: 2,
                               gramsPerEach: 170,
-                          }),
-                          {
+                              offQuality: {
+                                  nutriscoreGrade: "a",
+                                  novaGroup: 1,
+                                  ecoscoreGrade: "b",
+                                  additives: [],
+                                  allergensTags: ["en:milk"],
+                                  tracesTags: ["en:nuts"],
+                                  ingredientsAnalysisTags: [],
+                                  labelsTags: [],
+                                  fetchedAt: "2026-01-01T00:00:00.000Z",
+                              },
+                          },
+                      );
+                      const score = buildProductScoreSection(
+                          fullFood,
+                          previewMemberCards(fullFood, previewMembers),
+                      );
+                      return renderProductV2Page(
+                          buildPreviewProductPageView(chrome, fullFood, {
                               barcodes: ["5201054017463"],
                               stock: [
                                   {
@@ -1600,21 +1644,51 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                                       quantityLabel: "2",
                                   },
                               ],
-                          },
-                      ),
-                  ),
-                  "product-partial": renderProductV2Page(
-                      buildPreviewProductPageView(
-                          chrome,
-                          food("f-product-partial", "Trail mix", 120, {
-                              proteinG: null,
-                              carbsG: null,
-                              fatG: null,
-                              fiberG: null,
-                              sugarG: null,
+                              score,
                           }),
-                      ),
-                  ),
+                      );
+                  })(),
+                  "product-partial": (() => {
+                      const partialFood = food(
+                          "f-product-partial",
+                          "Trail mix",
+                          120,
+                          {
+                              proteinG: 8,
+                              carbsG: 18,
+                              fatG: 6,
+                              sugarG: 10,
+                              saturatedFatG: 2,
+                              offQuality: {
+                                  nutriscoreGrade: "c",
+                                  novaGroup: 3,
+                                  ecoscoreGrade: null,
+                                  additives: null,
+                                  allergensTags: [],
+                                  tracesTags: null,
+                                  ingredientsAnalysisTags: [],
+                                  labelsTags: [],
+                                  fetchedAt: "2026-01-01T00:00:00.000Z",
+                              },
+                          },
+                      );
+                      const score = buildProductScoreSection(
+                          partialFood,
+                          previewMemberCards(partialFood, [
+                              {
+                                  id: "u-ethan",
+                                  name: "Ethan Flow",
+                                  allergens: [],
+                                  dislikes: [],
+                              },
+                          ]),
+                      );
+                      return renderProductV2Page(
+                          buildPreviewProductPageView(chrome, partialFood, {
+                              score,
+                          }),
+                      );
+                  })(),
                   "product-none": renderProductV2Page(
                       buildPreviewProductPageView(
                           chrome,

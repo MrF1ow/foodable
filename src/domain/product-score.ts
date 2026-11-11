@@ -17,7 +17,7 @@ export const SCORE_PARTS: readonly ScorePart[] = [
 
 /*
  * Additive part penalties (chosen against OFF fixtures, Yuka-like sensitivity):
- * - high −15 each, any high-risk additive caps the part at 40
+ * - high −15 each, any high-risk additive caps the part score at 40 (budget ceiling)
  * - moderate −6, none 0, unknown tier −2 (OFF lists the tag but we have no tier)
  * Minimum known configured weight share 0.5: fewer than half the preset points with
  * real data yields not_enough_data instead of a misleading average.

@@ -33,6 +33,10 @@ import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
 import { MealItemsError, type MealItemSpec } from "../../domain/meals.js";
 import { toGrams } from "../../domain/food-quantity.js";
 import { unitHintsForLog } from "../../domain/log-search.js";
+import {
+    foodDisplayScore,
+    offHitDisplayScore,
+} from "../../domain/product-screen.js";
 import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { MAX_CALORIES, MAX_MACRO_G } from "../../domain/import.js";
@@ -117,6 +121,7 @@ function historyItemFromMeal(
     }
     if (line.food_id) {
         const food = foodsById.get(line.food_id);
+        const score = food ? foodDisplayScore(food) : null;
         return {
             ...base,
             food_id: line.food_id,
@@ -128,6 +133,7 @@ function historyItemFromMeal(
             protein_per_100g: food?.proteinG ?? null,
             carbs_per_100g: food?.carbsG ?? null,
             fat_per_100g: food?.fatG ?? null,
+            ...(score != null ? { product_score: score } : {}),
         };
     }
     return base;
@@ -198,6 +204,7 @@ async function loadHistoryMeals(
 
 function offToSource(hit: FoodResult): LogSearchSourceItem {
     const per100 = catalogNutritionFromOff(hit);
+    const score = offHitDisplayScore(hit);
     return {
         kind: "off",
         id: hit.source,
@@ -209,6 +216,7 @@ function offToSource(hit: FoodResult): LogSearchSourceItem {
         protein_per_100g: per100.proteinG,
         carbs_per_100g: per100.carbsG,
         fat_per_100g: per100.fatG,
+        ...(score != null ? { product_score: score } : {}),
     };
 }
 
@@ -245,6 +253,7 @@ async function splitOffByHouseholdBarcode(
 }
 
 function foodToSource(row: Food): LogSearchSourceItem {
+    const score = foodDisplayScore(row);
     return {
         kind: "food",
         id: row.id,
@@ -258,6 +267,7 @@ function foodToSource(row: Food): LogSearchSourceItem {
         protein_per_100g: row.proteinG,
         carbs_per_100g: row.carbsG,
         fat_per_100g: row.fatG,
+        ...(score != null ? { product_score: score } : {}),
     };
 }
 
@@ -326,6 +336,7 @@ export async function buildLogSearchSources(input: {
         const foodRow = item.foodId
             ? (foodsById.get(item.foodId) ?? null)
             : null;
+        const score = foodRow ? foodDisplayScore(foodRow) : null;
         stock.push({
             kind: "stock",
             id: item.id,
@@ -341,6 +352,7 @@ export async function buildLogSearchSources(input: {
             fat_per_100g: foodRow?.fatG ?? null,
             stock_amount: item.quantity.amount,
             stock_unit: item.quantity.unit,
+            ...(score != null ? { product_score: score } : {}),
         });
     }
 

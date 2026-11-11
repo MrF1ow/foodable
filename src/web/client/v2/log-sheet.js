@@ -274,6 +274,13 @@ function plusIcon() {
     return `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>`;
 }
 
+function scoreBadgeHtml(score) {
+    if (typeof score !== "number" || !Number.isFinite(score)) return "";
+    const value = Math.min(100, Math.max(0, Math.round(score)));
+    const band = value >= 70 ? "good" : value >= 40 ? "middling" : "poor";
+    return `<span class="fd-score fd-score--${band}" role="img" aria-label="Product score ${value} of 100, ${band}"><span class="fd-score__dot" aria-hidden="true"></span><span class="fd-score__num" aria-hidden="true">${value}</span></span>`;
+}
+
 function searchRowHtml(item, kind, rowIndex) {
     const relivable = kind !== "history" || logItemIsRelivable(item);
     const subtitle = itemSubtitle(item, kind);
@@ -285,7 +292,8 @@ function searchRowHtml(item, kind, rowIndex) {
     const pickAttr = relivable
         ? ` data-fd-log-row-pick="${esc(JSON.stringify({ ...item, kind }))}"`
         : "";
-    return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span></span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
+    const badge = scoreBadgeHtml(item.product_score);
+    return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span>${badge}</span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
 }
 
 function recentChipHtml(item) {

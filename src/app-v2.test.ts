@@ -153,9 +153,10 @@ describe("/app-v2.js", () => {
         // +~0.9 KB Kitchen usuals rows, unit select and add sheet;
         // +~0.5 KB usual product row sync and "No amount".
         // +~0.8 KB Recipes list desktop/phone search field swap.
+        // +~0.4 KB Log search result score badges.
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
         // +~0.2 KB log search waits for a tap on touch screens.
-        expect(js.length).toBeLessThan(87_800);
+        expect(js.length).toBeLessThan(88_300);
     });
 });
 

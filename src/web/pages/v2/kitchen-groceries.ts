@@ -46,6 +46,7 @@ export type KitchenGroceriesLineMeta = {
     allergenWarning: string | null;
     storeName: string;
     sectionName: string;
+    productScore?: number | null;
 };
 
 export type PutAwayDraft = Record<
@@ -295,6 +296,7 @@ export function groceryLineRowMarkup(
     const rowHtml = String(
         groceryRow({
             title: labels.title,
+            score: meta.productScore,
             subtitle: labels.subtitle,
             tag: labels.tag,
             amount,

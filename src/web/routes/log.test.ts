@@ -28,7 +28,9 @@ import {
     matchFoodsByWords,
     newFood,
     updateFood,
+    type FoodQuality,
 } from "../../domain/foods.js";
+import { foodDisplayScore } from "../../domain/product-screen.js";
 import { createMemoryFridgeStore } from "../../domain/fridge.js";
 import {
     createMemoryRecipesStore,
@@ -88,6 +90,9 @@ let listFoodsCalls = 0;
 let listRecipesCalls = 0;
 let listFridgeItemsCalls = 0;
 const mealsInserted: Array<Record<string, unknown>> = [];
+let rangeMealsOverride: Awaited<
+    ReturnType<typeof realNutritionDb.getMealsInRange>
+> | null = null;
 const waterInserted: Array<Record<string, unknown>> = [];
 const weightsInserted: Array<Record<string, unknown>> = [];
 
@@ -251,6 +256,7 @@ mock.module("../../db/nutrition.js", () => ({
         tz: string,
     ) => {
         rangeCalls.push({ userId, start, end, tz });
+        if (rangeMealsOverride != null) return rangeMealsOverride;
         return [
             {
                 id: "meal-recipe",
@@ -413,6 +419,7 @@ afterEach(async () => {
 });
 
 beforeEach(async () => {
+    rangeMealsOverride = null;
     mealsInserted.length = 0;
     waterInserted.length = 0;
     weightsInserted.length = 0;
@@ -577,6 +584,122 @@ describe("GET /api/log/search", () => {
         const body = await search("egg");
         expect(body.groups.some((g) => g.kind === "off")).toBe(false);
         expect(offCalls).toBe(0);
+    });
+
+    test("stock and history sources carry product_score when the food scores", async () => {
+        const quality: FoodQuality = {
+            nutriscoreGrade: "a",
+            novaGroup: 1,
+            ecoscoreGrade: "b",
+            additives: [],
+            allergensTags: [],
+            tracesTags: null,
+            ingredientsAnalysisTags: [],
+            labelsTags: [],
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const scored = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Greek yogurt",
+                calories: 59,
+                proteinG: 10,
+                sugarG: 4,
+                saturatedFatG: 2,
+                gramsPerEach: 170,
+                offQuality: quality,
+            }),
+        );
+        const expected = foodDisplayScore(scored);
+        expect(expected).not.toBeNull();
+        const loc = await db.fridgeStore.insertLocation({
+            id: "loc-fridge",
+            householdId: HH,
+            name: "Fridge",
+            sortOrder: 0,
+        });
+        await db.fridgeStore.insertItem({
+            id: "fridge-yogurt",
+            householdId: HH,
+            locationId: loc.id,
+            kind: "food",
+            displayName: scored.name,
+            quantity: { amount: 2, unit: "each" },
+            foodId: scored.id,
+        });
+        const { buildLogSearchSources } = await import("./log.js");
+        const built = await buildLogSearchSources({
+            householdId: HH,
+            userId: ALICE,
+            query: "greek",
+            limit: 20,
+            timezone: "America/Los_Angeles",
+        });
+        const stockRow = built.sources.stock?.find(
+            (row) => row.food_id === scored.id,
+        );
+        expect(stockRow?.product_score).toBe(expected);
+        const body = await search("greek");
+        const history = body.groups.find((g) => g.kind === "history");
+        expect(history).toBeUndefined();
+        const foodRow = body.groups
+            .find((g) => g.kind === "food")
+            ?.items.find((i) => i.food_id === scored.id);
+        expect(foodRow?.product_score).toBe(expected);
+
+        rangeMealsOverride = [
+            {
+                id: "meal-yogurt",
+                user_id: ALICE,
+                logged_at: "2026-11-10T12:00:00.000Z",
+                meal_type: "snack",
+                description: "Yogurt",
+                calories: 100,
+                protein_g: 17,
+                carbs_g: 4,
+                fat_g: 1,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                caffeine_mg: null,
+                notes: null,
+                idempotency_key: null,
+                items: [
+                    {
+                        id: "item-yogurt",
+                        meal_id: "meal-yogurt",
+                        user_id: ALICE,
+                        household_id: HH,
+                        food_id: scored.id,
+                        recipe_id: null,
+                        label: "Greek yogurt",
+                        amount: 1,
+                        unit: "each",
+                        grams: 170,
+                        portions: null,
+                        calories: 100,
+                        protein_g: 17,
+                        carbs_g: 4,
+                        fat_g: 1,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sort_order: 0,
+                        created_at: "2026-11-10T12:00:00.000Z",
+                    },
+                ],
+            },
+        ];
+        const empty = await buildLogSearchSources({
+            householdId: HH,
+            userId: ALICE,
+            query: "",
+            limit: 20,
+            timezone: "America/Los_Angeles",
+        });
+        expect(empty.sources.history?.[0]?.product_score).toBe(expected);
     });
 
     test("empty q returns history without OFF and recipe meals carry re-log fields", async () => {
