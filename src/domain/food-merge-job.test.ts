@@ -294,6 +294,7 @@ test("formatMergeJobReport: DRY line, labels, skip, empty", () => {
         households: [
             {
                 householdId: "h1",
+                pluralsSameFood: false,
                 merges: [
                     {
                         keep: {
@@ -357,7 +358,14 @@ test("formatMergeJobReport: DRY line, labels, skip, empty", () => {
 
     const empty = formatMergeJobReport({
         mode: "dry-run",
-        households: [{ householdId: "h0", merges: [], skipped: [] }],
+        households: [
+            {
+                householdId: "h0",
+                pluralsSameFood: false,
+                merges: [],
+                skipped: [],
+            },
+        ],
         mergedCount: 0,
         failedCount: 0,
         skippedCount: 0,
@@ -568,4 +576,78 @@ test("apply: a one-sided gramsPerMl fill keeps the ml ledger matched", async () 
     const items = await fridge.listItems(HH);
     const movements = await stock.listMovements(HH);
     expect(ledgerMatchesStock(items, movements, kept)).toBe(true);
+});
+
+test("plural pairs are listed only for a household with plurals on", async () => {
+    const foods = createMemoryFoodsStore();
+    const ON = "hh-plurals-on";
+    const OFF = "hh-plurals-off";
+    foods.setPluralsSameFood(ON, true);
+    for (const householdId of [ON, OFF]) {
+        for (const name of ["Egg", "Eggs", "Greens", "Green"]) {
+            await foods.insertFood(
+                newFood({ householdId, kind: "food", name }),
+            );
+        }
+    }
+    const mergeMock = mock((_h: string, _k: string, _d: string) =>
+        Promise.reject(new Error("merge should not run")),
+    );
+
+    const report = await runMergeJob(
+        {
+            listHouseholdIds: async () => [ON, OFF],
+            store: foods,
+            merge: mergeMock as MergeJobDeps["merge"],
+        },
+        { apply: false },
+    );
+
+    expect(mergeMock).not.toHaveBeenCalled();
+    const [on, off] = report.households;
+    expect(on!.pluralsSameFood).toBe(true);
+    expect(
+        on!.merges.map((m) => [m.keep.name, m.drop.name].sort()).sort(),
+    ).toEqual([
+        ["Egg", "Eggs"],
+        ["Green", "Greens"],
+    ]);
+    expect(off!.pluralsSameFood).toBe(false);
+    expect(off!.merges).toEqual([]);
+    expect(off!.skipped).toEqual([]);
+
+    const text = formatMergeJobReport(report);
+    expect(text).toContain(
+        `Household ${ON} (singular and plural are one food): 2 to merge, 0 skipped`,
+    );
+    expect(text).not.toContain(`Household ${OFF}`);
+});
+
+test("apply merges a plural pair when the household has plurals on", async () => {
+    const foods = createMemoryFoodsStore();
+    foods.setPluralsSameFood(HH, true);
+    const egg = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Egg" }),
+    );
+    const eggs = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+    );
+    foods.trackRef(eggs.id, HH);
+
+    const report = await runMergeJob(
+        {
+            listHouseholdIds: async () => [HH],
+            store: foods,
+            merge: (householdId, keepId, dropId) =>
+                mergeFoods(foods, householdId, keepId, dropId),
+        },
+        { apply: true },
+    );
+
+    expect(report.mergedCount).toBe(1);
+    const live = await foods.listFoods(HH);
+    expect(live.map((f) => f.id)).toEqual([eggs.id]);
+    expect(await foods.listAliases(HH, eggs.id)).toContain(
+        normalizeFoodName(egg.name),
+    );
 });

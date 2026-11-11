@@ -165,6 +165,12 @@ export type FoodsStore = {
         foodId: string,
         patch: FoodOffNutritionPatch,
     ): Promise<Food | null>;
+    /**
+     * The household's "treat singular and plural as the same food" setting.
+     * Name resolution reads it only after an exact name and alias miss. A
+     * store without it behaves as off.
+     */
+    pluralsSameFood?(householdId: string): Promise<boolean>;
 };
 
 export type FoodOffNutritionPatch = {
@@ -632,6 +638,7 @@ export type MemoryFoodsStore = FoodsStore &
             extra?: Record<string, unknown>,
         ): MemoryFoodRefRow;
         linkRefs(holder: MemoryFoodRefHolder): void;
+        setPluralsSameFood(householdId: string, enabled: boolean): void;
     };
 
 export function createMemoryFoodsStore(): MemoryFoodsStore {
@@ -643,9 +650,17 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
     const refs: MemoryFoodRefRow[] = [];
     const refHolders: MemoryFoodRefHolder[] = [];
     let linkedDismissals: NoticeDismissalsStore | undefined;
+    const pluralsOn = new Set<string>();
 
     const store: MemoryFoodsStore = {
         refs,
+        setPluralsSameFood(householdId, enabled) {
+            if (enabled) pluralsOn.add(householdId);
+            else pluralsOn.delete(householdId);
+        },
+        async pluralsSameFood(householdId) {
+            return pluralsOn.has(householdId);
+        },
         linkDismissals(s) {
             linkedDismissals = s;
         },
@@ -1258,6 +1273,35 @@ async function existingByNameOrAlias(
     return aliased;
 }
 
+async function storePluralsSameFood(
+    store: FoodsStore,
+    householdId: string,
+): Promise<boolean> {
+    return store.pluralsSameFood ? store.pluralsSameFood(householdId) : false;
+}
+
+/**
+ * Live foods of `kind` whose name has the same loose key as `name`. With
+ * `plurals`, the plural-free key is tried when the loose key finds nothing,
+ * so an exact spelling still wins over a singular or plural one.
+ */
+function filterLooseNameMatches(
+    foods: readonly Food[],
+    kind: FoodKind,
+    name: string,
+    plurals: boolean,
+): Food[] {
+    const live = foods.filter(
+        (food) => food.kind === kind && food.archivedAt == null,
+    );
+    const key = looseFoodKey(name);
+    const loose = live.filter((food) => looseFoodKey(food.name) === key);
+    if (loose.length > 0 || !plurals) return loose;
+    const pluralFree = pluralFreeFoodKey(name);
+    if (!pluralFree) return [];
+    return live.filter((food) => pluralFreeFoodKey(food.name) === pluralFree);
+}
+
 function preferLooseNameMatch(a: Food, b: Food): number {
     const aPlain = a.brand == null ? 1 : 0;
     const bPlain = b.brand == null ? 1 : 0;
@@ -1274,14 +1318,9 @@ async function findFoodByLooseKey(
     name: string,
     opts?: { rejectBranded?: boolean; requiredBrand?: string | null },
 ): Promise<Food | null> {
-    const key = looseFoodKey(name);
     const listed = await store.listFoods(householdId);
-    let matches = listed.filter(
-        (food) =>
-            food.kind === kind &&
-            food.archivedAt == null &&
-            looseFoodKey(food.name) === key,
-    );
+    const plurals = await storePluralsSameFood(store, householdId);
+    let matches = filterLooseNameMatches(listed, kind, name, plurals);
     if (opts?.rejectBranded) {
         matches = matches.filter((food) => food.brand == null);
     }
@@ -1759,6 +1798,50 @@ export function looseFoodKey(name: string): string {
         .trim();
 }
 
+/** Singular mass nouns whose "-es" is not a plural ending (see `(ss)es` rule). */
+const PLURAL_FREE_SS_ES_SINGULAR = new Set(["molasses"]);
+
+/**
+ * One name word with a regular English plural ending removed, for a key that
+ * makes two foods one. Stricter than `singularizeNameToken`, which only feeds
+ * suggestions. The result is a key, not a word: where a singular and its
+ * plural differ by more than an "s", both are cut to the stem they share.
+ * - words ending in "ss" or "us" are left alone ("glass", "hummus");
+ * - "-ies" and a consonant before "-y" meet at "…i"
+ *   ("berry"/"berries", "cookie"/"cookies"); "-ie" drops the trailing "e"
+ *   to join "-ies" ("cookie"/"cookies"); "pie"/"pies" share "pie";
+ * - after ch, sh, x, z, ss or o, "-es" and "-e" both come off
+ *   ("peach"/"peaches", "quiche"/"quiches", "glass"/"glasses",
+ *   "tomato"/"tomatoes", "sloe"/"sloes");
+ * - otherwise one trailing "s" comes off ("eggs", "dates", "greens").
+ * Irregular plurals ("leaves", "loaves") stay apart from their singulars.
+ */
+function pluralFreeNameToken(token: string): string {
+    if (/(ss|us)$/.test(token)) return token;
+    if (PLURAL_FREE_SS_ES_SINGULAR.has(token)) return token;
+    if (token.endsWith("ies") && token.length > 4) {
+        return token.slice(0, -3) + "i";
+    }
+    if (token.length > 3 && token.endsWith("ie")) return token.slice(0, -1);
+    if (/[^aeiou]y$/.test(token)) return token.slice(0, -1) + "i";
+    if (/(ch|sh|x|z|ss|o)es$/.test(token)) return token.slice(0, -2);
+    if (/(ch|sh|x|z|ss|o)e$/.test(token)) return token.slice(0, -1);
+    if (token.length <= 3) return token;
+    const single = singularizeNameToken(token);
+    return single === token ? token : pluralFreeNameToken(single);
+}
+
+/**
+ * `looseFoodKey` with each word's plural ending removed, so "Eggs" and "egg"
+ * share a key. Name resolution and the merge job use it only when the
+ * household treats singular and plural as the same food.
+ */
+export function pluralFreeFoodKey(name: string): string {
+    const loose = looseFoodKey(name);
+    if (!loose) return "";
+    return loose.split(" ").map(pluralFreeNameToken).join(" ");
+}
+
 export function foodNameTokens(text: string): string[] {
     return prepareFoodNameForTokens(text)
         .split(/[^a-z0-9]+/)
@@ -2011,6 +2094,7 @@ function findManualFoodInListed(
     aliasesByFoodId: ReadonlyMap<string, string[]>,
     kind: FoodKind,
     name: string,
+    plurals: boolean,
 ): Food | null {
     const trimmed = name.trim();
     if (!trimmed) return null;
@@ -2029,13 +2113,7 @@ function findManualFoodInListed(
             if (normalizeFoodName(alias) === normalized) return food;
         }
     }
-    const key = looseFoodKey(trimmed);
-    let matches = foods.filter(
-        (food) =>
-            food.kind === kind &&
-            !food.archivedAt &&
-            looseFoodKey(food.name) === key,
-    );
+    const matches = filterLooseNameMatches(foods, kind, trimmed, plurals);
     if (matches.length === 0) return null;
     matches.sort(preferLooseNameMatch);
     return copyFood(matches[0]!);
@@ -2048,9 +2126,10 @@ export async function similarFoodsForNames(
     kind: FoodKind,
     names: readonly string[],
 ): Promise<SimilarFoodsEntry[]> {
-    const [foods, aliasesByFoodId] = await Promise.all([
+    const [foods, aliasesByFoodId, plurals] = await Promise.all([
         store.listFoods(householdId),
         store.listAllAliases(householdId),
+        storePluralsSameFood(store, householdId),
     ]);
     const seenNorm = new Set<string>();
     const entries: SimilarFoodsEntry[] = [];
@@ -2060,7 +2139,15 @@ export async function similarFoodsForNames(
         const norm = normalizeFoodName(trimmed);
         if (seenNorm.has(norm)) continue;
         seenNorm.add(norm);
-        if (findManualFoodInListed(foods, aliasesByFoodId, kind, trimmed)) {
+        if (
+            findManualFoodInListed(
+                foods,
+                aliasesByFoodId,
+                kind,
+                trimmed,
+                plurals,
+            )
+        ) {
             continue;
         }
         const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
@@ -3104,7 +3191,9 @@ export function duplicatePairs(
     foods: readonly Food[],
     refCounts: ReadonlyMap<string, number>,
     aliases: ReadonlyMap<string, string[]> = new Map(),
+    opts: { plurals?: boolean } = {},
 ): DuplicatePairsReport {
+    const groupKeyOf = opts.plurals ? pluralFreeFoodKey : looseFoodKey;
     const catalog = foods;
     const foodsById = new Map(catalog.map((row) => [row.id, row]));
     const aliasOwnerByNorm = aliasOwnersByNormalizedName(aliases);
@@ -3131,7 +3220,7 @@ export function duplicatePairs(
     const byKey = new Map<string, Food[]>();
 
     for (const row of livePlain) {
-        const loose = looseFoodKey(row.name);
+        const loose = groupKeyOf(row.name);
         if (!loose) continue;
         const brand = duplicateBrandKey(row.brand);
         const key = `${row.householdId}\0${row.kind}\0${loose}\0${brand === null ? "" : brand}`;
@@ -3147,7 +3236,7 @@ export function duplicatePairs(
             rows,
             householdId: first.householdId,
             kind: first.kind,
-            loose: looseFoodKey(first.name),
+            loose: groupKeyOf(first.name),
             brand: duplicateBrandKey(first.brand),
         });
     }

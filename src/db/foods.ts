@@ -23,6 +23,7 @@ import {
 } from "./sql.js";
 
 const FOODS = "foods";
+const HOUSEHOLDS = "households";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
@@ -336,6 +337,27 @@ export function liveFoodsStore(): FoodsStore {
                     return data ? foodFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("set food off nutrition", err);
+                }
+            });
+        },
+        async pluralsSameFood(householdId) {
+            // The same column `getPluralsSameFood` in ./household.ts reads,
+            // queried here so this module does not import that one (several
+            // route tests replace it with a mock that lacks the export).
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ plurals_same_food: unknown }>(
+                        tx,
+                        tx`
+                            select plurals_same_food
+                            from ${tx.unsafe(HOUSEHOLDS)}
+                            where id = ${householdId}
+                        `,
+                        "load plurals_same_food",
+                    );
+                    return data?.plurals_same_food === true;
+                } catch (err) {
+                    throw pgError("load plurals_same_food", err);
                 }
             });
         },
