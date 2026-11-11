@@ -221,18 +221,30 @@ describe("renderLogSheets", () => {
         expect(html).toContain("data-sheet-open-on-load");
     });
 
-    test("empty search shows exactly three QUICK tiles", () => {
+    test("empty search shows four QUICK tiles when the camera is on", () => {
         const html = renderLogSheets({
             timezone: "UTC",
             previewSearch: "empty",
+            barcodeCamera: true,
         });
         expect(html).toContain("fd-log-quick-grid");
         expect(html).toContain("Quick calories");
         expect(html).toContain("Water +250 ml");
         expect(html).toContain("Weigh in");
-        expect(html).not.toContain("Scan barcode");
+        expect(html).toContain("Scan barcode");
         const tiles = html.match(/\bclass="fd-quick-tile"/g) ?? [];
-        expect(tiles).toHaveLength(3);
+        expect(tiles).toHaveLength(4);
+    });
+
+    test("barcode-camera off hides Scan but keeps Enter barcode", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            previewSearch: "empty",
+            barcodeCamera: false,
+        });
+        expect(html).not.toContain("Scan barcode");
+        expect(html).toContain("Enter barcode");
+        expect(html).toContain("fd-scanner--type-only");
     });
 
     test("quick calories and weigh-in sheets render their fields", () => {

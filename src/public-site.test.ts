@@ -184,6 +184,23 @@ describe("runtime surfaces that stay", () => {
         expect(await js.text()).toContain("FoodableApp.onLoad");
     });
 
+    test("GET /app-v2-scanner.js and .wasm serve the lazy decoder chunk", async () => {
+        const script = await app.request("http://x/app-v2-scanner.js");
+        expect(script.status).toBe(200);
+        expect(script.headers.get("content-type") ?? "").toContain(
+            "text/javascript",
+        );
+        expect(script.headers.get("cache-control")).toBe("no-cache");
+        const scriptText = await script.text();
+        expect(scriptText).toContain("FoodableScannerZxing");
+
+        const wasm = await app.request("http://x/app-v2-scanner.wasm");
+        expect(wasm.status).toBe(200);
+        expect(wasm.headers.get("content-type")).toBe("application/wasm");
+        expect(wasm.headers.get("cache-control")).toBe("no-cache");
+        expect((await wasm.arrayBuffer()).byteLength).toBeGreaterThan(100_000);
+    });
+
     test("versioned v2 assets are immutable when the query matches", async () => {
         const { appV2StylesheetHref, appV2ScriptHref } =
             await import("./widgets.js");

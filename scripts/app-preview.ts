@@ -1583,6 +1583,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       theme,
                       "weigh-in",
                   ),
+                  "nutrition-log-scanner": await logScannerPreview(theme),
                   "trends-v2": previewTrendsPage(chrome),
                   "product-full": (() => {
                       const previewMembers = [
@@ -1728,6 +1729,24 @@ function findChromium(): string | null {
         if (path) return path;
     }
     return null;
+}
+
+async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
+    const chrome = {
+        ...previewChrome(theme),
+        v2Timezone: "America/Los_Angeles",
+    };
+    return renderAppShell({
+        ...chrome,
+        title: "Nutrition",
+        active: "nutrition" as const,
+        body: pageHeader({ title: "Ethan Flow" }),
+        v2LogSheet: {
+            scannerOpenOnLoad: true,
+            previewScanner: true,
+            barcodeCamera: true,
+        },
+    });
 }
 
 async function logSheetPreview(

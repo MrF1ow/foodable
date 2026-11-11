@@ -37,7 +37,11 @@ import {
     getAppJs,
     getAppV2Css,
     getAppV2Js,
+    getScannerWasm,
+    getScannerZxingJs,
     getEmbedWidgetHtml,
+    scannerWasmHref,
+    scannerZxingScriptHref,
     warmWidgets,
 } from "./widgets.js";
 import { BRAND_SVGS } from "./brand.js";
@@ -168,7 +172,7 @@ app.use("*", async (c, next) => {
         // their own documents with their own copy (frame-ancestors 'self').
         c.header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
         );
     }
     c.header("Referrer-Policy", "no-referrer");
@@ -374,6 +378,28 @@ app.get("/app-v2.js", async (c) => {
         "Content-Type": "text/javascript; charset=utf-8",
         "Cache-Control": appAssetCacheControl(c, href),
     });
+});
+app.get("/app-v2-scanner.js", async (c) => {
+    try {
+        const href = scannerZxingScriptHref();
+        return c.body(await getScannerZxingJs(), 200, {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": appAssetCacheControl(c, href),
+        });
+    } catch {
+        return c.text("Scanner unavailable", 503);
+    }
+});
+app.get("/app-v2-scanner.wasm", async (c) => {
+    try {
+        const href = scannerWasmHref();
+        return c.body(await getScannerWasm(), 200, {
+            "Content-Type": "application/wasm",
+            "Cache-Control": appAssetCacheControl(c, href),
+        });
+    } catch {
+        return c.text("Scanner unavailable", 503);
+    }
 });
 // Dashboard widget documents. No user data (the per-request JSON stays on
 // the framing element), so this is public like /app.css. The middleware

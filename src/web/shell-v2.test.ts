@@ -25,6 +25,7 @@ import {
     kitchenTabFor,
     v2ActiveFor,
 } from "./shell-v2.js";
+import { FD_BARCODE_SCAN_SHEET_ID } from "./pages/v2/log-sheet.js";
 import {
     renderAppShell,
     renderBarePage,
@@ -379,6 +380,18 @@ describe("flag on: the new shell", () => {
         ).toContain('class="fd-account-role">Member<');
     });
 
+    test("top bar omits scan when barcode-camera is off", () => {
+        const html = v2Html({
+            flags: {
+                ...FIXTURE_APP_CHROME_FLAGS,
+                uiV2: true,
+                barcodeCamera: false,
+            },
+        });
+        const top = between(html, /<header class="fd-topbar"/, "</header>");
+        expect(top).not.toContain("fd-scan");
+    });
+
     test("top bar: search, scan and Log food are plain links", () => {
         const html = v2Html();
         const top = between(html, /<header class="fd-topbar"/, "</header>");
@@ -391,7 +404,9 @@ describe("flag on: the new shell", () => {
         const scan = between(top, /<a class="fd-scan"/, "</a>");
         expect(scan).toContain(`href="${FD_LOG_HREF}"`);
         expect(scan).toContain('aria-label="Scan a barcode"');
-        expect(scan).toContain('data-fd-open-sheet="fd-log-search"');
+        expect(scan).toContain(
+            `data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"`,
+        );
         const log = between(top, /<a class="fd-logfood"/, "</a>");
         expect(log).toContain(`href="${FD_LOG_HREF}"`);
         expect(log).toContain('data-fd-open-sheet="fd-log-search"');

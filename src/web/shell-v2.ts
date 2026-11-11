@@ -16,6 +16,8 @@ import {
     appStylesheetHref,
     appV2ScriptHref,
     appV2StylesheetHref,
+    scannerWasmHref,
+    scannerZxingScriptHref,
 } from "../widgets.js";
 import type { HouseholdMember } from "../household.js";
 import { fdIcon, type FdIconName } from "./components/fd-icons.js";
@@ -30,6 +32,7 @@ import {
     type V2NavId,
 } from "./shell.js";
 import {
+    FD_BARCODE_SCAN_SHEET_ID,
     FD_LOG_SEARCH_SHEET_ID,
     renderLogSheets,
 } from "./pages/v2/log-sheet.js";
@@ -284,8 +287,11 @@ function withKitchenTabs(body: string, chrome: AppChrome): string {
     return head ? `${head}${tabs}${body.slice(head.length)}` : `${tabs}${body}`;
 }
 
-function topBar(): string {
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span><a class="fd-scan" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a><a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+function topBar(chrome: AppChrome): string {
+    const scan = chrome.flags.barcodeCamera
+        ? `<a class="fd-scan" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a>`
+        : "";
+    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
 /** Head for the new shell: the shared meta, then the old stylesheet and script
@@ -314,12 +320,12 @@ ${appHeadV2(chrome.title, chrome.theme)}
 <div class="fd-shell">
 ${sidebar(chrome, active)}
 <div class="fd-column">
-${topBar()}
+${topBar(chrome)}
 <main class="app-main native fd-main">${accountChip(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
 </div>
 ${phoneTabs(chrome, active)}
 </div>
-${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", ...chrome.v2LogSheet }) : ""}
+${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet }) : ""}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;
