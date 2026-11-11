@@ -8,11 +8,13 @@ import {
     createHouseholdForCaller,
     getHouseholdConfig,
     getHouseholdMembership,
+    getPluralsSameFood,
     householdExists,
     listHouseholdMembers,
     removeHouseholdMemberAccount,
     rotateHouseholdMcpToken,
     setHouseholdMemberRole,
+    setPluralsSameFood,
     transferHouseholdOwnership,
     updateHouseholdConfig,
     updateMemberDisplayName,
@@ -325,6 +327,45 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
             ok: false,
             error: "You must be a household member to add people.",
         });
+    });
+
+    test("plurals_same_food defaults false, round-trips, and stays per household", async () => {
+        expect(await getPluralsSameFood(householdId)).toBe(false);
+        expect(await setPluralsSameFood(householdId, true)).toBe(true);
+        expect(await getPluralsSameFood(householdId)).toBe(true);
+        expect(await setPluralsSameFood(householdId, false)).toBe(false);
+        expect(await getPluralsSameFood(householdId)).toBe(false);
+
+        const { sql } = getCtx();
+        const other = await seedHousehold(sql);
+        const [otherRow] = (await sql`
+            select plurals_same_food
+            from public.households
+            where id = ${other.householdId}
+        `) as { plurals_same_food: boolean }[];
+        expect(otherRow!.plurals_same_food).toBe(false);
+
+        await asUser(
+            ownerId,
+            () => setPluralsSameFood(householdId, true),
+            householdId,
+        );
+        const [stillOff] = (await sql`
+            select plurals_same_food
+            from public.households
+            where id = ${other.householdId}
+        `) as { plurals_same_food: boolean }[];
+        expect(stillOff!.plurals_same_food).toBe(false);
+
+        await asUser(
+            ownerId,
+            () =>
+                expectRejectsWithMessage(
+                    getPluralsSameFood(other.householdId),
+                    "Failed to load plurals_same_food",
+                ),
+            householdId,
+        );
     });
 
     test("getHouseholdConfig and updateHouseholdConfig", async () => {
