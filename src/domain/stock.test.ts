@@ -843,6 +843,40 @@ test("putAwayGroceryLines accepts per-line location and expiry", async () => {
     expect(ledgerMatchesStock(listed.items, movements, oats)).toBe(true);
 });
 
+test("putAwayGroceryLines rejects sub-tenth-gram amount before any write", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const milk = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    const salt = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        name: "Salt",
+        amount: 0.04,
+        unit: "g",
+    });
+    await expect(
+        putAwayGroceryLines(grocery, fridge, stock, foods, {
+            householdId: HH,
+            lineIds: [milk.id, salt.id],
+            locationId: loc.id,
+        }),
+    ).rejects.toThrow(/greater than zero/);
+    expect((await listGrocery(grocery, settings, HH)).lines).toHaveLength(2);
+    expect((await listFridge(fridge, HH)).items).toHaveLength(0);
+    expect(await stock.listMovements(HH)).toHaveLength(0);
+});
+
 test("putAwayGroceryLines with a bad line in the middle writes nothing", async () => {
     const fridge = createMemoryFridgeStore();
     const stock = createMemoryStockStore();

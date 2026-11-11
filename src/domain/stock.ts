@@ -982,13 +982,18 @@ export async function putAwayGroceryLines(
         if (line.note?.trim() && override == null) {
             throw new NotedGroceryLineAmountRequiredError(line.displayName);
         }
-        if (
-            override &&
-            !(Number.isFinite(override.amount) && override.amount > 0)
-        ) {
-            throw new StockInputError(
-                `Enter an amount greater than zero for ${line.displayName}.`,
-            );
+        if (override) {
+            if (!Number.isFinite(override.amount)) {
+                throw new StockInputError(
+                    `Enter an amount greater than zero for ${line.displayName}.`,
+                );
+            }
+            const effectiveOverride = roundAmount(override.amount);
+            if (!(effectiveOverride > 0)) {
+                throw new StockInputError(
+                    `Enter an amount greater than zero for ${line.displayName}.`,
+                );
+            }
         }
 
         const lineOpts = input.perLine?.[line.id];
@@ -1046,6 +1051,15 @@ export async function putAwayGroceryLines(
             delta,
             unit,
         });
+    }
+
+    for (const row of resolved) {
+        const effectiveAmount = roundAmount(row.delta);
+        if (!(effectiveAmount > 0)) {
+            throw new StockInputError(
+                `Enter an amount greater than zero for ${row.line.displayName}.`,
+            );
+        }
     }
 
     const results: PutAwayResult[] = [];
