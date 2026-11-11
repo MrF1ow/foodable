@@ -167,15 +167,15 @@ export interface MealItemWrite {
 export interface MealInput {
     description: string;
     meal_type: "breakfast" | "lunch" | "dinner" | "snack";
-    calories?: number;
-    protein_g?: number;
-    carbs_g?: number;
-    fat_g?: number;
-    fiber_g?: number;
-    sugar_g?: number;
-    alcohol_g?: number;
+    calories?: number | null;
+    protein_g?: number | null;
+    carbs_g?: number | null;
+    fat_g?: number | null;
+    fiber_g?: number | null;
+    sugar_g?: number | null;
+    alcohol_g?: number | null;
     // Milligrams — see Meal.caffeine_mg.
-    caffeine_mg?: number;
+    caffeine_mg?: number | null;
     logged_at?: string;
     notes?: string;
     idempotency_key?: string;
@@ -266,11 +266,22 @@ export function updatedMealIdempotencyKey(
             (existing.meal_type as MealInput["meal_type"]),
         calories:
             fields.calories !== undefined
-                ? toStoredInteger(fields.calories)
+                ? fields.calories == null
+                    ? null
+                    : toStoredInteger(fields.calories)
                 : (existing.calories ?? undefined),
-        protein_g: fields.protein_g ?? existing.protein_g ?? undefined,
-        carbs_g: fields.carbs_g ?? existing.carbs_g ?? undefined,
-        fat_g: fields.fat_g ?? existing.fat_g ?? undefined,
+        protein_g:
+            fields.protein_g !== undefined
+                ? fields.protein_g
+                : (existing.protein_g ?? undefined),
+        carbs_g:
+            fields.carbs_g !== undefined
+                ? fields.carbs_g
+                : (existing.carbs_g ?? undefined),
+        fat_g:
+            fields.fat_g !== undefined
+                ? fields.fat_g
+                : (existing.fat_g ?? undefined),
         notes: fields.notes ?? existing.notes ?? undefined,
         item_digest: fields.item_digest,
     };
@@ -1063,9 +1074,12 @@ export async function updateMeal(
         if (fields.description !== undefined)
             update.description = decodeEscapeSequences(fields.description);
         if (fields.meal_type !== undefined) update.meal_type = fields.meal_type;
-        // Integer column — see toStoredInteger.
+        // Integer column — see toStoredInteger; null clears unknown totals.
         if (fields.calories !== undefined)
-            update.calories = toStoredInteger(fields.calories);
+            update.calories =
+                fields.calories == null
+                    ? null
+                    : toStoredInteger(fields.calories);
         if (fields.protein_g !== undefined) update.protein_g = fields.protein_g;
         if (fields.carbs_g !== undefined) update.carbs_g = fields.carbs_g;
         if (fields.fat_g !== undefined) update.fat_g = fields.fat_g;

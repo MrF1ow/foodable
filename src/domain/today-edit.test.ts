@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test";
+import { mealIdempotencyKey } from "../db/nutrition.js";
+import type { MealItem } from "../db/nutrition.js";
+import { itemListDigest } from "./meals.js";
 import {
     editItemQuantity,
     itemMacrosAtAmount,
+    itemSpecCandidatesFromStoredItem,
     mealLocalTimeValue,
     mealLoggedAtFromLocalTime,
+    recoverLoggingSpecsFromMeal,
     scaleMealTotals,
     submittedItemAmountsUnchanged,
 } from "./today-edit.js";
@@ -166,4 +171,136 @@ test("a row whose recipe was deleted still steps and scales by portions", () => 
         mode: "portions",
     });
     expect(itemMacrosAtAmount(item, 4).calories).toBe(1000);
+});
+
+test("itemSpecCandidatesFromStoredItem includes omitted unit", () => {
+    const variants = itemSpecCandidatesFromStoredItem({
+        food_id: "f1",
+        recipe_id: null,
+        label: "Egg",
+        amount: 2,
+        unit: "each",
+        portions: null,
+    });
+    expect(
+        variants.some((s) => s.foodId === "f1" && s.amount === 2 && !s.unit),
+    ).toBe(true);
+});
+
+test("recoverLoggingSpecsFromMeal matches omitted unit auto key", () => {
+    const loggedAt = "2026-03-02T12:34:56.789Z";
+    const userId = "user-1";
+    const loggingSpecs = [{ foodId: "f1", amount: 2 }];
+    const item_digest = itemListDigest(loggingSpecs);
+    const key = mealIdempotencyKey(
+        userId,
+        {
+            description: "2 Egg",
+            meal_type: "lunch",
+            calories: 160,
+            protein_g: 12,
+            item_digest,
+        },
+        loggedAt,
+    );
+    const storedItem: MealItem = {
+        id: "i1",
+        meal_id: "m1",
+        household_id: "hh",
+        user_id: userId,
+        food_id: "f1",
+        recipe_id: null,
+        label: "Egg",
+        amount: 2,
+        unit: "each",
+        grams: 100,
+        portions: null,
+        calories: 160,
+        protein_g: 12,
+        carbs_g: null,
+        fat_g: null,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        sort_order: 0,
+        created_at: "",
+    };
+    expect(
+        recoverLoggingSpecsFromMeal(userId, {
+            idempotency_key: key,
+            description: "2 Egg",
+            meal_type: "lunch",
+            calories: 160,
+            protein_g: 12,
+            carbs_g: null,
+            fat_g: null,
+            notes: null,
+            logged_at: loggedAt,
+            items: [storedItem],
+        }),
+    ).toEqual(loggingSpecs);
+});
+
+test("recoverLoggingSpecsFromMeal stays bounded on a 20-item meal", () => {
+    const loggedAt = "2026-03-02T12:34:56.789Z";
+    const userId = "user-1";
+    const loggingSpecs = Array.from({ length: 20 }, (_, i) => ({
+        foodId: `f${i}`,
+        amount: i + 1,
+    }));
+    const key = mealIdempotencyKey(
+        userId,
+        {
+            description: "big meal",
+            meal_type: "dinner",
+            item_digest: itemListDigest(loggingSpecs),
+        },
+        loggedAt,
+    );
+    const items: MealItem[] = loggingSpecs.map((spec, i) => ({
+        id: `i${i}`,
+        meal_id: "m1",
+        household_id: "hh",
+        user_id: userId,
+        food_id: spec.foodId,
+        recipe_id: null,
+        label: `Food ${i}`,
+        amount: spec.amount,
+        unit: "each",
+        grams: 50,
+        portions: null,
+        calories: null,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: null,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        sort_order: i,
+        created_at: "",
+    }));
+    const meal = {
+        idempotency_key: key,
+        description: "big meal",
+        meal_type: "dinner",
+        calories: null,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: null,
+        notes: null,
+        logged_at: loggedAt,
+        items,
+    };
+    const started = performance.now();
+    expect(recoverLoggingSpecsFromMeal(userId, meal)).toEqual(loggingSpecs);
+    // An unmatched key gives up after the capped search instead of 4^20 tries.
+    expect(
+        recoverLoggingSpecsFromMeal(userId, {
+            ...meal,
+            idempotency_key: "auto:nope",
+        }),
+    ).toBeNull();
+    expect(performance.now() - started).toBeLessThan(2000);
 });

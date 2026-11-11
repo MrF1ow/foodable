@@ -890,3 +890,391 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         ).toBe(false);
     });
 });
+
+const LOGGED_AT_COUNCIL = "2026-03-02T12:34:56.789Z";
+
+async function seedFoodNullable(
+    sql: SQL,
+    householdId: string,
+    opts: { name: string; calories: number | null; protein_g: number | null },
+): Promise<string> {
+    const id = crypto.randomUUID();
+    await sql`
+        insert into public.foods (
+            id, household_id, kind, name, normalized_name, default_unit,
+            grams_per_each, calories, protein_g, carbs_g, fat_g, allergens
+        )
+        values (
+            ${id}, ${householdId}, ${"food"}, ${opts.name},
+            ${opts.name.toLowerCase()}, ${"each"}, ${50},
+            ${opts.calories}, ${opts.protein_g}, ${null}, ${null},
+            ${sql.array([], "text")}
+        )
+    `;
+    return id;
+}
+
+function councilEditBody(fields: Record<string, string>): string {
+    return new URLSearchParams({
+        logged_time: "12:34",
+        date: "2026-03-02",
+        return_to: "/?date=2026-03-02",
+        ...fields,
+    }).toString();
+}
+
+describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
+    let userId: string;
+    let householdId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        ({ userId, householdId } = await seedHousehold(sql));
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+        resetFlagsForTests();
+    });
+
+    async function mealCount(): Promise<{
+        n: number;
+        calories: number | null;
+    }> {
+        const { sql } = getCtx();
+        const [row] = await sql`
+            select count(*)::int as n, sum(calories) as calories
+            from meals where user_id = ${userId}
+        `;
+        return {
+            n: Number(row.n),
+            calories: row.calories == null ? null : Number(row.calories),
+        };
+    }
+
+    function app() {
+        const web = new Hono();
+        web.route("/", nutritionRoutes);
+        return web;
+    }
+
+    test("control: unit-present amount edit dedupes a re-log", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const spec = (amount: number) => [{ foodId, amount, unit: "each" }];
+        const first = await mealWriteFromItems(householdId, spec(1));
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "lunch",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const relog = await mealWriteFromItems(householdId, spec(2));
+        const again = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        expect(again.deduplicated).toBe(true);
+    });
+
+    test("holds: omitted-unit no-op keeps the key and a re-log dedupes", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const specs = [{ foodId, amount: 2 }];
+        const first = await mealWriteFromItems(householdId, specs);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "lunch",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        const relog = await mealWriteFromItems(householdId, specs);
+        const again = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        expect(after!.idempotency_key).toBe(before!.idempotency_key);
+        expect(again.deduplicated).toBe(true);
+    });
+
+    test("omitted unit amount edit dedupes a re-log", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const spec = (amount: number) => [{ foodId, amount }];
+        const first = await mealWriteFromItems(householdId, spec(1));
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "lunch",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const relog = await mealWriteFromItems(householdId, spec(2));
+        const again = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        const totals = await mealCount();
+        expect(again.deduplicated).toBe(true);
+        expect(totals.n).toBe(1);
+        expect(totals.calories).toBe(80);
+    });
+
+    test("omitted unit meal-type edit dedupes a re-log", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const specs = [{ foodId, amount: 2 }];
+        const first = await mealWriteFromItems(householdId, specs);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "snack",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const relog = await mealWriteFromItems(householdId, specs);
+        const again = await insertMeal(userId, {
+            meal_type: "snack",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        const totals = await mealCount();
+        expect(again.deduplicated).toBe(true);
+        expect(totals.n).toBe(1);
+        expect(totals.calories).toBe(80);
+    });
+
+    test("amount edit keeps caller description and log_meal replay dedupes", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const spec = (amount: number) => [{ foodId, amount, unit: "each" }];
+        const first = await mealWriteFromItems(householdId, spec(1));
+        const { meal } = await insertMeal(userId, {
+            description: "Omelette",
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "lunch",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        const relog = await mealWriteFromItems(householdId, spec(2));
+        const again = await insertMeal(userId, {
+            description: "Omelette",
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        const totals = await mealCount();
+        expect(after!.description).toBe("Omelette");
+        expect(again.deduplicated).toBe(true);
+        expect(totals.n).toBe(1);
+    });
+
+    test("recipe portion edit keeps logged name and re-log dedupes", async () => {
+        const { sql } = getCtx();
+        const [recipe] = await sql`
+            insert into recipes (household_id, creator_id, name, yield_portions)
+            values (${householdId}, ${userId}, ${"Chili"}, ${4})
+            returning id
+        `;
+        const recipeId = recipe.id as string;
+        const spec = (portions: number) => [
+            { recipeId, name: "Chili night", portions },
+        ];
+        const first = await mealWriteFromItems(householdId, spec(1));
+        const { meal } = await insertMeal(userId, {
+            meal_type: "dinner",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "dinner",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        const relog = await mealWriteFromItems(householdId, spec(2));
+        const again = await insertMeal(userId, {
+            meal_type: "dinner",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        expect(after!.items![0]!.label).toBe("Chili night");
+        expect(again.deduplicated).toBe(true);
+    });
+
+    test("amount edit clears meal calories when food calories become null", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodNullable(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+        });
+        const spec = (amount: number) => [{ foodId, amount, unit: "each" }];
+        const first = await mealWriteFromItems(householdId, spec(1));
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: first.description,
+            ...first.totals,
+            items: first.items,
+            item_digest: first.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        await sql`update public.foods set calories = null where id = ${foodId}`;
+        const res = await app().request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "lunch",
+                [`item_amount_${before!.items![0]!.id}`]: "2",
+            }),
+        });
+        expect(res.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        const item = after!.items![0]!;
+        expect(item.amount).toBe(2);
+        expect(item.calories).toBeNull();
+        expect(after!.calories).toBeNull();
+        const relog = await mealWriteFromItems(householdId, spec(2));
+        const again = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: relog.description,
+            ...relog.totals,
+            items: relog.items,
+            item_digest: relog.item_digest,
+        });
+        expect(again.deduplicated).toBe(true);
+    });
+});

@@ -25,6 +25,7 @@ import {
     mealEditPatchFromItemAmounts,
     mealLocalTimeValue,
     mealLoggedAtFromLocalTime,
+    recoverLoggingSpecsFromMeal,
     scaleMealTotals,
     submittedItemAmountsUnchanged,
 } from "../../domain/today-edit.js";
@@ -150,12 +151,18 @@ todayMealsRoutes.post(
             const items = meal.items ?? [];
             if (items.length > 0) {
                 const amounts = submittedItemAmountMap(meal, body);
-                const digestSpecs = itemSpecsFromStoredItems(items);
+                const loggingSpecs = recoverLoggingSpecsFromMeal(userId, meal);
+                const digestSpecs =
+                    loggingSpecs ?? itemSpecsFromStoredItems(items);
                 if (!submittedItemAmountsUnchanged(items, amounts)) {
                     const computed = await mealEditPatchFromItemAmounts(
                         member.householdId,
                         items,
                         amounts,
+                        {
+                            storedDescription: meal.description,
+                            loggingSpecs,
+                        },
                     );
                     patch = {
                         ...patch,

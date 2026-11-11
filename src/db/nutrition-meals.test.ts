@@ -450,6 +450,17 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
         expect(cleared.notes).toBeNull();
     });
 
+    test("updateMeal writes null calories", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Known cals",
+            meal_type: "lunch",
+            logged_at: "2024-10-03T12:00:00.000Z",
+            calories: 100,
+        });
+        const updated = await updateMeal(userId, meal.id, { calories: null });
+        expect(updated.calories).toBeNull();
+    });
+
     test("updateMeal replaces items", async () => {
         const { meal: created } = await insertMeal(userId, {
             description: "Items",

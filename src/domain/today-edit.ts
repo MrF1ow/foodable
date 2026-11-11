@@ -4,11 +4,13 @@ import type {
     MealItem,
     MealItemWrite,
 } from "../db/nutrition.js";
+import { mealIdempotencyKey } from "../db/nutrition.js";
 import { mealWriteFromItems } from "../meal-write.js";
 import {
     descriptionFromItems,
     itemListDigest,
     sumItemNutrients,
+    type MealItemSnapshot,
     type MealItemSpec,
     type MealNutrients,
 } from "./meals.js";
@@ -197,6 +199,158 @@ export function itemMacrosAtAmount(
     };
 }
 
+function digestKeyForSpec(spec: MealItemSpec): string {
+    return itemListDigest([spec]);
+}
+
+function uniqueSpecs(specs: MealItemSpec[]): MealItemSpec[] {
+    const seen = new Set<string>();
+    const out: MealItemSpec[] = [];
+    for (const spec of specs) {
+        const key = digestKeyForSpec(spec);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(spec);
+    }
+    return out;
+}
+
+/** Candidate logging specs one stored row might have been written from. */
+export function itemSpecCandidatesFromStoredItem(
+    item: Pick<
+        MealItem,
+        "food_id" | "recipe_id" | "label" | "amount" | "unit" | "portions"
+    >,
+): MealItemSpec[] {
+    if (item.recipe_id) {
+        const portions = item.portions ?? 1;
+        const label = item.label?.trim();
+        const variants: MealItemSpec[] = [
+            { recipeId: item.recipe_id, portions },
+        ];
+        if (label)
+            variants.push({ recipeId: item.recipe_id, portions, name: label });
+        return uniqueSpecs(variants);
+    }
+    if (item.food_id) {
+        const amount = item.amount ?? 1;
+        const unit = item.unit?.trim() || "g";
+        const label = item.label?.trim();
+        const variants: MealItemSpec[] = [
+            { foodId: item.food_id, amount, unit },
+            { foodId: item.food_id, amount },
+        ];
+        if (label) {
+            variants.push(
+                { foodId: item.food_id, name: label, amount, unit },
+                { foodId: item.food_id, name: label, amount },
+            );
+        }
+        return uniqueSpecs(variants);
+    }
+    const amount = item.amount ?? 1;
+    const unit = item.unit?.trim() || "g";
+    const label = item.label?.trim() || "";
+    return uniqueSpecs([
+        { name: label, amount, unit },
+        { name: label, amount },
+    ]);
+}
+
+/** Most combinations tried before recovery gives up on mixed conventions. */
+const MAX_SPEC_COMBOS = 256;
+
+/**
+ * Candidate spec lists to try, cheapest and likeliest first. One logging call
+ * uses one convention for every item (all units given or all omitted, names
+ * passed or not), so the uniform picks come first; a mixed list is tried only
+ * up to MAX_SPEC_COMBOS, because the full product is 4^items and a 20-item
+ * meal would otherwise hash ~10^12 lists inside one request.
+ */
+function* candidateSpecLists(
+    lists: readonly MealItemSpec[][],
+): Generator<MealItemSpec[]> {
+    if (lists.length === 0) return;
+    const widest = Math.max(...lists.map((list) => list.length));
+    const seen = new Set<string>();
+    let tried = 0;
+    const emit = (combo: MealItemSpec[]): MealItemSpec[] | null => {
+        const key = itemListDigest(combo);
+        if (seen.has(key)) return null;
+        seen.add(key);
+        tried++;
+        return combo;
+    };
+    for (let k = 0; k < widest; k++) {
+        const combo = emit(
+            lists.map((list) => list[Math.min(k, list.length - 1)]!),
+        );
+        if (combo) yield combo;
+    }
+    const index = lists.map(() => 0);
+    while (tried < MAX_SPEC_COMBOS) {
+        const combo = emit(lists.map((list, i) => list[index[i]!]!));
+        if (combo) yield combo;
+        let pos = lists.length - 1;
+        while (pos >= 0) {
+            index[pos]!++;
+            if (index[pos]! < lists[pos]!.length) break;
+            index[pos] = 0;
+            pos--;
+        }
+        if (pos < 0) return;
+    }
+}
+
+/**
+ * Guess the item specs used at log time when the stored rows alone cannot
+ * tell (omitted unit, caller recipe name). Matches the meal's auto: key.
+ */
+export function recoverLoggingSpecsFromMeal(
+    userId: string,
+    meal: Pick<
+        Meal,
+        | "idempotency_key"
+        | "description"
+        | "meal_type"
+        | "calories"
+        | "protein_g"
+        | "carbs_g"
+        | "fat_g"
+        | "notes"
+        | "logged_at"
+        | "items"
+    >,
+): MealItemSpec[] | null {
+    if (!meal.idempotency_key?.startsWith("auto:")) return null;
+    const items = meal.items ?? [];
+    if (items.length === 0) return null;
+
+    const candidateLists = items.map((item) =>
+        itemSpecCandidatesFromStoredItem(item),
+    );
+    const loggedAt = new Date(meal.logged_at).toISOString();
+    for (const specs of candidateSpecLists(candidateLists)) {
+        const item_digest = itemListDigest(specs);
+        const key = mealIdempotencyKey(
+            userId,
+            {
+                description: meal.description,
+                meal_type: meal.meal_type as MealInput["meal_type"],
+                calories: meal.calories ?? undefined,
+                protein_g: meal.protein_g ?? undefined,
+                carbs_g: meal.carbs_g ?? undefined,
+                fat_g: meal.fat_g ?? undefined,
+                notes: meal.notes ?? undefined,
+                item_digest,
+            },
+            loggedAt,
+        );
+        if (key === meal.idempotency_key) return specs;
+    }
+    return null;
+}
+
 export function itemSpecsFromStoredItems(
     items: readonly Pick<
         MealItem,
@@ -211,9 +365,6 @@ export function itemSpecsFromStoredItems(
             };
         }
         if (item.food_id) {
-            // The label is the name the item was logged under, which is what
-            // the logging path folds into the digest; without it the key would
-            // stop matching a re-log of the same items.
             return {
                 foodId: item.food_id,
                 name: item.label,
@@ -227,6 +378,44 @@ export function itemSpecsFromStoredItems(
             unit: item.unit?.trim() || "g",
         };
     });
+}
+
+function mealItemSnapshotsFromRows(
+    items: readonly MealItem[],
+): MealItemSnapshot[] {
+    return items.map((item, index) => ({
+        foodId: item.food_id,
+        recipeId: item.recipe_id,
+        label: item.label,
+        amount: item.amount,
+        unit: item.unit,
+        grams: item.grams,
+        portions: item.portions,
+        calories: item.calories,
+        protein_g: item.protein_g,
+        carbs_g: item.carbs_g,
+        fat_g: item.fat_g,
+        fiber_g: item.fiber_g,
+        sugar_g: item.sugar_g,
+        alcohol_g: item.alcohol_g,
+        caffeine_mg: item.caffeine_mg,
+        sortOrder: index,
+        unknown: false,
+    }));
+}
+
+function loggingSpecAtAmount(
+    spec: MealItemSpec,
+    item: Pick<MealItem, "recipe_id" | "food_id" | "label">,
+    newAmount: number,
+): MealItemSpec {
+    if (item.recipe_id) {
+        return { ...spec, recipeId: item.recipe_id, portions: newAmount };
+    }
+    if (item.food_id) {
+        return { ...spec, foodId: item.food_id, amount: newAmount };
+    }
+    return { ...spec, name: item.label, amount: newAmount };
 }
 
 function mealItemToWriteRow(item: MealItem): MealItemWrite {
@@ -324,11 +513,17 @@ function specForChangedItem(item: MealItem, newAmount: number): MealItemSpec {
     };
 }
 
+export type MealEditPatchOpts = {
+    storedDescription?: string | null;
+    loggingSpecs?: readonly MealItemSpec[] | null;
+};
+
 /** Rebuild only rows whose submitted amount changed; untouched snapshots stay as logged. */
 export async function mealEditPatchFromItemAmounts(
     householdId: string,
     items: readonly MealItem[],
     amounts: ReadonlyMap<string, number>,
+    opts?: MealEditPatchOpts,
 ): Promise<
     Pick<
         MealInput,
@@ -345,20 +540,40 @@ export async function mealEditPatchFromItemAmounts(
         | "item_digest"
     >
 > {
+    const preEditDescription = descriptionFromItems(
+        mealItemSnapshotsFromRows(items),
+    );
+    const keepStoredDescription =
+        opts?.storedDescription != null &&
+        opts.storedDescription !== preEditDescription;
     const writes: MealItemWrite[] = [];
-    for (const item of items) {
+    const digestSpecs: MealItemSpec[] = [];
+    for (let index = 0; index < items.length; index++) {
+        const item = items[index]!;
         const newAmount = amounts.get(item.id);
         if (newAmount == null) {
             throw new Error("Missing item amount.");
         }
         const prior = editItemQuantity(item).value;
+        const loggingSpec = opts?.loggingSpecs?.[index] ?? null;
+        if (loggingSpec) {
+            digestSpecs.push(
+                newAmount === prior
+                    ? loggingSpec
+                    : loggingSpecAtAmount(loggingSpec, item, newAmount),
+            );
+        }
         if (newAmount === prior) {
             writes.push(mealItemToWriteRow(item));
             continue;
         }
         if (item.food_id || item.recipe_id) {
+            const changeSpec =
+                loggingSpec != null
+                    ? loggingSpecAtAmount(loggingSpec, item, newAmount)
+                    : specForChangedItem(item, newAmount);
             const computed = await mealWriteFromItems(householdId, [
-                specForChangedItem(item, newAmount),
+                changeSpec,
             ]);
             const row = computed.items?.[0];
             if (!row) {
@@ -389,20 +604,25 @@ export async function mealEditPatchFromItemAmounts(
         sortOrder: index,
         unknown: false,
     }));
+    const description = keepStoredDescription
+        ? opts!.storedDescription!
+        : descriptionFromItems(snapshots);
     return {
-        description: descriptionFromItems(snapshots),
-        calories: totals.calories ?? undefined,
-        protein_g: totals.protein_g ?? undefined,
-        carbs_g: totals.carbs_g ?? undefined,
-        fat_g: totals.fat_g ?? undefined,
-        fiber_g: totals.fiber_g ?? undefined,
-        sugar_g: totals.sugar_g ?? undefined,
-        alcohol_g: totals.alcohol_g ?? undefined,
-        caffeine_mg: totals.caffeine_mg ?? undefined,
+        description,
+        calories: totals.calories,
+        protein_g: totals.protein_g,
+        carbs_g: totals.carbs_g,
+        fat_g: totals.fat_g,
+        fiber_g: totals.fiber_g,
+        sugar_g: totals.sugar_g,
+        alcohol_g: totals.alcohol_g,
+        caffeine_mg: totals.caffeine_mg,
         items: writes,
-        // Built from the rows as written, so a re-log of the same items at the
-        // new amounts produces the same digest.
-        item_digest: itemListDigest(itemSpecsFromStoredItems(writes)),
+        item_digest: itemListDigest(
+            digestSpecs.length > 0
+                ? digestSpecs
+                : itemSpecsFromStoredItems(writes),
+        ),
     };
 }
 
