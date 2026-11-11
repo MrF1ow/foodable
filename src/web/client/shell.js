@@ -339,3 +339,28 @@ function initWidgetFrames(root) {
 }
 
 window.FoodableApp.onLoad(initWidgetFrames);
+
+// iOS Safari zooms the page into any focused text field whose font is under
+// 16px and stays zoomed afterwards; the v2 sheets focus their first field on
+// open (the log search is 15px), so opening search zoomed every time. On iOS,
+// maximum-scale=1 stops only that focus zoom: pinch-zoom still works there.
+// Elsewhere (Android) it would block pinch-zoom, so it is added on iOS only
+// (-webkit-touch-callout exists only in WebKit on iOS / iPadOS). Re-applied on
+// every load because Turbo's head merge swaps the viewport meta back.
+function stopIosFocusZoom(doc) {
+    const root = doc && doc.querySelector ? doc : document;
+    const ios =
+        window.CSS &&
+        CSS.supports &&
+        CSS.supports("-webkit-touch-callout", "none");
+    if (!ios) return;
+    const meta =
+        root.querySelector('meta[name="viewport"]') ||
+        document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    const content = meta.getAttribute("content") || "";
+    if (/maximum-scale/.test(content)) return;
+    meta.setAttribute("content", `${content}, maximum-scale=1`);
+}
+
+window.FoodableApp.onLoad(stopIosFocusZoom);
