@@ -6,23 +6,6 @@ const WEEK_SWIPE_MIN = 48;
 const mq = (q) =>
     typeof window.matchMedia === "function" && window.matchMedia(q).matches;
 
-// Same-origin paths only: DOM hrefs never reach navigation raw.
-function visit(href) {
-    let url;
-    try {
-        url = new URL(href, location.origin);
-    } catch {
-        return;
-    }
-    if (!href || url.origin !== location.origin) return;
-    const path = url.pathname + url.search + url.hash;
-    if (typeof window.Turbo !== "undefined" && window.Turbo.visit) {
-        window.Turbo.visit(path);
-        return;
-    }
-    window.location.assign(path);
-}
-
 /**
  * @param {{ dx: number, dy: number, threshold?: number }} opts
  * @returns {"prev"|"next"|null}
@@ -110,8 +93,10 @@ function updateMacroTiles(container, macros) {
 function initWeekSwipe(strip) {
     if (strip.dataset.fdWeekSwipeInit === "1") return;
     strip.dataset.fdWeekSwipeInit = "1";
-    const prev = strip.getAttribute("data-fd-week-prev") || "";
-    const next = strip.getAttribute("data-fd-week-next") || "";
+    // A swipe clicks the server-rendered chevron link, so navigation follows
+    // the anchor's own href (Turbo or the browser) and no DOM string is used.
+    const prev = strip.querySelector(".fd-today-week__chev--prev");
+    const next = strip.querySelector(".fd-today-week__chev--next");
     let startX = 0;
     let startY = 0;
     let tracking = false;
@@ -134,8 +119,8 @@ function initWeekSwipe(strip) {
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
             const dir = weekSwipeDecision({ dx, dy });
-            if (dir === "prev" && prev) visit(prev);
-            if (dir === "next" && next) visit(next);
+            if (dir === "prev") prev?.click();
+            if (dir === "next") next?.click();
         },
         { passive: true },
     );
