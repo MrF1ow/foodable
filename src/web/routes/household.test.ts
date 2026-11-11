@@ -81,6 +81,7 @@ const db: {
     profile: actualDbProfiles.Profile;
     members: HouseholdMember[];
     household: HouseholdConfig;
+    pluralsSameFood: boolean;
     configWrites: number;
     dismissalsStore: ReturnType<typeof createMemoryNoticeDismissalsStore>;
     socialReaderStatusStore: ReturnType<
@@ -112,6 +113,7 @@ const db: {
             restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
         },
     } as HouseholdConfig,
+    pluralsSameFood: false,
     configWrites: 0,
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
     foodsStore: createMemoryFoodsStore(),
@@ -186,6 +188,11 @@ mock.module("../../db/household.js", () => ({
     },
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+    getPluralsSameFood: async () => db.pluralsSameFood,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) => {
+        db.pluralsSameFood = enabled;
+        return enabled;
+    },
 }));
 mock.module("../../db/social-readers.js", () => ({
     ...realDbSocialReaders,
@@ -296,6 +303,7 @@ describe("settings household routes", () => {
 
     beforeEach(() => {
         db.configWrites = 0;
+        db.pluralsSameFood = false;
         db.household = {
             name: "Home",
             recipeSearchPlaces: [],
@@ -1721,6 +1729,73 @@ describe("household members page ui-v2", () => {
             body: "name=Nope",
         });
         expect(r.status).toBe(403);
+    });
+
+    test("owner can toggle plurals_same_food under ui-v2", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.pluralsSameFood = false;
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(303);
+        expect(db.pluralsSameFood).toBe(true);
+    });
+
+    test("member POST plurals_same_food is refused", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(BOB),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(403);
+    });
+
+    test("POST plurals_same_food is 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(404);
+    });
+
+    test("member POST plurals_same_food is 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(BOB),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+                redirect: "manual",
+            },
+        );
+        expect(r.status).toBe(404);
     });
 
     test("GET member page shows Today link for a peer", async () => {

@@ -413,6 +413,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "restock_enabled", required: false },
             { name: "restock_weekday", required: false },
             { name: "restock_time", required: false },
+            { name: "plurals_same_food", required: false },
         ],
         hasPhotoHint: false,
     },

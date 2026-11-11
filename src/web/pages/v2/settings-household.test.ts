@@ -136,6 +136,28 @@ describe("settings household v2", () => {
         );
     });
 
+    test("owner sees plurals_same_food control", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).toContain(
+            'action="/settings/household/plurals-same-food"',
+        );
+        expect(html).toContain("Treat singular and plural as the same food");
+    });
+
+    test("member viewer sees plurals_same_food as read-only", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                isOwner: false,
+                canManage: false,
+                pluralsSameFood: true,
+            }),
+        );
+        expect(html).not.toContain(
+            'action="/settings/household/plurals-same-food"',
+        );
+        expect(html).toContain(">On</span>");
+    });
+
     test("member viewer is read-only for household name and stores", () => {
         const html = renderSettingsHouseholdV2Page(
             baseView({

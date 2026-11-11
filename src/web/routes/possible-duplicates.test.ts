@@ -153,6 +153,9 @@ mock.module("../../db/household.js", () => ({
     getHouseholdConfig: async () => structuredClone(db.household),
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+    getPluralsSameFood: async () => false,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) =>
+        enabled,
 }));
 // The Members page reads recipe-fetch memory and social reader status (#175).
 mock.module("../../db/social-readers.js", () => ({

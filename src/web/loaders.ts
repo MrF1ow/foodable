@@ -20,6 +20,7 @@ import {
 } from "../db/profiles.js";
 import {
     getHouseholdConfig,
+    getPluralsSameFood,
     getHouseholdMembership,
     getHouseholdOwnerProfile,
     householdExists,
@@ -1520,6 +1521,7 @@ export async function renderHouseholdSettingsRoute(
         noticeResult,
     );
     if (chrome.flags.uiV2) {
+        const pluralsSameFood = await getPluralsSameFood(householdId);
         return {
             status: 200,
             html: renderSettingsHouseholdV2Page({
@@ -1545,6 +1547,7 @@ export async function renderHouseholdSettingsRoute(
                 duplicatePairs: noticeResult.possibleDuplicatePairs,
                 refCounts,
                 mergePost: opts.mergePost,
+                pluralsSameFood,
             }),
         };
     }
