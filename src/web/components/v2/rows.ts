@@ -354,7 +354,8 @@ export function usualRow(
         title: Text;
         meta?: Text;
         parts?: readonly UsualPart[];
-        href: string;
+        /** When omitted the row is not a link (sheet / script opens it). */
+        href?: string;
     },
 ): Html {
     const parts = (opts.parts ?? [])

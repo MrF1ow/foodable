@@ -150,7 +150,9 @@ describe("/app-v2.js", () => {
         // +~1.5 KB Kitchen fridge rows and the Freeze date panel;
         // +~1.2 KB Kitchen groceries put-away date chips.
         // +~0.6 KB Kitchen Overview grocery rows open their line.
-        expect(js.length).toBeLessThan(82_000);
+        // +~0.9 KB Kitchen usuals rows, unit select and add sheet;
+        // +~0.5 KB usual product row sync and "No amount".
+        expect(js.length).toBeLessThan(85_000);
     });
 });
 

@@ -214,35 +214,49 @@ householdRoutes.get("/settings/household/items", requireSiteUser, async (c) => {
 });
 
 householdRoutes.get("/kitchen/usuals", requireSiteUser, async (c) => {
+    const userId = c.get("userId");
     const food = c.req.query("food");
-    if (food) {
+    const member = await getHouseholdMembership(userId);
+    const uiV2 = member ? (await viewerFlagsFor(member)).uiV2 : false;
+    if (food && !uiV2) {
         const raw = c.req.query("from");
         const from = raw ? canonicalAppPath(raw) : raw;
         const target = `/kitchen/usuals/${encodeURIComponent(food)}${from ? `?from=${encodeURIComponent(from)}` : ""}`;
         // toast: none (picker shortcut)
         return c.redirect(target, 302);
     }
-    const page = await renderUsualProductsListPage(c.get("userId"), {
+    const page = await renderUsualProductsListPage(userId, {
         from: c.req.query("from"),
         q: c.req.query("q"),
+        storeFilter: c.req.query("store"),
+        openFoodId: food,
     });
     return c.html(page.html, page.status);
 });
 
 householdRoutes.get("/kitchen/usuals/:foodId", requireSiteUser, async (c) => {
-    const page = await renderUsualProductsPickerPage(
-        c.get("userId"),
-        c.req.param("foodId"),
-        { from: c.req.query("from") },
-    );
+    const foodId = c.req.param("foodId");
+    const member = await getHouseholdMembership(c.get("userId"));
+    const uiV2 = member ? (await viewerFlagsFor(member)).uiV2 : false;
+    if (uiV2) {
+        const from = c.req.query("from");
+        const qs = new URLSearchParams({ food: foodId });
+        if (from) qs.set("from", from);
+        return c.redirect(`/kitchen/usuals?${qs.toString()}`, 302);
+    }
+    const page = await renderUsualProductsPickerPage(c.get("userId"), foodId, {
+        from: c.req.query("from"),
+    });
     return c.html(page.html, page.status);
 });
 
 async function usualPickerFormError(
     userId: string,
+    member: HouseholdMember,
     foodId: string,
     err: unknown,
     from?: string,
+    returnTo?: string,
 ) {
     const message =
         err instanceof FoodsInputError
@@ -250,6 +264,21 @@ async function usualPickerFormError(
             : err instanceof Error
               ? err.message
               : "Could not update the usual product.";
+    const flags = await viewerFlagsFor(member);
+    if (flags.uiV2) {
+        const page = await renderUsualProductsListPage(userId, {
+            error: message,
+            openFoodId: foodId,
+            from: safeReturnPath(returnTo ?? from, "/kitchen/usuals"),
+            // Keep the store chip the user was on.
+            storeFilter:
+                new URL(
+                    safeReturnPath(returnTo ?? from, "/kitchen/usuals"),
+                    "http://local",
+                ).searchParams.get("store") ?? undefined,
+        });
+        return { html: page.html, status: 400 as const };
+    }
     const page = await renderUsualProductsPickerPage(userId, foodId, {
         error: message,
         from,
@@ -263,6 +292,7 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
     const foodId = c.req.param("foodId");
     const body = await c.req.parseBody();
     const from = formText(body, "from");
+    const returnTo = formText(body, "return_to");
     const productRaw = formText(body, "product_food_id");
     const productId = productRaw.trim() === "" ? null : productRaw.trim();
     const usualAmountRaw = formText(body, "usual_amount").trim();
@@ -291,11 +321,18 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
             },
         );
     } catch (err) {
-        const page = await usualPickerFormError(userId, foodId, err, from);
+        const page = await usualPickerFormError(
+            userId,
+            member,
+            foodId,
+            err,
+            from,
+            returnTo,
+        );
         return c.html(page.html, page.status);
     }
     // toast: none (return path after pick)
-    return c.redirect(safeReturnPath(from, "/kitchen/usuals"), 303);
+    return c.redirect(safeReturnPath(returnTo || from, "/kitchen/usuals"), 303);
 });
 
 householdRoutes.post(
@@ -326,7 +363,13 @@ householdRoutes.post(
             }
             await addProduct(store, member.householdId, foodId, picked.id);
         } catch (err) {
-            const page = await usualPickerFormError(userId, foodId, err, from);
+            const page = await usualPickerFormError(
+                userId,
+                member,
+                foodId,
+                err,
+                from,
+            );
             return c.html(page.html, page.status);
         }
         // toast: none. Back to the list, which now shows the product.
@@ -365,7 +408,13 @@ householdRoutes.post(
                 makeUsual: !plain.usualProductId,
             });
         } catch (err) {
-            const page = await usualPickerFormError(userId, foodId, err, from);
+            const page = await usualPickerFormError(
+                userId,
+                member,
+                foodId,
+                err,
+                from,
+            );
             return c.html(page.html, page.status);
         }
         // toast: none. Back to the list, which now shows the product.
@@ -390,7 +439,13 @@ householdRoutes.post(
                 c.req.param("productId"),
             );
         } catch (err) {
-            const page = await usualPickerFormError(userId, foodId, err, from);
+            const page = await usualPickerFormError(
+                userId,
+                member,
+                foodId,
+                err,
+                from,
+            );
             return c.html(page.html, page.status);
         }
         // toast: none. The list shows the product is gone.

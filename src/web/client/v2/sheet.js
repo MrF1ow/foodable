@@ -130,9 +130,17 @@ function focusFirstField(dialog) {
         }
         return;
     }
-    const field = dialog.querySelector(
+    let field = dialog.querySelector(
         'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
     );
+    // A radio group takes focus on its checked option, so the focus ring
+    // never sits on a choice that is not the selected one.
+    if (field && field.type === "radio" && !field.checked && field.name) {
+        const checked = dialog.querySelector(
+            `input[type="radio"][name="${CSS.escape(field.name)}"]:checked`,
+        );
+        if (checked) field = checked;
+    }
     if (field && typeof field.focus === "function") {
         field.focus();
         return;

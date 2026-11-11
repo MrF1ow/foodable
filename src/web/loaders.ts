@@ -111,6 +111,11 @@ import {
     type KitchenGroceriesLineMeta,
     type PutAwayDraft,
 } from "./pages/v2/kitchen-groceries.js";
+import {
+    kitchenUsualRowMeta,
+    renderKitchenUsualsV2Page,
+    type KitchenUsualsRowMeta,
+} from "./pages/v2/kitchen-usuals.js";
 import type { GroceryLineView } from "./pages/grocery.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
@@ -1274,7 +1279,13 @@ export async function renderSettingsFoodsPage(
 
 export async function renderUsualProductsListPage(
     viewerUserId: string,
-    opts: { error?: string; from?: string; q?: string } = {},
+    opts: {
+        error?: string;
+        from?: string;
+        q?: string;
+        storeFilter?: string;
+        openFoodId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1309,6 +1320,56 @@ export async function renderUsualProductsListPage(
         chrome,
         groceryLines,
     );
+    if (chromeWithCount.flags.uiV2) {
+        const stores = await liveSettingsStore().listStores(householdId);
+        const storesById = new Map(stores.map((row) => [row.id, row]));
+        const foodsById = new Map(
+            foods.map((row) => [
+                row.id,
+                { id: row.id, genericFoodId: row.genericFoodId },
+            ]),
+        );
+        const rowMeta = new Map<string, KitchenUsualsRowMeta>();
+        for (const row of rows) {
+            rowMeta.set(
+                row.food.id,
+                kitchenUsualRowMeta(row, {
+                    storesById,
+                    groceryLines,
+                    foodsById,
+                }),
+            );
+        }
+        const selectedStoreId =
+            opts.storeFilter &&
+            stores.some((store) => store.id === opts.storeFilter)
+                ? opts.storeFilter
+                : null;
+        const knownOpen =
+            opts.openFoodId &&
+            rows.some((row) => row.food.id === opts.openFoodId)
+                ? opts.openFoodId
+                : undefined;
+        let error = opts.error;
+        if (opts.openFoodId && !knownOpen && !error) {
+            error = "Unknown food.";
+        }
+        return {
+            status: 200,
+            html: renderKitchenUsualsV2Page({
+                chrome: chromeWithCount,
+                rows,
+                stores,
+                rowMeta,
+                addable,
+                selectedStoreId,
+                error,
+                openFoodId: knownOpen,
+                addSearch,
+                openGroceriesCount: groceryOpenLineCount(groceryLines),
+            }),
+        };
+    }
     return {
         status: 200,
         html: renderUsualProductsListHtml({

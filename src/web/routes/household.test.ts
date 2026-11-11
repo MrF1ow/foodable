@@ -43,6 +43,7 @@ import {
     resetFlagsForTests,
     setFlagsForTests,
 } from "../../flags.js";
+import { USUALS_INTRO } from "../pages/v2/kitchen-usuals.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -1798,5 +1799,131 @@ describe("household members page ui-v2", () => {
             { headers: { cookie: cookieFor(ALICE) } },
         );
         expect(r.status).toBe(403);
+    });
+});
+
+describe("kitchen usuals ui-v2", () => {
+    test("GET /kitchen/usuals serves v2 markup when ui-v2 is on", async () => {
+        await seedEggsCatalog();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await app().request("http://x/kitchen/usuals", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("fd-kitchen-usuals-page");
+        expect(html).not.toContain("usual-product-add");
+        expect(html).toContain(USUALS_INTRO);
+        expect(html).toContain("fd-kitchen-tabs");
+    });
+
+    test("GET /kitchen/usuals keeps legacy page when ui-v2 is off", async () => {
+        await seedEggsCatalog();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const res = await app().request("http://x/kitchen/usuals", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await res.text();
+        expect(html).toContain("Usual products");
+        expect(html).not.toContain("fd-kitchen-usuals-page");
+    });
+
+    test("GET picker redirects to the list with food query when ui-v2 is on", async () => {
+        const { eggs } = await seedEggsCatalog();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toBe(
+            `/kitchen/usuals?food=${eggs.id}`,
+        );
+    });
+
+    test("GET unknown food query shows a page error without opening a sheet", async () => {
+        await seedEggsCatalog();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await app().request(
+            "http://x/kitchen/usuals?food=does-not-exist",
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("Unknown food.");
+        expect(html).not.toContain("data-sheet-open-on-load");
+        resetFlagsForTests();
+    });
+
+    test("POST saves product, store and amount then GET shows them", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const save = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: `product_food_id=${kirkland.id}&usual_amount=18&usual_unit=each&usual_store_id=${costco.id}&return_to=%2Fkitchen%2Fusuals`,
+        });
+        expect(save.status).toBe(303);
+        const list = await app().request("http://x/kitchen/usuals", {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await list.text();
+        expect(html).toContain("Costco");
+        expect(html).toContain("18");
+        const prod = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(prod?.usualStoreId).toBe(costco.id);
+        expect(prod?.usualAmount).toEqual({ amount: 18, unit: "each" });
+        resetFlagsForTests();
+    });
+
+    test("POST validation error re-renders tab with sheet open", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, eggs.id))!,
+            usualProductId: kirkland.id,
+        });
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: `product_food_id=${kirkland.id}&usual_amount=0&usual_unit=g&return_to=%2Fkitchen%2Fusuals`,
+        });
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("fd-kitchen-usuals-page");
+        expect(html).toContain(`id="fd-usual-${eggs.id}"`);
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain("greater than zero");
+        resetFlagsForTests();
+    });
+
+    test("POST validation error keeps the store filter", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, eggs.id))!,
+            usualProductId: kirkland.id,
+            usualStoreId: costco.id,
+        });
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const back = `/kitchen/usuals?store=${costco.id}`;
+        const r = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: `product_food_id=${kirkland.id}&usual_amount=0&usual_unit=g&return_to=${encodeURIComponent(back)}`,
+        });
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain(`name="return_to" value="${back}"`);
+        resetFlagsForTests();
     });
 });

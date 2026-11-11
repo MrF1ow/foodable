@@ -85,6 +85,11 @@ import {
     buildPreviewKitchenGroceriesView,
     renderKitchenGroceriesV2Page,
 } from "../src/web/pages/v2/kitchen-groceries.js";
+import {
+    buildPreviewKitchenUsualsView,
+    kitchenUsualRowMeta,
+    renderKitchenUsualsV2Page,
+} from "../src/web/pages/v2/kitchen-usuals.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -626,6 +631,41 @@ function previewFoodCatalog() {
     return { catalog, usual };
 }
 
+function previewKitchenUsualsView(
+    chrome: unknown,
+    overrides: Partial<ReturnType<typeof buildPreviewKitchenUsualsView>> = {},
+): ReturnType<typeof buildPreviewKitchenUsualsView> {
+    const { catalog, usual } = previewFoodCatalog();
+    const stores = PREVIEW_STORES;
+    const storesById = new Map(stores.map((row) => [row.id, row]));
+    const foodsById = new Map(
+        catalog.map((row) => [
+            row.id,
+            { id: row.id, genericFoodId: row.genericFoodId },
+        ]),
+    );
+    const rowMeta = new Map(
+        usual.rows.map((row) => [
+            row.food.id,
+            kitchenUsualRowMeta(row, {
+                storesById,
+                groceryLines: previewGroceryLines(),
+                foodsById,
+            }),
+        ]),
+    );
+    return buildPreviewKitchenUsualsView({
+        chrome: chrome as never,
+        rows: usual.rows,
+        stores,
+        rowMeta,
+        addable: usual.addable,
+        openGroceriesCount: previewGroceryLines().filter((l) => !l.checked)
+            .length,
+        ...overrides,
+    });
+}
+
 /** The household-wide notices the preview pages share: the real fridge
  *  producer over the fridge fixture, plus one recipe gap. The top-bar count
  *  and the tab dots are computed from them, as the loaders do. */
@@ -1014,6 +1054,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                                   openPutAway: true,
                               };
                           })(),
+                      }),
+                  ),
+                  "kitchen-usuals": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never),
+                  ),
+                  "kitchen-usual-edit": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          openFoodId: "f-eggs",
                       }),
                   ),
               }
@@ -1698,7 +1746,9 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
         `grocery-did-you-mean-${theme}`,
-        ...(V2 ? [`grocery-put-away-${theme}`] : []),
+        ...(V2
+            ? [`grocery-put-away-${theme}`, `kitchen-usual-edit-${theme}`]
+            : []),
         `fridge-did-you-mean-${theme}`,
         `recipe-did-you-mean-${theme}`,
     );

@@ -103,15 +103,21 @@ export function buildKitchenFridgeGroceryOverview(
     };
 }
 
-function desktopKitchenSeg(): string {
+export function renderKitchenDesktopSeg(
+    active: (typeof DESKTOP_KITCHEN_TABS)[number]["id"],
+): string {
     const links = DESKTOP_KITCHEN_TABS.map((tab) => {
         const on =
-            tab.id === "fridge"
+            tab.id === active
                 ? ' class="fd-seg-btn fd-seg-btn--on" aria-current="page"'
                 : ' class="fd-seg-btn"';
         return `<a${on} href="${esc(tab.href)}">${esc(tab.label)}</a>`;
     }).join("");
     return `<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">${links}</nav>`;
+}
+
+function desktopKitchenSeg(): string {
+    return renderKitchenDesktopSeg("fridge");
 }
 
 export function renderKitchenOverviewDesktopHead(

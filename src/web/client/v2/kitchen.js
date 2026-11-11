@@ -104,6 +104,75 @@ function initOverviewGroceryRows(root) {
     });
 }
 
+function syncUsualUnitLabels(root) {
+    root.querySelectorAll("[data-fd-usual-unit]").forEach((select) => {
+        if (select.dataset.fdUsualUnitInit === "1") return;
+        select.dataset.fdUsualUnitInit = "1";
+        const formId = select.getAttribute("form");
+        const form = formId
+            ? document.getElementById(formId)
+            : select.closest("form");
+        const unitEl = form?.querySelector(".fd-stepper__unit");
+        if (!unitEl) return;
+        const hiddenId = select.getAttribute("data-fd-usual-unit-target");
+        const hidden = hiddenId ? document.getElementById(hiddenId) : null;
+        const amount = form?.querySelector('input[name="usual_amount"]');
+        const sync = () => {
+            const opt = select.options[select.selectedIndex];
+            if (opt) {
+                // "No amount" sends neither amount nor unit.
+                unitEl.textContent =
+                    opt.value === "" ? "" : (opt.textContent ?? "");
+                if (hidden) hidden.value = opt.value;
+                if (amount) amount.disabled = opt.value === "";
+            }
+        };
+        sync();
+        select.addEventListener("change", sync);
+    });
+}
+
+// The Product row shows the product picked in its picker before Save.
+function syncUsualProductRows(root) {
+    root.querySelectorAll(
+        'input[type="radio"][name="product_food_id"]',
+    ).forEach((radio) => {
+        if (radio.dataset.fdProductSyncInit === "1") return;
+        radio.dataset.fdProductSyncInit = "1";
+        radio.addEventListener("change", () => {
+            const picker = radio.closest("dialog");
+            if (!picker?.id || !radio.checked) return;
+            const meta = document.querySelector(
+                `[commandfor="${CSS.escape(picker.id)}"] .fd-kitchen-sheet-row__meta`,
+            );
+            const label = radio.closest("label")?.textContent?.trim();
+            if (meta && label) meta.textContent = label;
+        });
+    });
+}
+
+function initUsualRows(root) {
+    root.querySelectorAll("[data-fd-usual-row]").forEach((row) => {
+        if (row.dataset.fdUsualRowInit === "1") return;
+        row.dataset.fdUsualRowInit = "1";
+        const sheetId = row.getAttribute("data-sheet-id");
+        if (!sheetId) return;
+        const open = () => openSheet(sheetId);
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
+            e.preventDefault();
+            open();
+        });
+        row.addEventListener("keydown", (e) => {
+            if (e.target !== row) return;
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                open();
+            }
+        });
+    });
+}
+
 function initGroceryRows(root) {
     root.querySelectorAll("[data-fd-grocery-row]").forEach((row) => {
         if (row.dataset.fdGroceryRowInit === "1") return;
@@ -134,5 +203,10 @@ window.FoodableApp.onLoad((root) => {
     if (root.querySelector(".fd-kitchen-groceries-page")) {
         initGroceryRows(root);
         initPutAwayDates(root);
+    }
+    if (root.querySelector(".fd-kitchen-usuals-page")) {
+        initUsualRows(root);
+        syncUsualUnitLabels(root);
+        syncUsualProductRows(root);
     }
 });

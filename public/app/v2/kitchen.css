@@ -463,6 +463,146 @@
     color: var(--text-secondary);
 }
 
+.fd-kitchen-usuals-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-kitchen-usual-stores {
+    margin: 0;
+    padding: 0;
+}
+
+.fd-kitchen-usual-intro {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-empty {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-add-wrap {
+    display: flex;
+    justify-content: center;
+    padding: var(--fd-s-4) 0;
+}
+
+.fd-kitchen-usual-add-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--fd-s-6);
+    min-height: 44px;
+    padding: 0 var(--fd-s-10);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--accent-text);
+    font: 500 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+/* A sheet row that is a button looks like the link rows in the fridge
+   sheet, not like a native button. */
+button.fd-kitchen-sheet-row {
+    width: 100%;
+    margin: 0;
+    padding: var(--fd-s-12) 0;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: none;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* "+ Add a usual" is a quiet accent link, as in the design. */
+.fd-kitchen-usual-add-btn::before {
+    content: "+";
+    font: 400 22px/1 var(--font-body);
+}
+
+.fd-kitchen-usual-amount {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usual-unit {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 9rem;
+    min-height: 40px;
+    padding: 0 var(--fd-s-6);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    font: 500 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-usual-head.fd-kitchen-overview-head {
+    display: none;
+}
+
+.fd-chips--stack {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.fd-chips--stack .fd-chip--choice {
+    width: 100%;
+}
+
+.fd-kitchen-usual-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usual-add__results {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-kitchen-usual-add__result {
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-kitchen-usual-add__choose {
+    display: block;
+    padding: var(--fd-s-6) 0;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.fd-kitchen-usual-add__hint,
+.fd-kitchen-usual-add__empty {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-usual-sheet-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+}
+
+.fd-kitchen-usuals-page .fd-row--usual .fd-row__body--link {
+    cursor: pointer;
+}
+
 .fd-kitchen-put-row {
     padding: var(--fd-s-10) 0;
     border-bottom: 1px solid var(--line);
@@ -848,5 +988,23 @@
     .fd-kitchen-grocery-stores {
         margin: 0;
         padding: 0;
+    }
+
+    .fd-kitchen-usuals-page {
+        width: 100%;
+        padding-bottom: var(--space-section);
+    }
+
+    .fd-kitchen-usual-stores {
+        margin: 0;
+        padding: 0;
+    }
+
+    .fd-kitchen-usual-head.fd-kitchen-overview-head {
+        display: flex;
+    }
+
+    .fd-kitchen-usual-title.fd-kitchen-fridge-title--phone {
+        display: none;
     }
 }
