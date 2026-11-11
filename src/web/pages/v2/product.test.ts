@@ -6,7 +6,6 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js"
 import type { AppChromeBase } from "../../attention.js";
 import {
     buildPreviewProductPageView,
-    FD_PRODUCT_SCORE_SLOT_CLASS,
     productLogPickPayload,
     productStockForFood,
     renderProductBody,
@@ -149,7 +148,7 @@ describe("productStockForFood", () => {
 });
 
 describe("renderProductV2Page", () => {
-    test("renders stock, nutrition, actions, and P6 score slot", () => {
+    test("renders stock, nutrition, and actions without score when unscored", () => {
         const f = food({
             name: "Greek yogurt, plain 2%",
             brand: "Fage",
@@ -173,8 +172,7 @@ describe("renderProductV2Page", () => {
         expect(html).toContain('href="/kitchen/groceries"');
         expect(html).toContain("fd-btn--primary");
         expect(html).toContain("In the kitchen");
-        expect(html).toContain(FD_PRODUCT_SCORE_SLOT_CLASS);
-        expect(html).toContain("data-fd-product-score-slot");
+        expect(html).not.toContain("fd-product-score");
         expect(html).toContain("Add to groceries");
         expect(html).toContain("data-fd-log-pick");
         expect(html).toContain(`/foods/${f.id}/add-to-grocery`);

@@ -7,10 +7,12 @@ import {
     addStoreIdFromModal,
     groceryCheckedCount,
     groceryHeaderSubtitle,
+    groceryLineRowMarkup,
     groceryLineSheetId,
     groceryOpenLineCount,
     groceryRowLabels,
     groceryV2QuantityLabel,
+    GROCERY_V2_RETURN_TO,
     groceryV2ReturnTo,
     renderKitchenGroceriesBody,
     renderKitchenGroceriesV2Page,
@@ -448,4 +450,55 @@ describe("groceryCheckedCount", () => {
 test("addStoreIdFromModal parses grocery add modal ids", () => {
     expect(addStoreIdFromModal("grocery-add-food-st-1")).toBe("st-1");
     expect(addStoreIdFromModal("grocery-add-store")).toBe(null);
+});
+
+describe("groceryLineRowMarkup score badge", () => {
+    test("shows score badge only for scored packaged foods", () => {
+        const row = lineView(
+            line({ id: "soup", displayName: "Chicken soup", foodId: "f-soup" }),
+        );
+        const view = {
+            lineMeta: new Map<string, KitchenGroceriesLineMeta>([
+                [
+                    "soup",
+                    {
+                        plainFoodName: null,
+                        isUsual: false,
+                        allergenWarning: null,
+                        storeName: "Costco",
+                        sectionName: "Pantry",
+                        productScore: 41,
+                    },
+                ],
+            ]),
+        };
+        const html = String(
+            groceryLineRowMarkup(row, view, GROCERY_V2_RETURN_TO),
+        );
+        expect(html).toContain("fd-score--middling");
+        expect(html).toContain(">41<");
+
+        const plain = String(
+            groceryLineRowMarkup(
+                row,
+                {
+                    lineMeta: new Map([
+                        [
+                            "soup",
+                            {
+                                plainFoodName: null,
+                                isUsual: false,
+                                allergenWarning: null,
+                                storeName: "Costco",
+                                sectionName: "Pantry",
+                                productScore: null,
+                            },
+                        ],
+                    ]),
+                },
+                GROCERY_V2_RETURN_TO,
+            ),
+        );
+        expect(plain).not.toContain("fd-score");
+    });
 });

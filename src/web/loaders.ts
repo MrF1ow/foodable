@@ -34,6 +34,7 @@ import {
 } from "../domain/signup.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
+import { foodDisplayScore } from "../domain/product-screen.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
@@ -560,12 +561,14 @@ function kitchenGroceryLineMeta(
         ctx.memberAllergens,
         eff?.allergens ?? null,
     );
+    const productScore = foodRow ? foodDisplayScore(foodRow) : null;
     return {
         plainFoodName,
         isUsual,
         allergenWarning: warning?.text ?? null,
         storeName: ctx.storeName,
         sectionName: ctx.sectionName,
+        productScore,
     };
 }
 

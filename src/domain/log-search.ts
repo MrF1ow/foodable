@@ -39,6 +39,8 @@ export type LogSearchSourceItem = {
     grams_per_each?: number | null;
     grams_per_ml?: number | null;
     logged_at?: string | null;
+    /** Household / OFF product score 0–100 when scored. */
+    product_score?: number | null;
 };
 
 export type LogSearchSources = Partial<
@@ -72,6 +74,7 @@ export type LogSearchResultItem = {
     /** Fridge quantity on hand, for the row subtitle only (never a log amount). */
     stock_amount?: number | null;
     stock_unit?: string | null;
+    product_score?: number | null;
 };
 
 export type LogSearchResult = {
@@ -177,6 +180,7 @@ function toResultItem(item: LogSearchSourceItem): LogSearchResultItem {
     if (item.amount != null) out.amount = item.amount;
     if (item.unit != null) out.unit = item.unit;
     if (item.barcode != null) out.barcode = item.barcode;
+    if (item.product_score != null) out.product_score = item.product_score;
     return out;
 }
 

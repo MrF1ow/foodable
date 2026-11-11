@@ -261,6 +261,8 @@ export function searchResultRow(
 export function groceryRow(
     opts: RowBase & {
         title: Text;
+        /** 0–100 product score; omitted or non-finite shows no badge. */
+        score?: number | null;
         subtitle?: Text;
         /** Small outlined pill after the subtitle ("usual"). */
         tag?: Text;
@@ -297,7 +299,11 @@ export function groceryRow(
             ? `<span class="fd-row__subline">${metaSpan(opts.subtitle, "fd-row__sub")}${opts.tag != null && opts.tag !== "" ? `<span class="fd-tag">${esc(opts.tag)}</span>` : ""}</span>`
             : "";
     const main = join([
-        titleLine(opts.title, undefined, checked ? "fd-row__title--done" : ""),
+        titleLine(
+            opts.title,
+            scoreBadge(opts.score),
+            checked ? "fd-row__title--done" : "",
+        ),
         sub,
     ]);
     return rowShell({
@@ -390,6 +396,51 @@ const PART_STATUS_LABEL: Record<PartStatus, string> = {
     warn: "Moderate",
     over: "Poor",
 };
+
+/**
+ * Member check row, FigCraft `#21143`: avatar initials, name, verdict label, one
+ * line reason, trailing status dot (Good / Careful / Avoid).
+ */
+export function memberCheckRow(opts: {
+    name: Text;
+    initials: Text;
+    verdict: "good" | "careful" | "avoid";
+    reason: Text;
+}): Html {
+    const verdictLabel =
+        opts.verdict === "good"
+            ? "Good"
+            : opts.verdict === "careful"
+              ? "Careful"
+              : "Avoid";
+    const dotColor =
+        opts.verdict === "good"
+            ? ("good" as const)
+            : opts.verdict === "careful"
+              ? ("warn" as const)
+              : ("over" as const);
+    const verdictClass = `fd-member-verdict fd-member-verdict--${opts.verdict}`;
+    return rowShell({
+        variant: "member",
+        lead: {
+            html: raw(
+                `<span class="fd-avatar fd-avatar--row" aria-hidden="true">${esc(opts.initials)}</span>`,
+            ),
+        },
+        main: join([
+            titleLine(
+                opts.name,
+                raw(
+                    `<span class="${verdictClass}">${esc(verdictLabel)}</span>`,
+                ),
+            ),
+            `<span class="fd-row__sub">${esc(opts.reason)}</span>`,
+        ]),
+        trailing: raw(
+            `<span class="fd-row__status">${dot(dotColor, { label: verdictLabel })}</span>`,
+        ),
+    });
+}
 
 /**
  * Part row, FigCraft `#21113` (a line of the product score breakdown): a fixed
