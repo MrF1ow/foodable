@@ -268,7 +268,7 @@ describe("renderKitchenFridgeV2Page", () => {
         });
         const html = renderKitchenFridgeV2Page(view);
         const tabs = html.indexOf("fd-kitchen-tabs");
-        const title = html.indexOf("fd-kitchen-fridge-title");
+        const title = html.indexOf("fd-kitchen-fridge-title--phone");
         expect(html).toContain(">Kitchen<");
         expect(title).toBeGreaterThan(-1);
         expect(tabs).toBeGreaterThan(title);

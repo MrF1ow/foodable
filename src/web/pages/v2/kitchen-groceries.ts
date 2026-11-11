@@ -217,7 +217,12 @@ export function buildGroceryV2StoreGroups(input: {
     return groups.filter((g) => g.sections.some((s) => s.lines.length > 0));
 }
 
-function storeChips(view: KitchenGroceriesV2View): string {
+export function renderGroceryStoreChips(
+    view: Pick<
+        KitchenGroceriesV2View,
+        "stores" | "noStoreLines" | "selectedStoreId"
+    >,
+): string {
     const storeCounts = new Map<string, number>();
     for (const store of view.stores) {
         let n = 0;
@@ -263,10 +268,11 @@ function checkForm(line: GroceryLineView, checked: boolean, returnTo: string) {
     };
 }
 
-function groceryLineRowMarkup(
+export function groceryLineRowMarkup(
     line: GroceryLineView,
-    view: KitchenGroceriesV2View,
+    view: Pick<KitchenGroceriesV2View, "lineMeta">,
     returnTo: string,
+    opts: { overview?: boolean } = {},
 ): Html {
     const meta = view.lineMeta.get(line.id) ?? {
         plainFoodName: null,
@@ -284,7 +290,7 @@ function groceryLineRowMarkup(
             icon: line.checked ? undefined : iconCheck(),
             form: checkForm(line, line.checked, returnTo),
         },
-        sheetId,
+        ...(opts.overview ? {} : { sheetId }),
     };
     const rowHtml = String(
         groceryRow({
@@ -297,13 +303,55 @@ function groceryLineRowMarkup(
             swipe,
         }),
     );
-    const attrs = ` data-fd-grocery-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
+    const attrs = opts.overview
+        ? ` data-fd-grocery-row-overview tabindex="0" data-fd-grocery-line-href="${esc(`${GROCERY_V2_RETURN_TO}?line=${encodeURIComponent(line.id)}`)}"`
+        : ` data-fd-grocery-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
         rowHtml.replace(
             "<li ",
             `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
         ),
     );
+}
+
+const KITCHEN_OVERVIEW_RETURN_TO = "/kitchen/fridge";
+
+export function renderGroceryOverviewSections(
+    view: Pick<
+        KitchenGroceriesV2View,
+        "stores" | "noStoreLines" | "lineMeta" | "selectedStoreId"
+    >,
+): string {
+    const groups = buildGroceryV2StoreGroups({
+        stores: view.selectedStoreId
+            ? view.stores.filter((s) => s.id === view.selectedStoreId)
+            : view.stores,
+        noStoreLines: view.selectedStoreId ? [] : view.noStoreLines,
+    });
+    return groups
+        .map((store) =>
+            store.sections
+                .map((section) => {
+                    if (section.lines.length === 0) return "";
+                    const rows = section.lines.map((line) =>
+                        groceryLineRowMarkup(
+                            line,
+                            view,
+                            KITCHEN_OVERVIEW_RETURN_TO,
+                            { overview: true },
+                        ),
+                    );
+                    return `<section class="fd-kitchen-grocery-section fd-kitchen-overview-grocery-section" aria-labelledby="fd-overview-grocery-sec-${esc(section.section.id)}">${String(
+                        sectionHeader({
+                            title: section.section.name,
+                            count: section.lines.length,
+                            id: `fd-overview-grocery-sec-${section.section.id}`,
+                        }),
+                    )}${String(rowList(rows, { label: section.section.name }))}</section>`;
+                })
+                .join(""),
+        )
+        .join("");
 }
 
 function lineSheet(
@@ -572,7 +620,7 @@ export function renderKitchenGroceriesBody(
 <div class="fd-kitchen-groceries-page">
 ${pageError}
 ${allergenBanner}
-${storeChips(view)}
+${renderGroceryStoreChips(view)}
 ${groceryAddField(view)}
 ${sections}
 ${putAwayLink(view)}

@@ -5,6 +5,7 @@ import {
     type FridgeSnapshot,
 } from "../../../domain/fridge.js";
 import type { Food } from "../../../domain/foods.js";
+import type { GroceryLine } from "../../../domain/grocery.js";
 import {
     daysUntilExpiry,
     expiryLevel,
@@ -28,6 +29,13 @@ import {
 import { settingsErrorBanner } from "./settings-shared.js";
 import { renderAppShell } from "../../shell.js";
 import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
+import {
+    type KitchenFridgeGroceryOverview,
+    kitchenFridgeItemCountLabel,
+    renderKitchenOverviewDesktopHead,
+    renderKitchenOverviewGroceriesCard,
+    wrapKitchenOverviewColumns,
+} from "./kitchen-overview.js";
 
 export const FD_FRIDGE_ADD_SHEET_ID = "fd-fridge-add";
 
@@ -46,6 +54,8 @@ export type KitchenFridgeV2View = FridgeSnapshot & {
     openModalId?: string;
     didYouMean?: DidYouMeanModal;
     freezeDefaultExpiry: string;
+    groceryLines?: readonly GroceryLine[];
+    groceryOverview?: KitchenFridgeGroceryOverview;
 };
 
 export type FridgeLocationGroup = {
@@ -173,10 +183,18 @@ function itemSheetSubtitle(
 }
 
 function useSoonStrip(view: KitchenFridgeV2View): string {
-    const items = listExpiring(view.items, view.today, 3);
+    const primary = listExpiring(view.items, view.today, 3);
+    const extra = listExpiring(view.items, view.today, 7)
+        .filter((item) => !primary.some((row) => row.id === item.id))
+        .slice(0, Math.max(0, 5 - primary.length));
+    const items = [...primary, ...extra];
     if (items.length === 0) return "";
     const cards = items
-        .map((item) => {
+        .map((item, index) => {
+            const desktopOnly =
+                index >= primary.length
+                    ? " fd-kitchen-use-card--desktop-only"
+                    : "";
             const expiresOn = item.expiresOn ?? "";
             const level = expiryLevel(expiresOn, view.today) ?? "medium";
             const when = formatExpiryWhen(view.today, expiresOn);
@@ -185,7 +203,7 @@ function useSoonStrip(view: KitchenFridgeV2View): string {
                 item.quantity.amount,
                 item.quantity.unit,
             );
-            return `<button type="button" class="fd-kitchen-use-card" commandfor="${esc(sheetId)}" command="show-modal" data-sheet-id="${esc(sheetId)}">
+            return `<button type="button" class="fd-kitchen-use-card${desktopOnly}" commandfor="${esc(sheetId)}" command="show-modal" data-sheet-id="${esc(sheetId)}">
 <span class="fd-kitchen-use-card__when ${expiryToneClass(level)}">${esc(when)}</span>
 <span class="fd-kitchen-use-card__title">${esc(item.displayName)}</span>
 <span class="fd-kitchen-use-card__meta">${esc(qty)}</span>
@@ -251,16 +269,34 @@ function fridgeItemRowMarkup(
 function locationSection(
     group: FridgeLocationGroup,
     view: KitchenFridgeV2View,
+    emptyOnOverview = false,
 ): string {
-    if (group.items.length === 0) return "";
-    const rows = group.items.map((item) => fridgeItemRowMarkup(item, view));
-    return `<section class="fd-kitchen-fridge-loc" aria-labelledby="fd-kitchen-loc-${esc(group.location.id)}">${String(
+    const locId = `fd-kitchen-loc-${group.location.id}`;
+    const header = String(
         sectionHeader({
             title: group.location.name,
             count: group.items.length,
-            id: `fd-kitchen-loc-${group.location.id}`,
+            id: locId,
         }),
-    )}${String(rowList(rows, { label: group.location.name }))}</section>`;
+    );
+    if (group.items.length === 0) {
+        if (!emptyOnOverview) return "";
+        return `<section class="fd-kitchen-fridge-loc fd-kitchen-overview-loc fd-kitchen-overview-loc--empty" aria-labelledby="${esc(locId)}">${header}<p class="fd-kitchen-overview-loc-empty">Nothing here</p></section>`;
+    }
+    const rows = group.items.map((item) => fridgeItemRowMarkup(item, view));
+    return `<section class="fd-kitchen-fridge-loc fd-kitchen-overview-loc" aria-labelledby="${esc(locId)}">${header}${String(rowList(rows, { label: group.location.name }))}</section>`;
+}
+
+export function renderFridgeLocationSections(
+    view: KitchenFridgeV2View,
+    opts: { includeEmptyLocations?: boolean } = {},
+): string {
+    const groups = groupFridgeItemsByLocation(view.locations, view.items);
+    return groups
+        .map((group) =>
+            locationSection(group, view, !!opts.includeEmptyLocations),
+        )
+        .join("");
 }
 
 function roundAction(
@@ -462,8 +498,13 @@ function allItemSheets(view: KitchenFridgeV2View): string {
 }
 
 export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
-    const groups = groupFridgeItemsByLocation(view.locations, view.items);
-    const sections = groups.map((g) => locationSection(g, view)).join("");
+    const sections = renderFridgeLocationSections(view, {
+        includeEmptyLocations: true,
+    });
+    const groceriesCard = view.groceryOverview
+        ? renderKitchenOverviewGroceriesCard(view.groceryOverview)
+        : "";
+    const columns = wrapKitchenOverviewColumns(sections, groceriesCard);
     const empty =
         view.locations.length === 0
             ? `<p class="fd-kitchen-fridge-empty">Add a location, then add items with the button above.</p>`
@@ -476,14 +517,23 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
         className: "fd-icon-btn fd-kitchen-fridge-add",
         icon: String(iconPlus()),
     });
-    const itemCount =
-        view.items.length === 1 ? "1 item" : `${view.items.length} items`;
-    return `<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count">${esc(itemCount)}</span></h1>
+    const itemCount = kitchenFridgeItemCountLabel(view.items.length);
+    const groceryOpen =
+        view.groceryOverview?.openLineCount ??
+        (view.groceryLines
+            ? view.groceryLines.filter((row) => !row.checked).length
+            : 0);
+    const desktopHead = renderKitchenOverviewDesktopHead(
+        view.items.length,
+        groceryOpen,
+    );
+    return `<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">${esc(itemCount)}</span></h1>
+${desktopHead}
 <div class="fd-kitchen-fridge-page">
 <div class="fd-kitchen-fridge-top">${addBtn}</div>
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
 ${useSoonStrip(view)}
-${sections}
+${columns}
 ${empty}
 ${allItemSheets(view)}
 ${addItemSheet(view)}

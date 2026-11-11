@@ -80,6 +80,7 @@ import {
     buildPreviewKitchenFridgeView,
     renderKitchenFridgeV2Page,
 } from "../src/web/pages/v2/kitchen-fridge.js";
+import { buildKitchenFridgeGroceryOverview } from "../src/web/pages/v2/kitchen-overview.js";
 import {
     buildPreviewKitchenGroceriesView,
     renderKitchenGroceriesV2Page,
@@ -260,7 +261,11 @@ function fridgeView(chrome: unknown) {
     return {
         chrome,
         today,
-        locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
+        locations: [
+            loc("l1", "Fridge", 0),
+            loc("l3", "Freezer", 1),
+            loc("l2", "Pantry", 2),
+        ],
         items: [
             item(
                 "i1",
@@ -332,6 +337,74 @@ function restockLine() {
         today,
     );
     return { ...row, alreadyHave: null, notices };
+}
+
+function previewGrocerySnapshot(): import("../src/domain/grocery.js").GrocerySnapshot {
+    const legacy = groceryView(null) as {
+        stores: {
+            id: string;
+            householdId: string;
+            name: string;
+            sortOrder: number;
+            sections: {
+                id: string;
+                householdId: string;
+                storeId: string;
+                name: string;
+                sortOrder: number;
+                hidden: boolean;
+                isOther: boolean;
+                lines: ReturnType<typeof previewGroceryLines>;
+            }[];
+        }[];
+    };
+    return {
+        stores: legacy.stores.map((store) => ({
+            id: store.id,
+            householdId: store.householdId,
+            name: store.name,
+            sortOrder: store.sortOrder,
+        })),
+        sections: legacy.stores.flatMap((store) =>
+            store.sections.map((section) => ({
+                id: section.id,
+                householdId: section.householdId,
+                storeId: section.storeId,
+                name: section.name,
+                sortOrder: section.sortOrder,
+                hidden: section.hidden,
+                isOther: section.isOther,
+            })),
+        ),
+        lines: previewGroceryLines(),
+    };
+}
+
+function previewGroceryLines() {
+    type LegacyLine = {
+        id: string;
+        householdId: string;
+        storeId: string;
+        sectionId: string;
+        kind: "food" | "supply";
+        displayName: string;
+        quantity: { amount: number; unit: string };
+        foodId: string;
+        checked: boolean;
+    };
+    const legacy = groceryView(null) as {
+        stores: {
+            sections: { lines: LegacyLine[] }[];
+        }[];
+    };
+    return legacy.stores
+        .flatMap((store) => store.sections.flatMap((section) => section.lines))
+        .map((line) => ({
+            ...line,
+            source: "manual" as const,
+            sourceFridgeItemId: null,
+            note: null,
+        }));
 }
 
 function groceryView(chrome: unknown) {
@@ -791,6 +864,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                               freezeDefaultExpiry: defaultFreezeExpiry(
                                   snap.today,
                               ),
+                              groceryLines: previewGroceryLines(),
+                              groceryOverview:
+                                  buildKitchenFridgeGroceryOverview(
+                                      previewGrocerySnapshot(),
+                                  ),
                           },
                       ),
                   )
@@ -818,6 +896,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                               freezeDefaultExpiry: defaultFreezeExpiry(
                                   fridgeView(chrome).today,
                               ),
+                              groceryLines: previewGroceryLines(),
+                              groceryOverview:
+                                  buildKitchenFridgeGroceryOverview(
+                                      previewGrocerySnapshot(),
+                                  ),
                           },
                       ),
                   ),

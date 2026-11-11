@@ -79,6 +79,31 @@ function initPutAwayDates(root) {
     });
 }
 
+// Overview grocery rows open the line on the Groceries tab.
+function initOverviewGroceryRows(root) {
+    root.querySelectorAll("[data-fd-grocery-line-href]").forEach((row) => {
+        if (row.dataset.fdOverviewRowInit === "1") return;
+        row.dataset.fdOverviewRowInit = "1";
+        const href = row.getAttribute("data-fd-grocery-line-href");
+        if (!href || !href.startsWith("/kitchen/groceries")) return;
+        const go = () => {
+            if (window.Turbo?.visit) window.Turbo.visit(href);
+            else window.location.assign(href);
+        };
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("button, form, a")) return;
+            go();
+        });
+        row.addEventListener("keydown", (e) => {
+            if (e.target !== row) return;
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                go();
+            }
+        });
+    });
+}
+
 function initGroceryRows(root) {
     root.querySelectorAll("[data-fd-grocery-row]").forEach((row) => {
         if (row.dataset.fdGroceryRowInit === "1") return;
@@ -104,6 +129,7 @@ window.FoodableApp.onLoad((root) => {
     if (root.querySelector(".fd-kitchen-fridge-page")) {
         initFridgeRows(root);
         initReveals(root);
+        initOverviewGroceryRows(root);
     }
     if (root.querySelector(".fd-kitchen-groceries-page")) {
         initGroceryRows(root);

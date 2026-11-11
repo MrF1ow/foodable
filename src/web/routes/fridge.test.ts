@@ -25,6 +25,8 @@ import * as actualFridgeDb from "../../db/fridge.js";
 import * as actualProfiles from "../../db/profiles.js";
 import * as actualFoods from "../../db/foods.js";
 import * as actualGrocery from "../../db/grocery.js";
+import * as actualSettings from "../../db/settings.js";
+import { createMemorySettingsStore } from "../../domain/settings.js";
 import * as actualRestock from "../../db/restock.js";
 import * as actualStock from "../../db/stock.js";
 import * as actualAttention from "../attention.js";
@@ -46,17 +48,20 @@ const realFridgeDb = { ...actualFridgeDb };
 const realProfiles = { ...actualProfiles };
 const realFoods = { ...actualFoods };
 const realGrocery = { ...actualGrocery };
+const realSettings = { ...actualSettings };
 const realRestock = { ...actualRestock };
 const realStock = { ...actualStock };
 const realAttention = { ...actualAttention };
 
 let fridgeStore = createMemoryFridgeStore();
 let foodsStore = createMemoryFoodsStore();
+let settingsStore = createMemorySettingsStore();
 let stockStore = createMemoryStockStore();
 const today = "2026-11-10";
 
 async function seedFridge() {
     fridgeStore = createMemoryFridgeStore();
+    settingsStore = createMemorySettingsStore();
     const fridge: FridgeLocation = {
         id: "loc-fridge",
         householdId: HH,
@@ -133,6 +138,12 @@ mock.module("../../db/grocery.js", () => ({
     }),
 }));
 
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns db stubs
+mock.module("../../db/settings.js", () => ({
+    ...realSettings,
+    liveSettingsStore: () => settingsStore,
+}));
+
 mock.module("../../db/restock.js", () => ({
     ...realRestock,
     householdToday: async () => today,
@@ -191,6 +202,8 @@ afterAll(() => {
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../../db/foods.js", () => realFoods);
     mock.module("../../db/grocery.js", () => realGrocery);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restore after route test
+    mock.module("../../db/settings.js", () => realSettings);
     mock.module("../../db/restock.js", () => realRestock);
     mock.module("../../db/stock.js", () => realStock);
     mock.module("../attention.js", () => realAttention);

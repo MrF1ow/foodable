@@ -21,6 +21,7 @@ import * as actualRecipesDb from "../../db/recipes.js";
 import * as actualNutritionDb from "../../db/nutrition.js";
 import * as actualFoodSearch from "../../food-search.js";
 import type { FoodResult } from "../../foods.js";
+import * as actualFoods from "../../foods.js";
 import {
     catalogNutritionFromOff,
     createMemoryFoodsStore,
@@ -52,6 +53,7 @@ const realNutritionDb = { ...actualNutritionDb };
 const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
 const realAttention = { ...actualAttention };
+const realFoods = { ...actualFoods };
 const realDashboardData = { ...actualDashboardData };
 const realLoadersToday = { ...actualLoadersToday };
 
@@ -345,7 +347,15 @@ mock.module("../loaders-today.js", () => ({
     loadToday: async () => buildPreviewTodayView("2026-11-10"),
 }));
 
+// The barcode path must never reach the live Open Food Facts API.
+mock.module("../../foods.js", () => ({
+    ...realFoods,
+    lookupBarcode: async (barcode: string) =>
+        barcode === BARCODE ? offHit("barcode") : null,
+}));
+
 afterAll(() => {
+    mock.module("../../foods.js", () => realFoods);
     mock.module("../attention.js", () => realAttention);
     mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../loaders-today.js", () => realLoadersToday);

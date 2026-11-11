@@ -103,6 +103,7 @@ import {
     renderKitchenFridgeV2Page,
     type KitchenFridgeFoodMeta,
 } from "./pages/v2/kitchen-fridge.js";
+import { buildKitchenFridgeGroceryOverview } from "./pages/v2/kitchen-overview.js";
 import {
     groceryOpenLineCount,
     addStoreIdFromModal,
@@ -426,12 +427,20 @@ export async function renderFridgeInventoryPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const [snapshot, allFoods, groceryLines, today] = await Promise.all([
+    const flags = await viewerFlagsFor(gate.viewer);
+    // Only the new shell's Overview shows the grocery card (stores and
+    // sections); the old page needs just the lines.
+    const [snapshot, allFoods, grocerySnapshot, today] = await Promise.all([
         listFridge(liveFridgeStore(), householdId),
         liveFoodsStore().listFoods(householdId),
-        liveGroceryStore().listLines(householdId),
+        flags.uiV2
+            ? listGrocery(liveGroceryStore(), liveSettingsStore(), householdId)
+            : liveGroceryStore()
+                  .listLines(householdId)
+                  .then((lines) => ({ lines, stores: [], sections: [] })),
         householdToday(householdId),
     ]);
+    const groceryLines = grocerySnapshot.lines;
     const foodsById = new Map<string, KitchenFridgeFoodMeta>(
         allFoods.map((row) => [
             row.id,
@@ -447,13 +456,12 @@ export async function renderFridgeInventoryPage(
         gate.viewer,
         await loadHouseholdNotices(householdId, { today }),
     );
-    const flags = await viewerFlagsFor(gate.viewer);
     if (flags.uiV2) {
         const knownIds = new Set(snapshot.items.map((row) => row.id));
         const itemId = openFridgeItemId(openModalId, opts.openItemId, knownIds);
-        const chromeWithCount = await chromeWithKitchenGroceriesCount(
+        const chromeWithCount = chromeWithKitchenGroceriesCount(
             chrome,
-            householdId,
+            groceryLines,
         );
         return {
             status: 200,
@@ -468,6 +476,9 @@ export async function renderFridgeInventoryPage(
                 didYouMean: extras?.didYouMean,
                 foodsById,
                 freezeDefaultExpiry: defaultFreezeExpiry(today),
+                groceryLines,
+                groceryOverview:
+                    buildKitchenFridgeGroceryOverview(grocerySnapshot),
             }),
         };
     }
@@ -496,11 +507,10 @@ export async function renderFridgeInventoryPage(
     };
 }
 
-async function chromeWithKitchenGroceriesCount<
+function chromeWithKitchenGroceriesCount<
     T extends import("./attention.js").AppChromeBase,
->(chrome: T, householdId: string): Promise<T> {
+>(chrome: T, lines: import("../domain/grocery.js").GroceryLine[]): T {
     if (!chrome.flags.uiV2) return chrome;
-    const lines = await liveGroceryStore().listLines(householdId);
     return {
         ...chrome,
         v2KitchenGroceriesCount: groceryOpenLineCount(lines),
@@ -841,9 +851,9 @@ export async function renderGroceryListPage(
             stores.some((store) => store.id === opts.storeFilter)
                 ? opts.storeFilter
                 : null;
-        const chromeWithCount = await chromeWithKitchenGroceriesCount(
+        const chromeWithCount = chromeWithKitchenGroceriesCount(
             chrome,
-            householdId,
+            snapshot.lines,
         );
         const addStoreId = addStoreIdFromModal(opts.openModalId);
         return {
@@ -1286,15 +1296,18 @@ export async function renderUsualProductsListPage(
             truncated: matched.length > 20,
         };
     }
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const [noticeResult, groceryLines] = await Promise.all([
+        loadHouseholdNotices(householdId),
+        liveGroceryStore().listLines(householdId),
+    ]);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
         noticeResult,
     );
-    const chromeWithCount = await chromeWithKitchenGroceriesCount(
+    const chromeWithCount = chromeWithKitchenGroceriesCount(
         chrome,
-        householdId,
+        groceryLines,
     );
     return {
         status: 200,

@@ -149,7 +149,8 @@ describe("/app-v2.js", () => {
         // +~7 KB Today week swipe, edit sheet and live macro tiles;
         // +~1.5 KB Kitchen fridge rows and the Freeze date panel;
         // +~1.2 KB Kitchen groceries put-away date chips.
-        expect(js.length).toBeLessThan(81_000);
+        // +~0.6 KB Kitchen Overview grocery rows open their line.
+        expect(js.length).toBeLessThan(82_000);
     });
 });
 
