@@ -115,6 +115,10 @@ describe("renderTrendsV2Page", () => {
         expect(html).toContain("Logged");
         expect(html).toContain("No log");
         expect(html).toContain("fd-trends-month");
+        expect(html).toContain("fd-trends-summary--phone");
+        expect(html).toContain("fd-trends-summary--desktop");
+        expect(html).toContain("Day streak");
+        expect(html).toContain("fd-trends-bars-wrap");
     });
 
     test("member subject label is shown when set", () => {

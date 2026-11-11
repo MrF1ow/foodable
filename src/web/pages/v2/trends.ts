@@ -296,7 +296,7 @@ function ringSvg(day: TrendsDayRing): string {
     return `<svg class="fd-trends-ring" viewBox="0 0 ${box.width} ${box.height}" width="${box.width}" height="${box.height}" role="img" aria-hidden="true">${arcs}</svg>`;
 }
 
-function tilesMarkup(view: TrendsView): Html {
+function phoneTilesMarkup(view: TrendsView): Html {
     const tiles: StatTile[] = [
         {
             label: "Avg calories",
@@ -321,9 +321,81 @@ function tilesMarkup(view: TrendsView): Html {
         },
     ];
     return statStrip(tiles, {
-        className: "fd-trends-summary",
+        className: "fd-trends-summary fd-trends-summary--phone",
         label: "Summary for selected range",
     });
+}
+
+type TileMetaTone = "good" | "over" | "neutral";
+
+function desktopTileCard(opts: {
+    label: string;
+    value: string;
+    meta?: string;
+    metaTone?: TileMetaTone;
+}): string {
+    const meta =
+        opts.meta != null && opts.meta !== ""
+            ? `<p class="fd-trends-tile__meta fd-trends-tile__meta--${opts.metaTone ?? "neutral"}">${esc(opts.meta)}</p>`
+            : "";
+    return `<div class="fd-tile"><dt class="fd-tile__label">${esc(opts.label)}</dt><dd class="fd-tile__value">${esc(opts.value)}</dd>${meta}</div>`;
+}
+
+function desktopTilesMarkup(view: TrendsView): Html {
+    const { tiles, range } = view;
+    const loggedPct =
+        range > 0 ? Math.round((tiles.loggedDays / range) * 100) : 0;
+    const calRow = view.averagesVsGoals.calories;
+    const fatRow = view.averagesVsGoals.fat;
+    let calMeta = "";
+    let calTone: TileMetaTone = "neutral";
+    if (calRow.ratio != null && calRow.goal != null && calRow.goal > 0) {
+        const pct = Math.round(calRow.ratio * 100);
+        calMeta = `${pct}% of goal`;
+        calTone = calRow.ratio > 1 ? "over" : "good";
+    }
+    let fatMeta = "";
+    let fatTone: TileMetaTone = "neutral";
+    if (fatRow.ratio != null && fatRow.goal != null && fatRow.goal > 0) {
+        const overPct = Math.round((fatRow.ratio - 1) * 100);
+        if (overPct > 0) {
+            fatMeta = `${overPct}% over goal`;
+            fatTone = "over";
+        } else if (overPct < 0) {
+            fatMeta = `${Math.abs(overPct)}% under goal`;
+            fatTone = "good";
+        } else {
+            fatMeta = "At goal";
+            fatTone = "good";
+        }
+    }
+    const cards = [
+        desktopTileCard({
+            label: "Day streak",
+            value: String(tiles.currentStreak),
+            meta: `Best: ${tiles.longestStreak} days`,
+        }),
+        desktopTileCard({
+            label: "Days logged",
+            value: `${loggedPct}%`,
+            meta: `${tiles.loggedDays} of ${range}`,
+        }),
+        desktopTileCard({
+            label: "Average calories",
+            value: fmtKcal(tiles.avgKcal),
+            meta: calMeta,
+            metaTone: calTone,
+        }),
+        desktopTileCard({
+            label: "Average fat",
+            value: fatRow.actual != null ? `${fmtMacro(fatRow.actual)}g` : "—",
+            meta: fatMeta,
+            metaTone: fatTone,
+        }),
+    ];
+    return raw(
+        `<dl class="fd-tiles fd-trends-summary fd-trends-summary--desktop" aria-label="Summary for selected range">${cards.join("")}</dl>`,
+    );
 }
 
 function averagesMarkup(view: TrendsView): Html {
@@ -376,8 +448,19 @@ function caloriesByDayMarkup(view: TrendsView): Html {
             return `<li class="fd-trends-bar ${barStatusClass(bar.status)}" title="${esc(title)}"><span class="fd-trends-bar__fill" style="height:${height}%"></span><span class="fd-sr">${esc(title)}</span></li>`;
         })
         .join("");
+    const goal = view.bars.find((b) => b.goal != null && b.goal > 0)?.goal;
+    const goalMarkup =
+        goal != null
+            ? `<div class="fd-trends-bars__goal" aria-hidden="true"><span class="fd-trends-bars__goal-line"></span><span class="fd-trends-bars__goal-label">Goal ${fmtKcal(goal)}</span></div>`
+            : "";
+    const first = view.bars[0]?.date;
+    const last = view.bars[view.bars.length - 1]?.date;
+    const rangeMarkup =
+        first && last
+            ? `<p class="fd-trends-bars__range" aria-hidden="true"><span>${esc(shortDay(first))}</span><span>${esc(shortDay(last))}</span></p>`
+            : "";
     return raw(
-        `<section class="fd-trends-section fd-trends-calories" aria-label="Calories by day"><h2 class="fd-trends-section__title">Calories by day</h2><ul class="fd-trends-bars">${bars}</ul><p class="fd-trends-legend"><span class="fd-trends-legend__item fd-trends-legend__item--logged">Logged</span><span class="fd-trends-legend__item fd-trends-legend__item--near">Near goal</span><span class="fd-trends-legend__item fd-trends-legend__item--off">Off by 120+</span><span class="fd-trends-legend__item fd-trends-legend__item--empty">No log</span></p></section>`,
+        `<section class="fd-trends-section fd-trends-calories" aria-label="Calories by day"><h2 class="fd-trends-section__title">Calories by day</h2><div class="fd-trends-bars-wrap"><ul class="fd-trends-bars">${bars}</ul>${goalMarkup}${rangeMarkup}</div><p class="fd-trends-legend"><span class="fd-trends-legend__item fd-trends-legend__item--logged">Logged</span><span class="fd-trends-legend__item fd-trends-legend__item--near">Near goal</span><span class="fd-trends-legend__item fd-trends-legend__item--off">Off by 120+</span><span class="fd-trends-legend__item fd-trends-legend__item--empty">No log</span></p></section>`,
     );
 }
 
@@ -390,7 +473,7 @@ function ringsMarkup(view: TrendsView): Html {
         )
         .join("");
     return raw(
-        `<section class="fd-trends-section fd-trends-rings" aria-label="Macros by day"><h2 class="fd-trends-section__title">Macros by day</h2><ul class="fd-trends-rings__list">${days}</ul><p class="fd-trends-legend fd-trends-rings__legend"><span class="fd-trends-legend__item fd-trends-legend__item--protein">Protein</span><span class="fd-trends-legend__item fd-trends-legend__item--carbs">Carbs</span><span class="fd-trends-legend__item fd-trends-legend__item--fat">Fat</span></p></section>`,
+        `<section class="fd-trends-section fd-trends-rings" aria-label="Macros by day"><h2 class="fd-trends-section__title">Macros by day<span class="fd-trends-section__range" aria-hidden="true">This week</span></h2><ul class="fd-trends-rings__list">${days}</ul><p class="fd-trends-legend fd-trends-rings__legend"><span class="fd-trends-legend__item fd-trends-legend__item--protein">Protein</span><span class="fd-trends-legend__item fd-trends-legend__item--carbs">Carbs</span><span class="fd-trends-legend__item fd-trends-legend__item--fat">Fat</span></p></section>`,
     );
 }
 
@@ -450,6 +533,14 @@ function weightMarkup(view: TrendsView): Html {
         );
     }
     let delta: StatDelta | undefined;
+    const weightContext =
+        view.range === 365
+            ? "this year"
+            : view.range === 90
+              ? "last 90 days"
+              : view.range === 30
+                ? "this month"
+                : "last 7 days";
     if (weight.change != null && Number.isFinite(weight.change)) {
         const magnitude = Math.abs(Math.round(weight.change * 10) / 10).toFixed(
             1,
@@ -473,6 +564,7 @@ function weightMarkup(view: TrendsView): Html {
                       value,
                       unit: weight.unit,
                       delta,
+                      context: weightContext,
                   },
                   { className: "fd-trends-weight__headline" },
               )
@@ -499,11 +591,12 @@ function rangePanelBody(view: TrendsView): Html {
     // Weight is its own column item so the desktop grid can place the month
     // card (shared by every range) between Averages and Weight.
     return raw(
-        `${tilesMarkup(view)}<div class="fd-trends-col fd-trends-col--left">${left}</div><div class="fd-trends-col fd-trends-col--right">${averagesMarkup(view)}</div><div class="fd-trends-col fd-trends-col--weight">${weightMarkup(view)}</div>`,
+        `${phoneTilesMarkup(view)}${desktopTilesMarkup(view)}<div class="fd-trends-col fd-trends-col--left">${left}</div><div class="fd-trends-col fd-trends-col--right">${averagesMarkup(view)}</div><div class="fd-trends-col fd-trends-col--weight">${weightMarkup(view)}</div>`,
     );
 }
 
 function trendsRangeSubtitle(range: TrendsRange): string {
+    if (range === 7) return "This week";
     if (range === 365) return "How the last year went";
     return `How the last ${range} days went`;
 }

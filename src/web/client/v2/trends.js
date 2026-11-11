@@ -4,7 +4,7 @@ const trendsBound = new WeakSet();
 function subtitleForRange(range) {
     return (
         {
-            7: "How the last 7 days went",
+            7: "This week",
             30: "How the last 30 days went",
             90: "How the last 90 days went",
             365: "How the last year went",
