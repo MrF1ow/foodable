@@ -171,6 +171,16 @@ todayMealsRoutes.post(
                         items: computed.items,
                         item_digest: computed.item_digest,
                     };
+                } else if (timeUnchanged && meal_type === meal.meal_type) {
+                    // Nothing changed. Rebuilding the digest from the stored
+                    // rows would move the key of a meal logged with an
+                    // omitted unit or portions (the rows hold the defaults),
+                    // so a replay of that call would stop deduping.
+                    return redirectWithToast(
+                        c,
+                        returnTo,
+                        "nutrition.meal.updated",
+                    );
                 } else {
                     patch.item_digest = itemListDigest(digestSpecs);
                 }

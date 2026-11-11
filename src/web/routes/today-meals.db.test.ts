@@ -220,6 +220,57 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         resetFlagsForTests();
     });
 
+    test("no-op save keeps the key of a meal logged without a unit", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+            grams_per_each: 50,
+        });
+        // MCP log_meal lets the caller omit unit; the stored row then holds
+        // the food's default, which a digest rebuilt from rows would hash.
+        const specs = [{ foodId, amount: 2 }];
+        const computed = await mealWriteFromItems(householdId, specs);
+        const mealInput = (c: typeof computed) => ({
+            meal_type: "lunch" as const,
+            logged_at: "2026-03-02T12:34:56.789Z",
+            description: c.description,
+            ...c.totals,
+            items: c.items,
+            item_digest: c.item_digest,
+        });
+        const { meal } = await insertMeal(userId, mealInput(computed));
+        const before = await getMealById(userId, meal.id);
+        const itemId = before!.items![0]!.id;
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:34",
+                [`item_amount_${itemId}`]: "2",
+                date: "2026-03-02",
+                return_to: "/?date=2026-03-02",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        expect(after!.idempotency_key).toBe(before!.idempotency_key);
+        const relog = await insertMeal(
+            userId,
+            mealInput(await mealWriteFromItems(householdId, specs)),
+        );
+        expect(relog.deduplicated).toBe(true);
+        resetFlagsForTests();
+    });
+
     test("amount edit stores the key a re-log at the new amount writes", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
