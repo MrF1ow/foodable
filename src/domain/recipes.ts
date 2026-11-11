@@ -9,6 +9,7 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
+    findOrCreateManualFoodForRecipeImport,
     FoodsInputError,
     similarFoodsForNames,
     SimilarFoodsError,
@@ -2146,7 +2147,7 @@ export async function importRecipeFromText(
                         )
                     ).food;
                 } else {
-                    food = await findOrCreateManualFood(
+                    food = await findOrCreateManualFoodForRecipeImport(
                         foods,
                         input.householdId,
                         "food",

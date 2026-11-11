@@ -2,7 +2,7 @@ import { TOASTS, type ToastKey } from "../copy/toasts.js";
 import type { FetchFailure } from "../fetch-safe.js";
 import type { SafeFetcher } from "../fetch-safe.js";
 import {
-    findOrCreateManualFood,
+    findOrCreateManualFoodForRecipeImport,
     FoodsInputError,
     type FoodsStore,
 } from "./foods.js";
@@ -652,11 +652,13 @@ async function saveImportedRecipe(
         return await runTx(async () => {
             const resolved: {
                 item: (typeof parsed.items)[number];
-                food: Awaited<ReturnType<typeof findOrCreateManualFood>>;
+                food: Awaited<
+                    ReturnType<typeof findOrCreateManualFoodForRecipeImport>
+                >;
             }[] = [];
 
             for (const item of parsed.items) {
-                const food = await findOrCreateManualFood(
+                const food = await findOrCreateManualFoodForRecipeImport(
                     deps.foods,
                     input.householdId,
                     "food",

@@ -1493,6 +1493,28 @@ export async function findManualFood(
     return findFoodByLooseKey(store, householdId, kind, trimmed);
 }
 
+/** Recipe import: try stripped names for lookup only, then create under `name`. */
+export async function findOrCreateManualFoodForRecipeImport(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    opts?: { onSimilar?: OnSimilar },
+): Promise<Food> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+        throw new FoodsInputError(
+            kind === "supply" ? "Enter a supply name." : "Enter a food name.",
+        );
+    }
+    const plurals = await storePluralsSameFood(store, householdId);
+    for (const variant of ingredientLookupVariants(trimmed, { plurals })) {
+        const found = await findManualFood(store, householdId, kind, variant);
+        if (found) return found;
+    }
+    return findOrCreateManualFood(store, householdId, kind, trimmed, opts);
+}
+
 export async function findOrCreateManualFood(
     store: FoodsStore,
     householdId: string,
@@ -1840,6 +1862,168 @@ export function pluralFreeFoodKey(name: string): string {
     const loose = looseFoodKey(name);
     if (!loose) return "";
     return loose.split(" ").map(pluralFreeNameToken).join(" ");
+}
+
+const INGREDIENT_LOOKUP_SIZE_WORDS = new Set([
+    "extra",
+    "extra-large",
+    "jumbo",
+    "large",
+    "lg",
+    "md",
+    "med",
+    "medium",
+    "sm",
+    "small",
+    "x-large",
+    "xl",
+]);
+
+const INGREDIENT_LOOKUP_PREP_WORDS = new Set([
+    "beaten",
+    "chopped",
+    "crushed",
+    "cubed",
+    "diced",
+    "drained",
+    "fresh",
+    "grated",
+    "halved",
+    "julienned",
+    "melted",
+    "minced",
+    "peeled",
+    "quartered",
+    "rinsed",
+    "seeded",
+    "shredded",
+    "sliced",
+    "softened",
+    "thawed",
+    "trimmed",
+]);
+
+function stripIngredientParentheticals(name: string): string {
+    let s = name;
+    let prev = "";
+    while (s !== prev) {
+        prev = s;
+        s = s.replace(/\([^()]*\)/g, " ");
+    }
+    return s.replace(/\s+/g, " ").trim();
+}
+
+function ingredientLookupTokenKey(token: string): string {
+    return token.toLowerCase().replace(/[,.;:]+$/, "");
+}
+
+function isIngredientLookupSizeOrPrepToken(token: string): boolean {
+    const key = ingredientLookupTokenKey(token);
+    return (
+        INGREDIENT_LOOKUP_SIZE_WORDS.has(key) ||
+        INGREDIENT_LOOKUP_PREP_WORDS.has(key)
+    );
+}
+
+function stripOneLeadingSizePrepWord(
+    tokens: readonly string[],
+): string[] | null {
+    if (tokens.length === 0) return null;
+    if (isIngredientLookupSizeOrPrepToken(tokens[0]!)) {
+        return tokens.slice(1);
+    }
+    if (
+        tokens.length >= 2 &&
+        ingredientLookupTokenKey(tokens[0]!) === "extra" &&
+        isIngredientLookupSizeOrPrepToken(tokens[1]!)
+    ) {
+        return tokens.slice(2);
+    }
+    return null;
+}
+
+function stripOneTrailingSizePrepWord(
+    tokens: readonly string[],
+): string[] | null {
+    if (tokens.length === 0) return null;
+    const last = tokens[tokens.length - 1]!;
+    if (isIngredientLookupSizeOrPrepToken(last)) {
+        return tokens.slice(0, -1);
+    }
+    return null;
+}
+
+function stripTrailingCommaPrepClause(name: string): string | null {
+    const match = name.match(/^(.+?),\s*([\w-]+)\s*$/);
+    if (!match) return null;
+    const prep = ingredientLookupTokenKey(match[2]!);
+    if (
+        !INGREDIENT_LOOKUP_PREP_WORDS.has(prep) &&
+        !INGREDIENT_LOOKUP_SIZE_WORDS.has(prep)
+    ) {
+        return null;
+    }
+    return match[1]!.trim();
+}
+
+/** Strip leading/trailing prep+size one word at a time; comma clauses first. */
+function gradualIngredientLookupVariants(name: string): string[] {
+    const variants: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (s: string) => {
+        const t = s.trim();
+        if (!t || seen.has(t)) return;
+        seen.add(t);
+        variants.push(t);
+    };
+
+    const commaStripped = stripTrailingCommaPrepClause(name);
+    if (commaStripped) push(commaStripped);
+
+    const peelBase = commaStripped ?? name;
+    let tokens = peelBase.split(/\s+/).filter(Boolean);
+    for (;;) {
+        const leading = stripOneLeadingSizePrepWord(tokens);
+        const next = leading ?? stripOneTrailingSizePrepWord(tokens);
+        if (!next || next.length === 0) break;
+        tokens = next;
+        push(tokens.join(" "));
+    }
+    return variants;
+}
+
+function pushIngredientLookupVariant(variants: string[], name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (variants.includes(trimmed)) return;
+    variants.push(trimmed);
+}
+
+/**
+ * Names to try when recipe import links an ingredient line to an existing food.
+ * Each step only narrows the string for lookup; it never rewrites stored names.
+ */
+export function ingredientLookupVariants(
+    raw: string,
+    opts: { plurals: boolean },
+): string[] {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    const variants: string[] = [];
+    pushIngredientLookupVariant(variants, trimmed);
+    const noParens = stripIngredientParentheticals(trimmed);
+    pushIngredientLookupVariant(variants, noParens);
+    for (const step of gradualIngredientLookupVariants(noParens)) {
+        pushIngredientLookupVariant(variants, step);
+    }
+    const mostStripped =
+        variants.length > 0 ? variants[variants.length - 1]! : noParens;
+    if (opts.plurals) {
+        const pluralFree = pluralFreeFoodKey(mostStripped);
+        if (pluralFree) pushIngredientLookupVariant(variants, pluralFree);
+    }
+    return variants;
 }
 
 export function foodNameTokens(text: string): string[] {
