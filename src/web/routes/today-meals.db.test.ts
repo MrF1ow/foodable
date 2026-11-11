@@ -689,6 +689,80 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         resetFlagsForTests();
     });
 
+    test("undo restores a recipe meal whose recipe was deleted meanwhile", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const [recipe] = await sql`
+            insert into recipes (household_id, creator_id, name, yield_portions)
+            values (${householdId}, ${userId}, ${"Chili"}, ${4})
+            returning id
+        `;
+        const key = "test:undo-deleted-recipe";
+        const { meal } = await insertMeal(userId, {
+            description: "2 portions Chili",
+            meal_type: "dinner",
+            logged_at: "2026-03-01T18:00:00.000Z",
+            calories: 500,
+            idempotency_key: key,
+            items: [
+                {
+                    household_id: householdId,
+                    food_id: null,
+                    recipe_id: recipe!.id,
+                    label: "Chili",
+                    amount: null,
+                    unit: null,
+                    grams: null,
+                    portions: 2,
+                    calories: 500,
+                    protein_g: null,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                },
+            ],
+        });
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const del = await app.request(`http://test/meals/${meal.id}/delete`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "return_to=/?date=2026-03-01&date=2026-03-01",
+        });
+        expect(del.status).toBe(303);
+        await sql`delete from recipes where id = ${recipe!.id}`;
+        const cookiePairs = del.headers
+            .getSetCookie()
+            .map((line) => line.split(";")[0]!)
+            .join("; ");
+        const undo = await app.request("http://test/meals/undo", {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}; ${cookiePairs}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "return_to=/?date=2026-03-01&date=2026-03-01",
+        });
+        expect(undo.status).toBe(303);
+        const [restored] = await sql`
+            select m.calories, i.recipe_id, i.label, i.calories as item_calories
+            from meals m join meal_items i on i.meal_id = m.id
+            where m.user_id = ${userId} and m.idempotency_key = ${key}
+        `;
+        expect(Number(restored?.calories)).toBe(500);
+        expect(restored?.recipe_id).toBeNull();
+        expect(restored?.label).toBe("Chili");
+        expect(Number(restored?.item_calories)).toBe(500);
+        resetFlagsForTests();
+    });
+
     test("tampered undo token fails verification", async () => {
         const { meal } = await insertMeal(userId, {
             description: "Tamper",

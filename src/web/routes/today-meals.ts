@@ -6,10 +6,14 @@ import {
     updateMeal,
     type Meal,
     type MealInput,
+    type MealItemWrite,
 } from "../../db/nutrition.js";
+import { liveFoodsStore } from "../../db/foods.js";
 import { getProfile } from "../../db/profiles.js";
+import { liveRecipesStore } from "../../db/recipes.js";
 import {
     decodeUndoSnapshotPayload,
+    dropMissingItemRefs,
     mealUndoSnapshot,
     mintUndoFlash,
     parseUndoSnapshot,
@@ -298,8 +302,12 @@ todayMealsRoutes.post(
         if (!snapshot) return c.text("Undo expired or invalid.", 400);
         const { input } = snapshot;
         const key = snapshot.idempotency_key ?? input.idempotency_key;
+        const items = input.items
+            ? await withLiveItemRefs(member.householdId, input.items)
+            : undefined;
         const result = await insertMeal(userId, {
             ...input,
+            ...(items ? { items } : {}),
             idempotency_key: key ?? undefined,
         });
         const msg = result.deduplicated
@@ -308,3 +316,30 @@ todayMealsRoutes.post(
         return redirectWithToast(c, returnTo, msg);
     },
 );
+
+/** The snapshot's items, minus references to foods or recipes deleted since. */
+async function withLiveItemRefs(
+    householdId: string,
+    items: MealItemWrite[],
+): Promise<MealItemWrite[]> {
+    const foodIds = [
+        ...new Set(
+            items.flatMap((item) => (item.food_id ? [item.food_id] : [])),
+        ),
+    ];
+    const recipeIds = [
+        ...new Set(
+            items.flatMap((item) => (item.recipe_id ? [item.recipe_id] : [])),
+        ),
+    ];
+    const foods =
+        foodIds.length > 0
+            ? await liveFoodsStore().getFoodsByIds(householdId, foodIds)
+            : new Map();
+    const recipes = liveRecipesStore();
+    const liveRecipeIds = new Set<string>();
+    for (const id of recipeIds) {
+        if (await recipes.getRecipe(householdId, id)) liveRecipeIds.add(id);
+    }
+    return dropMissingItemRefs(items, new Set(foods.keys()), liveRecipeIds);
+}

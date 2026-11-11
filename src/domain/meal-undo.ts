@@ -171,3 +171,27 @@ export function parseUndoSnapshot(json: string): MealUndoSnapshot | null {
     if (key != null && typeof key !== "string") return null;
     return parsed as MealUndoSnapshot;
 }
+
+/**
+ * Clears item references whose food or recipe is gone. A delete of either
+ * sets the column null on logged items (`on delete set null`); an undo
+ * snapshot taken before that delete would otherwise fail its foreign key and
+ * lose the meal it is meant to restore.
+ */
+export function dropMissingItemRefs<
+    T extends { food_id: string | null; recipe_id: string | null },
+>(
+    items: readonly T[],
+    liveFoodIds: ReadonlySet<string>,
+    liveRecipeIds: ReadonlySet<string>,
+): T[] {
+    return items.map((item) => ({
+        ...item,
+        food_id:
+            item.food_id && liveFoodIds.has(item.food_id) ? item.food_id : null,
+        recipe_id:
+            item.recipe_id && liveRecipeIds.has(item.recipe_id)
+                ? item.recipe_id
+                : null,
+    }));
+}
