@@ -437,15 +437,22 @@
 @media (hover: hover) and (pointer: fine) {
     .fd-row--swipe:not([data-swipe-open]) {
         overflow: visible;
-        background: var(--surface-bg);
+        background: transparent;
     }
-    .fd-row--swipe:not([data-swipe-open]):hover,
-    .fd-row--swipe:not([data-swipe-open]):focus-within {
-        border-radius: var(--radius-md);
-        background: var(--surface-raised);
-    }
+    /* No swipe on a mouse, so the body need not cover the actions; it takes
+       the card's surface and tints on hover. */
     .fd-row--swipe:not([data-swipe-open]) .fd-row__body {
         transform: none;
+        border-radius: var(--radius-md);
+        background: transparent;
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover .fd-row__body,
+    .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__body {
+        background: var(--surface-raised);
+    }
+    .fd-row--swipe:not([data-swipe-open]):hover .fd-row__value,
+    .fd-row--swipe:not([data-swipe-open]):focus-within .fd-row__value {
+        visibility: hidden;
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action {
         top: 50%;
@@ -453,7 +460,7 @@
         z-index: 2;
         width: auto;
         padding: 0;
-        background: var(--surface-raised);
+        background: transparent;
         opacity: 0;
         pointer-events: none;
         transform: translateY(-50%);
@@ -464,14 +471,16 @@
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-row__action--lead {
         left: auto;
-        right: calc(var(--fd-s-6) + 30px);
+        right: calc(var(--fd-s-6) + 34px);
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn {
         justify-content: center;
-        width: 28px;
-        height: 28px;
+        width: 30px;
+        height: 30px;
+        min-height: 0;
         padding: 0;
         border-radius: var(--radius-pill);
+        background: var(--surface-panel);
     }
     .fd-row--swipe:not([data-swipe-open]) .fd-swipe-btn .fd-icon {
         display: block;
