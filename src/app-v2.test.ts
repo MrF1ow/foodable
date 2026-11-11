@@ -153,7 +153,8 @@ describe("/app-v2.js", () => {
         // +~0.9 KB Kitchen usuals rows, unit select and add sheet;
         // +~0.5 KB usual product row sync and "No amount".
         // +~0.8 KB Recipes list desktop/phone search field swap.
-        expect(js.length).toBeLessThan(86_000);
+        // +~1.3 KB bottom sheets fit above the iOS keyboard.
+        expect(js.length).toBeLessThan(87_500);
     });
 });
 
