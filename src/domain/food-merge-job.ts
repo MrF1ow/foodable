@@ -17,6 +17,8 @@ export type MergeJobResult =
 
 export type MergeJobHouseholdReport = {
     householdId: string;
+    /** The household treats singular and plural names as one food. */
+    pluralsSameFood: boolean;
     merges: (DuplicateMerge & { result?: MergeJobResult })[];
     skipped: DuplicateSkip[];
 };
@@ -43,7 +45,13 @@ export async function runMergeJob(
         const foods = await deps.store.listFoods(householdId);
         const refs = await deps.store.countFoodRefs(householdId);
         const allAliases = await deps.store.listAllAliases(householdId);
-        const pairs = duplicatePairs(foods, refs, allAliases);
+        // Plural pairs ("Egg" / "Eggs") are duplicates only where the
+        // household has said singular and plural are the same food.
+        const pluralsSameFood =
+            (await deps.store.pluralsSameFood?.(householdId)) ?? false;
+        const pairs = duplicatePairs(foods, refs, allAliases, {
+            plurals: pluralsSameFood,
+        });
         const merges: MergeJobHouseholdReport["merges"] = [];
 
         if (opts.apply) {
@@ -69,6 +77,7 @@ export async function runMergeJob(
         skippedCount += pairs.skipped.length;
         households.push({
             householdId,
+            pluralsSameFood,
             merges,
             skipped: pairs.skipped,
         });
@@ -107,7 +116,12 @@ export function formatMergeJobReport(report: MergeJobReport): string {
         const m = h.skipped.length;
         if (n === 0 && m === 0) continue;
         anyMergeOrSkip = true;
-        lines.push(`Household ${h.householdId}: ${n} to merge, ${m} skipped`);
+        const plurals = h.pluralsSameFood
+            ? " (singular and plural are one food)"
+            : "";
+        lines.push(
+            `Household ${h.householdId}${plurals}: ${n} to merge, ${m} skipped`,
+        );
         for (const merge of h.merges) {
             lines.push(
                 `KEEP ${formatFoodLabel(merge.keep.name, merge.keep.brand)} ${merge.keep.id} — ${merge.reason}`,
