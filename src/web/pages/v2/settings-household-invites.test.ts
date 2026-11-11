@@ -66,7 +66,9 @@ test("the page opens with its header, then the household sub-nav", () => {
     expect(header).toBeGreaterThan(-1);
     expect(nav).toBeGreaterThan(header);
     expect(html).toContain("<h1>Invite codes</h1>");
-    expect(html).not.toMatch(
+    // The page body, not the shell around it (the shell's log sheet uses fd-btn).
+    const body = html.slice(header, html.indexOf("</main>"));
+    expect(body).not.toMatch(
         /fd-(page-title|panel|mono|banner|btn|invite-row)/,
     );
 });
