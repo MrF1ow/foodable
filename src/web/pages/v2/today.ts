@@ -162,16 +162,17 @@ function formatCalendarDayMonth(date: string): string {
 
 function headerMarkup(data: TodayPageData): Html {
     const { view } = data;
-    const title = formatCalendarWeekday(view.date);
+    const weekday = formatCalendarWeekday(view.date);
     const dateLine = formatCalendarDayMonth(view.date);
     const streakPart = view.streak > 0 ? ` · ${view.streak}-day streak` : "";
     const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${streakPart}`)}</p>`;
+    const deskTitle = `${weekday}, ${dateLine}${streakPart}`;
     const peer =
         data.chrome.subjectLabel != null
             ? `<p class="fd-today-peer" role="status">${esc(`Viewing ${data.chrome.subjectLabel}`)}</p>`
             : "";
     return raw(
-        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(title)}</h1>${subtitle}${peer}</div></header>`,
+        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1><p class="fd-today-title-desk">${esc(deskTitle)}</p>${subtitle}${peer}</div></header>`,
     );
 }
 

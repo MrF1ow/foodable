@@ -37,6 +37,11 @@
     color: var(--text-primary);
 }
 
+.fd-today-title-desk {
+    display: none;
+    margin: 0;
+}
+
 .fd-today-subtitle,
 .fd-today-peer {
     margin: var(--fd-s-4) 0 0;
@@ -52,16 +57,7 @@
 }
 
 .fd-today-week__chev {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    margin-top: 14px;
-    border-radius: var(--radius-pill);
-    color: var(--text-secondary);
-    text-decoration: none;
+    display: none;
 }
 
 .fd-today-week__chev--prev .fd-icon {
@@ -479,8 +475,10 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
+    justify-content: flex-end;
     gap: var(--fd-s-4);
     margin-left: auto;
+    text-align: right;
 }
 
 .fd-today-section__add-food {
@@ -956,6 +954,28 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
         text-decoration: none;
     }
 
+    /* Desktop shows the combined line below; the h1 stays for assistive tech. */
+    .fd-today-title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .fd-today-title-desk {
+        display: block;
+        font: 600 22px/28px var(--font-display);
+        letter-spacing: -0.35px;
+        color: var(--text-primary);
+    }
+
+    .fd-today-subtitle {
+        display: none;
+    }
+
     .fd-today-header {
         padding-right: 0;
         flex: 1 1 220px;
@@ -965,5 +985,18 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     .fd-today-week {
         flex: none;
         max-width: min(520px, 48vw);
+    }
+
+    .fd-today-week__chev {
+        display: flex;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin-top: 14px;
+        border-radius: var(--radius-pill);
+        color: var(--text-secondary);
+        text-decoration: none;
     }
 }
