@@ -15,14 +15,18 @@ import {
     parseUndoSnapshot,
     verifyUndoToken,
 } from "../../domain/meal-undo.js";
-import { MealItemsError, type MealItemSpec } from "../../domain/meals.js";
+import { MealItemsError } from "../../domain/meals.js";
 import {
+    itemSpecsFromStoredItems,
+    mealEditPatchFromItemAmounts,
+    mealLocalTimeValue,
     mealLoggedAtFromLocalTime,
     scaleMealTotals,
     submittedItemAmountsUnchanged,
 } from "../../domain/today-edit.js";
+import { itemListDigest } from "../../domain/meals.js";
 import { dateInTz, validateTz } from "../../domain/tz.js";
-import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
+import { resolveWriteTimestamp } from "../../meal-write.js";
 import { resolveSessionSigningSecret } from "../../site-session.js";
 import { formAmount, formText } from "../form.js";
 import { gatedRoute } from "../gated.js";
@@ -96,39 +100,6 @@ function submittedItemAmountMap(
     return out;
 }
 
-function itemSpecsFromForm(
-    meal: Meal,
-    amounts: ReadonlyMap<string, number>,
-): MealItemSpec[] {
-    const items = meal.items ?? [];
-    const specs: MealItemSpec[] = [];
-    for (const item of items) {
-        const amount = amounts.get(item.id);
-        if (amount == null || amount <= 0) {
-            throw new MealItemsError("Enter an amount greater than zero.");
-        }
-        if (item.food_id) {
-            specs.push({
-                foodId: item.food_id,
-                amount,
-                unit: item.unit?.trim() || "g",
-            });
-        } else if (item.recipe_id) {
-            specs.push({
-                recipeId: item.recipe_id,
-                portions: amount,
-            });
-        } else {
-            specs.push({
-                name: item.label,
-                amount,
-                unit: item.unit?.trim() || "g",
-            });
-        }
-    }
-    return specs;
-}
-
 todayMealsRoutes.post(
     "/meals/:id/edit",
     requireMember,
@@ -156,32 +127,48 @@ todayMealsRoutes.post(
             // Inside the try: a missing or bad meal type is a 400 on the
             // sheet, not a 500.
             const meal_type = parseMealType(formText(body, "meal_type"));
-            const loggedAtLocal = mealLoggedAtFromLocalTime(
-                parseTodayDateParam(day, day),
-                logged_time,
-                tz,
-            );
-            const { iso } = await resolveWriteTimestamp(userId, loggedAtLocal);
-            let patch: Parameters<typeof updateMeal>[2] = {
-                meal_type,
-                logged_at: iso,
-            };
+            const timeUnchanged =
+                logged_time.trim() ===
+                mealLocalTimeValue(meal.logged_at, day, tz);
+            let patch: Parameters<typeof updateMeal>[2] = { meal_type };
+            if (!timeUnchanged) {
+                const loggedAtLocal = mealLoggedAtFromLocalTime(
+                    parseTodayDateParam(day, day),
+                    logged_time,
+                    tz,
+                );
+                const { iso } = await resolveWriteTimestamp(
+                    userId,
+                    loggedAtLocal,
+                );
+                patch.logged_at = iso;
+            }
             const items = meal.items ?? [];
             if (items.length > 0) {
                 const amounts = submittedItemAmountMap(meal, body);
+                const digestSpecs = itemSpecsFromStoredItems(items);
                 if (!submittedItemAmountsUnchanged(items, amounts)) {
-                    const specs = itemSpecsFromForm(meal, amounts);
-                    const computed = await mealWriteFromItems(
+                    const computed = await mealEditPatchFromItemAmounts(
                         member.householdId,
-                        specs,
+                        items,
+                        amounts,
                     );
                     patch = {
                         ...patch,
                         description: computed.description,
-                        ...computed.totals,
+                        calories: computed.calories,
+                        protein_g: computed.protein_g,
+                        carbs_g: computed.carbs_g,
+                        fat_g: computed.fat_g,
+                        fiber_g: computed.fiber_g,
+                        sugar_g: computed.sugar_g,
+                        alcohol_g: computed.alcohol_g,
+                        caffeine_mg: computed.caffeine_mg,
                         items: computed.items,
                         item_digest: computed.item_digest,
                     };
+                } else {
+                    patch.item_digest = itemListDigest(digestSpecs);
                 }
             } else {
                 const servings = formAmount(body, "servings") ?? 1;

@@ -10,6 +10,7 @@ import {
     deleteMeal,
     getMealById,
     insertMeal,
+    mealIdempotencyKey,
     updateMeal,
 } from "../../db/nutrition.js";
 import { upsertProfile } from "../../db/profiles.js";
@@ -24,9 +25,11 @@ import {
     verifyUndoToken,
 } from "../../domain/meal-undo.js";
 import {
+    itemSpecsFromStoredItems,
     mealLoggedAtFromLocalTime,
     scaleMealTotals,
 } from "../../domain/today-edit.js";
+import { itemListDigest } from "../../domain/meals.js";
 import { dateInTz } from "../../domain/tz.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { nutritionRoutes } from "./nutrition.js";
@@ -49,6 +52,7 @@ async function seedFoodWithNutrition(
         calories: number;
         protein_g: number;
         grams_per_each?: number;
+        default_unit?: string;
     },
 ): Promise<string> {
     const id = crypto.randomUUID();
@@ -73,7 +77,7 @@ async function seedFoodWithNutrition(
             ${"food"},
             ${opts.name},
             ${opts.name.toLowerCase()},
-            ${"each"},
+            ${opts.default_unit ?? "each"},
             ${opts.grams_per_each ?? 50},
             ${opts.calories},
             ${opts.protein_g},
@@ -146,6 +150,195 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         const owned = await getMealById(userId, meal.id);
         expect(owned?.items).toHaveLength(1);
         expect(await getMealById(otherUserId, meal.id)).toBeNull();
+    });
+
+    test("time-only edit keeps logged_at precision and item idempotency digest", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+            grams_per_each: 50,
+        });
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 1, unit: "each" },
+        ]);
+        const loggedAt = "2026-03-01T12:34:56.789Z";
+        const mealInput = {
+            meal_type: "lunch" as const,
+            logged_at: loggedAt,
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        };
+        const { meal } = await insertMeal(userId, mealInput);
+        const loaded = await getMealById(userId, meal.id);
+        const itemId = loaded!.items![0]!.id;
+        const relogKey = mealIdempotencyKey(
+            userId,
+            {
+                description: loaded!.description,
+                meal_type: loaded!.meal_type as "lunch",
+                calories: loaded!.calories ?? undefined,
+                protein_g: loaded!.protein_g ?? undefined,
+                carbs_g: loaded!.carbs_g ?? undefined,
+                fat_g: loaded!.fat_g ?? undefined,
+                item_digest: itemListDigest(
+                    itemSpecsFromStoredItems(loaded!.items!),
+                ),
+            },
+            new Date(loaded!.logged_at).toISOString(),
+        );
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:34",
+                [`item_amount_${itemId}`]: "1",
+                date: "2026-03-01",
+                return_to: "/?date=2026-03-01",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        expect(new Date(after!.logged_at).getTime()).toBe(
+            new Date(loggedAt).getTime(),
+        );
+        expect(new Date(after!.logged_at).toISOString().slice(17, 23)).toBe(
+            "56.789",
+        );
+        expect(after!.idempotency_key).toBe(relogKey);
+        resetFlagsForTests();
+    });
+
+    test("partial edit keeps untouched item snapshots when food nutrition changes", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const riceId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Rice",
+            calories: 100,
+            protein_g: 2,
+            default_unit: "g",
+        });
+        const beansId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Beans",
+            calories: 100,
+            protein_g: 7,
+            default_unit: "g",
+        });
+        const built = await mealWriteFromItems(householdId, [
+            { foodId: riceId, amount: 100, unit: "g" },
+            { foodId: beansId, amount: 100, unit: "g" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: "2026-03-01T12:00:00.000Z",
+            description: built.description,
+            ...built.totals,
+            items: built.items,
+            item_digest: built.item_digest,
+        });
+        await sql`
+            update public.foods
+            set calories = ${300}
+            where id = ${beansId}
+        `;
+        const loaded = await getMealById(userId, meal.id);
+        const riceItem = loaded!.items!.find((i) => i.food_id === riceId)!;
+        const beansItem = loaded!.items!.find((i) => i.food_id === beansId)!;
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:00",
+                [`item_amount_${riceItem.id}`]: "200",
+                [`item_amount_${beansItem.id}`]: "100",
+                date: "2026-03-01",
+                return_to: "/?date=2026-03-01",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        expect(after?.calories).toBe(300);
+        expect(after?.items?.find((i) => i.food_id === beansId)?.calories).toBe(
+            100,
+        );
+        resetFlagsForTests();
+    });
+
+    test("partial edit keeps deleted-food snapshot when another amount changes", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const riceId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Rice",
+            calories: 100,
+            protein_g: 2,
+            default_unit: "g",
+        });
+        const beansId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Beans",
+            calories: 100,
+            protein_g: 7,
+            default_unit: "g",
+        });
+        const built = await mealWriteFromItems(householdId, [
+            { foodId: riceId, amount: 100, unit: "g" },
+            { foodId: beansId, amount: 100, unit: "g" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: "2026-03-01T12:00:00.000Z",
+            description: built.description,
+            ...built.totals,
+            items: built.items,
+            item_digest: built.item_digest,
+        });
+        const loadedBeforeDelete = await getMealById(userId, meal.id);
+        const riceItem = loadedBeforeDelete!.items!.find(
+            (i) => i.food_id === riceId,
+        )!;
+        const beansItem = loadedBeforeDelete!.items!.find(
+            (i) => i.food_id === beansId,
+        )!;
+        await sql`delete from public.foods where id = ${beansId}`;
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        const edit = await app.request(`http://test/meals/${meal.id}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "lunch",
+                logged_time: "12:00",
+                [`item_amount_${riceItem.id}`]: "200",
+                [`item_amount_${beansItem.id}`]: "100",
+                date: "2026-03-01",
+                return_to: "/?date=2026-03-01",
+            }).toString(),
+        });
+        expect(edit.status).toBe(303);
+        const after = await getMealById(userId, meal.id);
+        expect(after?.calories).toBe(300);
+        const beansRow = after?.items?.find((i) => i.label === "Beans");
+        expect(beansRow?.calories).toBe(100);
+        expect(beansRow?.food_id).toBeNull();
+        resetFlagsForTests();
     });
 
     test("food-backed edit recomputes totals via mealWriteFromItems", async () => {

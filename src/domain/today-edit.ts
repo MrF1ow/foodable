@@ -1,4 +1,17 @@
-import type { Meal, MealItem } from "../db/nutrition.js";
+import type {
+    Meal,
+    MealInput,
+    MealItem,
+    MealItemWrite,
+} from "../db/nutrition.js";
+import { mealWriteFromItems } from "../meal-write.js";
+import {
+    descriptionFromItems,
+    itemListDigest,
+    sumItemNutrients,
+    type MealItemSpec,
+    type MealNutrients,
+} from "./meals.js";
 
 export function todayEditSheetId(mealId: string): string {
     return `fd-edit-meal-${mealId}`;
@@ -167,6 +180,191 @@ export function itemMacrosAtAmount(
         sugar_g: scaleNullable(item.sugar_g, factor),
         alcohol_g: scaleNullable(item.alcohol_g, factor),
         caffeine_mg: scaleNullable(item.caffeine_mg, factor),
+    };
+}
+
+export function itemSpecsFromStoredItems(
+    items: readonly MealItem[],
+): MealItemSpec[] {
+    return items.map((item) => {
+        if (item.recipe_id) {
+            return {
+                recipeId: item.recipe_id,
+                portions: item.portions ?? 1,
+            };
+        }
+        if (item.food_id) {
+            return {
+                foodId: item.food_id,
+                amount: item.amount ?? 1,
+                unit: item.unit?.trim() || "g",
+            };
+        }
+        return {
+            name: item.label,
+            amount: item.amount ?? 1,
+            unit: item.unit?.trim() || "g",
+        };
+    });
+}
+
+function mealItemToWriteRow(item: MealItem): MealItemWrite {
+    return {
+        household_id: item.household_id,
+        food_id: item.food_id,
+        recipe_id: item.recipe_id,
+        label: item.label,
+        amount: item.amount,
+        unit: item.unit,
+        grams: item.grams,
+        portions: item.portions,
+        calories: item.calories,
+        protein_g: item.protein_g,
+        carbs_g: item.carbs_g,
+        fat_g: item.fat_g,
+        fiber_g: item.fiber_g,
+        sugar_g: item.sugar_g,
+        alcohol_g: item.alcohol_g,
+        caffeine_mg: item.caffeine_mg,
+        sort_order: item.sort_order,
+    };
+}
+
+function nutrientsFromWrite(row: MealItemWrite): MealNutrients {
+    return {
+        calories: row.calories,
+        protein_g: row.protein_g,
+        carbs_g: row.carbs_g,
+        fat_g: row.fat_g,
+        fiber_g: row.fiber_g,
+        sugar_g: row.sugar_g,
+        alcohol_g: row.alcohol_g,
+        caffeine_mg: row.caffeine_mg,
+    };
+}
+
+function scaledFreeTextItemWrite(
+    item: MealItem,
+    newAmount: number,
+): MealItemWrite {
+    const scaled = itemMacrosAtAmount(item, newAmount);
+    const baseAmount = item.amount ?? 1;
+    const grams =
+        item.grams != null && baseAmount > 0
+            ? Math.round(((item.grams * newAmount) / baseAmount) * 10) / 10
+            : item.grams;
+    return {
+        ...mealItemToWriteRow(item),
+        amount: newAmount,
+        grams,
+        calories: scaled.calories,
+        protein_g: scaled.protein_g,
+        carbs_g: scaled.carbs_g,
+        fat_g: scaled.fat_g,
+        fiber_g: scaled.fiber_g,
+        sugar_g: scaled.sugar_g,
+        alcohol_g: scaled.alcohol_g,
+        caffeine_mg: scaled.caffeine_mg,
+    };
+}
+
+function specForChangedItem(item: MealItem, newAmount: number): MealItemSpec {
+    if (item.recipe_id) {
+        return { recipeId: item.recipe_id, portions: newAmount };
+    }
+    if (item.food_id) {
+        return {
+            foodId: item.food_id,
+            amount: newAmount,
+            unit: item.unit?.trim() || "g",
+        };
+    }
+    return {
+        name: item.label,
+        amount: newAmount,
+        unit: item.unit?.trim() || "g",
+    };
+}
+
+/** Rebuild only rows whose submitted amount changed; untouched snapshots stay as logged. */
+export async function mealEditPatchFromItemAmounts(
+    householdId: string,
+    items: readonly MealItem[],
+    amounts: ReadonlyMap<string, number>,
+): Promise<
+    Pick<
+        MealInput,
+        | "description"
+        | "calories"
+        | "protein_g"
+        | "carbs_g"
+        | "fat_g"
+        | "fiber_g"
+        | "sugar_g"
+        | "alcohol_g"
+        | "caffeine_mg"
+        | "items"
+        | "item_digest"
+    >
+> {
+    const writes: MealItemWrite[] = [];
+    const digestSpecs: MealItemSpec[] = [];
+    for (const item of items) {
+        const newAmount = amounts.get(item.id);
+        if (newAmount == null) {
+            throw new Error("Missing item amount.");
+        }
+        const prior = editItemQuantity(item).value;
+        digestSpecs.push(specForChangedItem(item, newAmount));
+        if (newAmount === prior) {
+            writes.push(mealItemToWriteRow(item));
+            continue;
+        }
+        if (item.food_id || item.recipe_id) {
+            const computed = await mealWriteFromItems(householdId, [
+                specForChangedItem(item, newAmount),
+            ]);
+            const row = computed.items?.[0];
+            if (!row) {
+                throw new Error("Could not recompute this meal item.");
+            }
+            writes.push({ ...row, sort_order: item.sort_order });
+            continue;
+        }
+        writes.push(scaledFreeTextItemWrite(item, newAmount));
+    }
+    const totals = sumItemNutrients(writes.map(nutrientsFromWrite));
+    const snapshots = writes.map((row, index) => ({
+        foodId: row.food_id,
+        recipeId: row.recipe_id,
+        label: row.label,
+        amount: row.amount,
+        unit: row.unit,
+        grams: row.grams,
+        portions: row.portions,
+        calories: row.calories,
+        protein_g: row.protein_g,
+        carbs_g: row.carbs_g,
+        fat_g: row.fat_g,
+        fiber_g: row.fiber_g,
+        sugar_g: row.sugar_g,
+        alcohol_g: row.alcohol_g,
+        caffeine_mg: row.caffeine_mg,
+        sortOrder: index,
+        unknown: false,
+    }));
+    return {
+        description: descriptionFromItems(snapshots),
+        calories: totals.calories ?? undefined,
+        protein_g: totals.protein_g ?? undefined,
+        carbs_g: totals.carbs_g ?? undefined,
+        fat_g: totals.fat_g ?? undefined,
+        fiber_g: totals.fiber_g ?? undefined,
+        sugar_g: totals.sugar_g ?? undefined,
+        alcohol_g: totals.alcohol_g ?? undefined,
+        caffeine_mg: totals.caffeine_mg ?? undefined,
+        items: writes,
+        item_digest: itemListDigest(digestSpecs),
     };
 }
 
