@@ -123,6 +123,11 @@
                                 "src/db/household",
                                 "src/db/nutrition"
                             ],
+                            "src/web/routes/today-again.test.ts": [
+                                "src/db/household",
+                                "src/db/nutrition",
+                                "src/db/profiles"
+                            ],
                             "src/web/routes/fridge.test.ts": [
                                 "src/db/fridge",
                                 "src/db/foods",

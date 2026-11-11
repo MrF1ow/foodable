@@ -236,6 +236,17 @@
     text-decoration: none;
 }
 
+.fd-kitchen-sheet-row__icon {
+    display: flex;
+    flex: none;
+    color: var(--text-tertiary);
+}
+
+.fd-kitchen-sheet-row__icon .fd-icon {
+    width: 20px;
+    height: 20px;
+}
+
 .fd-kitchen-sheet-row__label {
     font: 400 16px/22px var(--font-body);
     color: var(--text-primary);

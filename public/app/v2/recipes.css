@@ -326,14 +326,48 @@
 }
 
 .fd-recipe-back {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-6);
     margin: 0;
     padding-top: var(--fd-s-4);
 }
 
+.fd-recipe-back__btn {
+    display: inline-flex;
+}
+
 .fd-recipe-back__link {
+    display: none;
+    align-items: center;
+    gap: var(--fd-s-4);
     font: 500 14px/20px var(--font-body);
-    color: var(--accent-text);
+    color: var(--text-primary);
     text-decoration: none;
+}
+
+.fd-recipe-macros-kicker {
+    margin: 0 0 var(--fd-s-6);
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-recipes-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-recipes-search-input--desk {
+    display: none;
+}
+
+.fd-recipes-card__kcal {
+    display: none;
+    font: 500 13px/17px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-recipe-header {
@@ -600,6 +634,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: var(--fd-s-6);
         flex: none;
         margin: 0 0 2px;
         padding: var(--fd-s-10) var(--fd-s-14);
@@ -610,6 +645,48 @@
         font: 500 14px/18px var(--font-body);
         cursor: pointer;
         box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-recipes-add-link .fd-icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .fd-recipes-toolbar {
+        flex-direction: row;
+        align-items: center;
+        gap: var(--fd-s-12);
+    }
+
+    .fd-recipes-toolbar .fd-recipes-search-form {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .fd-recipes-toolbar .fd-recipes-chips {
+        flex: none;
+    }
+
+    .fd-recipes-search-input--phone {
+        display: none;
+    }
+
+    .fd-recipes-search-input--desk {
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .fd-recipes-card__kcal {
+        display: block;
+    }
+
+    .fd-recipe-back__btn {
+        display: none;
+    }
+
+    .fd-recipe-back__link {
+        display: inline-flex;
     }
 
     .fd-recipes-add-link:focus-visible {

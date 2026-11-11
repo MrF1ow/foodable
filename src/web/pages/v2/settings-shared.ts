@@ -131,10 +131,10 @@ function settingsDisplayMenuRow(
     );
 }
 
-function settingsPhoneTopBar(title: string): Html {
+function settingsPhoneTopBar(title: string, backHref: string): Html {
     const backIcon = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
     return raw(
-        `<header class="fd-settings-phone-top"><a class="fd-settings-phone-back" href="${esc(APP_PATHS.nutrition)}" data-turbo="false" aria-label="Back">${backIcon}</a><h1 class="fd-settings-phone-title">${esc(title)}</h1><span class="fd-settings-phone-top__balance" aria-hidden="true"></span></header>`,
+        `<header class="fd-settings-phone-top"><a class="fd-settings-phone-back" href="${esc(backHref)}" data-turbo="false" aria-label="Back">${backIcon}</a><h1 class="fd-settings-phone-title">${esc(title)}</h1><span class="fd-settings-phone-top__balance" aria-hidden="true"></span></header>`,
     );
 }
 
@@ -293,7 +293,10 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
             ? `<div class="fd-settings-profile-phone">${String(settingsProfileCard(profileSource))}</div>`
             : "";
     const back = isHome ? raw("") : settingsBackLink();
-    const phoneTop = isHome ? settingsPhoneTopBar(layout.title) : raw("");
+    const phoneTop = settingsPhoneTopBar(
+        layout.title,
+        isHome ? APP_PATHS.nutrition : APP_PATHS.settings,
+    );
     const desktopBanner = settingsDesktopPageBanner();
     const mainInner =
         typeof layout.body === "string" ? layout.body : String(layout.body);

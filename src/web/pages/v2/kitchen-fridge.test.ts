@@ -312,4 +312,23 @@ describe("renderKitchenFridgeV2Page", () => {
             "fd-kitchen-fridge-empty",
         );
     });
+
+    test("item sheet nav rows lead with icons", () => {
+        const view = buildPreviewKitchenFridgeView(chrome, today, {
+            items: [item({ id: "it-1", displayName: "Milk" })],
+            locations: [
+                {
+                    id: "loc-fridge",
+                    householdId: "hh",
+                    name: "Fridge",
+                    sortOrder: 0,
+                },
+            ],
+            openItemId: "it-1",
+        });
+        const body = renderKitchenFridgeBody(view);
+        expect(body).toContain("fd-kitchen-sheet-row__icon");
+        expect(body).toContain('name="expires_on"');
+        expect(body).toContain('name="location_id"');
+    });
 });

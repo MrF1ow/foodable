@@ -200,6 +200,10 @@ describe("renderRecipeDetailBody", () => {
         expect(html).toContain('name="deduct_stock"');
         expect(html).toContain('name="log_meals"');
         expect(html).toContain("fd-recipe-macro-tiles");
+        expect(html).toContain("fd-recipe-macros-kicker");
+        expect(html).toContain("Per serving");
+        expect(html).toContain('id="fd-recipe-method-heading">Steps</');
+        expect(html).toContain("fd-recipe-back__btn");
         expect(html).toContain("fd-dot--protein");
     });
 

@@ -29,5 +29,9 @@ describe("settings account v2", () => {
         expect(html).not.toContain('name="theme"');
         expect(html).toContain('class="fd-settings-back"');
         expect(html).toContain('href="/settings"');
+        expect(html).toContain('class="fd-settings-phone-top"');
+        expect(html).toMatch(
+            /class="fd-settings-phone-back"[^>]*href="\/settings"/,
+        );
     });
 });

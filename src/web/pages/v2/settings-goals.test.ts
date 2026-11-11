@@ -45,6 +45,11 @@ describe("settings goals v2", () => {
         expect(html).toContain('data-fd-settings-page="goals"');
         expect(html).toContain("2200 kcal");
         expect(html).toContain("Read-only");
+        expect(html).toContain("fd-settings-goals-card");
+        expect(html).toContain("Limits and minimums");
+        expect(html.match(/fd-settings-goals-card/g)?.length).toBeGreaterThan(
+            1,
+        );
     });
 
     test("empty goals message", () => {

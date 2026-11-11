@@ -28,6 +28,7 @@ import {
 } from "../../components/did-you-mean.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import { renderAppShell } from "../../shell.js";
+import { fdIcon } from "../../components/fd-icons.js";
 import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
 import {
     type KitchenFridgeGroceryOverview,
@@ -329,8 +330,13 @@ function itemSheetExpiryStatus(
     return `<p class="fd-kitchen-item-expiry ${expiryToneClass(level)}"><span class="fd-kitchen-item-expiry__dot" aria-hidden="true"></span>${esc(label)}</p>`;
 }
 
-function sheetNavRow(label: string, value: string, control: string): string {
-    return `<div class="fd-kitchen-sheet-row"><span class="fd-kitchen-sheet-row__label">${esc(label)}</span><span class="fd-kitchen-sheet-row__value">${control}<span class="fd-kitchen-sheet-row__meta">${esc(value)}</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></div>`;
+function sheetNavRow(
+    label: string,
+    value: string,
+    control: string,
+    icon: string,
+): string {
+    return `<div class="fd-kitchen-sheet-row"><span class="fd-kitchen-sheet-row__icon" aria-hidden="true">${icon}</span><span class="fd-kitchen-sheet-row__label">${esc(label)}</span><span class="fd-kitchen-sheet-row__value">${control}<span class="fd-kitchen-sheet-row__meta">${esc(value)}</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></div>`;
 }
 
 function itemSheet(item: FridgeItem, view: KitchenFridgeV2View): string {
@@ -420,11 +426,13 @@ ${sheetNavRow(
     "Expires",
     expiresValue ? formatFridgeExpiryLabel(expiresValue) : "No date",
     `<input type="date" class="fd-kitchen-sheet-row__control" name="expires_on" value="${esc(expiresValue)}" />`,
+    fdIcon("cal"),
 )}
 ${sheetNavRow(
     "Kept in",
     locationName(view.locations, item.locationId),
     `<select class="fd-kitchen-sheet-row__control" name="location_id" aria-label="Location">${locationOptions}</select>`,
+    fdIcon("fridge"),
 )}
 </div>
 ${usualBuy}

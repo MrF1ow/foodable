@@ -31,7 +31,11 @@ import {
     rowList,
     type Macros,
 } from "../../components/v2/rows.js";
-import { iconChevronRight, iconPlus } from "../../components/v2/icons.js";
+import {
+    iconChevronRight,
+    iconPlus,
+    iconRepeat,
+} from "../../components/v2/icons.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import {
     FD_LOG_SEARCH_SHEET_ID,
@@ -219,11 +223,14 @@ function weekStripMarkup(data: TodayPageData): Html {
 
 function gaugeMarkup(view: TodayView): Html {
     const goal = activeCalorieGoal(view.goals);
+    const hasMeals = viewHasMealRows(view);
     const eatenRaw = view.totals.calories;
+    const eatenForGauge =
+        eatenRaw == null && !hasMeals && goal != null ? 0 : eatenRaw;
     const g = calorieGauge(
         {
             goal,
-            eaten: eatenRaw ?? 0,
+            eaten: eatenForGauge ?? 0,
             protein_g: view.totals.protein_g,
             carbs_g: view.totals.carbs_g,
             fat_g: view.totals.fat_g,
@@ -241,7 +248,7 @@ function gaugeMarkup(view: TodayView): Html {
     let center: string;
     if (goal == null) {
         center = `<div class="fd-today-gauge__center fd-today-gauge__center--solo"><span class="fd-today-gauge__hero">${esc(fmtKcal(eatenRaw))}</span><span class="fd-today-gauge__caption">kcal eaten</span></div>`;
-    } else if (eatenRaw == null) {
+    } else if (eatenForGauge == null) {
         center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero">—</span></div>`;
     } else if (g.remaining != null && g.remaining < 0) {
         center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero fd-today-gauge__hero--over">${esc(fmtKcal(Math.abs(g.remaining)))}</span><span class="fd-today-gauge__caption fd-today-gauge__caption--over">kcal over ${esc(fmtKcal(goal))}</span></div>`;
@@ -250,11 +257,12 @@ function gaugeMarkup(view: TodayView): Html {
         center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero">${esc(fmtKcal(remaining))}</span><span class="fd-today-gauge__caption">kcal left of ${esc(fmtKcal(goal))}</span></div>`;
     }
     // The accessible name says what the hero number says.
+    const ariaEaten = eatenForGauge == null ? null : eatenForGauge;
     const ariaLabel =
-        eatenRaw == null
+        ariaEaten == null
             ? "Calories unknown"
             : goal == null
-              ? `${fmtKcal(eatenRaw)} kcal eaten`
+              ? `${fmtKcal(ariaEaten)} kcal eaten`
               : g.remaining != null && g.remaining < 0
                 ? `${fmtKcal(Math.abs(g.remaining))} kcal over ${fmtKcal(goal)}`
                 : `${fmtKcal(g.remaining ?? 0)} kcal left of ${fmtKcal(goal)}`;
@@ -308,13 +316,14 @@ function macroBarRow(
 
 function macroBarsMarkup(view: TodayView): Html {
     const goals = view.goals;
+    const hasMeals = viewHasMealRows(view);
     const rows = MACRO_ORDER.map((key) => {
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         const goalKey = `daily_${key}_g` as const;
         return macroBarRow(
             key,
             label,
-            view.totals[`${key}_g`],
+            emptyDayZero(view.totals[`${key}_g`], hasMeals),
             goals?.[goalKey] ?? null,
         );
     });
@@ -358,6 +367,15 @@ function fmtAlsoWater(
     };
 }
 
+function viewHasMealRows(view: TodayView): boolean {
+    return view.meals.some((g) => g.rows.length > 0);
+}
+
+/** Empty days show numeric zero; logged unknown macros stay null → em dash. */
+function emptyDayZero(value: number | null, hasMeals: boolean): number | null {
+    return !hasMeals && value == null ? 0 : value;
+}
+
 function fmtAlsoGrams(
     actual: number | null,
     goal: number | null,
@@ -372,20 +390,24 @@ function fmtAlsoGrams(
 
 function alsoTrackedMarkup(view: TodayView): Html {
     const { totals, goals } = view;
+    const hasMeals = viewHasMealRows(view);
+    const fiber = emptyDayZero(totals.fiber_g, hasMeals);
+    const sugar = emptyDayZero(totals.sugar_g, hasMeals);
+    const caffeine = emptyDayZero(totals.caffeine_mg, hasMeals);
     const bits: string[] = [
         esc(fmtWater(totals.water_ml, goals?.daily_water_ml ?? null)),
     ];
-    if (totals.fiber_g != null) {
-        bits.push(`Fiber ${esc(fmtGrams(totals.fiber_g))}`);
+    if (fiber != null) {
+        bits.push(`Fiber ${esc(fmtGrams(fiber))}`);
     }
-    if (totals.sugar_g != null) {
-        bits.push(`Sugar ${esc(fmtGrams(totals.sugar_g))}`);
+    if (sugar != null) {
+        bits.push(`Sugar ${esc(fmtGrams(sugar))}`);
     }
     if (view.alcoholTrackingEnabled && totals.alcohol_g != null) {
         bits.push(`Alcohol ${esc(fmtGrams(totals.alcohol_g))}`);
     }
-    if (totals.caffeine_mg != null) {
-        bits.push(`Caffeine ${esc(fmtWholeMg(totals.caffeine_mg))} mg`);
+    if (caffeine != null) {
+        bits.push(`Caffeine ${esc(fmtWholeMg(caffeine))} mg`);
     }
     const line = bits
         .map(
@@ -406,24 +428,21 @@ function alsoTrackedMarkup(view: TodayView): Html {
         alsoTrackedColumn({
             key: "fiber",
             label: "Fiber",
-            ...fmtAlsoGrams(totals.fiber_g, goals?.daily_fiber_g ?? null),
+            ...fmtAlsoGrams(fiber, goals?.daily_fiber_g ?? null),
         }),
         alsoTrackedColumn({
             key: "sugar",
             label: "Sugar",
-            ...fmtAlsoGrams(totals.sugar_g, goals?.daily_sugar_g ?? null),
+            ...fmtAlsoGrams(sugar, goals?.daily_sugar_g ?? null),
         }),
         alsoTrackedColumn({
             key: "caffeine",
             label: "Caffeine",
             nums:
                 goals?.daily_caffeine_mg != null && goals.daily_caffeine_mg > 0
-                    ? `${esc(fmtWholeMg(totals.caffeine_mg))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
-                    : esc(`${fmtWholeMg(totals.caffeine_mg)} mg`),
-            pct: alsoBarFill(
-                totals.caffeine_mg,
-                goals?.daily_caffeine_mg ?? null,
-            ),
+                    ? `${esc(fmtWholeMg(caffeine))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
+                    : esc(`${fmtWholeMg(caffeine)} mg`),
+            pct: alsoBarFill(caffeine, goals?.daily_caffeine_mg ?? null),
         }),
     ];
     if (view.alcoholTrackingEnabled) {
@@ -469,6 +488,17 @@ function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
             swipe: readOnly
                 ? undefined
                 : {
+                      lead: {
+                          label: "Again",
+                          icon: iconRepeat(),
+                          form: {
+                              action: `/meals/${row.mealId}/again`,
+                              fields: {
+                                  return_to: returnTo,
+                                  date: data.view.date,
+                              },
+                          },
+                      },
                       trail: {
                           label: "Delete",
                           form: {
@@ -543,15 +573,6 @@ function mealsMarkup(data: TodayPageData): Html {
     const { view } = data;
     const readOnly = isReadOnlyPeer(data);
     const groups = view.meals;
-    const anyMeals = groups.some((g) => g.rows.length > 0);
-    if (!anyMeals) {
-        const logBtn = readOnly
-            ? ""
-            : `<a class="fd-btn fd-btn--primary" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">Log food</a>`;
-        return raw(
-            `<div class="fd-today-empty"><p class="fd-today-empty__text">Nothing logged yet</p>${logBtn}</div>`,
-        );
-    }
     const sections = MEAL_TYPE_ORDER.map((mealType) => {
         const group = groupForType(groups, mealType);
         const rows = group?.rows ?? [];

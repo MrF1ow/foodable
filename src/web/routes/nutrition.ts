@@ -28,9 +28,11 @@ import {
 } from "../pages/nutrition.js";
 import { redirectWithToast } from "../components/toast.js";
 import { todayMealsRoutes } from "./today-meals.js";
+import { todayAgainRoutes } from "./today-again.js";
 
 export const nutritionRoutes = new Hono();
 nutritionRoutes.route("/", todayMealsRoutes);
+nutritionRoutes.route("/", todayAgainRoutes);
 
 function nutritionReturnPath(member: string | undefined): string {
     if (member?.trim()) {

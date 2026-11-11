@@ -128,6 +128,34 @@ describe("recipes list v2 page", () => {
         expect(html).toContain("fd-recipes-subtitle__cookable");
         expect(html).toContain("2 cookable now");
         expect(html).toContain('placeholder="Search or paste a link"');
+        expect(html).toContain('placeholder="Search recipes or paste a link"');
+        expect(html).toContain("fd-recipes-toolbar");
+        expect(html).toContain("fd-recipes-search-input--desk");
+    });
+
+    test("recipe cards expose desktop kcal line", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 1,
+            cards: [
+                {
+                    recipe: RECIPE,
+                    flags: {
+                        cookable: true,
+                        highProtein: false,
+                        quick: true,
+                        missingCount: 0,
+                        hasIngredients: true,
+                    },
+                    macrosPerPortion: MACROS,
+                    missingNames: [],
+                },
+            ],
+        });
+        expect(html).toContain('class="fd-recipes-card__kcal"');
+        expect(html).toContain("640 kcal");
     });
 
     test("empty states for no recipes and no matches", () => {

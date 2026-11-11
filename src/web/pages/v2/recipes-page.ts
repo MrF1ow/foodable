@@ -202,6 +202,10 @@ function macrosBlock(macros: RecipeMacros, gapReasons: string[]): string {
             dot: "fat",
         });
     }
+    const kicker =
+        tiles.length > 0
+            ? `<p class="fd-recipe-macros-kicker">Per serving</p>`
+            : "";
     const grid =
         tiles.length > 0
             ? String(
@@ -217,7 +221,7 @@ function macrosBlock(macros: RecipeMacros, gapReasons: string[]): string {
                   .map((r) => `<li>${esc(r)}</li>`)
                   .join("")}</ul>`
             : "";
-    return `${grid}${gaps}`;
+    return `${kicker}${grid}${gaps}`;
 }
 
 function ingredientSubline(
@@ -329,8 +333,10 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
         view.portionCount === 1
             ? "1 portion for you"
             : `${view.portionCount} portions for you`;
+    const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
+    const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
     return `<div class="fd-recipe-detail">
-<p class="fd-recipe-back"><a class="fd-recipe-back__link" href="/recipes">← Recipes</a></p>
+<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" data-turbo="false" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
 <header class="fd-recipe-header">
 <h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
@@ -350,7 +356,7 @@ ${cookForm(view)}
 </div>
 <div class="fd-recipe-col fd-recipe-col--secondary">
 <section class="fd-recipe-section" aria-labelledby="fd-recipe-method-heading">
-<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-method-heading">Instructions</h2></div>
+<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-method-heading">Steps</h2></div>
 ${instructionsHtml(view.recipe.instructions)}
 </section>
 </div>

@@ -134,7 +134,11 @@ function recipeCard(card: V2RecipeCard): string {
             : flags.hasIngredients && flags.missingCount > 0
               ? `<span class="fd-recipes-card__dot fd-recipes-card__dot--warn" aria-hidden="true"></span>`
               : "";
-    return `<li class="fd-row fd-row--recipe"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${
+    const kcal =
+        macrosPerPortion.calories != null
+            ? `<span class="fd-recipes-card__kcal">${esc(String(Math.round(macrosPerPortion.calories)))} kcal</span>`
+            : "";
+    return `<li class="fd-row fd-row--recipe"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${kcal}${
         stock
             ? `<span class="fd-recipes-card__stock ${stockClass}">${dot}<span class="fd-recipes-card__stock-text">${esc(stock)}</span></span>`
             : ""
@@ -265,23 +269,26 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 <h1 class="fd-recipes-title">Recipes</h1>
 <p class="fd-recipes-subtitle">${esc(savedLabel)}${cookableSuffix}</p>
 </div>
-<button type="button" class="fd-recipes-add-link" data-fd-recipes-add-link>Add from link</button>
+<button type="button" class="fd-recipes-add-link" data-fd-recipes-add-link>${recipesLinkIcon}<span>Add from link</span></button>
 </div>
 </header>
 ${importDuplicate}
 ${importErr}
 ${importPasteBlock(view)}
+<div class="fd-recipes-toolbar">
 <form class="fd-recipes-search-form" id="fd-recipes-search-form" method="get" action="/recipes" data-fd-recipes-search>
 <div class="fd-recipes-search-field">
 ${fdIcon("search")}
-<input class="fd-recipes-search-input" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search or paste a link" value="${q}" aria-label="Search or paste a recipe link" />
+<input class="fd-recipes-search-input fd-recipes-search-input--phone" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search or paste a link" value="${q}" aria-label="Search or paste a recipe link" />
+<input class="fd-recipes-search-input fd-recipes-search-input--desk" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search recipes or paste a link" value="${q}" aria-label="Search recipes or paste a link" disabled />
 <button type="button" class="fd-recipes-search-link" data-fd-recipes-add-link aria-label="Add from link">${recipesLinkIcon}</button>
 </div>
 ${filterHidden}
 <button type="submit" class="fd-sr">Search</button>
 </form>
-${importLinkBlock}
 ${chipsHtml}
+</div>
+${importLinkBlock}
 ${emptyAll}
 ${emptyFilter}
 ${grid}

@@ -335,7 +335,7 @@ describe("renderTodayV2Page", () => {
         expect(formatExpiryWhen("2026-11-10", "2026-11-11")).toBe("Tomorrow");
     });
 
-    test("empty day shows log action", () => {
+    test("empty day still renders meal sections and remaining calories", () => {
         const weekStart = sundayWeekStart(today);
         const dates = weekDates(weekStart);
         const view = {
@@ -351,8 +351,20 @@ describe("renderTodayV2Page", () => {
             },
         };
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html).toContain("fd-today-empty");
-        expect(html).toContain('data-fd-open-sheet="fd-log-search"');
-        expect(html).toContain("Log food");
+        expect(html).not.toContain("fd-today-empty");
+        expect(html).toContain('id="fd-today-breakfast"');
+        expect(html).toContain('id="fd-today-lunch"');
+        expect(html).toContain('id="fd-today-dinner"');
+        expect(html).toContain('id="fd-today-snack"');
+        expect(html).toContain("Nothing yet");
+        const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];
+        expect(hero).not.toBe("—");
+        expect(html).toContain('fd-today-macro__actual">0</');
+    });
+
+    test("meal row swipe exposes Again", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toMatch(/data-swipe-right="\/meals\/[^"]+\/again\tAgain"/);
+        expect(html).toContain("fd-swipe-btn--accent");
     });
 });
