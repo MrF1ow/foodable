@@ -164,3 +164,27 @@ test("row mappers round-trip and an invalid jsonb row falls back to its preset",
         memberScoreSettingsFromRow({ ...row, preset: "keto", weights: null }),
     ).toMatchObject({ preset: "household", weights: null });
 });
+
+test("the viewer's preset is their own, else the household's, else Balanced", async () => {
+    const store = createMemoryScoreSettingsStore();
+    expect((await scoreSettingsForViewer(store, HH, ME)).preset).toBe(
+        "balanced",
+    );
+    await updateHouseholdScoreDefault(store, HH, {
+        preset: "planet",
+        weights: null,
+    });
+    expect((await scoreSettingsForViewer(store, HH, ME)).preset).toBe("planet");
+    await updateMemberScoreSettings(store, HH, ME, {
+        choice: {
+            preset: "custom",
+            weights: {
+                nutrition: 10,
+                processing: 0,
+                additives: 0,
+                environment: 0,
+            },
+        },
+    });
+    expect((await scoreSettingsForViewer(store, HH, ME)).preset).toBe("custom");
+});

@@ -29,6 +29,8 @@ import * as actualRestock from "../../db/restock.js";
 import * as actualStock from "../../db/stock.js";
 import * as actualSettings from "../../db/settings.js";
 import * as actualRules from "../../db/rules.js";
+import * as actualScoreSettings from "../../db/score-settings.js";
+import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualAttention from "../attention.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
@@ -57,6 +59,7 @@ const realRestock = { ...actualRestock };
 const realStock = { ...actualStock };
 const realSettings = { ...actualSettings };
 const realRules = { ...actualRules };
+const realScoreSettings = { ...actualScoreSettings };
 const realNoticeDismissals = { ...actualNoticeDismissals };
 const realAttention = { ...actualAttention };
 
@@ -170,6 +173,11 @@ mock.module("../../db/settings.js", () => ({
     liveSettingsStore: () => settingsStore,
 }));
 
+mock.module("../../db/score-settings.js", () => ({
+    ...realScoreSettings,
+    liveScoreSettingsStore: () => createMemoryScoreSettingsStore(),
+}));
+
 mock.module("../../db/rules.js", () => ({
     ...realRules,
     liveRulesStore: () => ({
@@ -251,6 +259,7 @@ afterAll(() => {
     mock.module("../../db/stock.js", () => realStock);
     mock.module("../../db/settings.js", () => realSettings);
     mock.module("../../db/rules.js", () => realRules);
+    mock.module("../../db/score-settings.js", () => realScoreSettings);
     mock.module("../../db/notice-dismissals.js", () => realNoticeDismissals);
     mock.module("../attention.js", () => realAttention);
 });

@@ -16,7 +16,21 @@ import {
     renderSettingsHomeRoute,
     renderSettingsHouseholdRoute,
     renderSettingsSavedV2Route,
+    renderSettingsScoreHouseholdV2Route,
+    renderSettingsScoreV2Route,
 } from "../loaders.js";
+import { liveScoreSettingsStore } from "../../db/score-settings.js";
+import {
+    updateHouseholdScoreDefault,
+    updateMemberScoreSettings,
+} from "../../domain/score-settings.js";
+import {
+    parseScoreForm,
+    parseScoreIntent,
+    SCORE_HOUSEHOLD_PATH,
+    SCORE_PATH,
+    type ScoreFormDraft,
+} from "../pages/v2/settings-score.js";
 import { liveExportArchiveStore } from "../../db/exports.js";
 import { revokeConnection } from "../../db/tokens.js";
 import {
@@ -199,6 +213,148 @@ settingsRoutes.post(
             c,
             "/settings/goals",
             "settings.goals.day-cleared",
+        );
+    },
+);
+
+settingsRoutes.get(
+    SCORE_PATH,
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsScoreV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.post(
+    SCORE_PATH,
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const store = liveScoreSettingsStore();
+        const intent = parseScoreIntent(formText(body, "intent"));
+        // Always the caller's own record: the member comes from the session,
+        // never the form. Each save is read, patched and written whole, so
+        // changing one switch keeps the choice and the other switch.
+        switch (intent) {
+            case "household":
+                await updateMemberScoreSettings(
+                    store,
+                    member.householdId,
+                    userId,
+                    { choice: null },
+                );
+                return redirectWithToast(
+                    c,
+                    SCORE_PATH,
+                    "settings.score.household",
+                );
+            case "warn_traces":
+            case "compare_goals": {
+                await updateMemberScoreSettings(
+                    store,
+                    member.householdId,
+                    userId,
+                    intent === "warn_traces"
+                        ? { warnTraces: formText(body, "value") === "1" }
+                        : { compareGoals: formText(body, "value") === "1" },
+                );
+                // toast: none the switch itself shows the new state
+                return c.redirect(SCORE_PATH, 303);
+            }
+            case "choice": {
+                const parsed = parseScoreForm(body);
+                if (!parsed.ok) {
+                    return refusedScorePage(c, parsed.error, parsed.draft);
+                }
+                await updateMemberScoreSettings(
+                    store,
+                    member.householdId,
+                    userId,
+                    { choice: parsed.choice },
+                );
+                return redirectWithToast(c, SCORE_PATH, "settings.score.saved");
+            }
+            default: {
+                const page = await renderSettingsScoreV2Route(userId, {
+                    error: "Choose what to save.",
+                });
+                return c.html(page.html, 400);
+            }
+        }
+    },
+);
+
+async function refusedScorePage(
+    c: Context,
+    error: string,
+    draft: ScoreFormDraft,
+) {
+    const page = await renderSettingsScoreV2Route(c.get("userId"), {
+        error,
+        draft,
+    });
+    // A non-member gets the membership page with its own status.
+    return c.html(page.html, page.status === 200 ? 400 : page.status);
+}
+
+settingsRoutes.get(
+    SCORE_HOUSEHOLD_PATH,
+    requireManager,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsScoreHouseholdV2Route(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+// Owners and admins only, whatever the page shows: the middleware refuses
+// anyone else with 403 before this runs.
+settingsRoutes.post(
+    SCORE_HOUSEHOLD_PATH,
+    requireManager,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const store = liveScoreSettingsStore();
+        const intent = formText(body, "intent");
+        if (intent === "clear") {
+            await updateHouseholdScoreDefault(store, member.householdId, null);
+            return redirectWithToast(
+                c,
+                SCORE_PATH,
+                "settings.score.household-cleared",
+            );
+        }
+        if (intent !== "choice") {
+            const page = await renderSettingsScoreHouseholdV2Route(userId, {
+                error: "Choose what to save.",
+            });
+            return c.html(page.html, 400);
+        }
+        const parsed = parseScoreForm(body);
+        if (!parsed.ok) {
+            const page = await renderSettingsScoreHouseholdV2Route(userId, {
+                error: parsed.error,
+                draft: parsed.draft,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        await updateHouseholdScoreDefault(
+            store,
+            member.householdId,
+            parsed.choice,
+        );
+        return redirectWithToast(
+            c,
+            SCORE_PATH,
+            "settings.score.household-saved",
         );
     },
 );

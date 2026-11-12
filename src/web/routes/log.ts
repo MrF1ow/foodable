@@ -48,6 +48,12 @@ import {
     foodDisplayScore,
     offHitDisplayScore,
 } from "../../domain/product-screen.js";
+import type { ScoreWeights } from "../../domain/product-score.js";
+import {
+    scoreSettingsForViewer,
+    type ScoreSettingsStore,
+} from "../../domain/score-settings.js";
+import { liveScoreSettingsStore } from "../../db/score-settings.js";
 import { insertWater, insertWeight } from "../../db/nutrition.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { MAX_CALORIES, MAX_MACRO_G } from "../../domain/import.js";
@@ -102,6 +108,7 @@ function trimSources(result: LogSearchResult, limit: number): LogSearchResult {
 function historyItemFromMeal(
     meal: Meal,
     foodsById: Map<string, Food>,
+    weights: ScoreWeights,
 ): LogSearchSourceItem {
     const items = meal.items ?? [];
     const base: LogSearchSourceItem = {
@@ -133,7 +140,7 @@ function historyItemFromMeal(
     }
     if (line.food_id) {
         const food = foodsById.get(line.food_id);
-        const score = food ? foodDisplayScore(food) : null;
+        const score = food ? foodDisplayScore(food, weights) : null;
         return {
             ...base,
             food_id: line.food_id,
@@ -192,6 +199,7 @@ async function loadHistoryMeals(
     limit: number,
     tz: string,
     foodsById: Map<string, Food>,
+    weights: ScoreWeights,
 ): Promise<LogSearchSourceItem[]> {
     const trimmed = query.trim();
     let meals: Meal[];
@@ -200,7 +208,9 @@ async function loadHistoryMeals(
     } else {
         meals = await recentLogs(userId, limit);
     }
-    const items = meals.map((meal) => historyItemFromMeal(meal, foodsById));
+    const items = meals.map((meal) =>
+        historyItemFromMeal(meal, foodsById, weights),
+    );
     return Promise.all(
         items.map((item) =>
             enrichHistoryItem(item, householdId, userId, foodsById),
@@ -208,9 +218,12 @@ async function loadHistoryMeals(
     );
 }
 
-function offToSource(hit: FoodResult): LogSearchSourceItem {
+function offToSource(
+    hit: FoodResult,
+    weights: ScoreWeights,
+): LogSearchSourceItem {
     const per100 = catalogNutritionFromOff(hit);
-    const score = offHitDisplayScore(hit);
+    const score = offHitDisplayScore(hit, weights);
     return {
         kind: "off",
         id: hit.source,
@@ -258,8 +271,8 @@ async function splitOffByHouseholdBarcode(
     return { kept, householdFoodIds };
 }
 
-function foodToSource(row: Food): LogSearchSourceItem {
-    const score = foodDisplayScore(row);
+function foodToSource(row: Food, weights: ScoreWeights): LogSearchSourceItem {
+    const score = foodDisplayScore(row, weights);
     return {
         kind: "food",
         id: row.id,
@@ -283,7 +296,19 @@ export async function buildLogSearchSources(input: {
     query: string;
     limit: number;
     timezone: string;
-}): Promise<{ sources: LogSearchSources; foodsById: Map<string, Food> }> {
+    /** Where the viewer's score weights are read from; the live store by default. */
+    scoreSettings?: ScoreSettingsStore;
+}): Promise<{
+    sources: LogSearchSources;
+    foodsById: Map<string, Food>;
+    /** The viewer's weights: every score badge in these results uses them. */
+    weights: ScoreWeights;
+}> {
+    const { weights } = await scoreSettingsForViewer(
+        input.scoreSettings ?? liveScoreSettingsStore(),
+        input.householdId,
+        input.userId,
+    );
     const foodsStore = liveFoodsStore();
     const listed = await foodsStore.listFoods(input.householdId);
     const foodsById = new Map(listed.map((row) => [row.id, row]));
@@ -294,15 +319,16 @@ export async function buildLogSearchSources(input: {
         input.limit,
         input.timezone,
         foodsById,
+        weights,
     );
     // An empty query shows recent meals only: nothing else to load.
     if (!input.query.trim()) {
-        return { sources: { history }, foodsById };
+        return { sources: { history }, foodsById, weights };
     }
 
     const aliasMap = await foodsStore.listAllAliases(input.householdId);
-    const food = matchFoodsByWords(input.query, listed, aliasMap).map(
-        foodToSource,
+    const food = matchFoodsByWords(input.query, listed, aliasMap).map((row) =>
+        foodToSource(row, weights),
     );
 
     const recipes = await listRecipes(liveRecipesStore(), input.householdId);
@@ -342,7 +368,7 @@ export async function buildLogSearchSources(input: {
         const foodRow = item.foodId
             ? (foodsById.get(item.foodId) ?? null)
             : null;
-        const score = foodRow ? foodDisplayScore(foodRow) : null;
+        const score = foodRow ? foodDisplayScore(foodRow, weights) : null;
         stock.push({
             kind: "stock",
             id: item.id,
@@ -362,7 +388,7 @@ export async function buildLogSearchSources(input: {
         });
     }
 
-    return { sources: { food, recipe, history, stock }, foodsById };
+    return { sources: { food, recipe, history, stock }, foodsById, weights };
 }
 
 function countHouseholdHits(sources: LogSearchSources, query: string): number {
@@ -436,11 +462,14 @@ logRoutes.get(
             for (const id of householdFoodIds) {
                 const row = built.foodsById.get(id);
                 if (row && !listed.has(id)) {
-                    food.push(foodToSource(row));
+                    food.push(foodToSource(row, built.weights));
                 }
             }
             sources = { ...sources, food };
-            if (kept.length > 0) sources.off = kept.map(offToSource);
+            if (kept.length > 0)
+                sources.off = kept.map((hit) =>
+                    offToSource(hit, built.weights),
+                );
         }
 
         const merged = mergeLogResults(sources, q);

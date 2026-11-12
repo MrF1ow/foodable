@@ -42,6 +42,7 @@ import * as actualDbGrocery from "./db/grocery.js";
 import * as actualDbRecipes from "./db/recipes.js";
 import * as actualDbSettings from "./db/settings.js";
 import * as actualDbRules from "./db/rules.js";
+import * as actualDbScoreSettings from "./db/score-settings.js";
 import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
@@ -93,6 +94,7 @@ const realDbGrocery = { ...actualDbGrocery };
 const realDbRecipes = { ...actualDbRecipes };
 const realDbSettings = { ...actualDbSettings };
 const realDbRules = { ...actualDbRules };
+const realDbScoreSettings = { ...actualDbScoreSettings };
 const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
@@ -161,6 +163,11 @@ import {
     createMemorySettingsStore,
 } from "./domain/settings.js";
 import { addAllergen, createMemoryRulesStore } from "./domain/rules.js";
+import {
+    createMemoryScoreSettingsStore,
+    updateHouseholdScoreDefault,
+    updateMemberScoreSettings,
+} from "./domain/score-settings.js";
 import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
 import { createMemoryPlansStore } from "./domain/plan.js";
@@ -376,6 +383,7 @@ const db = {
     recipesStore: createMemoryRecipesStore(),
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
+    scoreSettingsStore: createMemoryScoreSettingsStore(),
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     plansStore: createMemoryPlansStore(),
@@ -790,6 +798,11 @@ mock.module("./db/rules.js", () => ({
     liveRulesStore: () => db.rulesStore,
 }));
 
+mock.module("./db/score-settings.js", () => ({
+    ...actualDbScoreSettings,
+    liveScoreSettingsStore: () => db.scoreSettingsStore,
+}));
+
 mock.module("./db/foods.js", () => ({
     ...actualDbFoods,
     liveFoodsStore: () => db.foodsStore,
@@ -885,6 +898,7 @@ afterAll(() => {
     mock.module("./db/recipes.js", () => realDbRecipes);
     mock.module("./db/settings.js", () => realDbSettings);
     mock.module("./db/rules.js", () => realDbRules);
+    mock.module("./db/score-settings.js", () => realDbScoreSettings);
     mock.module("./db/foods.js", () => realDbFoods);
     mock.module("./db/notice-dismissals.js", () => realDbNoticeDismissals);
     mock.module("./db/plans.js", () => realDbPlans);
@@ -947,6 +961,7 @@ beforeEach(() => {
     db.recipesStore = createMemoryRecipesStore();
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
+    db.scoreSettingsStore = createMemoryScoreSettingsStore();
     db.foodsStore = createMemoryFoodsStore();
     db.fridgeStore.linkDismissals(db.dismissalsStore);
     db.groceryStore.linkDismissals(db.dismissalsStore);
@@ -5311,6 +5326,207 @@ describe("household config tools", () => {
             });
         });
 
+        describe("the viewer's score weights", () => {
+            const PROCESSING_ONLY = {
+                nutrition: 0,
+                processing: 100,
+                additives: 0,
+                environment: 0,
+            };
+
+            async function seedProcessedProduct(): Promise<string> {
+                const food = newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Fizzy Bar",
+                    offQuality: {
+                        nutriscoreGrade: "a",
+                        novaGroup: 4,
+                        ecoscoreGrade: "b",
+                        additives: null,
+                        allergensTags: null,
+                        tracesTags: ["en:peanuts"],
+                        ingredientsAnalysisTags: null,
+                        labelsTags: null,
+                        fetchedAt: "2026-11-09T12:00:00.000Z",
+                    },
+                });
+                await db.foodsStore.insertFood(food);
+                return food.id;
+            }
+
+            function twoMembers() {
+                db.members = [
+                    {
+                        householdId: "hh-1",
+                        userId: "u1",
+                        role: "owner",
+                        displayName: "Alex",
+                    },
+                    {
+                        householdId: "hh-1",
+                        userId: "u2",
+                        role: "member",
+                        displayName: "Bob",
+                    },
+                ];
+            }
+
+            test("the caller's own weights score the product", async () => {
+                const foodId = await seedProcessedProduct();
+                let byDefault: number | null = null;
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("balanced");
+                    byDefault = out.score;
+                });
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u1",
+                    {
+                        choice: {
+                            preset: "custom",
+                            weights: PROCESSING_ONLY,
+                        },
+                    },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("custom");
+                    expect(out.score).not.toBe(byDefault);
+                    expect(
+                        out.breakdown.find((row) => row.part === "processing")
+                            ?.weight,
+                    ).toBe(1);
+                });
+            });
+
+            test("a member without a choice gets the household default", async () => {
+                const foodId = await seedProcessedProduct();
+                await updateHouseholdScoreDefault(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    { preset: "planet", weights: null },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("planet");
+                });
+            });
+
+            test("user_id uses that member's weights and switches, not the caller's", async () => {
+                twoMembers();
+                await addAllergen(db.rulesStore, {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    allergen: "peanut",
+                });
+                const foodId = await seedProcessedProduct();
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u2",
+                    {
+                        choice: {
+                            preset: "custom",
+                            weights: PROCESSING_ONLY,
+                        },
+                    },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const own = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (await call("rate_product", { food_id: foodId }))
+                            .structuredContent,
+                    );
+                    const bob = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("rate_product", {
+                                food_id: foodId,
+                                user_id: "u2",
+                            })
+                        ).structuredContent,
+                    );
+                    expect(own.preset).toBe("balanced");
+                    expect(bob.preset).toBe("custom");
+                    expect(bob.score).not.toBe(own.score);
+                    const traces = (out: typeof bob): string[] =>
+                        out.checks
+                            .flatMap((c) => c.notices)
+                            .map((n) => n.code)
+                            .filter((code) => code === "food.product_trace");
+                    expect(traces(bob)).toHaveLength(1);
+                });
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u2",
+                    { warnTraces: false },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const bob = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("rate_product", {
+                                food_id: foodId,
+                                user_id: "u2",
+                            })
+                        ).structuredContent,
+                    );
+                    expect(
+                        bob.checks
+                            .flatMap((c) => c.notices)
+                            .some((n) => n.code === "food.product_trace"),
+                    ).toBe(false);
+                    // the choice is kept when only a switch changes
+                    expect(bob.preset).toBe("custom");
+                });
+            });
+
+            test("compare with today's goals off drops the goals notice", async () => {
+                db.goals = goals({ daily_sugar_g: 30 });
+                const food = newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Sweet Bar",
+                    sugarG: 50,
+                    gramsPerEach: 40,
+                });
+                await db.foodsStore.insertFood(food);
+                const goalNotices = async () => {
+                    let found = 0;
+                    await withRateProductFlag(true, async (call) => {
+                        const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            (await call("rate_product", { food_id: food.id }))
+                                .structuredContent,
+                        );
+                        found = out.checks
+                            .flatMap((c) => c.notices)
+                            .filter(
+                                (n) => n.code === "food.product_goal",
+                            ).length;
+                    });
+                    return found;
+                };
+                expect(await goalNotices()).toBe(1);
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u1",
+                    { compareGoals: false },
+                );
+                expect(await goalNotices()).toBe(0);
+            });
+        });
+
         test("rejects user_id from another household", async () => {
             const other = "22222222-2222-4222-8222-222222222222";
             db.members.push({
@@ -8616,6 +8832,82 @@ describe("rate_product over HTTP", () => {
                         arguments: { food_id: food.id },
                     })) as ToolResult;
                     RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "scores with the caller's weights and only adds fields (%p)",
+        async (era) => {
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Rated Bar",
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "b",
+                    additives: null,
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const rate = async () =>
+                        RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            (
+                                (await client.callTool({
+                                    name: "rate_product",
+                                    arguments: { food_id: food.id },
+                                })) as ToolResult
+                            ).structuredContent,
+                        );
+                    const before = await rate();
+                    await updateMemberScoreSettings(
+                        db.scoreSettingsStore,
+                        "hh-1",
+                        "u1",
+                        {
+                            choice: {
+                                preset: "custom",
+                                weights: {
+                                    nutrition: 0,
+                                    processing: 100,
+                                    additives: 0,
+                                    environment: 0,
+                                },
+                            },
+                        },
+                    );
+                    const after = await rate();
+                    expect(before.preset).toBe("balanced");
+                    expect(after.preset).toBe("custom");
+                    expect(after.score).not.toBe(before.score);
+                    // Fields every existing client reads are all still there.
+                    for (const field of [
+                        "found",
+                        "product",
+                        "score",
+                        "label",
+                        "preset",
+                        "breakdown",
+                        "parts_used",
+                        "parts_total",
+                        "missing",
+                        "info_rows",
+                        "checks",
+                    ]) {
+                        expect(Object.keys(after)).toContain(field);
+                    }
                 });
             } finally {
                 resetFlagsForTests();

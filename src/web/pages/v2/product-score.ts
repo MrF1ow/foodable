@@ -11,9 +11,16 @@ import {
     SCORE_PRESET_LABELS,
     productInfoRows,
     type ProductScore,
+    type ScoreChoicePreset,
     type ScoreQuality,
+    type ScoreWeights,
     type NutrientLevel,
 } from "../../../domain/product-score.js";
+import { liveScoreSettingsStore } from "../../../db/score-settings.js";
+import {
+    scoreSettingsForViewer,
+    type ScoreSettingsStore,
+} from "../../../domain/score-settings.js";
 import type { ProductCheckMember } from "../../../domain/product-checks.js";
 import {
     memberProductVerdict,
@@ -236,15 +243,22 @@ export function buildProductMemberCards(
     });
 }
 
+/** How the viewer weights the score; Balanced when not given. */
+export type ProductScoreViewer = {
+    weights?: ScoreWeights;
+    preset?: ScoreChoicePreset;
+};
+
 export function buildProductScoreSection(
     food: Food,
     memberCards: ProductMemberCard[],
+    viewer: ProductScoreViewer = {},
 ): ProductScoreSection | null {
-    const score = scoredFoodProduct(food);
+    const score = scoredFoodProduct(food, viewer.weights);
     if (score == null) return null;
     return {
         score,
-        presetLabel: SCORE_PRESET_LABELS[DEFAULT_SCORE_PRESET],
+        presetLabel: SCORE_PRESET_LABELS[viewer.preset ?? DEFAULT_SCORE_PRESET],
         memberCards,
     };
 }
@@ -288,8 +302,14 @@ export async function loadProductScoreSection(
     householdId: string,
     food: Food,
     viewerUserId: string,
+    scoreSettings: ScoreSettingsStore = liveScoreSettingsStore(),
 ): Promise<ProductScoreSection | null> {
-    if (scoredFoodProduct(food) == null) return null;
+    const viewerSettings = await scoreSettingsForViewer(
+        scoreSettings,
+        householdId,
+        viewerUserId,
+    );
+    if (scoredFoodProduct(food, viewerSettings.weights) == null) return null;
     const viewerProfile = await getProfile(viewerUserId);
     const rawTz = viewerProfile?.timezone;
     const tz = rawTz && validateTz(rawTz) ? rawTz : "UTC";
@@ -305,13 +325,17 @@ export async function loadProductScoreSection(
     );
     const memberRows = await listHouseholdMembers(householdId);
     const rules = liveRulesStore();
+    // Each member's own switches decide what their card reports.
     const members: ProductCheckMember[] = await Promise.all(
         memberRows.map(async (member) => {
-            const [allergens, dislikes] = await Promise.all([
+            const [allergens, dislikes, switches] = await Promise.all([
                 rules.listAllergens(householdId, member.userId),
                 rules.listDislikes(householdId, member.userId),
+                scoreSettings.getMember(householdId, member.userId),
             ]);
             return {
+                warnTraces: switches?.warnTraces ?? true,
+                compareGoals: switches?.compareGoals ?? true,
                 id: member.userId,
                 name: member.displayName,
                 allergens: allergens.map(
@@ -331,7 +355,10 @@ export async function loadProductScoreSection(
                 : { remaining: {} },
     );
     const memberCards = buildProductMemberCards(food, members, noticesByMember);
-    return buildProductScoreSection(food, memberCards);
+    return buildProductScoreSection(food, memberCards, {
+        weights: viewerSettings.weights,
+        preset: viewerSettings.preset,
+    });
 }
 
 /** Fixture helper: build member cards without a database. */

@@ -9,6 +9,8 @@ import * as actualDbHousehold from "../../db/household.js";
 import * as actualDbProfiles from "../../db/profiles.js";
 import * as actualDbRecipes from "../../db/recipes.js";
 import * as actualDbRules from "../../db/rules.js";
+import * as actualDbScoreSettings from "../../db/score-settings.js";
+import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
 import * as actualDbSettings from "../../db/settings.js";
 import * as actualDbStock from "../../db/stock.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
@@ -61,6 +63,7 @@ const realDbHousehold = { ...actualDbHousehold };
 const realDbProfiles = { ...actualDbProfiles };
 const realDbRecipes = { ...actualDbRecipes };
 const realDbRules = { ...actualDbRules };
+const realDbScoreSettings = { ...actualDbScoreSettings };
 const realDbSettings = { ...actualDbSettings };
 const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
@@ -170,6 +173,10 @@ mock.module("../../db/settings.js", () => ({
     ...realDbSettings,
     liveSettingsStore: () => db.settingsStore,
 }));
+mock.module("../../db/score-settings.js", () => ({
+    ...realDbScoreSettings,
+    liveScoreSettingsStore: () => createMemoryScoreSettingsStore(),
+}));
 mock.module("../../db/rules.js", () => ({
     ...realDbRules,
     liveRulesStore: () => db.rulesStore,
@@ -253,6 +260,7 @@ afterAll(() => {
     mock.module("../../db/recipes.js", () => realDbRecipes);
     mock.module("../../db/settings.js", () => realDbSettings);
     mock.module("../../db/rules.js", () => realDbRules);
+    mock.module("../../db/score-settings.js", () => realDbScoreSettings);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);

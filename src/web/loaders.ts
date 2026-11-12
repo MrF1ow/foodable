@@ -35,6 +35,23 @@ import {
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { foodDisplayScore } from "../domain/product-screen.js";
+import {
+    DEFAULT_SCORE_PRESET,
+    SCORE_PRESET_LABELS,
+    type ScoreWeights,
+} from "../domain/product-score.js";
+import {
+    isUsableChoice,
+    scoreSettingsForHousehold,
+    scoreSettingsForViewer,
+} from "../domain/score-settings.js";
+import { ALLERGEN_LABELS } from "../domain/rules.js";
+import {
+    renderSettingsScoreHouseholdV2Page,
+    renderSettingsScoreV2Page,
+    type ScoreFormDraft,
+} from "./pages/v2/settings-score.js";
+import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
@@ -599,6 +616,8 @@ function kitchenGroceryLineMeta(
         memberAllergens: Awaited<ReturnType<typeof groceryAllergenMembers>>;
         storeName: string;
         sectionName: string;
+        /** The viewer's score weights: the badge on the line uses them. */
+        scoreWeights: ScoreWeights;
     },
 ): KitchenGroceriesLineMeta {
     const foodRow = line.foodId
@@ -628,7 +647,9 @@ function kitchenGroceryLineMeta(
         ctx.memberAllergens,
         eff?.allergens ?? null,
     );
-    const productScore = foodRow ? foodDisplayScore(foodRow) : null;
+    const productScore = foodRow
+        ? foodDisplayScore(foodRow, ctx.scoreWeights)
+        : null;
     return {
         plainFoodName,
         isUsual,
@@ -832,10 +853,16 @@ export async function renderGroceryListPage(
         const storeNameById = new Map(
             stores.map((store) => [store.id, store.name]),
         );
+        const { weights: scoreWeights } = await scoreSettingsForViewer(
+            liveScoreSettingsStore(),
+            householdId,
+            viewerUserId,
+        );
         const metaCtx = {
             allFoods,
             catalog,
             memberAllergens,
+            scoreWeights,
         };
         const lineMeta = new Map<string, KitchenGroceriesLineMeta>();
         const enrich = (line: GroceryLineView): GroceryLineView => {
@@ -1207,6 +1234,82 @@ export async function renderSettingsAiV2Route(
             timezone: profile?.timezone?.trim() || "UTC",
             mcpUrl: opts.mcpUrl,
             error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsScoreV2Route(
+    viewerUserId: string,
+    opts: { error?: string; draft?: ScoreFormDraft } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const householdId = gate.viewer.householdId;
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    const [settings, allergens] = await Promise.all([
+        scoreSettingsForViewer(
+            liveScoreSettingsStore(),
+            householdId,
+            viewerUserId,
+        ),
+        liveRulesStore().listAllergens(householdId, viewerUserId),
+    ]);
+    const householdPreset = isUsableChoice(settings.householdDefault)
+        ? settings.householdDefault.preset
+        : DEFAULT_SCORE_PRESET;
+    return {
+        status: 200,
+        html: renderSettingsScoreV2Page({
+            chrome,
+            preset: settings.preset,
+            weights: settings.weights,
+            followsHousehold: settings.member == null,
+            householdPresetLabel: SCORE_PRESET_LABELS[householdPreset],
+            canEditHousehold: canManageHousehold(gate.viewer),
+            warnTraces: settings.warnTraces,
+            compareGoals: settings.compareGoals,
+            allergensText:
+                allergens.length > 0
+                    ? allergens
+                          .map((row) => ALLERGEN_LABELS[row.allergen])
+                          .join(", ")
+                    : "None set",
+            allergensHref: `/settings/household/members/${viewerUserId}`,
+            error: opts.error,
+            draft: opts.draft,
+        }),
+    };
+}
+
+export async function renderSettingsScoreHouseholdV2Route(
+    viewerUserId: string,
+    opts: { error?: string; draft?: ScoreFormDraft } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    // Reading the default's editor is for the people who may change it.
+    if (!canManageHousehold(gate.viewer)) {
+        return { status: 403, html: forbiddenDashboardHtml() };
+    }
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    // The default alone: the viewer's own choice must not stand in for it.
+    const settings = await scoreSettingsForHousehold(
+        liveScoreSettingsStore(),
+        gate.viewer.householdId,
+    );
+    const current = settings.householdDefault;
+    const usable = isUsableChoice(current);
+    return {
+        status: 200,
+        html: renderSettingsScoreHouseholdV2Page({
+            chrome,
+            preset: usable ? current.preset : DEFAULT_SCORE_PRESET,
+            weights: settings.weights,
+            isSet: usable,
+            error: opts.error,
+            draft: opts.draft,
         }),
     };
 }
