@@ -35,6 +35,7 @@ import {
     restockDue,
     restockPlan,
     runRestockCheck,
+    usualsList,
     type RestockCheckDeps,
 } from "./restock.js";
 import type { FridgeItem } from "./fridge.js";
@@ -1045,4 +1046,148 @@ test("grocery page renders Restocked badge via notices component", () => {
         /1 l · <span class="pill[^"]*" data-notice="grocery.restocked">Restocked<\/span>/,
     );
     expect(html).toContain("notice-list grocery-line-notices");
+});
+
+// 2026-06-01 is a Monday (weekday 1).
+const LIST_STORES = [{ id: "store-1", name: "Corner" }];
+
+function listUsuals(
+    listed: ReturnType<typeof newFood>[],
+    opts: { weekday?: number; stores?: { id: string; name: string }[] } = {},
+) {
+    return usualsList({
+        listed,
+        stock: [],
+        stores: opts.stores ?? LIST_STORES,
+        today: TODAY,
+        householdRestockDay: opts.weekday ?? 1,
+    });
+}
+
+test("usualsList takes the product name, amount and store from the usual product", () => {
+    const milk = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Milk",
+        restockSchedule: "weekly",
+    });
+    const brand = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Oat Drink",
+        brand: "Oatly",
+        genericFoodId: milk.id,
+        usualStoreId: "store-1",
+        usualAmount: { amount: 2, unit: "l" },
+    });
+    milk.usualProductId = brand.id;
+    const { rows } = listUsuals([milk, brand]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+        foodId: milk.id,
+        name: "Milk",
+        productName: "Oat Drink (Oatly)",
+        storeId: "store-1",
+        storeName: "Corner",
+        amount: 2,
+        unit: "l",
+        schedule: "weekly",
+    });
+});
+
+test("usualsList leaves the store name null when the store id matches no store", () => {
+    const eggs = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Eggs",
+        restockSchedule: "weekly",
+        usualStoreId: "gone",
+    });
+    const { rows } = listUsuals([eggs]);
+    expect(rows[0]).toMatchObject({
+        storeId: "gone",
+        storeName: null,
+        productName: null,
+        amount: null,
+    });
+});
+
+test("usualsList skips generic, product, archived and non-usual foods", () => {
+    const milk = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Milk",
+        restockSchedule: "weekly",
+    });
+    const product = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Whole Milk",
+        genericFoodId: milk.id,
+        restockSchedule: "weekly",
+    });
+    const plain = newFood({ householdId: HH, kind: "food", name: "Salt" });
+    const archived = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Old",
+        restockSchedule: "weekly",
+    });
+    archived.archivedAt = "2026-01-01T00:00:00.000Z";
+    const { rows } = listUsuals([milk, product, plain, archived]);
+    expect(rows.map((r) => r.name)).toEqual(["Milk"]);
+});
+
+test("usualsList lists a paused usual with due null", () => {
+    const rice = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Rice",
+        restockSchedule: "weekly",
+        restockPaused: true,
+    });
+    const { rows } = listUsuals([rice]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ paused: true, due: null });
+});
+
+test("usualsList puts due usuals first, then sorts by name", () => {
+    const make = (name: string, extra: object = {}) =>
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name,
+            restockSchedule: "weekly",
+            ...extra,
+        });
+    const zucchini = make("Zucchini");
+    const apple = make("Apple", { restockPaused: true });
+    const bread = make("Bread");
+    const butter = make("Butter", { restockPaused: true });
+    const { rows } = listUsuals([apple, zucchini, butter, bread]);
+    expect(rows.map((r) => r.name)).toEqual([
+        "Bread",
+        "Zucchini",
+        "Apple",
+        "Butter",
+    ]);
+    expect(rows.map((r) => r.due?.trigger ?? null)).toEqual([
+        "schedule",
+        "schedule",
+        null,
+        null,
+    ]);
+});
+
+test("usualsList says whether today is the household restock day", () => {
+    const tea = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Tea",
+        restockSchedule: "weekly",
+    });
+    expect(listUsuals([tea], { weekday: 1 }).isRestockDay).toBe(true);
+    const off = listUsuals([tea], { weekday: 3 });
+    expect(off.isRestockDay).toBe(false);
+    expect(off.rows[0]!.due).toBeNull();
 });

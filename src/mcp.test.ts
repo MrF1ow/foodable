@@ -140,6 +140,7 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { LIST_USUALS_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
 import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
 import {
     FOOD_OUTPUT,
@@ -9510,6 +9511,262 @@ describe("rate_product over HTTP", () => {
             } finally {
                 resetFlagsForTests();
             }
+        },
+    );
+});
+
+describe("list_usuals over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    const WEEKDAYS = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    function weekdayOf(iso: string): number {
+        return new Date(`${iso}T00:00:00Z`).getUTCDay();
+    }
+
+    function setRestockWeekday(weekday: number, enabled = true) {
+        db.household!.preferences = {
+            ...db.household!.preferences,
+            restock: {
+                ...DEFAULT_RESTOCK,
+                enabled,
+                weekday: weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+            },
+        };
+    }
+
+    // Four usuals: one on a weekly schedule never bought, one added when low
+    // with nothing in stock, one weekly but paused, one every four weeks and
+    // bought a week ago.
+    async function seedUsuals() {
+        const today = utcTodayFromDate();
+        await db.settingsStore.insertStore({
+            id: "store-1",
+            householdId: "hh-1",
+            name: "Corner",
+            sortOrder: 0,
+        });
+        const plain = (name: string, extra: Partial<Food>) =>
+            newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name,
+                defaultUnit: "each",
+                ...extra,
+            });
+        const milk = plain("Oat milk", {
+            restockSchedule: "weekly",
+            usualStoreId: "store-1",
+            usualAmount: { amount: 2, unit: "each" },
+        });
+        const eggs = plain("Eggs", {
+            restockWhenLow: true,
+            usualAmount: { amount: 12, unit: "each" },
+        });
+        const rice = plain("Rice", {
+            restockSchedule: "weekly",
+            restockPaused: true,
+        });
+        const salt = plain("Salt", {
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 4,
+            lastRestockedOn: addUtcDays(today, -7),
+        });
+        const notUsual = plain("Plain flour", {});
+        for (const food of [milk, eggs, rice, salt, notUsual]) {
+            await db.foodsStore.insertFood(food);
+        }
+        return { today, milk, eggs, rice, salt };
+    }
+
+    type UsualsOut = z.infer<typeof LIST_USUALS_OUTPUT_SCHEMA>;
+
+    test.each(ERAS)(
+        "flag on: each usual says whether it is due and why (%p)",
+        async (era) => {
+            const { today, milk, eggs, rice, salt } = await seedUsuals();
+            setRestockWeekday(weekdayOf(today));
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).toContain("list_usuals");
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                const out: UsualsOut = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.today).toBe(today);
+                expect(out.restock_weekday).toBe(weekdayOf(today));
+                expect(out.restock_weekday_name).toBe(
+                    WEEKDAYS[weekdayOf(today)]!,
+                );
+                expect(out.is_restock_day).toBe(true);
+                // Plain flour has no schedule and no low rule: not a usual.
+                // Due ones come first, then the rest by name.
+                expect(out.usuals.map((u) => u.name)).toEqual([
+                    "Eggs",
+                    "Oat milk",
+                    "Rice",
+                    "Salt",
+                ]);
+                const byId = new Map(out.usuals.map((u) => [u.food_id, u]));
+                const scheduled = byId.get(milk.id)!;
+                expect(scheduled.due?.trigger).toBe("schedule");
+                expect(scheduled.due?.reason).toContain("weekly");
+                expect(scheduled).toMatchObject({
+                    schedule: "weekly",
+                    every_weeks: null,
+                    store_id: "store-1",
+                    store_name: "Corner",
+                    amount: 2,
+                    unit: "each",
+                    paused: false,
+                    restock_when_low: false,
+                });
+                const low = byId.get(eggs.id)!;
+                expect(low.due?.trigger).toBe("low");
+                expect(low).toMatchObject({
+                    schedule: null,
+                    restock_when_low: true,
+                    low_level: 3,
+                    store_id: null,
+                    store_name: null,
+                    amount: 12,
+                });
+                expect(byId.get(rice.id)).toMatchObject({
+                    paused: true,
+                    due: null,
+                });
+                expect(byId.get(salt.id)).toMatchObject({
+                    schedule: "every_n_weeks",
+                    every_weeks: 4,
+                    due: null,
+                });
+                expect(out.restock_enabled).toBe(true);
+                const text = r.content[0]?.text ?? "";
+                expect(text).toContain("Oat milk");
+                expect(text).toContain("add when below 3 each");
+                expect(text).toContain("every 4 weeks");
+                expect(text).not.toContain("Automatic restock is off");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "the text says so when a usual has no low level, no N, or restock is off (%p)",
+        async (era) => {
+            const mk = (name: string, extra: Partial<Food>) =>
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name,
+                    defaultUnit: "each",
+                    ...extra,
+                });
+            // Add-when-low with no usual amount: no level applies.
+            await db.foodsStore.insertFood(
+                mk("Flour", { restockWhenLow: true }),
+            );
+            await db.foodsStore.insertFood(
+                mk("Tea", {
+                    restockSchedule: "every_n_weeks",
+                    restockEveryWeeks: null,
+                }),
+            );
+            setRestockWeekday(0, false);
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.restock_enabled).toBe(false);
+                const text = r.content[0]?.text ?? "";
+                expect(text).toContain("add when low (no level set)");
+                expect(text).not.toContain("a quarter of the usual");
+                expect(text).toContain("every few weeks (not set)");
+                expect(text).not.toContain("null");
+                expect(text).toContain("Automatic restock is off");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "off the restock day only the low usual is due (%p)",
+        async (era) => {
+            const { today, milk, eggs } = await seedUsuals();
+            setRestockWeekday((weekdayOf(today) + 1) % 7);
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.is_restock_day).toBe(false);
+                const byId = new Map(out.usuals.map((u) => [u.food_id, u]));
+                expect(byId.get(milk.id)?.due).toBeNull();
+                expect(byId.get(eggs.id)?.due?.trigger).toBe("low");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "no usuals still returns structuredContent (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.usuals).toEqual([]);
+                expect(r.content[0]?.text).toMatch(/no usuals/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits list_usuals from tools/list and refuses calls (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).not.toContain("list_usuals");
+                await expect(
+                    client.callTool({ name: "list_usuals", arguments: {} }),
+                ).rejects.toThrow(/not found/i);
+            });
         },
     );
 });

@@ -44,6 +44,7 @@
     "delete_grocery_line",
     "clear_checked_grocery_lines",
     "put_away_grocery_lines",
+    "list_usuals",
     "list_recipes",
     "get_recipe",
     "create_recipe",

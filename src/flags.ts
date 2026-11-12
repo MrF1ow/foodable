@@ -117,6 +117,15 @@ export const FLAGS = {
         removeWhen:
             "rate_product has been on for everyone for a release with no rollback.",
     },
+    "mcp-list-usuals": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The list_usuals MCP tool.",
+        removeWhen:
+            "list_usuals has been on for everyone for a release with no rollback.",
+    },
     "mcp-household-digest": {
         type: "bool",
         kind: "temporary",

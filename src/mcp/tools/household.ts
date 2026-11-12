@@ -23,16 +23,7 @@ import {
     withAnalytics,
 } from "../../analytics.js";
 import type { ToolContext } from "../shared.js";
-
-const RESTOCK_DAY_NAMES = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-];
+import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 
 export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
     const {
@@ -181,7 +172,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                         loaded,
                     );
                     const restockLine = config.restock_enabled
-                        ? `Restock: on, ${RESTOCK_DAY_NAMES[config.restock_weekday] ?? config.restock_weekday} at ${config.restock_time} (${config.effective_timezone})`
+                        ? `Restock: on, ${WEEKDAY_NAMES[config.restock_weekday] ?? config.restock_weekday} at ${config.restock_time} (${config.effective_timezone})`
                         : "Restock: off";
                     return {
                         content: [

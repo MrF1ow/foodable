@@ -602,6 +602,13 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "list_usuals",
+        category: "grocery",
+        badges: ["view"],
+        params: [],
+        hasPhotoHint: false,
+    },
+    {
         name: "list_recipes",
         category: "recipes",
         badges: ["view"],
@@ -922,6 +929,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "delete_grocery_line",
     "clear_checked_grocery_lines",
     "put_away_grocery_lines",
+    "list_usuals",
     "list_recipes",
     "get_recipe",
     "create_recipe",
