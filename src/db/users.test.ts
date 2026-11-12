@@ -30,6 +30,7 @@ const EXPECTED_USER_FKS: {
     { table: "nutrition_goal_days", column: "user_id", deltype: "c" },
     { table: "nutrition_goals", column: "user_id", deltype: "c" },
     { table: "person_rules", column: "user_id", deltype: "c" },
+    { table: "recipe_favourites", column: "user_id", deltype: "c" },
     { table: "profiles", column: "user_id", deltype: "c" },
     { table: "water_log", column: "user_id", deltype: "c" },
     { table: "weight_log", column: "user_id", deltype: "c" },

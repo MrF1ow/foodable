@@ -26,6 +26,10 @@ export type StoreContractCtx = {
     setAllergenCreatedAt?: (id: string, createdAt: string) => Promise<void>;
     setDislikeCreatedAt?: (id: string, createdAt: string) => Promise<void>;
     setFridgeItemCreatedAt?: (id: string, createdAt: string) => Promise<void>;
+    /** Another member of this household. Live contexts add a user and a membership. */
+    ensureMember?: () => Promise<string>;
+    /** Runs `fn` as that member, the way a request for them would. Live contexts only. */
+    asMember?: <T>(userId: string, fn: () => Promise<T>) => Promise<T>;
     sql?: import("bun").SQL;
 };
 

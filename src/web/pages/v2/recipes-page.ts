@@ -19,6 +19,7 @@ import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc } from "../../components/v2/html.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { renderAppShell } from "../../shell.js";
+import { favouriteStarForm } from "./recipes-favourite.js";
 import {
     renderCookSheet,
     renderCookTrigger,
@@ -53,6 +54,8 @@ export type RecipeDetailV2View = {
     members: RecipeDetailV2Member[];
     viewerId: string;
     portionCount: number;
+    /** The viewer has starred this recipe. Absent means not. */
+    favourite?: boolean;
     /** The cook sheet. Absent when the recipe cannot be cooked (unverified). */
     cook?: CookSheetView;
     error?: string;
@@ -318,6 +321,13 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
             : "";
     return `<div class="fd-recipe-detail">
 ${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" data-turbo="false" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
+${favouriteStarForm({
+    recipeId: view.recipe.id,
+    recipeName: view.recipe.name,
+    on: view.favourite === true,
+    back: { kind: "recipe" },
+    className: "fd-recipe-star",
+})}
 <header class="fd-recipe-header">
 <h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}

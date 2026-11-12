@@ -99,6 +99,8 @@ insert into public.recipe_imports (recipe_id, household_id, source_kind)
     values ('${RECIPE_B}', '${HH_B}', 'text');
 insert into public.recipe_portions (recipe_id, household_id, user_id, portion_count)
     values ('${RECIPE_B}', '${HH_B}', '${USER_B}', 1);
+insert into public.recipe_favourites (household_id, user_id, recipe_id)
+    values ('${HH_B}', '${USER_B}', '${RECIPE_B}');
 insert into public.stock_movements (household_id, food_id, delta, unit, reason)
     values ('${HH_B}', '${FOOD_B}', 6, 'each', 'purchase');
 insert into public.member_allergens (household_id, user_id, allergen)

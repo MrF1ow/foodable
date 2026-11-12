@@ -1826,9 +1826,13 @@ export async function renderRecipesListPage(
             };
         });
         const flags = recipeFilters(rows, stock, foodsById);
+        const favouriteIds = new Set(
+            await liveRecipesStore().listFavourites(householdId, viewerUserId),
+        );
         const cards = rows.map((row, index) => ({
             recipe: row.recipe,
             flags: flags[index]!,
+            favourite: favouriteIds.has(row.recipe.id),
             macrosPerPortion: row.macrosPerPortion,
             missingNames: row.ingredients
                 .filter((ingredient) => {
@@ -2201,6 +2205,12 @@ export async function renderRecipeDetailRoute(
                 })),
                 viewerId: viewerUserId,
                 portionCount: view.portionCount,
+                favourite: (
+                    await liveRecipesStore().listFavourites(
+                        householdId,
+                        viewerUserId,
+                    )
+                ).includes(recipeId),
                 cook,
                 error: opts.error,
             }),
