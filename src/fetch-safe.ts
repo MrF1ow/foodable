@@ -767,6 +767,7 @@ export function createSafeFetcher(deps?: {
             maxBytes: number;
             timeoutMs: number;
             allowedHosts?: readonly string[];
+            redirectAllowed?: (next: URL) => boolean;
         },
     ): Promise<FetchOutcome> {
         // Known gap: the address is checked before the connection and fetch
@@ -903,6 +904,14 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
+                    if (opts.redirectAllowed && !opts.redirectAllowed(next)) {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.href,
+                        };
+                    }
                     if (
                         opts.allowedHosts?.length &&
                         !hostnameAllowedForList(
@@ -1031,6 +1040,12 @@ export function createSafeFetcher(deps?: {
                 maxBytes?: number;
                 timeoutMs?: number;
                 allowedHosts?: readonly string[];
+                /**
+                 * Vetoes a redirect hop: called with the next URL once it has
+                 * passed the address checks, and before it is resolved or
+                 * requested. Returning false ends the fetch as `invalid_link`.
+                 */
+                redirectAllowed?: (next: URL) => boolean;
             },
         ): Promise<FetchOutcome> {
             try {
@@ -1042,6 +1057,7 @@ export function createSafeFetcher(deps?: {
                     maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
                     timeoutMs: opts.timeoutMs ?? defaultTimeoutMs,
                     allowedHosts: opts.allowedHosts,
+                    redirectAllowed: opts.redirectAllowed,
                 });
             } catch {
                 return Promise.resolve({

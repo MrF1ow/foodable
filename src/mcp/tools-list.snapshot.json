@@ -76,5 +76,6 @@
     "get_household_digest",
     "create_share_link",
     "list_share_links",
-    "revoke_share_link"
+    "revoke_share_link",
+    "import_shared_recipe"
 ]

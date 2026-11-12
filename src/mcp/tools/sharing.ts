@@ -5,6 +5,10 @@ import { listHouseholdMembers } from "../../db/household.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveShareLinkStore } from "../../db/share-links.js";
 import {
+    SHARED_RECIPE_ERROR_CODES,
+    type SharedRecipeErrorCode,
+} from "../../domain/sharing-source.js";
+import {
     createShareLink,
     MAX_SHARE_EXPIRY_DAYS,
     MIN_SHARE_EXPIRY_DAYS,
@@ -15,6 +19,10 @@ import {
 } from "../../domain/sharing.js";
 import { gatedTool } from "../gated.js";
 import type { ToolContext } from "../shared.js";
+import {
+    importSharedRecipeForHousehold,
+    sharedImportFailure,
+} from "./sharing-import.js";
 
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,11 +57,63 @@ const REVOKE_OUTPUT_SCHEMA = z.object({
     revoked_at: z.string(),
 });
 
+// A refusal is a result (`status: "failed"`), not a protocol error: the
+// caller reads why from `error_code` and `message`, and the shape is the same
+// on every path. Nullable fields are required in the emitted schema, so every
+// result is built from a complete literal.
+const IMPORT_OUTPUT_SCHEMA = z.object({
+    status: z.enum(["imported", "failed"]),
+    recipe_id: z.string().nullable(),
+    recipe_name: z.string().nullable(),
+    renamed_from: z.string().nullable(),
+    matched: z.number(),
+    created: z.number(),
+    ingredients: z.array(
+        z.object({
+            name: z.string(),
+            food_id: z.string(),
+            status: z.enum(["matched", "created"]),
+        }),
+    ),
+    error_code: z
+        .enum([...SHARED_RECIPE_ERROR_CODES, "invalid_input"])
+        .nullable(),
+    message: z.string(),
+});
+
 export const SHARE_LINK_OUTPUT_SCHEMAS = {
     create: CREATE_OUTPUT_SCHEMA,
     list: LIST_OUTPUT_SCHEMA,
     revoke: REVOKE_OUTPUT_SCHEMA,
+    import: IMPORT_OUTPUT_SCHEMA,
 };
+
+type ImportOutput = z.infer<typeof IMPORT_OUTPUT_SCHEMA>;
+
+function importFailed(
+    code: SharedRecipeErrorCode | "invalid_input",
+    message: string,
+) {
+    const structuredContent: ImportOutput = {
+        status: "failed",
+        recipe_id: null,
+        recipe_name: null,
+        renamed_from: null,
+        matched: 0,
+        created: 0,
+        ingredients: [],
+        error_code: code,
+        message,
+    };
+    return {
+        content: [{ type: "text" as const, text: message }],
+        structuredContent,
+    };
+}
+
+function plural(n: number, one: string, many: string): string {
+    return `${n} ${n === 1 ? one : many}`;
+}
 
 /** The public address a visitor opens: `<origin>/s/<token>`. */
 export function shareLinkUrl(origin: string, token: string): string {
@@ -66,7 +126,7 @@ const KIND_LABEL: Record<ShareLink["kind"], string> = {
 };
 
 export function registerSharingTools(server: McpServer, ctx: ToolContext) {
-    const { auth, baseUrl, callerHouseholdId, analytics } = ctx;
+    const { auth, baseUrl, callerHouseholdId, callerActor, analytics } = ctx;
 
     gatedTool(
         server,
@@ -299,6 +359,114 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                     };
                 },
                 analytics,
+            ),
+    );
+
+    gatedTool(
+        server,
+        ctx,
+        "mcp-share-links",
+        "import_shared_recipe",
+        {
+            title: "Import Shared Recipe",
+            description:
+                'Import a recipe that another Foodable household shared, as a new copy in this household (later edits on either side do not sync). Give either url (the share link, https://…/s/…, which Foodable fetches) or document (the recipe\'s JSON, pasted). Each ingredient is matched by name to a food the household already has, which is never changed, or created with the nutrition the document ships; a value the document leaves out stays unknown, so the recipe can show as incomplete until it is filled in. A recipe whose name is already taken is saved as "Name (2)". Returns status imported with the new recipe id, its name and how many ingredients matched or were created, or status failed with an error_code and a message saying what to fix; nothing is written when it fails.',
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: true,
+            },
+            inputSchema: z.object({
+                url: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "A share link another Foodable made, https://…/s/<token>. Not both url and document.",
+                    ),
+                document: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "The shared recipe's JSON, as text. Not both url and document.",
+                    ),
+            }),
+            outputSchema: IMPORT_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "import_shared_recipe",
+                async () => {
+                    const url = args.url?.trim() ?? "";
+                    const document = args.document ?? "";
+                    const hasUrl = url !== "";
+                    const hasDocument = document.trim() !== "";
+                    if (hasUrl === hasDocument) {
+                        return importFailed(
+                            "invalid_input",
+                            hasUrl
+                                ? "Give either a url or a document, not both."
+                                : "Give a url (a share link) or a document (the recipe's JSON).",
+                        );
+                    }
+                    const actor = await callerActor();
+                    let result;
+                    try {
+                        result = await importSharedRecipeForHousehold({
+                            householdId: actor.householdId,
+                            creatorId: actor.userId,
+                            input: hasUrl ? url : document,
+                        });
+                    } catch (err) {
+                        const failure = sharedImportFailure(err);
+                        if (!failure) throw err;
+                        return importFailed(failure.code, failure.message);
+                    }
+                    const structuredContent: ImportOutput = {
+                        status: "imported",
+                        recipe_id: result.recipe.id,
+                        recipe_name: result.recipe.name,
+                        renamed_from: result.renamedFrom,
+                        matched: result.matched,
+                        created: result.created,
+                        ingredients: result.ingredients.map((line) => ({
+                            name: line.name,
+                            food_id: line.foodId,
+                            status: line.status,
+                        })),
+                        error_code: null,
+                        message: "",
+                    };
+                    const renamed =
+                        result.renamedFrom === null
+                            ? ""
+                            : ` It was saved as "${result.recipe.name}" because the household already has "${result.renamedFrom}".`;
+                    structuredContent.message = `Imported "${result.recipe.name}" as recipe ${result.recipe.id}: ${plural(result.matched, "ingredient", "ingredients")} matched foods the household already had, ${plural(result.created, "ingredient", "ingredients")} added as new foods.${renamed}`;
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: structuredContent.message,
+                            },
+                        ],
+                        structuredContent,
+                    };
+                },
+                analytics,
+                undefined,
+                {
+                    outcome: (r) => {
+                        const out = (
+                            r as { structuredContent?: Partial<ImportOutput> }
+                        ).structuredContent;
+                        return out?.status === "imported"
+                            ? { success: true }
+                            : {
+                                  success: false,
+                                  errorCategory: out?.error_code ?? "unknown",
+                              };
+                    },
+                },
             ),
     );
 }
