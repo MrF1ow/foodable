@@ -23,6 +23,8 @@ const food = {
     defaultUnit: "each",
     gramsPerEach: 50,
     gramsPerMl: null,
+    serving: null,
+    nutritionBasis: null,
     calories: 143,
     proteinG: 13,
     carbsG: 1,

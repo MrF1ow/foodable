@@ -1043,6 +1043,8 @@ function food(
         defaultUnit: "g",
         gramsPerEach: null,
         gramsPerMl: null,
+        serving: null,
+        nutritionBasis: null,
         calories,
         proteinG: null,
         carbsG: null,

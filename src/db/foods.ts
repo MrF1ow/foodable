@@ -27,7 +27,7 @@ const HOUSEHOLDS = "households";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, restock_schedule, restock_every_weeks, restock_paused, restock_when_low, restock_low_level, last_restocked_on::text as last_restocked_on, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, serving_label, serving_amount, serving_unit, nutrition_basis, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, restock_schedule, restock_every_weeks, restock_paused, restock_when_low, restock_low_level, last_restocked_on::text as last_restocked_on, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",
@@ -305,15 +305,40 @@ export function liveFoodsStore(): FoodsStore {
             foodId,
             patch: FoodOffNutritionPatch,
         ) {
-            const sat =
-                patch.saturatedFatG != null && patch.saturatedFatG >= 0
-                    ? patch.saturatedFatG
-                    : null;
+            const nonNegative = (value: number | undefined): number | null =>
+                value != null && value >= 0 ? value : null;
+            const sat = nonNegative(patch.saturatedFatG);
+            const cal = nonNegative(patch.calories);
+            const protein = nonNegative(patch.proteinG);
+            const carbs = nonNegative(patch.carbsG);
+            const fat = nonNegative(patch.fatG);
+            const fiber = nonNegative(patch.fiberG);
+            const sugar = nonNegative(patch.sugarG);
+            const alcohol = nonNegative(patch.alcoholG);
+            const serving = patch.serving ?? null;
+            const basis = patch.nutritionBasis ?? null;
             const hasLevels = patch.offNutrientLevels != null;
-            if (sat == null && !hasLevels) return null;
+            if (
+                sat == null &&
+                cal == null &&
+                protein == null &&
+                carbs == null &&
+                fat == null &&
+                fiber == null &&
+                sugar == null &&
+                alcohol == null &&
+                serving == null &&
+                basis == null &&
+                !hasLevels
+            ) {
+                return null;
+            }
             const levelsJson = hasLevels
                 ? JSON.stringify(patch.offNutrientLevels)
                 : null;
+            const servingLabel = serving?.label ?? null;
+            const servingAmount = serving?.amount ?? null;
+            const servingUnit = serving?.unit ?? null;
             return run(async (tx) => {
                 try {
                     const data = await maybeOne<Record<string, unknown>>(
@@ -321,6 +346,17 @@ export function liveFoodsStore(): FoodsStore {
                         tx`
                             update ${tx.unsafe(FOODS)}
                             set saturated_fat_g = coalesce(saturated_fat_g, ${sat}::numeric),
+                                calories = coalesce(calories, ${cal}::numeric),
+                                protein_g = coalesce(protein_g, ${protein}::numeric),
+                                carbs_g = coalesce(carbs_g, ${carbs}::numeric),
+                                fat_g = coalesce(fat_g, ${fat}::numeric),
+                                fiber_g = coalesce(fiber_g, ${fiber}::numeric),
+                                sugar_g = coalesce(sugar_g, ${sugar}::numeric),
+                                alcohol_g = coalesce(alcohol_g, ${alcohol}::numeric),
+                                nutrition_basis = coalesce(nutrition_basis, ${basis}::text),
+                                serving_label = case when serving_amount is null then ${servingLabel}::text else serving_label end,
+                                serving_unit = case when serving_amount is null then ${servingUnit}::text else serving_unit end,
+                                serving_amount = coalesce(serving_amount, ${servingAmount}::numeric),
                                 off_nutrient_levels = coalesce(${levelsJson}::jsonb, off_nutrient_levels),
                                 updated_at = now()
                             where household_id = ${householdId}
@@ -328,6 +364,15 @@ export function liveFoodsStore(): FoodsStore {
                               and archived_at is null
                               and (
                                   (${sat}::numeric is not null and saturated_fat_g is null)
+                                  or (${cal}::numeric is not null and calories is null)
+                                  or (${protein}::numeric is not null and protein_g is null)
+                                  or (${carbs}::numeric is not null and carbs_g is null)
+                                  or (${fat}::numeric is not null and fat_g is null)
+                                  or (${fiber}::numeric is not null and fiber_g is null)
+                                  or (${sugar}::numeric is not null and sugar_g is null)
+                                  or (${alcohol}::numeric is not null and alcohol_g is null)
+                                  or (${basis}::text is not null and nutrition_basis is null)
+                                  or (${servingAmount}::numeric is not null and serving_amount is null)
                                   or ${levelsJson}::jsonb is not null
                               )
                             returning ${tx.unsafe(FOOD_COLS)}

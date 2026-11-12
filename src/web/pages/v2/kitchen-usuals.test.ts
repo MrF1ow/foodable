@@ -44,6 +44,8 @@ function food(overrides: Partial<Food> & Pick<Food, "id" | "name">): Food {
         defaultUnit: "each",
         gramsPerEach: null,
         gramsPerMl: null,
+        serving: null,
+        nutritionBasis: null,
         calories: null,
         proteinG: null,
         carbsG: null,

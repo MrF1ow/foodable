@@ -799,4 +799,40 @@ describe("duplicatePairs", () => {
             '"all-purpose flour" is already another name for "All purpose flour"',
         );
     });
+
+    test("equal numbers per a different basis are a conflict, not a merge", async () => {
+        const store = createMemoryFoodsStore();
+        const a = await insert(store, {
+            ...newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Half and half",
+                calories: 133.33,
+                nutritionBasis: "100ml",
+            }),
+            createdAt: "2026-01-02T00:00:00.000Z",
+            updatedAt: "2026-01-02T00:00:00.000Z",
+        });
+        const b = await insert(store, {
+            ...newFood({
+                householdId: HH,
+                kind: "food",
+                name: "half and half",
+                calories: 133.33,
+            }),
+            createdAt: "2026-03-04T00:00:00.000Z",
+            updatedAt: "2026-03-04T00:00:00.000Z",
+        });
+        const foods = await store.listFoods(HH);
+        const { merges, skipped } = duplicatePairs(
+            foods,
+            refMap([
+                { id: a.id, count: 1 },
+                { id: b.id, count: 1 },
+            ]),
+        );
+        expect(merges).toEqual([]);
+        expect(skipped).toHaveLength(1);
+        expect(skipped[0]!.reason).toMatch(/basis differs/);
+    });
 });

@@ -209,6 +209,10 @@ async function write(
                 saturatedFatG: n.saturated_fat_g,
                 alcoholG: n.alcohol_g,
                 caffeineMg: n.caffeine_mg,
+                // The basis only matters beside shipped numbers.
+                nutritionBasis: hasShippedNutrition(n)
+                    ? (n.nutrition_basis ?? null)
+                    : null,
                 gramsPerMl: n.grams_per_ml,
                 gramsPerEach: n.grams_per_each,
                 // The document carries numbers someone entered; it is neither
