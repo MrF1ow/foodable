@@ -100,7 +100,12 @@ async function flushPromises(times = 16) {
 
 async function loadScannerModule(
     overrides: Record<string, unknown> = {},
-    opts: { scriptStubs?: ScriptStub[] } = {},
+    opts: {
+        scriptStubs?: ScriptStub[];
+        /** Load scanner.js as a browser without the API sees it: no
+         *  `BarcodeDetector` binding at all (not even undefined). */
+        noBarcodeDetectorGlobal?: boolean;
+    } = {},
 ) {
     const tracks: { stopped: boolean; stop: () => void }[] = [];
     const getUserMediaQueue: Array<(stream: unknown) => void> = [];
@@ -215,7 +220,7 @@ async function loadScannerModule(
         return { getTracks: () => [track], getVideoTracks: () => [track] };
     };
     const src = readFileSync(join(import.meta.dir, "scanner.js"), "utf8");
-    new Function(
+    const names = [
         "window",
         "document",
         "navigator",
@@ -224,8 +229,8 @@ async function loadScannerModule(
         "cancelAnimationFrame",
         "createImageBitmap",
         "HTMLMediaElement",
-        src,
-    )(
+    ];
+    const values: unknown[] = [
         window,
         document,
         window.navigator,
@@ -234,7 +239,12 @@ async function loadScannerModule(
         window.cancelAnimationFrame,
         window.createImageBitmap,
         window.HTMLMediaElement,
-    );
+    ];
+    if (opts.noBarcodeDetectorGlobal) {
+        names.splice(3, 1);
+        values.splice(3, 1);
+    }
+    new Function(...names, src)(...values);
     const resolveGetUserMedia = () => {
         getUserMediaQueue.shift()?.(makeStream());
     };
@@ -424,5 +434,70 @@ describe("decoder file paths", () => {
         ]) {
             expect(sameOriginPath(bad, "/fallback.js")).toBe("/fallback.js");
         }
+    });
+});
+
+describe("scanner without a BarcodeDetector global (iOS Safari)", () => {
+    test("loads the wasm decoder, reads a code and navigates to it", async () => {
+        const scripts: ScriptStub[] = [];
+        let rafBudget = 8;
+        const ctx = await loadScannerModule(
+            {
+                BarcodeDetector: undefined,
+                // The real picker, as the bundle ships it.
+                FoodableScannerPick: undefined,
+                requestAnimationFrame: (fn: () => void) => {
+                    if (rafBudget-- <= 0) return 0;
+                    queueMicrotask(fn);
+                    return 1;
+                },
+            },
+            { scriptStubs: scripts, noBarcodeDetectorGlobal: true },
+        );
+        delete (ctx.window as Record<string, unknown>).BarcodeDetector;
+        // A frame to draw: video size and a 2d canvas context.
+        Object.assign(ctx.dialog.video, { videoWidth: 640, videoHeight: 480 });
+        const proto = FakeEl.prototype as unknown as Record<string, unknown>;
+        proto.getContext = () => ({
+            drawImage: () => {},
+            getImageData: () => ({ width: 640, height: 480 }),
+        });
+        const errors: unknown[] = [];
+        const onRejection = (e: unknown) => errors.push(e);
+        process.on("unhandledRejection", onRejection);
+        try {
+            ctx.dialog.open = true;
+            ctx.dialog.fire("toggle", { newState: "open" });
+            ctx.resolveGetUserMedia();
+            await flushPromises();
+            // Start-up got past the native-format probe and asked for the decoder.
+            expect(scripts.length).toBe(1);
+            (ctx.window as Record<string, unknown>).FoodableScannerZxing = {
+                configureScannerWasm: () => {},
+                decodeBarcodeImageData: async () => "4006381333931",
+            };
+            scripts[0]?._onload?.();
+            await flushPromises(64);
+        } finally {
+            process.off("unhandledRejection", onRejection);
+            delete proto.getContext;
+        }
+        expect(errors).toEqual([]);
+        expect(ctx.assigns.some((u) => u.includes("4006381333931"))).toBe(true);
+    });
+
+    test("closing detaches the stream from the video, so a reopen starts clean", async () => {
+        const ctx = await loadScannerModule(
+            {},
+            { noBarcodeDetectorGlobal: true },
+        );
+        const video = ctx.dialog.video as unknown as { srcObject: unknown };
+        ctx.dialog.fire("toggle", { newState: "open" });
+        ctx.resolveGetUserMedia();
+        await flushPromises();
+        expect(video.srcObject).toBeTruthy();
+        ctx.dialog.close();
+        expect(video.srcObject).toBeNull();
+        expect(ctx.tracks.every((t) => t.stopped)).toBe(true);
     });
 });

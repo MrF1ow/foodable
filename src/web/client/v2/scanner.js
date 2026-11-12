@@ -48,10 +48,17 @@ function goBarcode(code) {
     window.location.assign(barcodeUrl(digits));
 }
 
+// Off window: a bare `BarcodeDetector?.x` throws where it is undeclared (iOS).
+function nativeDetectorClass() {
+    const ctor = window.BarcodeDetector;
+    return typeof ctor === "function" ? ctor : null;
+}
+
 async function supportedNativeFormats() {
-    if (typeof BarcodeDetector?.getSupportedFormats !== "function") return [];
+    const ctor = nativeDetectorClass();
+    if (typeof ctor?.getSupportedFormats !== "function") return [];
     try {
-        return await BarcodeDetector.getSupportedFormats();
+        return await ctor.getSupportedFormats();
     } catch (_) {
         return [];
     }
@@ -133,21 +140,29 @@ function discardSessionAttempt(session, stream) {
     }
 }
 
+// iOS shows black if a <video> holding an ended stream gets a new one.
+function detachVideo(video) {
+    if (!video) return;
+    video.pause?.();
+    video.srcObject = null;
+}
+
 function stopSession() {
     sessionGeneration += 1;
     if (startupStream) {
         stopTracks(startupStream);
         startupStream = null;
+        detachVideo(scannerDialog()?.querySelector(".fd-scanner-video"));
     }
     const session = activeSession;
     activeSession = null;
     if (!session) return;
     if (session.raf) cancelAnimationFrame(session.raf);
-    session.video?.pause();
     turnTorchOff(session);
     const torchBtn = session.dialog?.querySelector("[data-fd-scanner-torch]");
     torchBtn?.setAttribute("aria-pressed", "false");
     stopTracks(session.stream);
+    detachVideo(session.video);
 }
 
 function setError(dialog, message) {
@@ -208,7 +223,7 @@ function showTypePanel(dialog, on) {
         if (help) help.hidden = false;
         if (camera && !dialog.classList.contains("fd-scanner--type-only")) {
             camera.hidden = false;
-            startCamera(dialog);
+            startScanner(dialog);
         }
     }
 }
@@ -273,6 +288,15 @@ function loopDecode(dialog, session) {
 
 function startupStillValid(generation) {
     return sessionGeneration === generation;
+}
+
+// Never fail silently: an error shows the typing panel.
+function startScanner(dialog) {
+    startCamera(dialog).catch(() => {
+        stopSession();
+        setError(dialog, "Scanner could not start. Type the number instead.");
+        showTypePanel(dialog, true);
+    });
 }
 
 async function startCamera(dialog) {
@@ -367,9 +391,10 @@ async function startCamera(dialog) {
     }
     activeSession = session;
     startupStream = null;
-    if (pick === "native" && typeof BarcodeDetector === "function") {
+    const Detector = nativeDetectorClass();
+    if (pick === "native" && Detector) {
         try {
-            session.detector = new BarcodeDetector({
+            session.detector = new Detector({
                 formats: NATIVE_FORMATS.filter((f) => formats.includes(f)),
             });
         } catch (_) {
@@ -431,7 +456,7 @@ function bindScannerDialog(dialog) {
                 showTypePanel(dialog, true);
             } else {
                 resetScannerPanels(dialog);
-                startCamera(dialog);
+                startScanner(dialog);
             }
         } else {
             stopSession();
@@ -498,7 +523,7 @@ function initScanner() {
             resetScannerPanels(dialog);
         } else {
             resetScannerPanels(dialog);
-            startCamera(dialog);
+            startScanner(dialog);
         }
     }
 }
