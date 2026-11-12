@@ -69,7 +69,7 @@ ${field({
     id: "fd-scanner-manual",
     label: "Barcode number",
     control:
-        '<input class="fd-scanner-type-input" id="fd-scanner-manual" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="go" placeholder="EAN or UPC digits" />',
+        '<input class="fd-scanner-type-input" id="fd-scanner-manual" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="go" placeholder="Barcode number" />',
 }).toString()}
 <button type="button" class="fd-btn fd-btn--primary fd-scanner-type-submit" data-fd-scanner-submit>Look up</button>
 <button type="button" class="fd-scanner-back" data-fd-scanner-back-type>Back to camera</button>

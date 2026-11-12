@@ -107,6 +107,12 @@ describe("settings goals v2 form", () => {
         expect(html).toContain("2,200 kcal");
         expect(html).toContain("2 L");
         expect(html).toContain("fd-settings-goals-dl");
+        // Calories, water and the limits carry the frame's row icons; the
+        // macros keep their dots.
+        expect(html).toMatch(
+            /<dt><span class="fd-settings-goals-icon"><svg[^>]*>.*?<\/svg><\/span>Water<\/dt>/,
+        );
+        expect(html).toContain('<dt><span class="fd-dot fd-dot--protein"');
         // The pill opens the sheet that holds the form; Save is in the sheet.
         expect(html).toMatch(
             /<button[^>]*class="fd-settings-goals-edit"[^>]*commandfor="fd-goals-edit"[^>]*>Edit goals<\/button>/,

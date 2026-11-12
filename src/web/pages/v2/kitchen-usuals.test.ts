@@ -28,6 +28,7 @@ import {
     usualRestockParts,
     usualRestockView,
     usualScheduleLabel,
+    usualTableCells,
     type KitchenUsualsRowMeta,
     type UsualRestockView,
 } from "./kitchen-usuals.js";
@@ -590,5 +591,51 @@ describe("edit-usual sheet restock controls", () => {
                 `id="${usualRestockSheetId("eggs")}"[^>]*data-sheet-open-on-load`,
             ),
         );
+    });
+});
+
+describe("usualTableCells", () => {
+    const meta: KitchenUsualsRowMeta = {
+        productLabel: "Vital Farms large",
+        storeId: "s",
+        storeName: "Costco",
+        amountLabel: "24",
+        onList: false,
+        lowNow: true,
+        restock: {
+            schedule: "weekly",
+            everyWeeks: null,
+            paused: false,
+            whenLow: false,
+            lowLevel: null,
+            effectiveLowLevel: null,
+            unit: null,
+        },
+    };
+
+    test("the desktop row has product, store, amount and restock cells", () => {
+        const html = usualTableCells({ ...meta, lowNow: false });
+        expect(html).toContain(
+            '<span class="fd-usual-cell fd-usual-cell--product">Vital Farms large</span>',
+        );
+        expect(html).toContain(
+            '<span class="fd-usual-cell fd-usual-cell--store">Costco</span>',
+        );
+        expect(html).toContain(
+            '<span class="fd-usual-cell fd-usual-cell--amount">24</span>',
+        );
+        expect(html).toContain("<span>Every week</span>");
+    });
+
+    test("low now tones the whole restock cell, as the frame does", () => {
+        expect(usualTableCells(meta)).toContain(
+            '<span class="fd-usual-cell fd-usual-cell--restock fd-tone fd-tone--warn">Every week · low now</span>',
+        );
+    });
+
+    test("any brand reads muted", () => {
+        expect(
+            usualTableCells({ ...meta, productLabel: "Any brand" }),
+        ).toContain("fd-usual-cell--muted");
     });
 });

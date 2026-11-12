@@ -821,6 +821,14 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     line-height: 17px;
 }
 
+/* The × keeps a tall tap area without growing the row past the frame's
+   41px (FigCraft 41837 Needs attention): the padding is given back. */
+.fd-today-rail-row .fd-today-rail-row__dismiss {
+    min-height: 0;
+    margin: -12px 0;
+    padding: 12px 0;
+}
+
 .fd-today-weight__chart {
     display: block;
     width: 100%;

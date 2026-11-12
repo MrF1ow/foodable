@@ -579,6 +579,7 @@
 
 .fd-recipe-actions {
     display: flex;
+    gap: var(--fd-s-10);
     margin: 0;
 }
 
@@ -1122,7 +1123,7 @@
     justify-content: center;
     gap: var(--space-gap);
     min-height: 52px;
-    margin: 0 0 0 var(--fd-s-6);
+    margin: 0;
     padding: 0 18px;
     border: 0;
     border-radius: var(--radius-pill);
@@ -1314,10 +1315,13 @@
         display: none;
     }
 
-    .fd-recipes-search-input--desk {
+    /* The field is the frame's 46px box (FigCraft 57474); the input inside
+       drops the shared 44px tap height, which its padding would double. */
+    .fd-recipes-search-input.fd-recipes-search-input--desk {
         display: block;
         flex: 1 1 auto;
         min-width: 0;
+        min-height: 0;
     }
 
     .fd-recipes-card__kcal {

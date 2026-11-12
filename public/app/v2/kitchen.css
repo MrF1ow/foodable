@@ -954,6 +954,13 @@ button.fd-kitchen-sheet-row {
     display: none;
 }
 
+/* Desktop table cells and column titles (FigCraft 48217); the phone row
+   shows the product as meta and the rest on its sub-line instead. */
+.fd-kitchen-usual-thead,
+.fd-usual-cell {
+    display: none;
+}
+
 @media (min-width: 1024px) {
     .fd-kitchen-fridge-page {
         max-width: none;
@@ -1183,5 +1190,82 @@ button.fd-kitchen-sheet-row {
 
     .fd-kitchen-usual-title.fd-kitchen-fridge-title--phone {
         display: none;
+    }
+
+    /* Usuals as a table in one panel (FigCraft 48217). */
+    .fd-kitchen-usuals-page .fd-section-head {
+        display: none;
+    }
+
+    .fd-kitchen-usual-table {
+        padding: var(--fd-s-12) 22px var(--fd-s-12);
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-kitchen-usual-thead,
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
+        display: grid;
+        grid-template-columns:
+            minmax(0, 196fr) minmax(0, 330fr) minmax(0, 166fr)
+            minmax(0, 116fr) minmax(0, 237fr) 24px;
+        align-items: center;
+        gap: 0;
+    }
+
+    .fd-kitchen-usual-thead {
+        padding: var(--fd-s-10) 0;
+        border-bottom: 1px solid var(--line);
+        font: 600 11px/14px var(--font-body);
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual:last-child {
+        border-bottom: 0;
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
+        min-height: 50px;
+        padding: var(--fd-s-10) 0;
+        cursor: pointer;
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__meta,
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__sub {
+        display: none;
+    }
+
+    .fd-usual-cell {
+        display: block;
+        min-width: 0;
+        padding-right: var(--fd-s-12);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 400 14px/18px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-usual-cell--product {
+        color: var(--text-primary);
+    }
+
+    .fd-usual-cell--muted {
+        color: var(--text-tertiary);
+    }
+
+    .fd-usual-cell--restock {
+        font-size: 13px;
+    }
+
+    .fd-usual-cell.fd-tone--warn {
+        color: var(--status-warn);
+    }
+
+    .fd-usual-cell.fd-tone--accent {
+        color: var(--accent-text);
     }
 }

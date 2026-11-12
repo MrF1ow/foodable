@@ -207,7 +207,11 @@ function useSoonHighlightMarkup(view: TodayView): string {
 function useSoonMarkup(view: TodayView): string {
     const items = view.expiringFridge;
     if (items.length === 0) {
-        return `<p class="fd-today-card__empty">Nothing expiring soon</p>`;
+        // The same empty card as Needs attention, not a bare line in the rail.
+        return railCard(
+            "Use soon",
+            `<p class="fd-today-card__empty">Nothing expiring soon</p>`,
+        );
     }
     const expiryToday = view.householdDate;
     const usesByItem = new Map(

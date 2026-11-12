@@ -5,7 +5,8 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: var(--space-gutter);
+    /* The shell's main already holds the phone gutter (FigCraft 23562: 20px). */
+    padding: var(--space-gutter) 0;
     padding-bottom: calc(var(--space-gutter) + 5.5rem);
     max-width: 40rem;
 }
@@ -713,7 +714,7 @@
 }
 
 .fd-settings-goals-dl {
-    padding: 0 var(--fd-s-14);
+    padding: 0 16px;
     border: 0;
     border-radius: var(--radius-lg);
     background: var(--surface-panel);
@@ -729,13 +730,30 @@
 .fd-settings-goals-dl dt {
     display: flex;
     align-items: center;
-    gap: var(--fd-s-12);
+    gap: var(--fd-s-14);
     color: var(--text-primary);
     font-size: 1rem;
 }
 
 .fd-settings-goals-dl dd {
     font-weight: 400;
+}
+
+/* Calories, water and the limits carry the frame's 24px row icon; the
+   macros keep their dot, centred in the same 24px column. */
+.fd-settings-goals-icon {
+    display: inline-flex;
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-settings-goals-icon .fd-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.fd-settings-goals-dl dt > .fd-dot {
+    margin-left: 8px;
 }
 
 .fd-settings-saved-search {
@@ -1381,6 +1399,34 @@
     color: var(--text-tertiary);
 }
 
+/* Members in one panel with initials avatars (FigCraft 23470 phone,
+ * 49474 desktop). */
+.fd-settings-members-card {
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-members-card .fd-row--settings-member:last-child {
+    border-bottom: 0;
+}
+
+.fd-row--settings-member .fd-settings-member-avatar {
+    box-sizing: border-box;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-right: var(--fd-s-6);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 13px/1 var(--font-body);
+}
+
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -1582,5 +1628,9 @@
 
     .fd-scoreset {
         max-width: 42.5rem;
+    }
+
+    .fd-settings-members-card {
+        padding: var(--fd-s-6) 22px;
     }
 }

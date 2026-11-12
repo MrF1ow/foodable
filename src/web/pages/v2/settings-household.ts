@@ -52,6 +52,7 @@ import {
 } from "./settings-household-shared-links.js";
 import { sourceIcon } from "../../components/source-icon.js";
 import { lastActiveLabel } from "../../../domain/last-active.js";
+import { initialsOf } from "../../shell-v2.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
 
 export type SettingsHouseholdV2View = {
@@ -174,7 +175,7 @@ function memberRow(
           )}</span>`
         : "";
     return raw(
-        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
+        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">${esc(initialsOf(member.displayName))}</span><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
     );
 }
 
@@ -325,7 +326,7 @@ export function renderSettingsHouseholdV2Body(
               )
             : pluralsBlock,
         raw(
-            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}`,
+            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}<div class="fd-settings-members-card">${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}</div>`,
         ),
         raw(
             `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,
