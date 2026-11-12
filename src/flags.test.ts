@@ -1,4 +1,6 @@
 import { test, expect, describe, afterEach } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
     FLAGS,
     type FlagName,
@@ -928,6 +930,28 @@ describe("round-2 QA fixes", () => {
             expect(evalCalls).toBe(0);
         } finally {
             console.log = logSpy;
+        }
+    });
+});
+
+describe("flag descriptions name the tools they gate", () => {
+    test("every gatedTool flag's why mentions each tool it gates", async () => {
+        const dir = join(import.meta.dir, "mcp", "tools");
+        const gated: { flag: string; tool: string }[] = [];
+        for (const file of readdirSync(dir)) {
+            if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+            const source = readFileSync(join(dir, file), "utf8");
+            for (const m of source.matchAll(
+                /gatedTool\(\s*server,\s*ctx,\s*"([^"]+)",\s*"([^"]+)"/g,
+            )) {
+                gated.push({ flag: m[1]!, tool: m[2]! });
+            }
+        }
+        expect(gated.length).toBeGreaterThan(0);
+        for (const { flag, tool } of gated) {
+            const def = (FLAGS as Record<string, { why: string }>)[flag];
+            expect(def, flag).toBeDefined();
+            expect(def!.why, `${flag} why names ${tool}`).toContain(tool);
         }
     });
 });

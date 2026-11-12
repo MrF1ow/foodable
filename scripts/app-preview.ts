@@ -27,6 +27,7 @@ import {
     type Notice,
 } from "../src/domain/notices.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
+import { renderShareViewPage } from "../src/web/pages/share-view.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
     renderRecipeDetailPage,
@@ -34,9 +35,16 @@ import {
 } from "../src/web/pages/recipes.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import {
+    buildWeekPlanView,
+    PLAN_MISSING_SHEET_ID,
+    planEditSheetId,
+    withPlanEditDraft,
+} from "../src/web/pages/v2/recipes-plan.js";
+import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
 } from "../src/web/pages/v2/recipes-page.js";
+import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import {
     renderFoodsSettingsPage,
@@ -74,6 +82,8 @@ import {
 import {
     buildPreviewTodayPageData,
     buildPreviewTodayViewWithRail,
+    buildPreviewTodayViewWithSuggestions,
+    buildPreviewTodayViewWithYesterdayHint,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
 import {
@@ -90,16 +100,44 @@ import {
     kitchenUsualRowMeta,
     renderKitchenUsualsV2Page,
 } from "../src/web/pages/v2/kitchen-usuals.js";
+import {
+    buildPreviewProductPageView,
+    renderProductBarcodeUnknownPage,
+    renderProductV2Page,
+} from "../src/web/pages/v2/product.js";
+import {
+    buildProductScoreSection,
+    previewMemberCards,
+} from "../src/web/pages/v2/product-score.js";
+import { listExpiring } from "../src/domain/stock.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
+import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
+import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import {
+    renderSettingsStoresV2Page,
+    STORES_REORDER_SHEET_ID,
+} from "../src/web/pages/v2/settings-stores.js";
+import {
+    renderSettingsStoreV2Page,
+    STORE_DELETE_SHEET_ID,
+} from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
+import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
+import {
+    renderSettingsScoreHouseholdV2Page,
+    renderSettingsScoreV2Page,
+    type SettingsScoreV2View,
+} from "../src/web/pages/v2/settings-score.js";
+import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -108,6 +146,7 @@ import { isNutritionCard } from "../src/domain/layout.js";
 import {
     didYouMeanView,
     matchFoodsByWords,
+    NO_USUAL_SCHEDULE,
     possibleDuplicates,
     usualProductRows,
 } from "../src/domain/foods.js";
@@ -140,6 +179,92 @@ const ME = {
     displayName: "Ethan",
 };
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+const JORDAN = { ...SAM, userId: "u3", displayName: "Jordan" };
+const RILEY = { ...SAM, userId: "u4", displayName: "Riley" };
+const ALEX = { ...SAM, userId: "u5", displayName: "Alex" };
+/** Settings › Household's Shared links: a recipe link that expires, the grocery
+ *  list that never does, and a recipe link whose recipe was since deleted. */
+const PREVIEW_SHARED_LINKS: SharedLinkRow[] = [
+    {
+        id: "00000000-0000-4000-8000-000000000001",
+        kind: "recipe",
+        recipeName: "Smoky red lentil soup",
+        createdByName: "Ethan Flow",
+        createdAt: "2026-11-10T18:00:00.000Z",
+        expiresAt: "2026-12-10T18:00:00.000Z",
+    },
+    {
+        id: "00000000-0000-4000-8000-000000000002",
+        kind: "grocery_list",
+        recipeName: null,
+        createdByName: "Sam Flow",
+        createdAt: "2026-11-02T09:30:00.000Z",
+        expiresAt: null,
+    },
+    {
+        id: "00000000-0000-4000-8000-000000000003",
+        kind: "recipe",
+        recipeName: null,
+        createdByName: "Ethan Flow",
+        createdAt: "2026-10-21T12:00:00.000Z",
+        expiresAt: null,
+    },
+];
+
+/** The clock the Last active column reads, so the shots do not drift by day. */
+const PREVIEW_NOW = new Date("2026-11-12T18:00:00Z");
+
+// The Stores screens of the design: Costco with six sections and five lines on
+// the list, Trader Joe's, and a market with no sections yet.
+const PREVIEW_STORE_SUMMARIES = [
+    { id: "s-costco", name: "Costco", sectionCount: 6, lineCount: 5 },
+    { id: "s-trader", name: "Trader Joe's", sectionCount: 5, lineCount: 3 },
+    { id: "s-market", name: "Farmers market", sectionCount: 0, lineCount: 0 },
+];
+const PREVIEW_COSTCO_SECTIONS = [
+    ["Produce", 0],
+    ["Bakery", 0],
+    ["Meat", 1],
+    ["Dairy & eggs", 2],
+    ["Pantry", 2],
+    ["Frozen", 0],
+].map(([name, lines], index) => ({
+    section: {
+        id: `sec-${index}`,
+        householdId: H,
+        storeId: "s-costco",
+        name: String(name),
+        sortOrder: index,
+        hidden: false,
+        isOther: false,
+    },
+    lines: Number(lines),
+}));
+function previewStoreView(chrome: unknown, over: Record<string, unknown> = {}) {
+    return {
+        chrome,
+        store: {
+            id: "s-costco",
+            householdId: H,
+            name: "Costco",
+            sortOrder: 0,
+        },
+        sections: PREVIEW_COSTCO_SECTIONS.map((row) => row.section),
+        sectionLineCounts: new Map(
+            PREVIEW_COSTCO_SECTIONS.map((row) => [row.section.id, row.lines]),
+        ),
+        lineCount: 5,
+        rules: [],
+        moveTarget: {
+            id: "s-trader",
+            householdId: H,
+            name: "Trader Joe's",
+            sortOrder: 1,
+        },
+        canManage: true,
+        ...over,
+    };
+}
 
 const PREVIEW_STORES = [
     { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
@@ -162,6 +287,96 @@ const PREVIEW_TRENDS_GOALS: NutritionGoals = {
     updated_at: "2026-01-01T00:00:00Z",
 };
 
+// The goals the Settings › Goals and Today previews show with a name, and the
+// days that carry their own goals.
+const PREVIEW_NAMED_GOALS: NutritionGoals = {
+    ...PREVIEW_TRENDS_GOALS,
+    daily_alcohol_g: 28,
+    goal_name: "Recomp",
+    goal_note: "maintenance minus 5%",
+    goals_set_on: "2026-10-02",
+};
+
+// The apps the AI connections page lists: a named one used today, a named one
+// last used days ago, one that was never used, and the tokens with no app.
+/** The Product score page: an owner who picked Balanced, as in the design. */
+function previewScoreView(
+    chrome: SettingsScoreV2View["chrome"],
+    over: Partial<SettingsScoreV2View> = {},
+): SettingsScoreV2View {
+    return {
+        chrome,
+        preset: "balanced",
+        weights: SCORE_PRESETS.balanced,
+        followsHousehold: false,
+        householdPresetLabel: "Balanced",
+        canEditHousehold: true,
+        warnTraces: true,
+        compareGoals: true,
+        allergensText: "Milk",
+        allergensHref: "/settings/household/members/u-ethan",
+        ...over,
+    };
+}
+
+const PREVIEW_AI_CONNECTIONS = [
+    {
+        clientId: "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
+        clientName: "Claude",
+        firstConnectedAt: new Date("2026-10-03T12:00:00.000Z"),
+        lastUsedAt: new Date("2026-11-10T08:00:00.000Z"),
+    },
+    {
+        clientId: "2b1c0d9e-8f7a-4b6c-8d5e-4f3a2b1c0d9e",
+        clientName: "Grok CLI",
+        firstConnectedAt: new Date("2026-11-01T08:00:00.000Z"),
+        lastUsedAt: new Date("2026-11-08T08:00:00.000Z"),
+    },
+    {
+        clientId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        clientName: "ChatGPT",
+        firstConnectedAt: new Date("2026-11-09T18:30:00.000Z"),
+        lastUsedAt: null,
+    },
+    {
+        clientId: null,
+        clientName: null,
+        firstConnectedAt: new Date("2026-09-14T09:00:00.000Z"),
+        lastUsedAt: new Date("2026-10-20T09:00:00.000Z"),
+    },
+];
+
+const PREVIEW_GOAL_DAYS = [
+    {
+        user_id: "u1",
+        date: "2026-11-14",
+        daily_calories: 1800,
+        daily_protein_g: 170,
+        daily_carbs_g: null,
+        daily_fat_g: null,
+        daily_fiber_g: null,
+        daily_sugar_g: null,
+        daily_alcohol_g: null,
+        daily_caffeine_mg: null,
+        daily_water_ml: null,
+        updated_at: "2026-11-01T00:00:00Z",
+    },
+    {
+        user_id: "u1",
+        date: "2026-11-21",
+        daily_calories: 2600,
+        daily_protein_g: null,
+        daily_carbs_g: null,
+        daily_fat_g: null,
+        daily_fiber_g: null,
+        daily_sugar_g: null,
+        daily_alcohol_g: null,
+        daily_caffeine_mg: null,
+        daily_water_ml: 3000,
+        updated_at: "2026-11-01T00:00:00Z",
+    },
+];
+
 function previewTrendsDays(today: string) {
     const days = [];
     for (let i = 364; i >= 0; i--) {
@@ -180,6 +395,71 @@ function previewTrendsDays(today: string) {
         });
     }
     return days;
+}
+
+/** The full product screen; `viewer` is how its reader weights the score. */
+function previewProductFull(
+    chrome: ReturnType<typeof previewChrome>,
+    viewer?: Parameters<typeof buildProductScoreSection>[2],
+) {
+    const previewMembers = [
+        {
+            id: "u-ethan",
+            name: "Ethan",
+            allergens: [] as const,
+            dislikes: [],
+        },
+        {
+            id: "u-sam",
+            name: "Sam",
+            allergens: ["milk"] as const,
+            dislikes: [],
+        },
+        {
+            id: "u-jordan",
+            name: "Jordan",
+            allergens: ["tree_nut"] as const,
+            dislikes: [],
+        },
+    ];
+    const fullFood = food("f-product-full", "Greek yogurt, plain 2%", 59, {
+        brand: "Fage",
+        proteinG: 10,
+        carbsG: 4,
+        fatG: 0.4,
+        fiberG: 0,
+        sugarG: 4,
+        saturatedFatG: 2,
+        gramsPerEach: 170,
+        offQuality: {
+            nutriscoreGrade: "a",
+            novaGroup: 1,
+            ecoscoreGrade: "b",
+            additives: [],
+            allergensTags: ["en:milk"],
+            tracesTags: ["en:nuts"],
+            ingredientsAnalysisTags: [],
+            labelsTags: [],
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    const score = buildProductScoreSection(
+        fullFood,
+        previewMemberCards(fullFood, previewMembers),
+        viewer,
+    );
+    return renderProductV2Page(
+        buildPreviewProductPageView(chrome, fullFood, {
+            barcodes: ["5201054017463"],
+            stock: [
+                {
+                    locationName: "Fridge",
+                    quantityLabel: "2",
+                },
+            ],
+            score,
+        }),
+    );
 }
 
 function previewTrendsPage(chrome: ReturnType<typeof previewChrome>) {
@@ -517,6 +797,180 @@ function groceryView(chrome: unknown) {
     };
 }
 
+/** This week for the new app's Today and Recipes: three dinners, some of it missing. */
+/** A move to a day already past: the edit sheet of "pl2" re-opened with the reason. */
+function previewMoveError() {
+    const view = previewWeekPlan();
+    return (
+        withPlanEditDraft(view, {
+            planId: "pl2",
+            date: "2026-11-01",
+            slot: "dinner",
+            servings: 4,
+            error: "Pick today or a later day.",
+        }) ?? view
+    );
+}
+
+const PREVIEW_VIEWER_ID = "preview-viewer";
+
+/** The three one-tap notices as the preview household has them. */
+function previewOneTapNotices(): import("../src/domain/notices.js").Notice[] {
+    return [
+        {
+            code: "grocery.running_low",
+            severity: "warn",
+            subject: { kind: "food", id: "u-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                foodId: "u-eggs",
+                reason: "2 left, below 6",
+                dismissScope: "2026-11-02",
+            },
+        },
+        {
+            code: "plan.missing_ingredient",
+            severity: "warn",
+            subject: { kind: "food", id: "f-lemon" },
+            related: [{ kind: "recipe", id: "r1", name: "Lemon chicken" }],
+            params: {
+                name: "Lemon",
+                foodId: "f-lemon",
+                unknown: "no",
+                recipeName: "Lemon chicken",
+                recipeCount: 1,
+                plannedOn: "2026-11-11",
+                daysLeft: 1,
+                amounts: "2 each",
+                dismissScope: "plan-1",
+            },
+        },
+        {
+            code: "nutrition.weigh_in_due",
+            severity: "info",
+            subject: { kind: "member", id: PREVIEW_VIEWER_ID },
+            related: [{ kind: "member", id: PREVIEW_VIEWER_ID, name: "Ethan" }],
+            params: {
+                name: "Ethan",
+                days: 9,
+                lastWeighedOn: "2026-11-01",
+                dismissScope: "2026-11-01",
+            },
+        },
+    ];
+}
+
+function previewWeekPlan(openSheet?: "missing" | "plan") {
+    const today = "2026-11-10";
+    const plan = (
+        id: string,
+        recipeId: string,
+        date: string,
+        servings: number,
+    ) => ({
+        id,
+        householdId: H,
+        recipeId,
+        date,
+        slot: "dinner" as const,
+        servings,
+        createdBy: null,
+        createdAt: "2026-11-09T10:00:00.000Z",
+    });
+    const grams = (amount: number) => ({ amount, unit: "g" });
+    const view = buildWeekPlanView({
+        today,
+        plans: [
+            plan("pl1", "pr-salmon", "2026-11-10", 2),
+            plan("pl2", "pr-chili", "2026-11-11", 6),
+            plan("pl3", "pr-bowl", "2026-11-12", 4),
+        ],
+        recipes: [
+            {
+                id: "pr-salmon",
+                name: "Salmon, rice & spinach",
+                yieldPortions: 2,
+                ingredients: [
+                    {
+                        displayName: "Salmon",
+                        foodId: "pf-salmon",
+                        quantity: grams(400),
+                    },
+                    {
+                        displayName: "Rice",
+                        foodId: "pf-rice",
+                        quantity: grams(300),
+                    },
+                    {
+                        displayName: "Baby spinach",
+                        foodId: "pf-spinach",
+                        quantity: grams(200),
+                    },
+                ],
+            },
+            {
+                id: "pr-chili",
+                name: "Beef chili",
+                yieldPortions: 6,
+                ingredients: [
+                    {
+                        displayName: "Kidney beans",
+                        foodId: "pf-beans",
+                        quantity: grams(400),
+                    },
+                    {
+                        displayName: "Beef mince",
+                        foodId: "pf-beef",
+                        quantity: grams(500),
+                    },
+                    {
+                        displayName: "Cumin",
+                        foodId: "pf-cumin",
+                        quantity: null,
+                    },
+                ],
+            },
+            {
+                id: "pr-bowl",
+                name: "Chicken rice bowl",
+                yieldPortions: 4,
+                ingredients: [
+                    {
+                        displayName: "Chicken breast",
+                        foodId: "pf-chicken",
+                        quantity: grams(600),
+                    },
+                    {
+                        displayName: "Avocado",
+                        foodId: "pf-avocado",
+                        quantity: { amount: 2, unit: "each" },
+                    },
+                ],
+            },
+        ],
+        stock: [
+            { foodId: "pf-salmon", quantity: grams(450) },
+            { foodId: "pf-rice", quantity: grams(1000) },
+            { foodId: "pf-spinach", quantity: grams(100) },
+            { foodId: "pf-beef", quantity: grams(500) },
+            { foodId: "pf-chicken", quantity: grams(300) },
+            // Held by weight, and the avocado has no weight per piece: unknown.
+            { foodId: "pf-avocado", quantity: grams(150) },
+        ],
+        foodsById: new Map(),
+    });
+    return {
+        ...view,
+        openSheet:
+            openSheet === "missing"
+                ? PLAN_MISSING_SHEET_ID
+                : openSheet === "plan"
+                  ? planEditSheetId("pl2")
+                  : undefined,
+    };
+}
+
 const RECIPE = {
     id: "r1",
     householdId: H,
@@ -607,6 +1061,7 @@ function food(
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        ...NO_USUAL_SCHEDULE,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",
@@ -644,12 +1099,113 @@ function previewFoodCatalog() {
     return { catalog, usual };
 }
 
+/** The usuals page's own catalog: seven usuals, each with a product, in every
+ *  restock state (weekly, every N weeks, monthly, when low only, paused). */
+function previewUsualsCatalog() {
+    const usualOf = (
+        id: string,
+        name: string,
+        product: string,
+        brand: string | null,
+        store: string,
+        amount: { amount: number; unit: string },
+        plain: Record<string, unknown> = {},
+    ) => [
+        food(id, name, null, {
+            usualProductId: `${id}-p`,
+            usualStoreId: store,
+            usualAmount: amount,
+            ...plain,
+        }),
+        food(`${id}-p`, product, null, {
+            genericFoodId: id,
+            brand,
+            usualStoreId: store,
+            usualAmount: amount,
+        }),
+    ];
+    const catalog = [
+        ...usualOf(
+            "u-milk",
+            "Milk",
+            "Kirkland 2% milk",
+            null,
+            "s-costco",
+            { amount: 64, unit: "fl oz" },
+            { restockSchedule: "weekly" },
+        ),
+        ...usualOf(
+            "u-eggs",
+            "Eggs",
+            "Vital Farms large",
+            null,
+            "s-costco",
+            { amount: 24, unit: "each" },
+            {
+                restockSchedule: "weekly",
+                restockWhenLow: true,
+            },
+        ),
+        ...usualOf(
+            "u-yogurt",
+            "Greek yogurt",
+            "Fage Total 2%",
+            null,
+            "s-tj",
+            { amount: 32, unit: "oz" },
+            { restockSchedule: "weekly" },
+        ),
+        ...usualOf(
+            "u-chicken",
+            "Chicken thighs",
+            "Kirkland boneless",
+            null,
+            "s-costco",
+            { amount: 4, unit: "lb" },
+            { restockSchedule: "every_n_weeks", restockEveryWeeks: 2 },
+        ),
+        ...usualOf(
+            "u-bananas",
+            "Bananas",
+            "Bananas",
+            null,
+            "s-tj",
+            { amount: 6, unit: "each" },
+            { restockWhenLow: true, restockLowLevel: 2 },
+        ),
+        ...usualOf(
+            "u-coffee",
+            "Coffee beans",
+            "Onyx Southern Weather",
+            null,
+            "s-tj",
+            { amount: 1, unit: "each" },
+            { restockSchedule: "monthly" },
+        ),
+        ...usualOf(
+            "u-oil",
+            "Olive oil",
+            "California Olive Ranch",
+            null,
+            "s-costco",
+            { amount: 1, unit: "each" },
+            { restockSchedule: "monthly", restockPaused: true },
+        ),
+    ];
+    return { catalog, usual: usualProductRows({ foods: catalog }) };
+}
+
+const PREVIEW_USUAL_STORES = [
+    { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
+    { id: "s-tj", householdId: H, name: "Trader Joe's", sortOrder: 1 },
+];
+
 function previewKitchenUsualsView(
     chrome: unknown,
     overrides: Partial<ReturnType<typeof buildPreviewKitchenUsualsView>> = {},
 ): ReturnType<typeof buildPreviewKitchenUsualsView> {
-    const { catalog, usual } = previewFoodCatalog();
-    const stores = PREVIEW_STORES;
+    const { catalog, usual } = previewUsualsCatalog();
+    const stores = PREVIEW_USUAL_STORES;
     const storesById = new Map(stores.map((row) => [row.id, row]));
     const foodsById = new Map(
         catalog.map((row) => [
@@ -662,8 +1218,9 @@ function previewKitchenUsualsView(
             row.food.id,
             kitchenUsualRowMeta(row, {
                 storesById,
-                groceryLines: previewGroceryLines(),
+                groceryLines: [{ foodId: "u-yogurt", checked: false }],
                 foodsById,
+                lowFoodIds: new Set(["u-eggs"]),
             }),
         ]),
     );
@@ -673,6 +1230,7 @@ function previewKitchenUsualsView(
         stores,
         rowMeta,
         addable: usual.addable,
+        restockDay: "Sundays",
         openGroceriesCount: previewGroceryLines().filter((l) => !l.checked)
             .length,
         ...overrides,
@@ -766,6 +1324,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ? renderTodayV2Page({
               ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
               view: buildPreviewTodayViewWithRail("2026-11-10"),
+              plan: previewWeekPlan(),
           })
         : await renderNutritionPage({
               access: { ok: true, mode: "self", viewer: ME, subject: ME },
@@ -892,41 +1451,258 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         macros: MACROS,
         isOwner: true,
     };
+    // The cook sheet: a pantry that covers most of a loaf and falls short on
+    // buttermilk, so the warning row is shot too.
+    const cookSheet: CookSheetView = {
+        recipeId: "r1",
+        recipeName: "Banana bread",
+        servings: 10,
+        yieldPortions: 10,
+        preview: {
+            totalPortions: 10,
+            lines: [
+                {
+                    foodId: "f-eggs",
+                    displayName: "Eggs",
+                    fromItemId: "ri-eggs",
+                    unit: "each",
+                    before: 6,
+                    after: 3,
+                },
+                {
+                    foodId: "f2",
+                    displayName: "All-purpose flour",
+                    fromItemId: "ri-flour",
+                    unit: "g",
+                    before: 500,
+                    after: 300,
+                },
+                {
+                    foodId: "f3",
+                    displayName: "Sugar",
+                    fromItemId: "ri-sugar",
+                    unit: "g",
+                    before: 500,
+                    after: 400,
+                },
+            ],
+            movements: [],
+            shortfalls: [
+                {
+                    foodId: "f-buttermilk",
+                    displayName: "Buttermilk",
+                    amount: 200,
+                    unit: "ml",
+                    unknownFactor: false,
+                },
+            ],
+            unmeasured: [{ foodId: null, displayName: "Salt" }],
+        },
+        slot: "dinner",
+        macrosPerPortion: MACROS as never,
+        submitKey: "preview",
+    };
+    const settingsHouseholdV2 = (sharedLinks: SharedLinkRow[]) => {
+        const dupPairs = possibleDuplicates(
+            catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+            new Map(),
+            new Set(),
+            new Set(),
+        );
+        return renderSettingsHouseholdV2Page({
+            chrome,
+            householdName: "The Flow household",
+            members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
+            now: PREVIEW_NOW,
+            lastSeen: new Map<string, Date | null>([
+                [ME.userId, new Date("2026-11-12T16:20:00Z")],
+                [SAM.userId, new Date("2026-11-11T20:05:00Z")],
+                [JORDAN.userId, new Date("2026-11-09T17:40:00Z")],
+                [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
+                [ALEX.userId, null],
+            ]),
+            stores: PREVIEW_STORES,
+            isOwner: true,
+            canManage: true,
+            viewerUserId: ME.userId,
+            socialReaders: EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+            timezone: "America/Los_Angeles",
+            noticeResult: {
+                notices: previewNotices(),
+                dismissals: [],
+                subjectNames: new Map(),
+                subjectTimes: new Map(),
+                noticeFoods: new Map(),
+                catalogFoods: catalog,
+                aliasMap: new Map(),
+                barcodedIds: new Set(),
+                possibleDuplicatePairs: dupPairs,
+                recipesListPrefetch: {
+                    recipes: [],
+                    allIngredients: [],
+                    fridgeItems: [],
+                    foodsById: new Map(),
+                },
+            },
+            duplicatePairs: dupPairs,
+            refCounts: new Map(),
+            pluralsSameFood: true,
+            sharedLinks,
+        } as never);
+    };
+    const recipeV2 = (
+        cook: CookSheetView,
+        planOpen = false,
+        shareOpen = false,
+    ) =>
+        renderRecipeDetailV2Page({
+            chrome,
+            recipe: recipeView.recipe,
+            ingredients: recipeView.ingredients as never,
+            ingredientGroups: groupRecipeIngredientsByPlace(
+                recipeView.ingredients,
+                [
+                    {
+                        id: "ri-eggs",
+                        householdId: H,
+                        locationId: "l1",
+                        kind: "food",
+                        displayName: "Eggs",
+                        quantity: { amount: 6, unit: "each" },
+                        foodId: "f-eggs",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 4),
+                    },
+                    {
+                        id: "ri-flour",
+                        householdId: H,
+                        locationId: "l2",
+                        kind: "food",
+                        displayName: "All-purpose flour",
+                        quantity: { amount: 1, unit: "kg" },
+                        foodId: "f2",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 30),
+                    },
+                    {
+                        id: "ri-sugar",
+                        householdId: H,
+                        locationId: "l2",
+                        kind: "food",
+                        displayName: "Sugar",
+                        quantity: { amount: 500, unit: "g" },
+                        foodId: "f3",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 90),
+                    },
+                ],
+                [
+                    {
+                        id: "l1",
+                        householdId: H,
+                        name: "Fridge",
+                        sortOrder: 0,
+                    },
+                    {
+                        id: "l2",
+                        householdId: H,
+                        name: "Pantry",
+                        sortOrder: 1,
+                    },
+                ],
+                new Map(
+                    ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
+                        id,
+                        { id, genericFoodId: null },
+                    ]),
+                ),
+            ),
+            macrosPerPortion: MACROS as never,
+            gapReasons: [],
+            members: recipeView.members,
+            viewerId: recipeView.viewerId,
+            portionCount: recipeView.portionCount,
+            favourite: true,
+            cook,
+            plan: {
+                recipeId: recipeView.recipe.id,
+                recipeName: recipeView.recipe.name,
+                yieldPortions: recipeView.recipe.yieldPortions,
+                today: "2026-11-10",
+                date: "2026-11-11",
+                slot: "dinner",
+                servings: recipeView.recipe.yieldPortions,
+                open: planOpen,
+            },
+            share: { open: shareOpen },
+        });
+    const recipesListV2 = (
+        extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
+    ) =>
+        renderRecipesListV2Page({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 2,
+            cookableCount: 1,
+            cards: [
+                {
+                    recipe: RECIPE,
+                    flags: {
+                        cookable: true,
+                        highProtein: false,
+                        quick: true,
+                        missingCount: 0,
+                        hasIngredients: true,
+                    },
+                    macrosPerPortion: RECIPE_LIST_MACROS,
+                    missingNames: [],
+                    favourite: true,
+                },
+                {
+                    recipe: RECIPE_TWO,
+                    flags: {
+                        cookable: false,
+                        highProtein: false,
+                        quick: true,
+                        missingCount: 2,
+                        hasIngredients: true,
+                    },
+                    macrosPerPortion: RECIPE_LIST_MACROS,
+                    missingNames: ["Avocado", "Lime"],
+                },
+            ],
+            ...extra,
+        });
+    const fridgePage = (
+        extra: Partial<
+            Parameters<typeof buildPreviewKitchenFridgeView>[2]
+        > = {},
+    ) => {
+        const snap = fridgeView(chrome);
+        return V2
+            ? renderKitchenFridgeV2Page(
+                  buildPreviewKitchenFridgeView(chrome as never, snap.today, {
+                      locations: snap.locations,
+                      items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
+                      foodsById: new Map(
+                          [...snap.foodsById.entries()].map(([id, row]) => [
+                              id,
+                              { ...row, usualAmount: null },
+                          ]),
+                      ),
+                      freezeDefaultExpiry: defaultFreezeExpiry(snap.today),
+                      ...extra,
+                      groceryLines: previewGroceryLines(),
+                      groceryOverview: buildKitchenFridgeGroceryOverview(
+                          previewGrocerySnapshot(),
+                      ),
+                  }),
+              )
+            : renderFridgePage(snap as never);
+    };
     return {
         nutrition,
         ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
         "nutrition-peer": nutritionPeer,
-        fridge: (() => {
-            const snap = fridgeView(chrome);
-            return V2
-                ? renderKitchenFridgeV2Page(
-                      buildPreviewKitchenFridgeView(
-                          chrome as never,
-                          snap.today,
-                          {
-                              locations: snap.locations,
-                              items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
-                              foodsById: new Map(
-                                  [...snap.foodsById.entries()].map(
-                                      ([id, row]) => [
-                                          id,
-                                          { ...row, usualAmount: null },
-                                      ],
-                                  ),
-                              ),
-                              freezeDefaultExpiry: defaultFreezeExpiry(
-                                  snap.today,
-                              ),
-                              groceryLines: previewGroceryLines(),
-                              groceryOverview:
-                                  buildKitchenFridgeGroceryOverview(
-                                      previewGrocerySnapshot(),
-                                  ),
-                          },
-                      ),
-                  )
-                : renderFridgePage(snap as never);
-        })(),
+        fridge: fridgePage(),
         ...(V2
             ? {
                   "kitchen-fridge-item": renderKitchenFridgeV2Page(
@@ -1072,9 +1848,45 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   "kitchen-usuals": renderKitchenUsualsV2Page(
                       previewKitchenUsualsView(chrome as never),
                   ),
+                  "kitchen-usuals-low": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          notices: previewOneTapNotices(),
+                      }),
+                  ),
+                  "kitchen-fridge-low": fridgePage({
+                      notices: previewOneTapNotices(),
+                  }),
+                  "recipes-plan-notices": recipesListV2({
+                      week: previewWeekPlan(),
+                      notices: previewOneTapNotices(),
+                  }),
+                  "nutrition-notices": (() => {
+                      const view = buildPreviewTodayViewWithRail("2026-11-10");
+                      const notices = previewOneTapNotices();
+                      view.attention = {
+                          viewerUserId: PREVIEW_VIEWER_ID,
+                          count: notices.length,
+                          notices,
+                          noticeFoods: new Map(),
+                      };
+                      return renderTodayV2Page({
+                          ...buildPreviewTodayPageData(
+                              chrome as never,
+                              "2026-11-10",
+                          ),
+                          view,
+                          plan: previewWeekPlan(),
+                      });
+                  })(),
                   "kitchen-usual-edit": renderKitchenUsualsV2Page(
                       previewKitchenUsualsView(chrome as never, {
-                          openFoodId: "f-eggs",
+                          openFoodId: "u-milk",
+                      }),
+                  ),
+                  "kitchen-usual-restock": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          openFoodId: "u-eggs",
+                          openRestock: true,
                       }),
                   ),
               }
@@ -1121,112 +1933,136 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ),
         } as never),
         recipes: V2
-            ? renderRecipesListV2Page({
-                  chrome,
-                  query: "",
-                  filter: "",
-                  totalCount: 2,
-                  cookableCount: 1,
-                  cards: [
-                      {
-                          recipe: RECIPE,
-                          flags: {
-                              cookable: true,
-                              highProtein: false,
-                              quick: true,
-                              missingCount: 0,
-                              hasIngredients: true,
-                          },
-                          macrosPerPortion: RECIPE_LIST_MACROS,
-                          missingNames: [],
-                      },
-                      {
-                          recipe: RECIPE_TWO,
-                          flags: {
-                              cookable: false,
-                              highProtein: false,
-                              quick: true,
-                              missingCount: 2,
-                              hasIngredients: true,
-                          },
-                          macrosPerPortion: RECIPE_LIST_MACROS,
-                          missingNames: ["Avocado", "Lime"],
-                      },
-                  ],
-              })
+            ? recipesListV2({ week: previewWeekPlan() })
             : renderRecipesPage({
                   chrome,
                   recipes: [RECIPE, RECIPE_TWO],
                   members: [ME, SAM],
                   viewerId: "u1",
               } as never),
+        ...(V2
+            ? {
+                  "recipes-favourites": renderRecipesListV2Page({
+                      chrome,
+                      query: "",
+                      filter: "favourites",
+                      totalCount: 3,
+                      cookableCount: 1,
+                      cards: [
+                          {
+                              recipe: RECIPE,
+                              flags: {
+                                  cookable: true,
+                                  highProtein: false,
+                                  quick: true,
+                                  missingCount: 0,
+                                  hasIngredients: true,
+                              },
+                              macrosPerPortion: RECIPE_LIST_MACROS,
+                              missingNames: [],
+                              favourite: true,
+                          },
+                          {
+                              recipe: {
+                                  ...RECIPE_TWO,
+                                  id: "r3",
+                                  name: "Overnight oats",
+                                  yieldPortions: 1,
+                                  prepMinutes: 5,
+                                  cookMinutes: 0,
+                              },
+                              flags: {
+                                  cookable: false,
+                                  highProtein: false,
+                                  quick: true,
+                                  missingCount: 1,
+                                  hasIngredients: true,
+                              },
+                              macrosPerPortion: RECIPE_LIST_MACROS,
+                              missingNames: ["Rolled oats"],
+                              favourite: true,
+                          },
+                      ],
+                  }),
+              }
+            : {}),
         recipe: V2
-            ? renderRecipeDetailV2Page({
-                  chrome,
-                  recipe: recipeView.recipe,
-                  ingredients: recipeView.ingredients as never,
-                  ingredientGroups: groupRecipeIngredientsByPlace(
-                      recipeView.ingredients,
-                      [
-                          {
-                              id: "ri-eggs",
-                              householdId: H,
-                              locationId: "l1",
-                              kind: "food",
-                              displayName: "Eggs",
-                              quantity: { amount: 6, unit: "each" },
-                              foodId: "f-eggs",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 4),
-                          },
-                          {
-                              id: "ri-flour",
-                              householdId: H,
-                              locationId: "l2",
-                              kind: "food",
-                              displayName: "All-purpose flour",
-                              quantity: { amount: 1, unit: "kg" },
-                              foodId: "f2",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 30),
-                          },
-                          {
-                              id: "ri-sugar",
-                              householdId: H,
-                              locationId: "l2",
-                              kind: "food",
-                              displayName: "Sugar",
-                              quantity: { amount: 500, unit: "g" },
-                              foodId: "f3",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 90),
-                          },
-                      ],
-                      [
-                          {
-                              id: "l1",
-                              householdId: H,
-                              name: "Fridge",
-                              sortOrder: 0,
-                          },
-                          {
-                              id: "l2",
-                              householdId: H,
-                              name: "Pantry",
-                              sortOrder: 1,
-                          },
-                      ],
-                      new Map(
-                          ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
-                              id,
-                              { id, genericFoodId: null },
-                          ]),
-                      ),
-                  ),
-                  macrosPerPortion: MACROS as never,
-                  gapReasons: [],
-                  members: recipeView.members,
-                  viewerId: recipeView.viewerId,
-                  portionCount: recipeView.portionCount,
-              })
+            ? recipeV2(cookSheet)
             : renderRecipeDetailPage(recipeView as never),
+        ...(V2
+            ? {
+                  "recipe-cook": recipeV2({ ...cookSheet, open: true }),
+                  "recipe-plan": recipeV2(cookSheet, true),
+                  "recipe-share": recipeV2(cookSheet, false, true),
+                  // The one screen that shows a new share link's address.
+                  "share-link-made": renderShareCreatedPage({
+                      chrome,
+                      url: "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M",
+                      what: "recipe",
+                      name: recipeView.recipe.name,
+                      expiresAt: "2026-12-12T10:00:00.000Z",
+                      backHref: "/recipes/r1",
+                      active: "recipes",
+                  }),
+                  "share-link-made-list": renderShareCreatedPage({
+                      chrome,
+                      url: "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M",
+                      what: "grocery list",
+                      name: null,
+                      expiresAt: null,
+                      backHref: "/kitchen/groceries",
+                      active: "grocery",
+                  }),
+                  "recipes-import-open": recipesListV2({
+                      week: previewWeekPlan(),
+                      sharedImport: {},
+                  }),
+                  "recipes-import-error": recipesListV2({
+                      week: previewWeekPlan(),
+                      sharedImport: {
+                          error: "That share link doesn't work any more. It may have been revoked or expired, or it isn't a recipe link.",
+                          input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+                      },
+                  }),
+                  "recipes-plan-pick": recipesListV2({
+                      week: previewWeekPlan(),
+                      planDate: "2026-11-14",
+                  }),
+                  "recipes-plan-missing": recipesListV2({
+                      week: previewWeekPlan("missing"),
+                  }),
+                  "recipes-plan-edit": recipesListV2({
+                      week: previewWeekPlan("plan"),
+                  }),
+                  "recipes-plan-move-error": recipesListV2({
+                      week: previewMoveError(),
+                  }),
+                  "nutrition-plan-move-error": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewMoveError(),
+                  }),
+                  "nutrition-plan-missing": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewWeekPlan("missing"),
+                  }),
+                  "nutrition-plan-edit": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewWeekPlan("plan"),
+                  }),
+              }
+            : {}),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,
             openModalId: "recipe-add-ingredient-r1",
@@ -1269,47 +2105,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       chrome,
                       storedTheme: null,
                   }),
-                  "settings-household-v2": (() => {
-                      const dupPairs = possibleDuplicates(
-                          catalog.filter(
-                              (f) => !f.archivedAt && !f.genericFoodId,
-                          ),
-                          new Map(),
-                          new Set(),
-                          new Set(),
-                      );
-                      return renderSettingsHouseholdV2Page({
-                          chrome,
-                          householdName: "The Flow household",
-                          members: [ME, SAM] as never,
-                          stores: PREVIEW_STORES,
-                          isOwner: true,
-                          canManage: true,
-                          viewerUserId: ME.userId,
-                          socialReaders:
-                              EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
-                          timezone: "America/Los_Angeles",
-                          noticeResult: {
-                              notices: previewNotices(),
-                              dismissals: [],
-                              subjectNames: new Map(),
-                              subjectTimes: new Map(),
-                              noticeFoods: new Map(),
-                              catalogFoods: catalog,
-                              aliasMap: new Map(),
-                              barcodedIds: new Set(),
-                              possibleDuplicatePairs: dupPairs,
-                              recipesListPrefetch: {
-                                  recipes: [],
-                                  allIngredients: [],
-                                  fridgeItems: [],
-                                  foodsById: new Map(),
-                              },
-                          },
-                          duplicatePairs: dupPairs,
-                          refCounts: new Map(),
-                      } as never);
-                  })(),
+                  "settings-household-v2":
+                      settingsHouseholdV2(PREVIEW_SHARED_LINKS),
+                  "settings-household-v2-empty": settingsHouseholdV2([]),
                   "settings-household-v2-member": renderSettingsMemberV2Page({
                       chrome,
                       member: SAM as never,
@@ -1318,10 +2116,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   }),
                   "settings-goals": renderSettingsGoalsV2Page({
                       chrome,
-                      goals: PREVIEW_TRENDS_GOALS,
-                      goalDate: "2026-11-09",
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
                       weightUnit: "kg",
                       alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                  }),
+                  "settings-goals-edit": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                      // A draft opens the sheet on load.
+                      draft: goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
+                  }),
+                  "settings-goals-empty": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: null,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: null,
+                      days: [],
+                  }),
+                  "settings-goals-error": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                      draft: {
+                          ...goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
+                          goal_name: "Recomp until the spring wedding photos",
+                          daily_calories: "30000",
+                      },
+                      error: "Goal name must be at most 40 characters. Calories must be at most 20000.",
+                      invalid: ["goal_name", "daily_calories"],
                   }),
                   "settings-saved": renderSettingsSavedV2Page({
                       chrome,
@@ -1333,6 +2165,104 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       searchQuery: "",
                   }),
                   "settings-export": renderSettingsExportV2Page({ chrome }),
+                  "settings-ai": renderSettingsAiV2Page({
+                      chrome,
+                      connections: PREVIEW_AI_CONNECTIONS,
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                  }),
+                  "settings-ai-empty": renderSettingsAiV2Page({
+                      chrome,
+                      connections: [],
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                  }),
+                  "settings-ai-confirm": renderSettingsAiV2Page({
+                      chrome,
+                      connections: PREVIEW_AI_CONNECTIONS,
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                      openClient: PREVIEW_AI_CONNECTIONS[0]!.clientId!,
+                  }),
+                  // The viewer is an owner who picked Balanced: the design's frame.
+                  "settings-score": renderSettingsScoreV2Page(
+                      previewScoreView(chrome),
+                  ),
+                  // A member with no choice of their own: the household row is plain.
+                  "settings-score-member": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          preset: "planet",
+                          weights: SCORE_PRESETS.planet,
+                          followsHousehold: true,
+                          householdPresetLabel: "Planet",
+                          canEditHousehold: false,
+                      }),
+                  ),
+                  "settings-score-custom": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          preset: "custom",
+                          weights: {
+                              nutrition: 10,
+                              processing: 70,
+                              additives: 20,
+                              environment: 0,
+                          },
+                          warnTraces: false,
+                      }),
+                  ),
+                  "settings-score-error": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          error: "Give at least one part a weight above 0.",
+                          draft: {
+                              preset: "custom",
+                              weights: {
+                                  nutrition: "0",
+                                  processing: "0",
+                                  additives: "0",
+                                  environment: "0",
+                              },
+                          },
+                      }),
+                  ),
+                  "settings-score-household":
+                      renderSettingsScoreHouseholdV2Page({
+                          chrome,
+                          preset: "planet",
+                          weights: SCORE_PRESETS.planet,
+                          isSet: true,
+                      }),
+                  "settings-stores": renderSettingsStoresV2Page({
+                      chrome,
+                      stores: PREVIEW_STORE_SUMMARIES,
+                      defaultStoreId: "s-costco",
+                      useUsualStore: true,
+                      canManage: true,
+                  }),
+                  "settings-stores-reorder": renderSettingsStoresV2Page({
+                      chrome,
+                      stores: PREVIEW_STORE_SUMMARIES,
+                      defaultStoreId: "s-costco",
+                      useUsualStore: true,
+                      canManage: true,
+                      openModalId: STORES_REORDER_SHEET_ID,
+                  }),
+                  "settings-store": renderSettingsStoreV2Page(
+                      previewStoreView(chrome) as never,
+                  ),
+                  "settings-store-delete": renderSettingsStoreV2Page(
+                      previewStoreView(chrome, {
+                          openModalId: STORE_DELETE_SHEET_ID,
+                      }) as never,
+                  ),
+                  "settings-store-delete-empty": renderSettingsStoreV2Page(
+                      previewStoreView(chrome, {
+                          lineCount: 0,
+                          openModalId: STORE_DELETE_SHEET_ID,
+                      }) as never,
+                  ),
               }
             : {}),
         household: renderHouseholdSettingsPage({
@@ -1498,6 +2428,25 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
+        ...(V2
+            ? {
+                  // The one-tap notices on the page behind "View all".
+                  "needs-attention-notices": (() => {
+                      const notices = previewOneTapNotices();
+                      return renderNeedsAttentionPage({
+                          chrome,
+                          viewerUserId: PREVIEW_VIEWER_ID,
+                          result: {
+                              notices,
+                              dismissals: [],
+                              subjectNames: new Map(),
+                              subjectTimes: new Map(),
+                              noticeFoods: new Map(),
+                          },
+                      } as never);
+                  })(),
+              }
+            : {}),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
             flags: PREVIEW_FLAGS,
@@ -1557,6 +2506,95 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "dev-gallery-v2": renderDevGalleryV2Page(chrome),
                   "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-log-search-no-yesterday": await logSheetPreview(
+                      theme,
+                      "empty-no-yesterday",
+                  ),
+                  "nutrition-goal-name": (() => {
+                      const data = buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      );
+                      return renderTodayV2Page({
+                          ...data,
+                          view: {
+                              ...data.view,
+                              goals: {
+                                  ...data.view.goals!,
+                                  goal_name: "Recomp",
+                                  goals_set_on: "2026-10-02",
+                              },
+                          },
+                      });
+                  })(),
+                  "nutrition-today-yesterday": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithYesterdayHint(
+                          "2026-11-10",
+                      ),
+                  }),
+                  "nutrition-today-suggestions": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithSuggestions("2026-11-10"),
+                  }),
+                  "kitchen-fridge-use-in": (() => {
+                      const snap = fridgeView(chrome);
+                      const items =
+                          snap.items as import("../src/domain/fridge.js").FridgeItem[];
+                      return renderKitchenFridgeV2Page(
+                          buildPreviewKitchenFridgeView(
+                              chrome as never,
+                              snap.today,
+                              {
+                                  locations: snap.locations,
+                                  items,
+                                  foodsById: new Map(
+                                      [...snap.foodsById.entries()].map(
+                                          ([id, row]) => [
+                                              id,
+                                              { ...row, usualAmount: null },
+                                          ],
+                                      ),
+                                  ),
+                                  freezeDefaultExpiry: defaultFreezeExpiry(
+                                      snap.today,
+                                  ),
+                                  // Every other expiring item has a recipe.
+                                  useSoonUses: listExpiring(
+                                      items,
+                                      snap.today,
+                                      7,
+                                  )
+                                      .filter((_, index) => index % 2 === 0)
+                                      .map((item) => ({
+                                          item: {
+                                              id: item.id,
+                                              displayName: item.displayName,
+                                              expiresOn: item.expiresOn ?? "",
+                                          },
+                                          recipes: [
+                                              {
+                                                  recipeId: "r-salmon-rice",
+                                                  name: "Salmon & rice",
+                                                  incomplete: false,
+                                              },
+                                          ],
+                                      })),
+                                  groceryLines: previewGroceryLines(),
+                                  groceryOverview:
+                                      buildKitchenFridgeGroceryOverview(
+                                          previewGrocerySnapshot(),
+                                      ),
+                              },
+                          ),
+                      );
+                  })(),
                   "nutrition-log-results": await logSheetPreview(
                       theme,
                       "results",
@@ -1573,7 +2611,154 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       theme,
                       "weigh-in",
                   ),
+                  "nutrition-log-scanner": await logScannerPreview(theme),
                   "trends-v2": previewTrendsPage(chrome),
+                  // The public /s/:token pages (no shell, no session).
+                  "share-recipe": renderShareViewPage(
+                      {
+                          kind: "recipe",
+                          recipe: {
+                              name: "Smoky red lentil soup",
+                              portions: 4,
+                              instructions:
+                                  "1. Soften the onion and garlic in olive oil.\n2. Stir in the lentils, smoked paprika and stock.\n3. Simmer for 25 minutes, then blend half.\n4. Finish with lemon and parsley.",
+                              tags: ["dinner", "vegan", "batch cook"],
+                              ingredients: [
+                                  {
+                                      name: "Red lentils",
+                                      amount: 300,
+                                      unit: "g",
+                                      note: null,
+                                  },
+                                  {
+                                      name: "Onion",
+                                      amount: 2,
+                                      unit: "each",
+                                      note: "finely diced",
+                                  },
+                                  {
+                                      name: "Vegetable stock",
+                                      amount: 1.2,
+                                      unit: "l",
+                                      note: null,
+                                  },
+                                  {
+                                      name: "Smoked paprika",
+                                      amount: null,
+                                      unit: null,
+                                      note: null,
+                                  },
+                              ],
+                          },
+                      },
+                      theme,
+                  ),
+                  "share-groceries": renderShareViewPage(
+                      {
+                          kind: "grocery_list",
+                          list: {
+                              stores: [
+                                  {
+                                      name: "Corner Shop",
+                                      lines: [
+                                          {
+                                              name: "Leeks",
+                                              amount: 3,
+                                              unit: "each",
+                                              checked: false,
+                                          },
+                                          {
+                                              name: "Milk",
+                                              amount: 2,
+                                              unit: "l",
+                                              checked: false,
+                                          },
+                                          {
+                                              name: "Eggs",
+                                              amount: 12,
+                                              unit: "each",
+                                              checked: true,
+                                          },
+                                      ],
+                                  },
+                                  {
+                                      name: "Market",
+                                      lines: [
+                                          {
+                                              name: "Basmati rice",
+                                              amount: 1,
+                                              unit: "kg",
+                                              checked: false,
+                                          },
+                                      ],
+                                  },
+                              ],
+                          },
+                      },
+                      theme,
+                  ),
+                  "product-full": previewProductFull(chrome),
+                  "product-full-custom": previewProductFull(chrome, {
+                      weights: {
+                          nutrition: 0,
+                          processing: 100,
+                          additives: 0,
+                          environment: 0,
+                      },
+                      preset: "custom",
+                  }),
+                  "product-partial": (() => {
+                      const partialFood = food(
+                          "f-product-partial",
+                          "Trail mix",
+                          120,
+                          {
+                              proteinG: 8,
+                              carbsG: 18,
+                              fatG: 6,
+                              sugarG: 10,
+                              saturatedFatG: 2,
+                              offQuality: {
+                                  nutriscoreGrade: "c",
+                                  novaGroup: 3,
+                                  ecoscoreGrade: null,
+                                  additives: null,
+                                  allergensTags: [],
+                                  tracesTags: null,
+                                  ingredientsAnalysisTags: [],
+                                  labelsTags: [],
+                                  fetchedAt: "2026-01-01T00:00:00.000Z",
+                              },
+                          },
+                      );
+                      const score = buildProductScoreSection(
+                          partialFood,
+                          previewMemberCards(partialFood, [
+                              {
+                                  id: "u-ethan",
+                                  name: "Ethan Flow",
+                                  allergens: [],
+                                  dislikes: [],
+                              },
+                          ]),
+                      );
+                      return renderProductV2Page(
+                          buildPreviewProductPageView(chrome, partialFood, {
+                              score,
+                          }),
+                      );
+                  })(),
+                  "product-none": renderProductV2Page(
+                      buildPreviewProductPageView(
+                          chrome,
+                          food("f-product-none", "Spice blend", null),
+                      ),
+                  ),
+                  "product-barcode-unknown": renderProductBarcodeUnknownPage({
+                      chrome,
+                      barcode: "9999999999999",
+                      backHref: "/kitchen/fridge",
+                  }),
               }
             : {}),
     };
@@ -1604,9 +2789,33 @@ function findChromium(): string | null {
     return null;
 }
 
+async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
+    const chrome = {
+        ...previewChrome(theme),
+        v2Timezone: "America/Los_Angeles",
+    };
+    return renderAppShell({
+        ...chrome,
+        title: "Nutrition",
+        active: "nutrition" as const,
+        body: pageHeader({ title: "Ethan Flow" }),
+        v2LogSheet: {
+            scannerOpenOnLoad: true,
+            previewScanner: true,
+            barcodeCamera: true,
+        },
+    });
+}
+
 async function logSheetPreview(
     theme: "light" | "dark",
-    mode: "empty" | "results" | "amount" | "quick-cal" | "weigh-in",
+    mode:
+        | "empty"
+        | "empty-no-yesterday"
+        | "results"
+        | "amount"
+        | "quick-cal"
+        | "weigh-in",
 ): Promise<string> {
     const chrome = {
         ...previewChrome(theme),
@@ -1668,12 +2877,24 @@ async function logSheetPreview(
             },
         });
     }
+    // Today's own sheet carries the Copy yesterday tile: enabled for every
+    // meal, or (empty-no-yesterday) disabled because yesterday had no meals.
+    const copyYesterday =
+        mode === "empty"
+            ? {
+                  slots: ["breakfast", "lunch", "snack", "dinner"],
+                  returnTo: "/",
+              }
+            : mode === "empty-no-yesterday"
+              ? { slots: [], returnTo: "/" }
+              : undefined;
     return renderAppShell({
         ...base,
         v2LogSheet: {
             searchOpenOnLoad: true,
-            previewSearch: mode,
+            previewSearch: mode === "results" ? "results" : "empty",
             previewQuery: mode === "results" ? "chick" : "",
+            ...(copyYesterday ? { copyYesterday } : {}),
         },
     });
 }
@@ -1763,9 +2984,17 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-${theme}`,
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
+        ...(V2 ? [`recipe-cook-${theme}`] : []),
         `grocery-did-you-mean-${theme}`,
         ...(V2
-            ? [`grocery-put-away-${theme}`, `kitchen-usual-edit-${theme}`]
+            ? [
+                  `grocery-put-away-${theme}`,
+                  `kitchen-usual-edit-${theme}`,
+                  `kitchen-usual-restock-${theme}`,
+                  `settings-stores-reorder-${theme}`,
+                  `settings-store-delete-${theme}`,
+                  `settings-store-delete-empty-${theme}`,
+              ]
             : []),
         `fridge-did-you-mean-${theme}`,
         `recipe-did-you-mean-${theme}`,
@@ -1861,9 +3090,11 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings-display" ||
                 shotBase === "settings-household-v2" ||
                 shotBase === "settings-household-v2-member" ||
-                shotBase === "settings-goals" ||
+                shotBase.startsWith("settings-goals") ||
                 shotBase === "settings-saved" ||
                 shotBase === "settings-export" ||
+                shotBase.startsWith("settings-ai") ||
+                shotBase.startsWith("settings-score") ||
                 shotBase === "help" ||
                 shotBase === "recipes" ||
                 shotBase === "recipe";

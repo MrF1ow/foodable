@@ -9,6 +9,8 @@ import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
 import * as actualLoadersToday from "../loaders-today.js";
+import * as actualLoadersPlan from "../loaders-plan.js";
+import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
 import * as actualAttention from "../attention.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
@@ -28,6 +30,7 @@ import * as actualNutrition from "../../db/nutrition.js";
 const realHousehold = { ...actualHousehold };
 const realProfiles = { ...actualProfiles };
 const realLoadersToday = { ...actualLoadersToday };
+const realLoadersPlan = { ...actualLoadersPlan };
 const realAttention = { ...actualAttention };
 const realDashboardData = { ...actualDashboardData };
 const realNutrition = { ...actualNutrition };
@@ -98,10 +101,29 @@ function todayViewForDate(date: string) {
     };
 }
 
+// This week reads the plans table; these tests do not run against one.
+mock.module("../loaders-plan.js", () => ({
+    ...realLoadersPlan,
+    loadWeekPlanView: async () =>
+        buildWeekPlanView({
+            today: "2026-11-10",
+            plans: [],
+            recipes: [],
+            stock: [],
+            foodsById: new Map(),
+        }),
+}));
+
+// What the page handed the chrome as already-loaded notices, per render.
+const chromeSeen: { prefetched: unknown; todayNotices: unknown }[] = [];
+let lastTodayView: ReturnType<typeof todayViewForDate> | null = null;
+
 mock.module("../loaders-today.js", () => ({
     ...realLoadersToday,
-    loadToday: async (_viewer: HouseholdMember, date?: string) =>
-        todayViewForDate(date ?? "2026-11-10"),
+    loadToday: async (_viewer: HouseholdMember, date?: string) => {
+        lastTodayView = todayViewForDate(date ?? "2026-11-10");
+        return lastTodayView;
+    },
 }));
 
 mock.module("../../dashboard-data.js", () => ({
@@ -125,7 +147,12 @@ mock.module("../attention.js", () => ({
     viewerChromeWithAttention: async (
         profile: { theme?: string | null } | null,
         viewer: HouseholdMember,
+        prefetched?: unknown,
     ) => {
+        chromeSeen.push({
+            prefetched,
+            todayNotices: lastTodayView?.attention.notices,
+        });
         const flags = await realAttention.viewerFlagsFor(viewer);
         return {
             theme:
@@ -152,6 +179,7 @@ afterAll(() => {
     mock.module("../../db/household.js", () => realHousehold);
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../loaders-today.js", () => realLoadersToday);
+    mock.module("../loaders-plan.js", () => realLoadersPlan);
     mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../../db/nutrition.js", () => realNutrition);
     mock.module("../attention.js", () => realAttention);
@@ -169,6 +197,22 @@ function cookie(userId: string): string {
 }
 
 describe("GET /", () => {
+    test("Today on the new app loads the household's notices once: the chrome reuses what the page loaded", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        chromeSeen.length = 0;
+        lastTodayView = null;
+        const res = await hono.request("http://test/", {
+            headers: { cookie: cookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        expect(chromeSeen).toHaveLength(1);
+        const seen = chromeSeen[0]!;
+        expect(seen.prefetched).toBeDefined();
+        expect((seen.prefetched as { notices: unknown }).notices).toBe(
+            seen.todayNotices,
+        );
+    });
+
     test("flag on renders v2 today", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/", {

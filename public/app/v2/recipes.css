@@ -122,8 +122,28 @@
     display: none;
 }
 
+/* One row that scrolls sideways, the way the design's Filters row runs off the
+   screen edge (FigCraft 22732), now that there are four chips. */
 .fd-recipes-chips {
-    margin: 0;
+    flex-wrap: nowrap;
+    margin: 0 calc(-1 * var(--space-gutter)) 0 0;
+    padding: 0 var(--space-gutter) 0 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.fd-recipes-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.fd-recipes-chips .fd-chip {
+    flex: none;
+}
+
+/* The chip that is on leads the row, so it is never scrolled out of sight (the
+   design's selected chip leads too). Desktop shows all four and keeps the order. */
+.fd-recipes-chips .fd-chip--selected {
+    order: -1;
 }
 
 .fd-recipes-section-head {
@@ -303,6 +323,24 @@
     background: var(--surface-panel);
     color: var(--text-primary);
     font: 400 15px/20px var(--font-body);
+}
+
+/* The shared-recipe form under the link form: set apart by a hairline. */
+.fd-recipes-import-shared {
+    margin-top: var(--fd-s-6);
+    padding-top: var(--fd-s-14);
+    border-top: 1px solid var(--line);
+}
+
+.fd-recipes-import-shared .fd-recipes-import-note {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-recipes-import-shared .fd-recipes-import-text {
+    min-height: 88px;
+    resize: vertical;
 }
 
 .fd-recipes-import-submit {
@@ -536,60 +574,24 @@
     color: var(--text-primary);
 }
 
-.fd-recipe-cook {
+/* Cook: the button on the page (FigCraft 22840 bottom row, 48815 header) and
+   the sheet it opens (22962 / 27874 phone, 48994 / 57877 desktop). */
+
+.fd-recipe-actions {
     display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-}
-
-.fd-recipe-cook-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
-}
-
-.fd-recipe-cook-field__label {
-    font: 500 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-cook-input,
-.fd-recipe-cook-select {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--line);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    font: 400 15px/20px var(--font-body);
-}
-
-.fd-recipe-cook-options {
+    gap: var(--fd-s-10);
     margin: 0;
-    padding: 0;
-    border: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-7);
 }
 
-.fd-recipe-cook-check {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-7);
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-recipe-cook-submit {
-    display: flex;
+.fd-recipe-cook-btn {
+    display: inline-flex;
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    gap: var(--space-gap);
     min-height: 52px;
     margin: 0;
-    padding: var(--fd-s-12) var(--fd-s-14);
+    padding: 0 18px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--accent-fill);
@@ -598,18 +600,653 @@
     cursor: pointer;
 }
 
-.fd-recipe-cook-submit:focus-visible {
-    outline: 2px solid var(--accent-fill);
+.fd-recipe-cook-btn .fd-icon {
+    flex: none;
+    width: 24px;
+    height: 24px;
+}
+
+.fd-recipe-cook-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
     outline-offset: 2px;
 }
 
-.fd-recipe-cook-error {
-    margin: 0;
+.fd-recipe-error {
+    margin: 0 0 var(--fd-s-6);
     padding: var(--fd-s-10) var(--fd-s-12);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--status-over) 12%, transparent);
     color: var(--status-over);
     font: 400 14px/20px var(--font-body);
+}
+
+.fd-recipe-cook-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.fd-recipe-cook-label {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-recipe-cook-stepper {
+    margin-top: var(--fd-s-4);
+}
+
+.fd-recipe-cook-region {
+    display: flex;
+    flex-direction: column;
+    transition: opacity 0.15s ease;
+}
+
+.fd-recipe-cook-region .fd-recipe-cook-label {
+    margin: var(--fd-s-12) 0 var(--fd-s-2);
+    padding-top: var(--fd-s-4);
+}
+
+.fd-recipe-cook-form[aria-busy="true"] .fd-recipe-cook-region {
+    opacity: 0.55;
+}
+
+.fd-recipe-cook-uses {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-recipe-cook-use {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-row);
+    padding: var(--fd-s-10) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-recipe-cook-use__name {
+    min-width: 0;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-recipe-cook-use__change {
+    flex: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.fd-recipe-cook-use--short .fd-recipe-cook-use__change {
+    color: var(--status-warn);
+}
+
+.fd-recipe-cook-note {
+    margin: var(--fd-s-10) 0 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-recipe-cook-note--warn {
+    color: var(--status-warn);
+}
+
+.fd-recipe-cook-log {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-row);
+    padding: var(--fd-s-14) 0 var(--space-gutter);
+    cursor: pointer;
+}
+
+.fd-recipe-cook-log__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    min-width: 0;
+}
+
+.fd-recipe-cook-log__title {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-recipe-cook-log__sub {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* A checkbox drawn as the design's toggle (46 x 28, 24 knob): it posts with
+   the form and needs no script. */
+.fd-recipe-cook-switch {
+    position: relative;
+    flex: none;
+    width: 46px;
+    height: 28px;
+    margin: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    appearance: none;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.fd-recipe-cook-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+
+.fd-recipe-cook-switch:checked {
+    background: var(--accent-fill);
+}
+
+.fd-recipe-cook-switch:checked::after {
+    background: var(--accent-on);
+    transform: translateX(18px);
+}
+
+.fd-recipe-cook-switch:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+/* The design's Cook button sits right under the toggle row. */
+#fd-recipe-cook-sheet .fd-sheet-actions {
+    margin-top: 0;
+}
+
+.fd-recipe-cook-error {
+    margin: 0 0 var(--fd-s-10);
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--status-over) 12%, transparent);
+    color: var(--status-over);
+    font: 400 14px/20px var(--font-body);
+}
+
+/* Favourites: the star on a recipe card and on the recipe page. It is a button
+   in a form of its own, so it sits beside a card's link, not inside it. The
+   design has the Favourites chip but no star yet; this follows its 36px round
+   icon buttons (FigCraft 22849). */
+
+.fd-star-form {
+    margin: 0;
+}
+
+.fd-star {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-star .fd-icon {
+    width: 22px;
+    height: 22px;
+}
+
+.fd-star--on {
+    color: var(--accent-text);
+}
+
+.fd-star:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .fd-star:not(.fd-star--on):hover {
+        color: var(--text-primary);
+    }
+}
+
+.fd-row--recipe {
+    position: relative;
+}
+
+/* Centred on the 22px title line: the row's 11px padding plus half the line,
+   less half the button. The icon, not the button, lines up with the right edge. */
+.fd-recipes-card__star {
+    position: absolute;
+    top: 4px;
+    right: -7px;
+}
+
+.fd-recipes-card__title {
+    padding-right: 34px;
+}
+
+/* On the recipe page it takes the top bar's right-hand slot (FigCraft 22849's
+   place), so the account chip steps aside for it, as on the product screen. */
+.fd-recipe-detail {
+    position: relative;
+}
+
+.fd-recipe-star {
+    position: absolute;
+    top: 4px;
+    right: 0;
+}
+
+.fd-recipe-star .fd-star {
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-main:has(.fd-recipe-detail) .fd-account-chip {
+    display: none;
+}
+
+/* The week plan: the Recipes strip, the Today rows, and the plan sheets
+   (FigCraft Screens › Recipes 22716 / 48591, Desktop › Today 41837). The design
+   has no frame for the sheets, the missing list or the phone Today section; they
+   use the cook sheet's labels, rows and buttons. */
+
+.fd-plan-strip {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-7);
+}
+
+.fd-plan-strip__title {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-plan-strip__title--desk {
+    display: none;
+}
+
+.fd-plan-tiles {
+    display: flex;
+    gap: var(--fd-s-6);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.fd-plan-tiles::-webkit-scrollbar {
+    display: none;
+}
+
+.fd-plan-tile {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    box-sizing: border-box;
+    width: 112px;
+    padding: var(--fd-s-10) var(--fd-s-10);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+/* On the phone only the planned days show; the desktop strip shows all seven. */
+.fd-plan-tile--empty {
+    display: none;
+}
+
+.fd-plan-tile__day,
+.fd-plan-day__label {
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-plan-tile__name {
+    font: 400 14px/18px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-plan-tile__add {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-plan-tile--empty .fd-plan-tile__name {
+    color: var(--text-tertiary);
+}
+
+/* A planned recipe is a button that opens its sheet, reset to read as text. */
+.fd-plan-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 40px;
+    gap: var(--fd-s-6);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.fd-plan-item:focus-visible,
+.fd-plan-day__add:focus-visible,
+.fd-plan-tile__add:focus-visible,
+.fd-plan-missing-link:focus-visible,
+.fd-recipes-card__plan:focus-visible,
+.fd-recipe-plan-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.fd-plan-item__name {
+    min-width: 0;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-plan-item__slot {
+    flex: none;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-plan-missing-link {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--accent-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.fd-plan-covered,
+.fd-plan-empty {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-plan-pick {
+    margin: 0;
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-plan-pick a {
+    color: var(--accent-text);
+}
+
+/* The day rows on Today: weekday, recipe, meal. */
+.fd-plan-days {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-plan-day {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--fd-s-6);
+    min-height: 40px;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-plan-day:last-child {
+    border-bottom: 0;
+}
+
+.fd-plan-day--empty {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+}
+
+.fd-plan-day--today .fd-plan-day__label {
+    color: var(--accent-text);
+}
+
+.fd-plan-day__name {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-tertiary);
+}
+
+.fd-plan-day__add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--text-tertiary);
+    text-decoration: none;
+}
+
+.fd-plan-day__add .fd-icon {
+    width: 20px;
+    height: 20px;
+}
+
+.fd-plan-phone .fd-plan-days {
+    margin-top: var(--fd-s-4);
+}
+
+.fd-plan-days + .fd-plan-missing-link,
+.fd-plan-days + .fd-plan-covered {
+    display: block;
+    margin-top: var(--fd-s-10);
+}
+
+.fd-plan-phone__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--fd-s-6);
+    padding-bottom: var(--fd-s-7);
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-plan-phone__title {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-plan-phone__link {
+    font: 400 13px/17px var(--font-body);
+    color: var(--accent-text);
+    text-decoration: none;
+}
+
+/* Plan on a recipe card (Recipes) and on the recipe page. */
+.fd-recipes-card__plan {
+    display: none;
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 14px/18px var(--font-body);
+    text-decoration: none;
+}
+
+/* Picking a recipe for a day: Plan shows on every card, phone included. */
+.fd-recipes-list--planning .fd-recipes-card__plan {
+    display: inline-flex;
+    min-height: 32px;
+    right: 0;
+    bottom: 11px;
+    padding: 0 14px;
+}
+
+.fd-recipe-plan-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-gap);
+    min-height: 52px;
+    margin: 0;
+    padding: 0 18px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+.fd-recipe-plan-btn .fd-icon {
+    flex: none;
+    width: 22px;
+    height: 22px;
+}
+
+.fd-plan-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-plan-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-4);
+}
+
+.fd-plan-field__label {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-plan-field input,
+.fd-plan-field select {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 var(--fd-s-10);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    /* 16px: smaller and iOS zooms the page when the field takes focus. */
+    font: 400 16px/22px var(--font-body);
+}
+
+/* The select's own arrow is off in the app's form reset, so draw one. */
+.fd-plan-select {
+    position: relative;
+    display: block;
+}
+
+.fd-plan-select select {
+    padding-right: 36px;
+}
+
+.fd-plan-select::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    width: 7px;
+    height: 7px;
+    border-right: 1.7px solid var(--text-secondary);
+    border-bottom: 1.7px solid var(--text-secondary);
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+}
+
+.fd-plan-stepper {
+    margin-top: var(--fd-s-2);
+}
+
+.fd-plan-error {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--status-over);
+}
+
+.fd-plan-missing-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-plan-missing-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-row);
+    padding: var(--fd-s-10) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-plan-missing-row__main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    min-width: 0;
+}
+
+.fd-plan-missing-row__name {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-plan-missing-row__note {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-plan-missing-row--unknown .fd-plan-missing-row__note {
+    color: var(--status-warn);
+}
+
+.fd-plan-missing-row__amount {
+    flex: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -665,16 +1302,26 @@
 
     .fd-recipes-toolbar .fd-recipes-chips {
         flex: none;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+    }
+
+    .fd-recipes-toolbar .fd-recipes-chips .fd-chip--selected {
+        order: 0;
     }
 
     .fd-recipes-search-input--phone {
         display: none;
     }
 
-    .fd-recipes-search-input--desk {
+    /* The field is the frame's 46px box (FigCraft 57474); the input inside
+       drops the shared 44px tap height, which its padding would double. */
+    .fd-recipes-search-input.fd-recipes-search-input--desk {
         display: block;
         flex: 1 1 auto;
         min-width: 0;
+        min-height: 0;
     }
 
     .fd-recipes-card__kcal {
@@ -768,9 +1415,158 @@
         align-items: start;
     }
 
-    .fd-recipe-cook-submit {
+    /* FigCraft 48815: the title on the left, Cook on the right of its row. */
+    .fd-recipe-detail {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas:
+            "back back back"
+            "head star act"
+            "body body body";
+        align-items: end;
+    }
+
+    .fd-recipe-back {
+        grid-area: back;
+    }
+
+    .fd-recipe-header {
+        grid-area: head;
+    }
+
+    .fd-recipe-layout {
+        grid-area: body;
+    }
+
+    .fd-recipe-actions {
+        grid-area: act;
+    }
+
+    .fd-recipe-cook-btn {
+        flex: none;
+        min-height: 42px;
+        padding: 0 18px;
+        font-size: 14px;
+        line-height: 18px;
+    }
+
+    /* The star moves into the card's corner, inside its 14px padding. */
+    .fd-recipes-card__star {
+        top: 8px;
+        right: 8px;
+    }
+
+    .fd-recipes-card__title {
+        padding-right: 40px;
+    }
+
+    /* The star sits left of Cook on the title row. */
+    .fd-recipe-star {
+        position: static;
+        grid-area: star;
+        align-self: end;
+        margin-bottom: 3px;
+    }
+
+    /* FigCraft 48994: a 560px centred dialog. */
+    #fd-recipe-cook-sheet.fd-sheet--confirm {
+        width: 560px;
+    }
+
+    /* This week (FigCraft 48591): a panel with seven day tiles. */
+    .fd-plan-strip {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: baseline;
+        gap: var(--fd-s-12) var(--fd-s-10);
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-plan-strip__title {
+        font: 600 18px/22px var(--font-display);
+        letter-spacing: -0.3px;
+        text-transform: none;
+        color: var(--text-primary);
+    }
+
+    .fd-plan-strip__title--phone {
+        display: none;
+    }
+
+    .fd-plan-strip__title--desk {
+        display: inline;
+    }
+
+    .fd-plan-strip > .fd-plan-missing-link,
+    .fd-plan-strip > .fd-plan-covered {
+        grid-row: 1;
+        grid-column: 2;
+    }
+
+    .fd-plan-tiles,
+    .fd-plan-empty {
+        grid-column: 1 / -1;
+    }
+
+    .fd-plan-tiles {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        overflow: visible;
+    }
+
+    /* FigCraft 48682 (light 57565): the tile is inset into the panel, filled
+       with the page background, 12px padding, 6px gap, 61px with one line. */
+    .fd-plan-tile {
         width: auto;
-        align-self: flex-start;
-        min-width: 200px;
+        min-height: 61px;
+        gap: var(--fd-s-6);
+        padding: var(--fd-s-12);
+        background: var(--surface-bg);
+    }
+
+    .fd-plan-tile--empty {
+        display: flex;
+        padding: 0;
+        background: transparent;
+        border: 1px dashed var(--line);
+    }
+
+    .fd-plan-tile__add {
+        flex: 1;
+        gap: var(--fd-s-6);
+        padding: var(--fd-s-12);
+    }
+
+    .fd-plan-tile__name {
+        font-size: 13px;
+        line-height: 17px;
+        overflow-wrap: anywhere;
+    }
+
+    /* Plan sits at the card's bottom right, level with the stock line. */
+    .fd-recipes-card__plan {
+        display: inline-flex;
+    }
+
+    .fd-recipes-list--planning .fd-recipes-card__plan {
+        min-height: 42px;
+        right: 14px;
+        bottom: 14px;
+        padding: 0 18px;
+    }
+
+    .fd-recipe-plan-btn {
+        min-height: 42px;
+        padding: 0 18px;
+        font-size: 14px;
+        line-height: 18px;
+    }
+
+    /* The Today rail card shows the week there; the phone section steps aside. */
+    .fd-today-section.fd-plan-phone {
+        display: none;
     }
 }

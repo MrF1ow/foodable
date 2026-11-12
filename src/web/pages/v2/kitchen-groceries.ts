@@ -27,6 +27,11 @@ import type { GroceryLineView, GroceryStoreView } from "../grocery.js";
 import { renderAppShell } from "../../shell.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import { UNKNOWN_ALLERGEN_TEXT } from "../../../copy/notices.js";
+import {
+    GROCERY_SHARE_SHEET_ID,
+    renderShareSheet,
+    renderShareTrigger,
+} from "./share-sheet.js";
 
 export const GROCERY_V2_RETURN_TO = "/kitchen/groceries";
 export const FD_GROCERY_PUT_AWAY_SHEET_ID = "fd-grocery-put-away";
@@ -46,6 +51,7 @@ export type KitchenGroceriesLineMeta = {
     allergenWarning: string | null;
     storeName: string;
     sectionName: string;
+    productScore?: number | null;
 };
 
 export type PutAwayDraft = Record<
@@ -73,6 +79,8 @@ export type KitchenGroceriesV2View = {
     openPutAway?: boolean;
     putAwayDraft?: PutAwayDraft;
     openAdd?: boolean;
+    /** A refused Share post re-renders the page with the Share sheet open. */
+    openShare?: boolean;
     addStoreId?: string | null;
     allergenNotices?: Notice[];
     allergenRetry?: GroceryAllergenRetry;
@@ -295,6 +303,7 @@ export function groceryLineRowMarkup(
     const rowHtml = String(
         groceryRow({
             title: labels.title,
+            score: meta.productScore,
             subtitle: labels.subtitle,
             tag: labels.tag,
             amount,
@@ -307,9 +316,10 @@ export function groceryLineRowMarkup(
         ? ` data-fd-grocery-row-overview tabindex="0" data-fd-grocery-line-href="${esc(`${GROCERY_V2_RETURN_TO}?line=${encodeURIComponent(line.id)}`)}"`
         : ` data-fd-grocery-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
+            () => `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
         ),
     );
 }
@@ -606,7 +616,7 @@ export function renderKitchenGroceriesBody(
         ? `<p class="fd-kitchen-grocery-unknown-allergen">${esc(UNKNOWN_ALLERGEN_TEXT)}</p>`
         : "";
     const pageError =
-        view.error && !view.openLineId && !view.openPutAway
+        view.error && !view.openLineId && !view.openPutAway && !view.openShare
             ? String(settingsErrorBanner(view.error))
             : "";
     const itemCount = groceryHeaderSubtitle(view.openLineCount);
@@ -616,7 +626,7 @@ export function renderKitchenGroceriesBody(
     const sheets = allLines
         .map((line) => lineSheet(line, view, returnTo))
         .join("");
-    return `<h1 class="fd-kitchen-grocery-title">Kitchen<span class="fd-kitchen-grocery-count">${esc(itemCount)}</span></h1>
+    return `<div class="fd-kitchen-grocery-head"><h1 class="fd-kitchen-grocery-title">Kitchen<span class="fd-kitchen-grocery-count">${esc(itemCount)}</span></h1>${String(renderShareTrigger(GROCERY_SHARE_SHEET_ID, "fd-kitchen-grocery-share"))}</div>
 <div class="fd-kitchen-groceries-page">
 ${pageError}
 ${allergenBanner}
@@ -629,6 +639,15 @@ ${empty}
 ${sheets}
 ${groceryAddSheet(view, returnTo)}
 ${putAwaySheet(view, returnTo)}
+${renderShareSheet({
+    id: GROCERY_SHARE_SHEET_ID,
+    action: "/kitchen/groceries/share",
+    title: "Share grocery list",
+    subtitle: "The whole list, by store",
+    what: "grocery list",
+    open: view.openShare,
+    error: view.openShare ? view.error : undefined,
+})}
 ${confirmSheet({
     id: FD_GROCERY_CLEAR_SHEET_ID,
     title: "Clear checked",

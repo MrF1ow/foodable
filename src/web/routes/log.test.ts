@@ -18,8 +18,11 @@ import * as actualProfiles from "../../db/profiles.js";
 import * as actualFoodsDb from "../../db/foods.js";
 import * as actualFridgeDb from "../../db/fridge.js";
 import * as actualRecipesDb from "../../db/recipes.js";
+import * as actualMealsDb from "../../db/meals.js";
+import * as actualScoreSettingsDb from "../../db/score-settings.js";
 import * as actualNutritionDb from "../../db/nutrition.js";
 import * as actualFoodSearch from "../../food-search.js";
+import { TOASTS } from "../../copy/toasts.js";
 import type { FoodResult } from "../../foods.js";
 import * as actualFoods from "../../foods.js";
 import {
@@ -28,8 +31,14 @@ import {
     matchFoodsByWords,
     newFood,
     updateFood,
+    type FoodQuality,
 } from "../../domain/foods.js";
+import { foodDisplayScore } from "../../domain/product-screen.js";
 import { createMemoryFridgeStore } from "../../domain/fridge.js";
+import {
+    createMemoryScoreSettingsStore,
+    updateMemberScoreSettings,
+} from "../../domain/score-settings.js";
 import {
     createMemoryRecipesStore,
     createRecipe,
@@ -42,6 +51,8 @@ import {
 import * as actualAttention from "../attention.js";
 import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualLoadersToday from "../loaders-today.js";
+import * as actualLoadersPlan from "../loaders-plan.js";
+import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
 import { buildPreviewTodayView } from "../pages/v2/today.js";
 
 const realHousehold = { ...actualHousehold };
@@ -49,6 +60,8 @@ const realProfiles = { ...actualProfiles };
 const realFoodsDb = { ...actualFoodsDb };
 const realFridgeDb = { ...actualFridgeDb };
 const realRecipesDb = { ...actualRecipesDb };
+const realMealsDb = { ...actualMealsDb };
+const realScoreSettingsDb = { ...actualScoreSettingsDb };
 const realNutritionDb = { ...actualNutritionDb };
 const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
@@ -56,6 +69,7 @@ const realAttention = { ...actualAttention };
 const realFoods = { ...actualFoods };
 const realDashboardData = { ...actualDashboardData };
 const realLoadersToday = { ...actualLoadersToday };
+const realLoadersPlan = { ...actualLoadersPlan };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
@@ -73,6 +87,7 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     fridgeStore: createMemoryFridgeStore(),
     recipesStore: createMemoryRecipesStore(),
+    scoreSettingsStore: createMemoryScoreSettingsStore(),
 };
 
 let offThrows = false;
@@ -84,10 +99,66 @@ const rangeCalls: Array<{
     end: string;
     tz: string;
 }> = [];
+const recentLogsCalls: Array<{ userId: string; limit: number }> = [];
 let listFoodsCalls = 0;
 let listRecipesCalls = 0;
 let listFridgeItemsCalls = 0;
 const mealsInserted: Array<Record<string, unknown>> = [];
+let rangeMealsOverride: Awaited<
+    ReturnType<typeof realNutritionDb.getMealsInRange>
+> | null = null;
+let recentLogsOverride: Awaited<
+    ReturnType<typeof realMealsDb.recentLogs>
+> | null = null;
+
+function defaultRecentHistoryMeals(): Awaited<
+    ReturnType<typeof realMealsDb.recentLogs>
+> {
+    return [
+        {
+            id: "meal-recipe",
+            user_id: ALICE,
+            logged_at: "2026-11-01T19:00:00.000Z",
+            meal_type: "dinner",
+            description: "Chili night",
+            calories: 400,
+            protein_g: 20,
+            carbs_g: 30,
+            fat_g: 10,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            notes: null,
+            idempotency_key: null,
+            items: [
+                {
+                    id: "item-1",
+                    meal_id: "meal-recipe",
+                    user_id: ALICE,
+                    household_id: HH,
+                    food_id: null,
+                    recipe_id: "recipe-chili",
+                    label: "Chili",
+                    amount: 1,
+                    unit: "portion",
+                    grams: null,
+                    portions: 1,
+                    calories: 400,
+                    protein_g: 20,
+                    carbs_g: 30,
+                    fat_g: 10,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                    created_at: "2026-11-01T19:00:00.000Z",
+                },
+            ],
+        },
+    ];
+}
 const waterInserted: Array<Record<string, unknown>> = [];
 const weightsInserted: Array<Record<string, unknown>> = [];
 
@@ -184,6 +255,20 @@ mock.module("../../db/recipes.js", () => ({
     liveRecipesStore: () => db.recipesStore,
 }));
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/score-settings.js", () => ({
+    ...realScoreSettingsDb,
+    liveScoreSettingsStore: () => db.scoreSettingsStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/meals.js", () => ({
+    ...realMealsDb,
+    recentLogs: async (userId: string, limit: number) => {
+        recentLogsCalls.push({ userId, limit });
+        if (recentLogsOverride != null) return recentLogsOverride;
+        return defaultRecentHistoryMeals().slice(0, limit);
+    },
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
 mock.module("../../db/nutrition.js", () => ({
     ...realNutritionDb,
     insertMeal: async (userId: string, input: Record<string, unknown>) => {
@@ -251,6 +336,7 @@ mock.module("../../db/nutrition.js", () => ({
         tz: string,
     ) => {
         rangeCalls.push({ userId, start, end, tz });
+        if (rangeMealsOverride != null) return rangeMealsOverride;
         return [
             {
                 id: "meal-recipe",
@@ -342,6 +428,19 @@ mock.module("../../dashboard-data.js", () => ({
     getWeightTrendsPayload: async () => widgetStub,
 }));
 
+// This week reads the plans table; these tests do not run against one.
+mock.module("../loaders-plan.js", () => ({
+    ...realLoadersPlan,
+    loadWeekPlanView: async () =>
+        buildWeekPlanView({
+            today: "2026-11-10",
+            plans: [],
+            recipes: [],
+            stock: [],
+            foodsById: new Map(),
+        }),
+}));
+
 mock.module("../loaders-today.js", () => ({
     ...realLoadersToday,
     loadToday: async () => buildPreviewTodayView("2026-11-10"),
@@ -359,6 +458,7 @@ afterAll(() => {
     mock.module("../attention.js", () => realAttention);
     mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../loaders-today.js", () => realLoadersToday);
+    mock.module("../loaders-plan.js", () => realLoadersPlan);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/household.js", () => realHousehold);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
@@ -369,6 +469,10 @@ afterAll(() => {
     mock.module("../../db/fridge.js", () => realFridgeDb);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/recipes.js", () => realRecipesDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/score-settings.js", () => realScoreSettingsDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/meals.js", () => realMealsDb);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/nutrition.js", () => realNutritionDb);
     mock.module("../../food-search.js", () => realFoodSearch);
@@ -413,6 +517,8 @@ afterEach(async () => {
 });
 
 beforeEach(async () => {
+    rangeMealsOverride = null;
+    recentLogsOverride = null;
     mealsInserted.length = 0;
     waterInserted.length = 0;
     weightsInserted.length = 0;
@@ -420,10 +526,12 @@ beforeEach(async () => {
     offServing = "30 g";
     offCalls = 0;
     rangeCalls.length = 0;
+    recentLogsCalls.length = 0;
     listFoodsCalls = 0;
     listRecipesCalls = 0;
     listFridgeItemsCalls = 0;
     db.foodsStore = createMemoryFoodsStore();
+    db.scoreSettingsStore = createMemoryScoreSettingsStore();
     db.fridgeStore = createMemoryFridgeStore();
     db.recipesStore = createMemoryRecipesStore();
     const foodsList = db.foodsStore.listFoods.bind(db.foodsStore);
@@ -586,16 +694,182 @@ describe("GET /api/log/search", () => {
         expect(offCalls).toBe(0);
     });
 
+    test("stock and history sources carry product_score when the food scores", async () => {
+        const quality: FoodQuality = {
+            nutriscoreGrade: "a",
+            novaGroup: 1,
+            ecoscoreGrade: "b",
+            additives: [],
+            allergensTags: [],
+            tracesTags: null,
+            ingredientsAnalysisTags: [],
+            labelsTags: [],
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const scored = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Greek yogurt",
+                calories: 59,
+                proteinG: 10,
+                sugarG: 4,
+                saturatedFatG: 2,
+                gramsPerEach: 170,
+                offQuality: quality,
+            }),
+        );
+        const expected = foodDisplayScore(scored);
+        expect(expected).not.toBeNull();
+        const loc = await db.fridgeStore.insertLocation({
+            id: "loc-fridge",
+            householdId: HH,
+            name: "Fridge",
+            sortOrder: 0,
+        });
+        await db.fridgeStore.insertItem({
+            id: "fridge-yogurt",
+            householdId: HH,
+            locationId: loc.id,
+            kind: "food",
+            displayName: scored.name,
+            quantity: { amount: 2, unit: "each" },
+            foodId: scored.id,
+        });
+        const { buildLogSearchSources } = await import("./log.js");
+        const built = await buildLogSearchSources({
+            householdId: HH,
+            userId: ALICE,
+            query: "greek",
+            limit: 20,
+            timezone: "America/Los_Angeles",
+        });
+        const stockRow = built.sources.stock?.find(
+            (row) => row.food_id === scored.id,
+        );
+        expect(stockRow?.product_score).toBe(expected);
+        const body = await search("greek");
+        const history = body.groups.find((g) => g.kind === "history");
+        expect(history).toBeUndefined();
+        const foodRow = body.groups
+            .find((g) => g.kind === "food")
+            ?.items.find((i) => i.food_id === scored.id);
+        expect(foodRow?.product_score).toBe(expected);
+
+        recentLogsOverride = [
+            {
+                id: "meal-yogurt",
+                user_id: ALICE,
+                logged_at: "2026-11-10T12:00:00.000Z",
+                meal_type: "snack",
+                description: "Yogurt",
+                calories: 100,
+                protein_g: 17,
+                carbs_g: 4,
+                fat_g: 1,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                caffeine_mg: null,
+                notes: null,
+                idempotency_key: null,
+                items: [
+                    {
+                        id: "item-yogurt",
+                        meal_id: "meal-yogurt",
+                        user_id: ALICE,
+                        household_id: HH,
+                        food_id: scored.id,
+                        recipe_id: null,
+                        label: "Greek yogurt",
+                        amount: 1,
+                        unit: "each",
+                        grams: 170,
+                        portions: null,
+                        calories: 100,
+                        protein_g: 17,
+                        carbs_g: 4,
+                        fat_g: 1,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sort_order: 0,
+                        created_at: "2026-11-10T12:00:00.000Z",
+                    },
+                ],
+            },
+        ];
+        const empty = await buildLogSearchSources({
+            householdId: HH,
+            userId: ALICE,
+            query: "",
+            limit: 20,
+            timezone: "America/Los_Angeles",
+        });
+        expect(empty.sources.history?.[0]?.product_score).toBe(expected);
+    });
+
+    test("score badges use the viewer's weights, in the results and in the source builder", async () => {
+        const scored = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Greek yogurt",
+                gramsPerEach: 170,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "b",
+                    additives: [],
+                    allergensTags: [],
+                    tracesTags: null,
+                    ingredientsAnalysisTags: [],
+                    labelsTags: [],
+                    fetchedAt: "2026-01-01T00:00:00.000Z",
+                },
+            }),
+        );
+        const scoreOf = async () =>
+            (await search("greek")).groups
+                .find((g) => g.kind === "food")
+                ?.items.find((i) => i.food_id === scored.id)?.product_score;
+        const byDefault = await scoreOf();
+        expect(byDefault).toBe(foodDisplayScore(scored));
+        await updateMemberScoreSettings(db.scoreSettingsStore, HH, ALICE, {
+            choice: {
+                preset: "custom",
+                weights: {
+                    nutrition: 0,
+                    processing: 100,
+                    additives: 0,
+                    environment: 0,
+                },
+            },
+        });
+        const custom = await scoreOf();
+        expect(custom).not.toBe(byDefault);
+        expect(custom).toBe(
+            foodDisplayScore(scored, {
+                nutrition: 0,
+                processing: 100,
+                additives: 0,
+                environment: 0,
+            }),
+        );
+    });
+
     test("empty q returns history without OFF and recipe meals carry re-log fields", async () => {
         const empty = await search("");
         expect(offCalls).toBe(0);
         expect(empty.groups.map((g) => g.kind)).toEqual(["history"]);
-        expect(rangeCalls[0]).toMatchObject({
+        expect(recentLogsCalls[0]).toMatchObject({
             userId: ALICE,
-            tz: "America/Los_Angeles",
+            limit: 20,
         });
         const item = empty.groups[0]!.items[0]!;
         expect(item.id).toBe("meal-recipe");
+        expect(item.meal_id).toBe("meal-recipe");
         expect(item.recipe_id).toBe("recipe-chili");
         expect(item.kcal).toBe(400);
         expect(item.meal_kcal).toBe(400);
@@ -1102,6 +1376,15 @@ describe("POST /log/weight", () => {
         expect(res.status).toBe(400);
         expect(html).toMatch(/Last: 183\.0 lb/);
     });
+});
+
+test("copy-yesterday noop toast differs from undo noop", () => {
+    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).toBe(
+        "Already copied from yesterday",
+    );
+    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).not.toBe(
+        TOASTS["nutrition.meal.undo.noop"].text,
+    );
 });
 
 describe("weighInPrefillForUser", () => {

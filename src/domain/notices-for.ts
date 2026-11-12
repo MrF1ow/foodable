@@ -3,6 +3,7 @@ import {
     duplicatesNeedRefCounts,
     foodDisplayName,
     effectiveFoodsByIds,
+    effectiveFoodsFromListed,
     possibleDuplicates,
     type FoodsStore,
 } from "./foods.js";
@@ -28,7 +29,16 @@ import {
     type RecipesStore,
 } from "./recipes.js";
 import type { FridgeItem } from "./fridge.js";
-import type { GroceryListStore } from "./grocery.js";
+import type { GroceryLine, GroceryListStore } from "./grocery.js";
+import {
+    PLAN_NOTICE_DAYS,
+    planMissingNotices,
+    runningLowNotices,
+    weighInDueNotices,
+    type WeighInStore,
+} from "./notices-actionable.js";
+import type { PlansStore } from "./plan.js";
+import { addPlanDays, planRecipesOf } from "./plan-week.js";
 import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices } from "./stock.js";
 
@@ -41,6 +51,10 @@ export type NoticesForDeps = {
      *  grocery list, as the fridge page does, so their "Add to grocery list"
      *  action shows the same way. Optional: the count does not depend on it. */
     grocery?: GroceryListStore;
+    /** Planned recipes, for the missing-for-plan notice. Without it none is produced. */
+    plans?: PlansStore;
+    /** Latest weigh-ins, for the weigh-in notice. Without it none is produced. */
+    weighIns?: WeighInStore;
 };
 
 export type RecipesListPrefetch = {
@@ -189,6 +203,15 @@ export async function noticesFor(
         includeDismissed?: boolean;
         /** When set (e.g. Possible duplicates page), used for job exclusion and not fetched again. */
         refCounts?: ReadonlyMap<string, number>;
+        /**
+         * Also produce the notices that come with a one-tap action: running
+         * low, missing for the plan, weigh-in due. Off by default so only the
+         * surfaces that can act on them (the new app, the MCP tools for its
+         * callers) ever see them.
+         */
+        actionable?: boolean;
+        /** The household's time zone, for counting days since a weigh-in. Default UTC. */
+        timezone?: string;
     },
 ): Promise<NoticesForResult> {
     const today = opts.today;
@@ -337,6 +360,21 @@ export async function noticesFor(
     if (grocery) {
         raw.push(...groceryRestockNotices(grocery.lines, fridgeItems, today));
     }
+    if (opts.actionable) {
+        const actionable = await actionableNotices(deps, householdId, {
+            today,
+            timezone: opts.timezone ?? "UTC",
+            catalogFoods,
+            fridgeItems,
+            lines: grocery?.lines,
+            recipes,
+            allIngredients,
+        });
+        raw.push(...actionable.notices);
+        for (const [key, name] of actionable.subjectNames) {
+            subjectNames.set(key, name);
+        }
+    }
 
     let filtered = raw;
     if (!opts?.includeDismissed) {
@@ -374,6 +412,80 @@ export async function noticesFor(
     };
 }
 
+/**
+ * The producers of `notices-actionable`, fed from what `noticesFor` already
+ * loaded. Running low and missing-for-plan need the grocery list to know what
+ * is already on it, so they are skipped without one; weigh-in needs its store.
+ */
+async function actionableNotices(
+    deps: NoticesForDeps,
+    householdId: string,
+    input: {
+        today: string;
+        timezone: string;
+        catalogFoods: readonly Food[];
+        fridgeItems: readonly FridgeItem[];
+        lines: readonly GroceryLine[] | undefined;
+        recipes: readonly Recipe[];
+        allIngredients: readonly RecipeIngredient[];
+    },
+): Promise<{ notices: Notice[]; subjectNames: Map<string, string> }> {
+    const notices: Notice[] = [];
+    const subjectNames = new Map<string, string>();
+    const { lines } = input;
+    if (lines) {
+        const foodsById = effectiveFoodsFromListed(input.catalogFoods);
+        notices.push(
+            ...runningLowNotices({
+                foodsById,
+                stock: input.fridgeItems,
+                lines,
+                today: input.today,
+            }),
+        );
+        if (deps.plans) {
+            const plans = await deps.plans.listPlans(
+                householdId,
+                input.today,
+                addPlanDays(input.today, PLAN_NOTICE_DAYS - 1),
+            );
+            const recipes = planRecipesOf(
+                plans,
+                input.recipes,
+                input.allIngredients,
+            );
+            notices.push(
+                ...planMissingNotices({
+                    plans,
+                    recipes,
+                    stock: input.fridgeItems.map((item) => ({
+                        quantity: item.quantity,
+                        foodId: item.foodId,
+                    })),
+                    lines,
+                    foodsById,
+                    today: input.today,
+                }),
+            );
+        }
+    }
+    if (deps.weighIns) {
+        const members = await deps.weighIns.latestWeighIns(householdId);
+        for (const notice of weighInDueNotices({
+            members,
+            today: input.today,
+            timezone: input.timezone,
+        })) {
+            notices.push(notice);
+            subjectNames.set(
+                subjectNameKey("member", notice.subject.id),
+                String(notice.params.name),
+            );
+        }
+    }
+    return { notices, subjectNames };
+}
+
 export type DismissNoticeInput = {
     code: Notice["code"];
     subjectKind: NoticeSubjectKind;
@@ -386,12 +498,14 @@ export async function dismissNotice(
     householdId: string,
     userId: string,
     input: DismissNoticeInput,
-    opts: { today: string },
+    opts: { today: string; actionable?: boolean; timezone?: string },
 ): Promise<NoticeDismissal> {
     assertDismissibleCode(input.code);
 
     const { notices } = await noticesFor(deps, householdId, {
         today: opts.today,
+        actionable: opts.actionable,
+        timezone: opts.timezone,
         includeDismissed: true,
     });
     const key = lookupDismissalKey(

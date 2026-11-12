@@ -99,7 +99,10 @@ export function releaseTitle(version: string): string {
 export function setPackageVersion(json: string, version: string): string {
     const re = /("version"\s*:\s*")[^"]*(")/;
     if (!re.test(json)) throw new Error("package.json has no version field");
-    return json.replace(re, `$1${version}$2`);
+    return json.replace(
+        re,
+        (_match, open: string, close: string) => `${open}${version}${close}`,
+    );
 }
 
 export function releaseBody(input: {

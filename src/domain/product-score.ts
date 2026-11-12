@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AdditiveRisk } from "./additive-risk.js";
 import { parseOffNutrientLevel } from "./off-nutrient-levels.js";
 
@@ -17,7 +18,7 @@ export const SCORE_PARTS: readonly ScorePart[] = [
 
 /*
  * Additive part penalties (chosen against OFF fixtures, Yuka-like sensitivity):
- * - high −15 each, any high-risk additive caps the part at 40
+ * - high −15 each, any high-risk additive caps the part score at 40 (budget ceiling)
  * - moderate −6, none 0, unknown tier −2 (OFF lists the tag but we have no tier)
  * Minimum known configured weight share 0.5: fewer than half the preset points with
  * real data yields not_enough_data instead of a misleading average.
@@ -69,6 +70,119 @@ export const SCORE_PRESET_LABELS: Record<ScorePresetId | "custom", string> = {
     planet: "Planet",
     custom: "Custom",
 };
+
+/** Each custom weight is a whole number from 0 to 100 (a slider step). */
+export const SCORE_WEIGHT_MIN = 0;
+export const SCORE_WEIGHT_MAX = 100;
+
+export const SCORE_WEIGHTS_SUM_ERROR =
+    "Give at least one part a weight above 0.";
+export const SCORE_WEIGHT_RANGE_ERROR = `Each weight is a whole number from ${SCORE_WEIGHT_MIN} to ${SCORE_WEIGHT_MAX}.`;
+export const SCORE_PRESET_ERROR = "Pick a score preset.";
+
+/** A way of weighting the score: a named preset, or four custom weights. */
+export type ScoreChoicePreset = ScorePresetId | "custom";
+
+export type ScoreChoice = {
+    preset: ScoreChoicePreset;
+    /** Set only for `custom`; a preset carries its own weights. */
+    weights: ScoreWeights | null;
+};
+
+const weightSchema = z
+    .number()
+    .int()
+    .min(SCORE_WEIGHT_MIN)
+    .max(SCORE_WEIGHT_MAX);
+
+const weightsSchema = z.object({
+    nutrition: weightSchema,
+    processing: weightSchema,
+    additives: weightSchema,
+    environment: weightSchema,
+});
+
+const presetSchema = z.enum([
+    "balanced",
+    "health_first",
+    "less_processed",
+    "planet",
+    "custom",
+] satisfies ScoreChoicePreset[]);
+
+function weightsSum(w: ScoreWeights): number {
+    return SCORE_PARTS.reduce((s, p) => s + w[p], 0);
+}
+
+/** Custom weights that are well-formed and not all zero, else null. */
+function usableCustomWeights(raw: unknown): ScoreWeights | null {
+    const parsed = weightsSchema.safeParse(raw);
+    if (!parsed.success) return null;
+    return weightsSum(parsed.data) > 0 ? parsed.data : null;
+}
+
+/**
+ * Reads a stored choice (`{preset, weights}` jsonb). A preset row keeps the
+ * preset and drops its weights, so a corrupt weights value cannot hurt it. A
+ * custom row whose weights are invalid stays `custom` with no weights, which
+ * `resolveWeights` treats as no choice. An unknown preset or a non-object is
+ * no choice at all (null).
+ */
+export function parseScoreChoice(raw: unknown): ScoreChoice | null {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const record = raw as Record<string, unknown>;
+    const preset = presetSchema.safeParse(record.preset);
+    if (!preset.success) return null;
+    if (preset.data !== "custom") {
+        return { preset: preset.data, weights: null };
+    }
+    return { preset: "custom", weights: usableCustomWeights(record.weights) };
+}
+
+/** Checks a choice a person is saving; the handler calls this before any write. */
+export function validateScoreChoice(
+    raw: unknown,
+): { ok: true; value: ScoreChoice } | { ok: false; error: string } {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return { ok: false, error: SCORE_PRESET_ERROR };
+    }
+    const record = raw as Record<string, unknown>;
+    const preset = presetSchema.safeParse(record.preset);
+    if (!preset.success) return { ok: false, error: SCORE_PRESET_ERROR };
+    if (preset.data !== "custom") {
+        return { ok: true, value: { preset: preset.data, weights: null } };
+    }
+    const weights = weightsSchema.safeParse(record.weights);
+    if (!weights.success) {
+        return { ok: false, error: SCORE_WEIGHT_RANGE_ERROR };
+    }
+    if (weightsSum(weights.data) <= 0) {
+        return { ok: false, error: SCORE_WEIGHTS_SUM_ERROR };
+    }
+    return { ok: true, value: { preset: "custom", weights: weights.data } };
+}
+
+function weightsOfChoice(choice: ScoreChoice | null): ScoreWeights | null {
+    if (!choice) return null;
+    if (choice.preset === "custom") return usableCustomWeights(choice.weights);
+    return SCORE_PRESETS[choice.preset];
+}
+
+/**
+ * The weights a viewer's scores use: their own choice, else the household
+ * default, else Balanced. A choice that cannot produce weights (custom with
+ * none or all-zero) counts as unset, so a bad row never blanks the score.
+ */
+export function resolveWeights(
+    member: ScoreChoice | null,
+    householdDefault: ScoreChoice | null,
+): ScoreWeights {
+    return (
+        weightsOfChoice(member) ??
+        weightsOfChoice(householdDefault) ??
+        SCORE_PRESETS[DEFAULT_SCORE_PRESET]
+    );
+}
 
 export type ScoreQuality = {
     nutriscoreGrade: "a" | "b" | "c" | "d" | "e" | null;

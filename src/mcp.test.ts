@@ -40,8 +40,10 @@ import * as actualHousehold from "./db/household.js";
 import * as actualDbFridge from "./db/fridge.js";
 import * as actualDbGrocery from "./db/grocery.js";
 import * as actualDbRecipes from "./db/recipes.js";
+import * as actualDbShareLinks from "./db/share-links.js";
 import * as actualDbSettings from "./db/settings.js";
 import * as actualDbRules from "./db/rules.js";
+import * as actualDbScoreSettings from "./db/score-settings.js";
 import * as actualDbFoods from "./db/foods.js";
 import * as actualDbStock from "./db/stock.js";
 import * as actualDbAnalytics from "./db/analytics.js";
@@ -91,8 +93,10 @@ const realHousehold = { ...actualHousehold };
 const realDbFridge = { ...actualDbFridge };
 const realDbGrocery = { ...actualDbGrocery };
 const realDbRecipes = { ...actualDbRecipes };
+const realDbShareLinks = { ...actualDbShareLinks };
 const realDbSettings = { ...actualDbSettings };
 const realDbRules = { ...actualDbRules };
+const realDbScoreSettings = { ...actualDbScoreSettings };
 const realDbFoods = { ...actualDbFoods };
 const realDbStock = { ...actualDbStock };
 const realDbAnalytics = { ...actualDbAnalytics };
@@ -104,6 +108,8 @@ const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbPlans = { ...actualDbPlans };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realDbUsers = { ...actualDbUsers };
 const exportMemoryStore = createMemoryExportArchiveStore();
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
@@ -120,7 +126,7 @@ import {
 } from "./household.js";
 import { createMemoryFridgeStore } from "./domain/fridge.js";
 import { createMemoryStockStore, ledgerMatchesStock } from "./domain/stock.js";
-import { createMemoryFoodsStore } from "./domain/foods.js";
+import { createMemoryFoodsStore, type Food } from "./domain/foods.js";
 import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
@@ -152,15 +158,33 @@ import { utcTodayFromDate } from "./domain/stock.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
+    createRecipe,
     importRecipeFromText,
 } from "./domain/recipes.js";
+import {
+    createMemoryShareLinkStore,
+    resolveShareToken,
+} from "./domain/sharing.js";
+import { SHARE_LINK_OUTPUT_SCHEMAS } from "./mcp/tools/sharing.js";
 import {
     createGroceryStore,
     createMemorySettingsStore,
 } from "./domain/settings.js";
 import { addAllergen, createMemoryRulesStore } from "./domain/rules.js";
+import {
+    createMemoryScoreSettingsStore,
+    updateHouseholdScoreDefault,
+    updateMemberScoreSettings,
+} from "./domain/score-settings.js";
 import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
+import { createMemoryPlansStore } from "./domain/plan.js";
+import {
+    createMemoryWeighInStore,
+    type LatestWeighIn,
+} from "./domain/notices-actionable.js";
+import * as actualDbPlans from "./db/plans.js";
+import * as actualDbWeighIns from "./db/weigh-ins.js";
 import { createMemorySocialReaderStatusStore } from "./domain/social-readers.js";
 import {
     TOOLS,
@@ -176,7 +200,12 @@ import type {
     WaterEntry,
     WeightEntry,
 } from "./db/nutrition.js";
-import { dateInTz, formatLocalDateTime, weekdayInTz } from "./domain/tz.js";
+import {
+    dateInTz,
+    formatLocalDateTime,
+    todayInTz,
+    weekdayInTz,
+} from "./domain/tz.js";
 import { getAppCss, getAppJs, getWidgetHtml } from "./widgets.js";
 
 function meal(over: Partial<Meal> = {}): Meal {
@@ -219,6 +248,9 @@ function goals(over: Partial<NutritionGoals> = {}): NutritionGoals {
         daily_caffeine_mg: 400,
         daily_water_ml: 2500,
         target_weight_g: null,
+        goal_name: null,
+        goal_note: null,
+        goals_set_on: null,
         updated_at: "2026-07-26T00:00:00.000Z",
         ...over,
     };
@@ -350,14 +382,21 @@ const db = {
         issuedBy: string | null;
     }[],
     household: null as HouseholdConfig | null,
+    pluralsSameFood: false,
+    pluralsSameFoodWrites: 0,
+    householdConfigWrites: 0,
     fridgeStore: createMemoryFridgeStore(),
     stockStore: createMemoryStockStore(),
     groceryStore: createMemoryGroceryStore(),
     recipesStore: createMemoryRecipesStore(),
+    shareLinksStore: createMemoryShareLinkStore(),
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
+    scoreSettingsStore: createMemoryScoreSettingsStore(),
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
+    plansStore: createMemoryPlansStore(),
+    weighInRows: [] as LatestWeighIn[],
     barcodeFoods: {} as Record<string, FoodResult>,
     // Off by default so no test reaches Open Food Facts or depends on
     // OFF_USER_AGENT; the kill-switch tests turn it on (with fetch stubbed or
@@ -488,7 +527,16 @@ mock.module("./db/nutrition.js", () => ({
         userId: string,
         patch: Record<string, unknown>,
     ) => {
-        db.goals = { ...goals(), user_id: userId, ...patch } as NutritionGoals;
+        // The real upsert drops undefined keys (an omitted field keeps its
+        // stored value), so the stand-in must not spread them over the row.
+        const defined = Object.fromEntries(
+            Object.entries(patch).filter(([, v]) => v !== undefined),
+        );
+        db.goals = {
+            ...(db.goals ?? goals()),
+            user_id: userId,
+            ...defined,
+        } as NutritionGoals;
         return db.goals;
     },
     upsertGoalDays: async (
@@ -665,8 +713,15 @@ mock.module("./db/household.js", () => ({
         _householdId: string,
         config: HouseholdConfig,
     ) => {
+        db.householdConfigWrites += 1;
         db.household = structuredClone(config);
         return structuredClone(db.household);
+    },
+    getPluralsSameFood: async () => db.pluralsSameFood,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) => {
+        db.pluralsSameFoodWrites += 1;
+        db.pluralsSameFood = enabled;
+        return enabled;
     },
     transferHouseholdOwnership: async (
         householdId: string,
@@ -742,6 +797,11 @@ mock.module("./db/recipes.js", () => ({
     liveRecipesStore: () => db.recipesStore,
 }));
 
+mock.module("./db/share-links.js", () => ({
+    ...actualDbShareLinks,
+    liveShareLinkStore: () => db.shareLinksStore,
+}));
+
 mock.module("./db/settings.js", () => ({
     ...actualDbSettings,
     liveSettingsStore: () => db.settingsStore,
@@ -750,6 +810,11 @@ mock.module("./db/settings.js", () => ({
 mock.module("./db/rules.js", () => ({
     ...actualDbRules,
     liveRulesStore: () => db.rulesStore,
+}));
+
+mock.module("./db/score-settings.js", () => ({
+    ...actualDbScoreSettings,
+    liveScoreSettingsStore: () => db.scoreSettingsStore,
 }));
 
 mock.module("./db/foods.js", () => ({
@@ -766,6 +831,16 @@ mock.module("./db/foods.js", () => ({
 mock.module("./db/notice-dismissals.js", () => ({
     ...actualDbNoticeDismissals,
     liveNoticeDismissalsStore: () => db.dismissalsStore,
+}));
+
+mock.module("./db/plans.js", () => ({
+    ...actualDbPlans,
+    liveRecipePlansStore: () => db.plansStore,
+}));
+
+mock.module("./db/weigh-ins.js", () => ({
+    ...actualDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore(db.weighInRows),
 }));
 
 mock.module("./db/social-readers.js", () => ({
@@ -798,7 +873,10 @@ mock.module("./food-search.js", () => ({
 
 mock.module("./db/sql.js", () => ({
     ...actualDbSql,
-    run: async <T>(fn: (tx: unknown) => Promise<T>) => fn({}),
+    // A tx that can be called as a tagged template (the shared-import advisory
+    // lock) and answers with no rows.
+    run: async <T>(fn: (tx: unknown) => Promise<T>) =>
+        fn(Object.assign(async () => [], {})),
 }));
 
 mock.module("./db/users.js", () => ({
@@ -835,10 +913,14 @@ afterAll(() => {
     mock.module("./db/stock.js", () => realDbStock);
     mock.module("./db/grocery.js", () => realDbGrocery);
     mock.module("./db/recipes.js", () => realDbRecipes);
+    mock.module("./db/share-links.js", () => realDbShareLinks);
     mock.module("./db/settings.js", () => realDbSettings);
     mock.module("./db/rules.js", () => realDbRules);
+    mock.module("./db/score-settings.js", () => realDbScoreSettings);
     mock.module("./db/foods.js", () => realDbFoods);
     mock.module("./db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("./db/plans.js", () => realDbPlans);
+    mock.module("./db/weigh-ins.js", () => realDbWeighIns);
     mock.module("./db/social-readers.js", () => realDbSocialReaders);
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
@@ -877,6 +959,9 @@ beforeEach(() => {
         recipeSearchPlaces: [],
         preferences: { ...EMPTY_HOUSEHOLD_PREFERENCES },
     };
+    db.pluralsSameFood = false;
+    db.pluralsSameFoodWrites = 0;
+    db.householdConfigWrites = 0;
     db.members = [
         {
             householdId: "hh-1",
@@ -886,12 +971,16 @@ beforeEach(() => {
         },
     ];
     db.dismissalsStore = createMemoryNoticeDismissalsStore();
+    db.plansStore = createMemoryPlansStore();
+    db.weighInRows = [];
     db.fridgeStore = createMemoryFridgeStore();
     db.stockStore = createMemoryStockStore();
     db.groceryStore = createMemoryGroceryStore();
     db.recipesStore = createMemoryRecipesStore();
+    db.shareLinksStore = createMemoryShareLinkStore();
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
+    db.scoreSettingsStore = createMemoryScoreSettingsStore();
     db.foodsStore = createMemoryFoodsStore();
     db.fridgeStore.linkDismissals(db.dismissalsStore);
     db.groceryStore.linkDismissals(db.dismissalsStore);
@@ -1608,6 +1697,129 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
     });
 });
 
+describe("set_nutrition_goals names the goals", () => {
+    const parsed = (r: ToolResult) =>
+        SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(r.structuredContent);
+
+    test("a name and note are stored, echoed and stamped with today's date", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "Asia/Tokyo" };
+        db.goals = null;
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 2100,
+                goal_name: "  Recomp  ",
+                goal_note: "Since the October check-in",
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("Recomp");
+            expect(db.goals!.goal_note).toBe("Since the October check-in");
+            expect(db.goals!.goals_set_on).toBe(todayInTz("Asia/Tokyo"));
+            const out = parsed(r);
+            expect(out.goals).toMatchObject({
+                goal_name: "Recomp",
+                goal_note: "Since the October check-in",
+                goals_set_on: todayInTz("Asia/Tokyo"),
+            });
+            expect(textOf(r)).toContain("Recomp");
+        });
+    });
+
+    test("a write without goal_name keeps the stored name and note", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_protein_g: 150,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("Recomp");
+            expect(db.goals!.goal_note).toBe("Slow and steady");
+            expect(parsed(r).goals?.goal_name).toBe("Recomp");
+            // Changing a target is a save, so the date moves to today.
+            expect(db.goals!.goals_set_on).not.toBe("2026-10-02");
+        });
+    });
+
+    test("renaming alone keeps the set date; null or blank clears", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", { goal_name: "Cut" });
+            expect(db.goals!.goal_name).toBe("Cut");
+            expect(db.goals!.goals_set_on).toBe("2026-10-02");
+            await call("set_nutrition_goals", { goal_note: null });
+            expect(db.goals!.goal_note).toBeNull();
+            await call("set_nutrition_goals", { goal_name: "   " });
+            expect(db.goals!.goal_name).toBeNull();
+            expect(db.goals!.goals_set_on).toBe("2026-10-02");
+        });
+    });
+
+    test("a 41-character name is refused, 40 is accepted", async () => {
+        db.goals = goals({ goal_name: "Recomp" });
+        await withTools(null, async (call) => {
+            const long = await call("set_nutrition_goals", {
+                goal_name: "x".repeat(41),
+            });
+            expect(long.isError).toBe(true);
+            expect(textOf(long)).toContain("at most 40 characters");
+            expect(db.goals!.goal_name).toBe("Recomp");
+            const ok = await call("set_nutrition_goals", {
+                goal_name: "x".repeat(40),
+            });
+            expect(ok.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("x".repeat(40));
+            const note = await call("set_nutrition_goals", {
+                goal_note: "n".repeat(281),
+            });
+            expect(note.isError).toBe(true);
+            expect(textOf(note)).toContain("at most 280 characters");
+        });
+    });
+
+    test("a name cannot be set on a per-day override", async () => {
+        db.goals = goals();
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+                goal_name: "Rest day",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("default goals only");
+        });
+    });
+
+    test("get_goal_progress returns the name, note and set date", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            const r = await call("get_goal_progress", {});
+            const sc = r.structuredContent as {
+                goals: {
+                    goal_name: string | null;
+                    goal_note: string | null;
+                    goals_set_on: string | null;
+                };
+            };
+            expect(sc.goals).toMatchObject({
+                goal_name: "Recomp",
+                goal_note: "Slow and steady",
+                goals_set_on: "2026-10-02",
+            });
+        });
+    });
+});
+
 describe("per-day nutrition goal overrides (read path)", () => {
     test("get_goal_progress uses override calories; target weight stays default", async () => {
         db.goals = goals({
@@ -2023,6 +2235,27 @@ describe("set_alcohol_tracking", () => {
         expect(setWidgets?.description).toContain("reconnects");
         await client.close();
         await server.close();
+    });
+});
+
+describe("the notice tool descriptions match what the tools do", () => {
+    test("dismiss_notice says to pass related_id back; list_notices does not promise the badge", async () => {
+        const server = new McpServer(
+            { name: "t", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(server, { kind: "user", userId: "u1" }, true, null);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "c", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        const { tools } = await client.listTools();
+        await client.close();
+        await server.close();
+        const dismiss = tools.find((t) => t.name === "dismiss_notice");
+        expect(dismiss?.description).toContain("related_id");
+        expect(dismiss?.description).not.toContain("info-level");
+        const list = tools.find((t) => t.name === "list_notices");
+        expect(list?.description).not.toContain("badge");
     });
 });
 
@@ -3915,7 +4148,31 @@ describe("household config tools", () => {
                 restock_weekday: 6,
                 restock_time: "07:00",
                 restock_last_run_on: null,
+                plurals_same_food: false,
             });
+        });
+    });
+
+    test("plurals_same_food round-trips through config tools", async () => {
+        await withHousehold(async (call) => {
+            const written = await call("update_household_config", {
+                plurals_same_food: true,
+            });
+            expect(written.isError).toBeFalsy();
+            expect(written.structuredContent?.plurals_same_food).toBe(true);
+            expect(db.pluralsSameFood).toBe(true);
+            const got = await call("get_household_config");
+            expect(got.structuredContent?.plurals_same_food).toBe(true);
+        });
+    });
+
+    test("plurals_only update does not write household config", async () => {
+        await withHousehold(async (call) => {
+            db.household!.name = "Concurrent";
+            db.householdConfigWrites = 0;
+            await call("update_household_config", { plurals_same_food: true });
+            expect(db.householdConfigWrites).toBe(0);
+            expect(db.household!.name).toBe("Concurrent");
         });
     });
 
@@ -5085,6 +5342,207 @@ describe("household config tools", () => {
                 expect(
                     out.checks[0]!.notices.some((n) => n.severity === "block"),
                 ).toBe(false);
+            });
+        });
+
+        describe("the viewer's score weights", () => {
+            const PROCESSING_ONLY = {
+                nutrition: 0,
+                processing: 100,
+                additives: 0,
+                environment: 0,
+            };
+
+            async function seedProcessedProduct(): Promise<string> {
+                const food = newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Fizzy Bar",
+                    offQuality: {
+                        nutriscoreGrade: "a",
+                        novaGroup: 4,
+                        ecoscoreGrade: "b",
+                        additives: null,
+                        allergensTags: null,
+                        tracesTags: ["en:peanuts"],
+                        ingredientsAnalysisTags: null,
+                        labelsTags: null,
+                        fetchedAt: "2026-11-09T12:00:00.000Z",
+                    },
+                });
+                await db.foodsStore.insertFood(food);
+                return food.id;
+            }
+
+            function twoMembers() {
+                db.members = [
+                    {
+                        householdId: "hh-1",
+                        userId: "u1",
+                        role: "owner",
+                        displayName: "Alex",
+                    },
+                    {
+                        householdId: "hh-1",
+                        userId: "u2",
+                        role: "member",
+                        displayName: "Bob",
+                    },
+                ];
+            }
+
+            test("the caller's own weights score the product", async () => {
+                const foodId = await seedProcessedProduct();
+                let byDefault: number | null = null;
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("balanced");
+                    byDefault = out.score;
+                });
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u1",
+                    {
+                        choice: {
+                            preset: "custom",
+                            weights: PROCESSING_ONLY,
+                        },
+                    },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("custom");
+                    expect(out.score).not.toBe(byDefault);
+                    expect(
+                        out.breakdown.find((row) => row.part === "processing")
+                            ?.weight,
+                    ).toBe(1);
+                });
+            });
+
+            test("a member without a choice gets the household default", async () => {
+                const foodId = await seedProcessedProduct();
+                await updateHouseholdScoreDefault(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    { preset: "planet", weights: null },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const r = await call("rate_product", { food_id: foodId });
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        r.structuredContent,
+                    );
+                    expect(out.preset).toBe("planet");
+                });
+            });
+
+            test("user_id uses that member's weights and switches, not the caller's", async () => {
+                twoMembers();
+                await addAllergen(db.rulesStore, {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    allergen: "peanut",
+                });
+                const foodId = await seedProcessedProduct();
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u2",
+                    {
+                        choice: {
+                            preset: "custom",
+                            weights: PROCESSING_ONLY,
+                        },
+                    },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const own = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (await call("rate_product", { food_id: foodId }))
+                            .structuredContent,
+                    );
+                    const bob = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("rate_product", {
+                                food_id: foodId,
+                                user_id: "u2",
+                            })
+                        ).structuredContent,
+                    );
+                    expect(own.preset).toBe("balanced");
+                    expect(bob.preset).toBe("custom");
+                    expect(bob.score).not.toBe(own.score);
+                    const traces = (out: typeof bob): string[] =>
+                        out.checks
+                            .flatMap((c) => c.notices)
+                            .map((n) => n.code)
+                            .filter((code) => code === "food.product_trace");
+                    expect(traces(bob)).toHaveLength(1);
+                });
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u2",
+                    { warnTraces: false },
+                );
+                await withRateProductFlag(true, async (call) => {
+                    const bob = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("rate_product", {
+                                food_id: foodId,
+                                user_id: "u2",
+                            })
+                        ).structuredContent,
+                    );
+                    expect(
+                        bob.checks
+                            .flatMap((c) => c.notices)
+                            .some((n) => n.code === "food.product_trace"),
+                    ).toBe(false);
+                    // the choice is kept when only a switch changes
+                    expect(bob.preset).toBe("custom");
+                });
+            });
+
+            test("compare with today's goals off drops the goals notice", async () => {
+                db.goals = goals({ daily_sugar_g: 30 });
+                const food = newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Sweet Bar",
+                    sugarG: 50,
+                    gramsPerEach: 40,
+                });
+                await db.foodsStore.insertFood(food);
+                const goalNotices = async () => {
+                    let found = 0;
+                    await withRateProductFlag(true, async (call) => {
+                        const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            (await call("rate_product", { food_id: food.id }))
+                                .structuredContent,
+                        );
+                        found = out.checks
+                            .flatMap((c) => c.notices)
+                            .filter(
+                                (n) => n.code === "food.product_goal",
+                            ).length;
+                    });
+                    return found;
+                };
+                expect(await goalNotices()).toBe(1);
+                await updateMemberScoreSettings(
+                    db.scoreSettingsStore,
+                    "hh-1",
+                    "u1",
+                    { compareGoals: false },
+                );
+                expect(await goalNotices()).toBe(0);
             });
         });
 
@@ -6366,6 +6824,97 @@ describe("phone-app domain MCP tools", () => {
             expect(txt).toContain("Walmart");
             expect(txt).toContain("18");
             expect(txt).toContain("each");
+        });
+    });
+
+    test("the usual tools keep the usual's schedule", async () => {
+        await withPat(async (call) => {
+            const costco = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Costco",
+            );
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const kirkland = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Kirkland Large Eggs",
+                brand: "Kirkland",
+                calories: 140,
+            });
+            const productId = kirkland.structuredContent?.id as string;
+            const plain = (await db.foodsStore.getFood("hh-1", eggsId))!;
+            await db.foodsStore.updateFoodRow({ ...plain, ...USUAL_SCHEDULED });
+            const keptSchedule = async () => {
+                const row = await db.foodsStore.getFood("hh-1", eggsId);
+                return {
+                    restockSchedule: row?.restockSchedule,
+                    restockEveryWeeks: row?.restockEveryWeeks,
+                    restockPaused: row?.restockPaused,
+                    restockWhenLow: row?.restockWhenLow,
+                    restockLowLevel: row?.restockLowLevel,
+                    lastRestockedOn: row?.lastRestockedOn,
+                } satisfies Partial<Food>;
+            };
+            expect(await keptSchedule()).toEqual(USUAL_SCHEDULED);
+
+            const steps: [string, Record<string, unknown>][] = [
+                [
+                    "upsert_food",
+                    {
+                        food_id: eggsId,
+                        usual_store_id: costco.id,
+                        usual_amount: 24,
+                        usual_unit: "each",
+                    },
+                ],
+                ["upsert_food", { food_id: eggsId, name: "Free range eggs" }],
+                ["upsert_food", { food_id: eggsId, allergens: ["egg"] }],
+                [
+                    "set_usual_product",
+                    {
+                        food_id: eggsId,
+                        product_food_id: productId,
+                        store_id: costco.id,
+                        amount: 18,
+                        unit: "each",
+                    },
+                ],
+                [
+                    "set_usual_product",
+                    { food_id: eggsId, product_food_id: null, amount: null },
+                ],
+                ["link_product", { product_food_id: productId, food_id: null }],
+                [
+                    "link_product",
+                    { product_food_id: productId, food_id: eggsId },
+                ],
+                [
+                    "upsert_food",
+                    {
+                        food_id: eggsId,
+                        usual_store_id: null,
+                        usual_amount: null,
+                        usual_unit: null,
+                    },
+                ],
+            ];
+            for (const [tool, args] of steps) {
+                const result = await call(tool, args);
+                expect(
+                    result.isError,
+                    `${tool} ${JSON.stringify(args)}`,
+                ).toBeFalsy();
+                expect(
+                    await keptSchedule(),
+                    `${tool} ${JSON.stringify(args)}`,
+                ).toEqual(USUAL_SCHEDULED);
+            }
+            const got = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: eggsId })).structuredContent,
+            );
+            expect(got.name).toBe("Free range eggs");
+            expect(got.usual_store_id).toBeNull();
         });
     });
 
@@ -7717,9 +8266,7 @@ describe("phone-app domain MCP tools", () => {
                 subject_id: itemId,
             });
             expect(warn.isError).toBe(true);
-            expect(textOf(warn)).toContain(
-                "Only suggestions (info notices) can be dismissed",
-            );
+            expect(textOf(warn)).toContain("This notice can't be dismissed");
 
             const missing = await call("dismiss_notice", {
                 code: "fridge.expiring",
@@ -7858,6 +8405,16 @@ describe("removed membership admin MCP tools", () => {
     });
 });
 
+// A usual with every schedule field set to something other than its default.
+const USUAL_SCHEDULED = {
+    restockSchedule: "every_n_weeks",
+    restockEveryWeeks: 3,
+    restockPaused: true,
+    restockWhenLow: true,
+    restockLowLevel: 6,
+    lastRestockedOn: "2026-11-02",
+} as const;
+
 // ---------- /mcp over HTTP: both protocol eras ----------
 //
 // Kept in this file rather than its own: mock.module is process-wide, and a
@@ -7955,6 +8512,236 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
 
+describe("household config plurals_same_food over HTTP", () => {
+    test.each(ERAS)("update and get round-trip (%p)", async (era) => {
+        db.pluralsSameFood = false;
+        await withHttpClient("u1", era, async (client) => {
+            const written = (await client.callTool({
+                name: "update_household_config",
+                arguments: { plurals_same_food: true },
+            })) as ToolResult;
+            expect(written.isError).toBeFalsy();
+            expect(written.structuredContent).toMatchObject({
+                plurals_same_food: true,
+            });
+            const got = (await client.callTool({
+                name: "get_household_config",
+            })) as ToolResult;
+            expect(got.structuredContent).toMatchObject({
+                plurals_same_food: true,
+            });
+        });
+    });
+});
+
+describe("household notices with actions over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    const CODES = [
+        "grocery.running_low",
+        "plan.missing_ingredient",
+        "nutrition.weigh_in_due",
+    ];
+
+    // A usual with nothing in stock, a recipe planned for tomorrow that needs
+    // flour, and a member whose last weigh-in was nine days ago.
+    async function seed(call: CallTool) {
+        const today = utcTodayFromDate();
+        await db.foodsStore.insertFood(
+            newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Eggs",
+                defaultUnit: "each",
+                restockWhenLow: true,
+                usualAmount: { amount: 12, unit: "each" },
+            }),
+        );
+        const flour = await call("upsert_food", { name: "Flour" });
+        const recipe = await call("create_recipe", {
+            name: "Bread",
+            yield_portions: 1,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: flour.structuredContent?.id as string,
+            amount: 200,
+            unit: "g",
+        });
+        await db.plansStore.addPlan({
+            householdId: "hh-1",
+            recipeId,
+            date: addUtcDays(today, 1),
+            slot: "dinner",
+            servings: 1,
+        });
+        db.weighInRows.push({
+            userId: "u1",
+            displayName: "U1",
+            lastLoggedAt: `${addUtcDays(today, -9)}T12:00:00Z`,
+        });
+    }
+
+    type Wire = {
+        code: string;
+        message: string;
+        action: { label: string } | null;
+        can_dismiss: boolean;
+        dismiss: {
+            code: string;
+            subject_kind: string;
+            subject_id: string;
+            related_id: string | null;
+        } | null;
+    };
+
+    async function listed(call: CallTool, args: Record<string, unknown> = {}) {
+        const out = await call("list_notices", args);
+        expect(out.isError).toBeFalsy();
+        const sc = out.structuredContent as { count: number; notices: Wire[] };
+        for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
+        return sc;
+    }
+
+    test.each(ERAS)(
+        "with ui-v2 on, list_notices carries the three with their actions and each can be dismissed (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                const mine = sc.notices.filter((n) => CODES.includes(n.code));
+                expect(mine.map((n) => n.code).sort()).toEqual(
+                    [...CODES].sort(),
+                );
+                const byCode = Object.fromEntries(mine.map((n) => [n.code, n]));
+                expect(byCode["grocery.running_low"]).toMatchObject({
+                    message: "Running low: Eggs (0 left, below 3)",
+                    action: { label: "Add to list" },
+                });
+                expect(byCode["plan.missing_ingredient"]).toMatchObject({
+                    message: "Flour, 200 g, missing for Bread, tomorrow",
+                    action: { label: "Add" },
+                });
+                expect(byCode["nutrition.weigh_in_due"]).toMatchObject({
+                    message: "U1 hasn't weighed in for 9 days",
+                    action: { label: "Weigh in" },
+                });
+                expect(sc.count).toBeGreaterThanOrEqual(3);
+
+                const narrowed = await listed(call, {
+                    code: "plan.missing_ingredient",
+                });
+                expect(narrowed.notices).toHaveLength(1);
+
+                for (const n of mine) {
+                    expect(n.can_dismiss).toBe(true);
+                    const d = n.dismiss!;
+                    const out = await call("dismiss_notice", {
+                        code: d.code,
+                        subject_kind: d.subject_kind,
+                        subject_id: d.subject_id,
+                        ...(d.related_id ? { related_id: d.related_id } : {}),
+                    });
+                    expect(out.isError).toBeFalsy();
+                }
+                const after = await listed(call);
+                expect(
+                    after.notices.filter((n) => CODES.includes(n.code)),
+                ).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "with ui-v2 off, none of the three is listed or dismissable (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                expect(
+                    sc.notices.filter((n) => CODES.includes(n.code)),
+                ).toEqual([]);
+                const out = await call("dismiss_notice", {
+                    code: "nutrition.weigh_in_due",
+                    subject_kind: "member",
+                    subject_id: "u1",
+                    related_id: "2026-01-01",
+                });
+                expect(out.isError).toBe(true);
+            });
+        },
+    );
+});
+
+describe("usual tools keep the usual's schedule over HTTP", () => {
+    test.each(ERAS)("upsert_food and set_usual_product (%p)", async (era) => {
+        await withHttpClient("u1", era, async (client) => {
+            const costco = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                `Costco ${JSON.stringify(era)}`,
+            );
+            const call = async (name: string, args: Record<string, unknown>) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+            const eggs = await call("upsert_food", {
+                name: `Eggs ${JSON.stringify(era)}`,
+            });
+            const eggsId = eggs.structuredContent?.id as string;
+            const product = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: `Kirkland ${JSON.stringify(era)}`,
+                calories: 140,
+            });
+            const productId = product.structuredContent?.id as string;
+            const plain = (await db.foodsStore.getFood("hh-1", eggsId))!;
+            await db.foodsStore.updateFoodRow({ ...plain, ...USUAL_SCHEDULED });
+
+            const usual = await call("upsert_food", {
+                food_id: eggsId,
+                usual_store_id: costco.id,
+                usual_amount: 24,
+                usual_unit: "each",
+            });
+            expect(usual.isError).toBeFalsy();
+            const set = await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+                store_id: costco.id,
+                amount: 18,
+                unit: "each",
+            });
+            expect(set.isError).toBeFalsy();
+            const row = await db.foodsStore.getFood("hh-1", eggsId);
+            expect(row).toMatchObject(USUAL_SCHEDULED);
+            expect(row?.usualProductId).toBe(productId);
+            expect(row?.usualAmount).toEqual({ amount: 24, unit: "each" });
+        });
+    });
+});
+
 describe("set_nutrition_goals over HTTP", () => {
     test.each(ERAS)(
         "per-day override and get_goal_progress agree (%p)",
@@ -7979,6 +8766,53 @@ describe("set_nutrition_goals over HTTP", () => {
                     arguments: { date: "2026-07-04" },
                 })) as ToolResult;
                 expect(textOf(prog)).toContain("2800");
+            });
+        },
+    );
+});
+
+describe("goal name over HTTP", () => {
+    test.each(ERAS)(
+        "set_nutrition_goals names the goals and refuses 41 characters (%p)",
+        async (era) => {
+            db.goals = goals({ daily_calories: 2000 });
+            await withHttpClient("u1", era, async (client) => {
+                const set = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { goal_name: "Recomp", goal_note: "Autumn" },
+                })) as ToolResult;
+                expect(set.isError).toBeFalsy();
+                const out = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                    set.structuredContent,
+                );
+                expect(out.goals?.goal_name).toBe("Recomp");
+                expect(out.goals?.goal_note).toBe("Autumn");
+                const kept = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { daily_protein_g: 140 },
+                })) as ToolResult;
+                expect(
+                    SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                        kept.structuredContent,
+                    ).goals?.goal_name,
+                ).toBe("Recomp");
+                const long = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { goal_name: "x".repeat(41) },
+                })) as ToolResult;
+                expect(long.isError).toBe(true);
+                expect(textOf(long)).toContain("at most 40 characters");
+                const prog = (await client.callTool({
+                    name: "get_goal_progress",
+                    arguments: {},
+                })) as ToolResult;
+                expect(
+                    (
+                        prog.structuredContent as {
+                            goals: { goal_name: string };
+                        }
+                    ).goals.goal_name,
+                ).toBe("Recomp");
             });
         },
     );
@@ -8017,6 +8851,82 @@ describe("rate_product over HTTP", () => {
                         arguments: { food_id: food.id },
                     })) as ToolResult;
                     RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "scores with the caller's weights and only adds fields (%p)",
+        async (era) => {
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Rated Bar",
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "b",
+                    additives: null,
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const rate = async () =>
+                        RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                            (
+                                (await client.callTool({
+                                    name: "rate_product",
+                                    arguments: { food_id: food.id },
+                                })) as ToolResult
+                            ).structuredContent,
+                        );
+                    const before = await rate();
+                    await updateMemberScoreSettings(
+                        db.scoreSettingsStore,
+                        "hh-1",
+                        "u1",
+                        {
+                            choice: {
+                                preset: "custom",
+                                weights: {
+                                    nutrition: 0,
+                                    processing: 100,
+                                    additives: 0,
+                                    environment: 0,
+                                },
+                            },
+                        },
+                    );
+                    const after = await rate();
+                    expect(before.preset).toBe("balanced");
+                    expect(after.preset).toBe("custom");
+                    expect(after.score).not.toBe(before.score);
+                    // Fields every existing client reads are all still there.
+                    for (const field of [
+                        "found",
+                        "product",
+                        "score",
+                        "label",
+                        "preset",
+                        "breakdown",
+                        "parts_used",
+                        "parts_total",
+                        "missing",
+                        "info_rows",
+                        "checks",
+                    ]) {
+                        expect(Object.keys(after)).toContain(field);
+                    }
                 });
             } finally {
                 resetFlagsForTests();
@@ -11153,5 +12063,1136 @@ describe("authenticated dashboard HTTP", () => {
                 displayName: "Alice",
             },
         ]);
+    });
+});
+
+// ---------- share links: create_share_link / list_share_links / revoke_share_link ----------
+
+describe("share link tools", () => {
+    const TOKEN_URL = /^http:\/\/localhost\/s\/([A-Za-z0-9_-]{43})$/;
+    const OTHER_HOUSEHOLD = "hh-2";
+    const SHARE_TOOLS = [
+        "create_share_link",
+        "list_share_links",
+        "revoke_share_link",
+        "import_shared_recipe",
+    ];
+
+    async function withShareLinks(
+        on: boolean,
+        auth:
+            | { kind: "user"; userId: string }
+            | {
+                  kind: "household";
+                  householdId: string;
+              },
+        run: (call: CallTool, client: Client) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flags = evaluateViewerFlags(
+            buildFlagContext({
+                auth,
+                member:
+                    auth.kind === "user" && member
+                        ? {
+                              userId: member.userId,
+                              householdId: member.householdId,
+                              role: member.role,
+                              displayName: member.displayName,
+                          }
+                        : undefined,
+            }),
+            createMemoryFlags({ "mcp-share-links": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            auth,
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test-client", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            await run(
+                async (name, args) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args ?? {},
+                    })) as ToolResult,
+                client,
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    const asU1 = { kind: "user", userId: "u1" } as const;
+
+    async function seedRecipe(householdId: string, name = "Lentil soup") {
+        return createRecipe(db.recipesStore, {
+            householdId,
+            creatorId: "u1",
+            name,
+            yieldPortions: 4,
+        });
+    }
+
+    function tokenOf(r: ToolResult): string {
+        const url = String(r.structuredContent?.url);
+        const m = TOKEN_URL.exec(url);
+        if (!m) throw new Error(`unexpected share url: ${url}`);
+        return m[1]!;
+    }
+
+    test("flag on lists the three tools; flag off hides them and refuses a call", async () => {
+        await withShareLinks(true, asU1, async (_call, client) => {
+            const names = (await client.listTools()).tools.map((t) => t.name);
+            for (const name of SHARE_TOOLS) expect(names).toContain(name);
+        });
+        await withShareLinks(false, asU1, async (call, client) => {
+            const names = (await client.listTools()).tools.map((t) => t.name);
+            for (const name of SHARE_TOOLS) expect(names).not.toContain(name);
+            await expect(
+                client.callTool({
+                    name: "create_share_link",
+                    arguments: { kind: "grocery_list" },
+                }),
+            ).rejects.toThrow(/not found/i);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+            void call;
+        });
+    });
+
+    test("create_share_link for a recipe returns the url once and the link resolves", async () => {
+        const recipe = await seedRecipe("hh-1");
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", {
+                kind: "recipe",
+                target_id: recipe.id,
+                expires_in_days: 7,
+            });
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                r.structuredContent,
+            );
+            expect(parsed.kind).toBe("recipe");
+            expect(parsed.target_id).toBe(recipe.id);
+            expect(parsed.url).toMatch(TOKEN_URL);
+            expect(r.content[0]!.text).toContain(parsed.url);
+            const expiresMs = Date.parse(parsed.expires_at!);
+            expect(expiresMs - Date.now()).toBeGreaterThan(6.9 * 86_400_000);
+            expect(expiresMs - Date.now()).toBeLessThan(7.1 * 86_400_000);
+
+            const link = await resolveShareToken(
+                db.shareLinksStore,
+                tokenOf(r),
+                new Date(),
+            );
+            expect(link).toMatchObject({
+                id: parsed.id,
+                householdId: "hh-1",
+                kind: "recipe",
+                targetId: recipe.id,
+                createdBy: "u1",
+            });
+        });
+    });
+
+    test("create_share_link for the grocery list needs no target and may never expire", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", { kind: "grocery_list" });
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                r.structuredContent,
+            );
+            expect(parsed).toMatchObject({
+                kind: "grocery_list",
+                target_id: null,
+                expires_at: null,
+            });
+            const link = await resolveShareToken(
+                db.shareLinksStore,
+                tokenOf(r),
+                new Date(),
+            );
+            expect(link?.kind).toBe("grocery_list");
+            const withTarget = await call("create_share_link", {
+                kind: "grocery_list",
+                target_id: crypto.randomUUID(),
+            });
+            expect(withTarget.isError).toBe(true);
+        });
+    });
+
+    test("a household token creates a link with no member behind it", async () => {
+        await withShareLinks(
+            true,
+            { kind: "household", householdId: "hh-1" },
+            async (call) => {
+                const r = await call("create_share_link", {
+                    kind: "grocery_list",
+                });
+                expect(r.isError).toBeFalsy();
+                const link = await resolveShareToken(
+                    db.shareLinksStore,
+                    tokenOf(r),
+                    new Date(),
+                );
+                expect(link).toMatchObject({
+                    householdId: "hh-1",
+                    createdBy: null,
+                });
+                const listed = await call("list_share_links");
+                const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                    listed.structuredContent,
+                );
+                expect(parsed.links[0]).toMatchObject({
+                    created_by: null,
+                    created_by_name: null,
+                });
+            },
+        );
+    });
+
+    test("refuses a recipe from another household, a missing one, and a non-uuid target", async () => {
+        const foreign = await seedRecipe(OTHER_HOUSEHOLD, "Secret stew");
+        await withShareLinks(true, asU1, async (call) => {
+            const crossHousehold = await call("create_share_link", {
+                kind: "recipe",
+                target_id: foreign.id,
+            });
+            expect(crossHousehold.isError).toBe(true);
+            expect(crossHousehold.content[0]!.text).toMatch(
+                /not in your household/i,
+            );
+            const missing = await call("create_share_link", {
+                kind: "recipe",
+                target_id: crypto.randomUUID(),
+            });
+            expect(missing.isError).toBe(true);
+            const garbage = await call("create_share_link", {
+                kind: "recipe",
+                target_id: "not-a-uuid",
+            });
+            expect(garbage.isError).toBe(true);
+            expect(garbage.content[0]!.text).toMatch(/uuid|recipe id/i);
+            const noTarget = await call("create_share_link", {
+                kind: "recipe",
+            });
+            expect(noTarget.isError).toBe(true);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+            expect(
+                await db.shareLinksStore.listForHousehold(OTHER_HOUSEHOLD),
+            ).toEqual([]);
+        });
+    });
+
+    test.each([0, 366, 1.5, -3])("refuses expires_in_days %p", async (days) => {
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", {
+                kind: "grocery_list",
+                expires_in_days: days,
+            });
+            expect(r.isError).toBe(true);
+            expect(r.content[0]!.text).toMatch(/expires_in_days/);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+        });
+    });
+
+    test("list_share_links shows active links with the recipe name and sharer, never a token", async () => {
+        const soup = await seedRecipe("hh-1", "Lentil soup");
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "recipe",
+                target_id: soup.id,
+            });
+            const groceries = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            const revoked = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            await call("revoke_share_link", {
+                id: String(revoked.structuredContent?.id),
+            });
+
+            const r = await call("list_share_links");
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                r.structuredContent,
+            );
+            expect(parsed.links.map((l) => l.id).sort()).toEqual(
+                [made.structuredContent?.id, groceries.structuredContent?.id]
+                    .map(String)
+                    .sort(),
+            );
+            const recipeLink = parsed.links.find((l) => l.kind === "recipe")!;
+            expect(recipeLink).toMatchObject({
+                target_id: soup.id,
+                recipe_name: "Lentil soup",
+                created_by: "u1",
+                created_by_name: "U1",
+            });
+            expect(
+                parsed.links.find((l) => l.kind === "grocery_list"),
+            ).toMatchObject({ target_id: null, recipe_name: null });
+            // Neither the token nor a hash of it can be read back.
+            const wire = JSON.stringify(r);
+            expect(wire).not.toContain(tokenOf(made));
+            expect(wire).not.toContain(tokenOf(groceries));
+            expect(wire).not.toMatch(/token|hash|\/s\//i);
+        });
+    });
+
+    test("list_share_links leaves out expired links and other households' links", async () => {
+        await db.shareLinksStore.create({
+            householdId: "hh-1",
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u1",
+            tokenHash: "a".repeat(64),
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+        });
+        await db.shareLinksStore.create({
+            householdId: OTHER_HOUSEHOLD,
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u9",
+            tokenHash: "b".repeat(64),
+            expiresAt: null,
+        });
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("list_share_links");
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                r.structuredContent,
+            );
+            expect(parsed.links).toEqual([]);
+            expect(r.content[0]!.text).toMatch(/no active share links/i);
+        });
+    });
+
+    test("revoke_share_link stops the link resolving, and is idempotent", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            const token = tokenOf(made);
+            const id = String(made.structuredContent?.id);
+            expect(
+                await resolveShareToken(db.shareLinksStore, token, new Date()),
+            ).not.toBeNull();
+
+            const first = await call("revoke_share_link", { id });
+            expect(first.isError).toBeFalsy();
+            const parsedFirst = SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(
+                first.structuredContent,
+            );
+            expect(parsedFirst).toMatchObject({ id, kind: "grocery_list" });
+            expect(
+                await resolveShareToken(db.shareLinksStore, token, new Date()),
+            ).toBeNull();
+
+            const second = await call("revoke_share_link", { id });
+            expect(second.isError).toBeFalsy();
+            expect(
+                SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(second.structuredContent)
+                    .revoked_at,
+            ).toBe(parsedFirst.revoked_at);
+        });
+    });
+
+    test("revoke_share_link answers not found for another household's link, an unknown id and a non-uuid", async () => {
+        const foreign = await db.shareLinksStore.create({
+            householdId: OTHER_HOUSEHOLD,
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u9",
+            tokenHash: "c".repeat(64),
+            expiresAt: null,
+        });
+        await withShareLinks(true, asU1, async (call) => {
+            for (const id of [foreign.id, crypto.randomUUID(), "nope"]) {
+                const r = await call("revoke_share_link", { id });
+                expect(r.isError).toBe(true);
+                expect(r.content[0]!.text).toMatch(/share link not found/i);
+            }
+            const still =
+                await db.shareLinksStore.listForHousehold(OTHER_HOUSEHOLD);
+            expect(still).toHaveLength(1);
+        });
+    });
+
+    test("the raw token appears only in the tool result, never in analytics", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            await call("list_share_links");
+            expect(db.analyticsRows.length).toBeGreaterThanOrEqual(2);
+            const rows = JSON.stringify(db.analyticsRows);
+            expect(rows).toContain("create_share_link");
+            expect(rows).not.toContain(tokenOf(made));
+        });
+    });
+
+    describe("import_shared_recipe", () => {
+        const TOKEN = "B".repeat(43);
+        const LINK = `https://kitchen.example/s/${TOKEN}`;
+        const NONE = {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            saturated_fat_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            grams_per_ml: null,
+            grams_per_each: null,
+        };
+        function documentJson(over: Record<string, unknown> = {}) {
+            return JSON.stringify({
+                version: 1,
+                name: "Lentil soup",
+                portions: 4,
+                instructions: "Simmer.",
+                tags: ["soup"],
+                ingredients: [
+                    {
+                        food_name: "Red lentils",
+                        amount: 300,
+                        unit: "g",
+                        food: {
+                            ...NONE,
+                            calories: 352,
+                            protein_g: 24.6,
+                            carbs_g: 63,
+                            fat_g: 1.1,
+                        },
+                    },
+                    {
+                        food_name: "Salt",
+                        amount: null,
+                        unit: null,
+                        food: { ...NONE },
+                    },
+                ],
+                ...over,
+            });
+        }
+        function fetching(
+            outcome: (url: string) => import("./fetch-safe.js").FetchOutcome,
+        ) {
+            const calls: string[] = [];
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage(url) {
+                    calls.push(String(url));
+                    return outcome(String(url));
+                },
+            };
+            return calls;
+        }
+        const serving = (body: string) =>
+            fetching((url) => ({
+                ok: true,
+                url,
+                status: 200,
+                contentType: "application/json",
+                body,
+            }));
+
+        test("a pasted document becomes a recipe in the household, with matched and created foods", async () => {
+            const mine = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "red lentils",
+                    calories: 340,
+                }),
+            );
+            const before = JSON.stringify(
+                await db.foodsStore.getFood("hh-1", mine.id),
+            );
+            await withShareLinks(true, asU1, async (call) => {
+                const r = await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                expect(r.isError).toBeFalsy();
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    r.structuredContent,
+                );
+                expect(out).toMatchObject({
+                    status: "imported",
+                    recipe_name: "Lentil soup",
+                    renamed_from: null,
+                    matched: 1,
+                    created: 1,
+                    error_code: null,
+                });
+                expect(out.ingredients).toEqual([
+                    {
+                        name: "red lentils",
+                        food_id: mine.id,
+                        status: "matched",
+                    },
+                    {
+                        name: "Salt",
+                        food_id: expect.any(String),
+                        status: "created",
+                    },
+                ]);
+                expect(r.content[0]!.text).toContain("Lentil soup");
+                expect(r.content[0]!.text).toContain(out.recipe_id!);
+                const recipes = await db.recipesStore.listRecipes("hh-1");
+                expect(recipes.map((x) => [x.id, x.name, x.creatorId])).toEqual(
+                    [[out.recipe_id!, "Lentil soup", "u1"]],
+                );
+                expect(
+                    JSON.stringify(
+                        await db.foodsStore.getFood("hh-1", mine.id),
+                    ),
+                ).toBe(before);
+                // Another household got nothing.
+                expect(await db.recipesStore.listRecipes("hh-2")).toEqual([]);
+                expect(await db.foodsStore.listFoods("hh-2")).toEqual([]);
+            });
+        });
+
+        test("a share link is fetched through the safe fetcher as its .json", async () => {
+            const calls = serving(documentJson({ name: "From a link" }));
+            await withShareLinks(true, asU1, async (call) => {
+                const r = await call("import_shared_recipe", { url: LINK });
+                expect(r.isError).toBeFalsy();
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    r.structuredContent,
+                );
+                expect(out.status).toBe("imported");
+                expect(out.recipe_name).toBe("From a link");
+                expect(calls).toEqual([`${LINK}.json`]);
+            });
+        });
+
+        test("importing the same recipe twice names the second apart", async () => {
+            await withShareLinks(true, asU1, async (call) => {
+                await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                const again = await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    again.structuredContent,
+                );
+                expect(out.recipe_name).toBe("Lentil soup (2)");
+                expect(out.renamed_from).toBe("Lentil soup");
+                expect(out.created).toBe(0);
+                expect(out.matched).toBe(2);
+            });
+        });
+
+        const refusals: [
+            string,
+            Record<string, unknown>,
+            () => void,
+            string,
+            RegExp,
+        ][] = [
+            [
+                "neither url nor document",
+                {},
+                () => {},
+                "invalid_input",
+                /give a url .* or a document/i,
+            ],
+            [
+                "both url and document",
+                { url: LINK, document: documentJson() },
+                () => {},
+                "invalid_input",
+                /not both/i,
+            ],
+            [
+                "text that is not a share link",
+                { url: "pasta" },
+                () => {},
+                "not_share_link",
+                /share link/i,
+            ],
+            [
+                "an http link",
+                { url: `http://kitchen.example/s/${TOKEN}` },
+                () => {},
+                "not_share_link",
+                /https/i,
+            ],
+            [
+                "a private address",
+                { url: `https://169.254.169.254/s/${TOKEN}` },
+                () => {},
+                "not_share_link",
+                /can't import from that address/i,
+            ],
+            [
+                "an unreachable link",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "network_error",
+                        status: null,
+                        detail: "",
+                    })),
+                "unreachable",
+                /couldn't reach/i,
+            ],
+            [
+                "a revoked link",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "not_found",
+                        status: 404,
+                        detail: "",
+                    })),
+                "not_found",
+                /revoked or expired/i,
+            ],
+            [
+                "a too large recipe",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "too_large",
+                        status: 200,
+                        detail: "",
+                    })),
+                "too_large",
+                /too large/i,
+            ],
+            [
+                "a document that is not a recipe",
+                { document: '{"hello":"world"}' },
+                () => {},
+                "not_recipe",
+                /isn't a Foodable recipe/i,
+            ],
+            [
+                "a version this deploy does not read",
+                { document: documentJson({ version: 3 }) },
+                () => {},
+                "unsupported_version",
+                /version 3/i,
+            ],
+            // The foods table checks a unit factor > 0: a zero factor is a bad
+            // document, not a database error while writing it.
+            ...(["grams_per_ml", "grams_per_each"] as const).map(
+                (
+                    key,
+                ): [
+                    string,
+                    Record<string, unknown>,
+                    () => void,
+                    string,
+                    RegExp,
+                ] => [
+                    `${key} of zero`,
+                    {
+                        document: documentJson({
+                            ingredients: [
+                                {
+                                    food_name: "Lentils",
+                                    amount: 300,
+                                    unit: "g",
+                                    food: { ...NONE, [key]: 0 },
+                                },
+                            ],
+                        }),
+                    },
+                    () => {},
+                    "not_recipe",
+                    new RegExp(
+                        `isn't a Foodable recipe\\.[^]*ingredients\\.0\\.food\\.${key}`,
+                        "i",
+                    ),
+                ],
+            ),
+            // A NUL cannot be stored and no other control character belongs
+            // in a recipe: the tool refuses the document rather than fail
+            // while writing it.
+            ...(
+                [
+                    ["a NUL in the name", { name: "So\u0000up" }, /name:/],
+                    [
+                        "a NUL in the instructions",
+                        { instructions: "Stir\u0000 well" },
+                        /instructions:/,
+                    ],
+                    ["a NUL in a tag", { tags: ["so\u0000up"] }, /tags\.0:/],
+                    [
+                        "a NUL in an ingredient name",
+                        {
+                            ingredients: [
+                                {
+                                    food_name: "Len\u0000tils",
+                                    amount: 300,
+                                    unit: "g",
+                                    food: { ...NONE },
+                                },
+                            ],
+                        },
+                        /ingredients\.0\.food_name:/,
+                    ],
+                    [
+                        "a NUL in an ingredient unit",
+                        {
+                            ingredients: [
+                                {
+                                    food_name: "Lentils",
+                                    amount: 300,
+                                    unit: "g\u0000",
+                                    food: { ...NONE },
+                                },
+                            ],
+                        },
+                        /ingredients\.0\.unit:/,
+                    ],
+                    [
+                        "an escape character in the name",
+                        { name: "So\u001bup" },
+                        /name:/,
+                    ],
+                ] as [string, Record<string, unknown>, RegExp][]
+            ).map(
+                ([label, over, where]): [
+                    string,
+                    Record<string, unknown>,
+                    () => void,
+                    string,
+                    RegExp,
+                ] => [
+                    label,
+                    { document: documentJson(over) },
+                    () => {},
+                    "not_recipe",
+                    new RegExp(
+                        `isn't a Foodable recipe\\.[^]*${where.source}[^]*control character`,
+                        "i",
+                    ),
+                ],
+            ),
+        ];
+
+        for (const [name, args, setup, code, message] of refusals) {
+            test(`${name} is refused with a clear structured message and writes nothing`, async () => {
+                setup();
+                await withShareLinks(true, asU1, async (call) => {
+                    const r = await call("import_shared_recipe", args);
+                    // A refusal is a result, not a protocol error.
+                    expect(r.isError).toBeFalsy();
+                    const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                        r.structuredContent,
+                    );
+                    expect(out).toMatchObject({
+                        status: "failed",
+                        recipe_id: null,
+                        recipe_name: null,
+                        renamed_from: null,
+                        matched: 0,
+                        created: 0,
+                        ingredients: [],
+                        error_code: code,
+                    });
+                    expect(out.message).toMatch(message);
+                    expect(r.content[0]!.text).toBe(out.message);
+                    expect(await db.recipesStore.listRecipes("hh-1")).toEqual(
+                        [],
+                    );
+                    expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
+                });
+            });
+        }
+
+        test("a refused link never reaches the fetcher", async () => {
+            const calls = serving(documentJson());
+            await withShareLinks(true, asU1, async (call) => {
+                for (const url of [
+                    "pasta",
+                    `http://kitchen.example/s/${TOKEN}`,
+                    `https://127.0.0.1/s/${TOKEN}`,
+                    "https://kitchen.example/other",
+                ]) {
+                    const r = await call("import_shared_recipe", { url });
+                    expect(r.structuredContent?.status).toBe("failed");
+                }
+                expect(calls).toEqual([]);
+            });
+        });
+
+        test("the link reader kill switch pauses links but not a pasted document", async () => {
+            const calls = serving(documentJson());
+            const member = db.members[0]!;
+            const flags = evaluateViewerFlags(
+                buildFlagContext({
+                    auth: asU1,
+                    member: {
+                        userId: member.userId,
+                        householdId: member.householdId,
+                        role: member.role,
+                        displayName: member.displayName,
+                    },
+                }),
+                createMemoryFlags({ "mcp-share-links": true }),
+            );
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-share-links": true,
+                    "recipe-link-reader": false,
+                }),
+            );
+            try {
+                const server = new McpServer(
+                    { name: "foodable-test", version: "0.0.0" },
+                    { capabilities: { tools: {}, resources: {} } },
+                );
+                registerTools(
+                    server,
+                    asU1,
+                    true,
+                    null,
+                    undefined,
+                    "http://localhost",
+                    true,
+                    flags,
+                );
+                const [ct, st] = InMemoryTransport.createLinkedPair();
+                const client = new Client({
+                    name: "test-client",
+                    version: "0.0.0",
+                });
+                await Promise.all([server.connect(st), client.connect(ct)]);
+                try {
+                    const paused = (await client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { url: LINK },
+                    })) as ToolResult;
+                    expect(paused.structuredContent?.status).toBe("failed");
+                    expect(String(paused.structuredContent?.message)).toMatch(
+                        /paused/i,
+                    );
+                    expect(calls).toEqual([]);
+                    const pasted = (await client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { document: documentJson() },
+                    })) as ToolResult;
+                    expect(pasted.structuredContent?.status).toBe("imported");
+                } finally {
+                    await client.close();
+                    await server.close();
+                }
+            } finally {
+                resetFlagsForTests();
+            }
+        });
+
+        test("analytics records an import as a success and a refusal as a failure, never the link", async () => {
+            serving(documentJson());
+            await withShareLinks(true, asU1, async (call) => {
+                await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                await call("import_shared_recipe", { url: "pasta" });
+                await call("import_shared_recipe", { url: LINK });
+                const rows = db.analyticsRows.filter(
+                    (r) => r.tool_name === "import_shared_recipe",
+                );
+                expect(rows.map((r) => r.success)).toEqual([true, false, true]);
+                expect(rows[1]!.error_category).toBe("not_share_link");
+                expect(JSON.stringify(db.analyticsRows)).not.toContain(TOKEN);
+            });
+        });
+
+        test("flag off: the tool is absent and a call changes nothing", async () => {
+            await withShareLinks(false, asU1, async (call, client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).not.toContain("import_shared_recipe");
+                await expect(
+                    client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { document: documentJson() },
+                    }),
+                ).rejects.toThrow(/not found/i);
+                expect(await db.recipesStore.listRecipes("hh-1")).toEqual([]);
+                void call;
+            });
+        });
+
+        test("the tool is declared as a write that reaches out", async () => {
+            await withShareLinks(true, asU1, async (_call, client) => {
+                const tool = (await client.listTools()).tools.find(
+                    (t) => t.name === "import_shared_recipe",
+                );
+                expect(tool).toBeDefined();
+                expect(tool!.annotations).toMatchObject({
+                    readOnlyHint: false,
+                    destructiveHint: false,
+                    idempotentHint: false,
+                    openWorldHint: true,
+                });
+                expect(tool!.outputSchema).toBeDefined();
+            });
+        });
+    });
+
+    describe("over HTTP", () => {
+        test.each(ERAS)(
+            "import_shared_recipe works with the flag on and is absent with it off (%p)",
+            async (era) => {
+                const calls: string[] = [];
+                db.recipeImportFetcher = {
+                    async robotsAllows() {
+                        return true;
+                    },
+                    async fetchPage(url) {
+                        calls.push(String(url));
+                        return {
+                            ok: true as const,
+                            url: String(url),
+                            status: 200,
+                            contentType: "application/json",
+                            body: JSON.stringify({
+                                version: 1,
+                                name: "Soup over HTTP",
+                                portions: 2,
+                                instructions: null,
+                                tags: [],
+                                ingredients: [
+                                    {
+                                        food_name: "Leek",
+                                        amount: 2,
+                                        unit: "each",
+                                        food: {
+                                            calories: 61,
+                                            protein_g: 1.5,
+                                            carbs_g: 14,
+                                            fat_g: 0.3,
+                                            fiber_g: 1.8,
+                                            sugar_g: 3.9,
+                                            saturated_fat_g: 0.1,
+                                            alcohol_g: null,
+                                            caffeine_mg: null,
+                                            grams_per_ml: null,
+                                            grams_per_each: null,
+                                        },
+                                    },
+                                ],
+                            }),
+                        };
+                    },
+                };
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-share-links": true }),
+                );
+                try {
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        expect(names).toContain("import_shared_recipe");
+                        const byUrl = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: {
+                                url: `https://kitchen.example/s/${"C".repeat(43)}`,
+                            },
+                        })) as ToolResult;
+                        const parsed = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                            byUrl.structuredContent,
+                        );
+                        expect(parsed).toMatchObject({
+                            status: "imported",
+                            recipe_name: "Soup over HTTP",
+                            created: 1,
+                            matched: 0,
+                        });
+                        expect(calls).toEqual([
+                            `https://kitchen.example/s/${"C".repeat(43)}.json`,
+                        ]);
+                        expect(
+                            (await db.recipesStore.listRecipes("hh-1")).map(
+                                (r) => r.name,
+                            ),
+                        ).toEqual(["Soup over HTTP"]);
+
+                        const byDocument = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: {
+                                document: JSON.stringify({
+                                    version: 1,
+                                    name: "Pasted over HTTP",
+                                    portions: 1,
+                                    instructions: null,
+                                    tags: [],
+                                    ingredients: [],
+                                }),
+                            },
+                        })) as ToolResult;
+                        expect(byDocument.structuredContent?.status).toBe(
+                            "imported",
+                        );
+
+                        const refused = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: { url: "http://kitchen.example/s/x" },
+                        })) as ToolResult;
+                        expect(refused.structuredContent).toMatchObject({
+                            status: "failed",
+                            error_code: "not_share_link",
+                        });
+                    });
+                    setFlagsForTests(
+                        createMemoryFlags({ "mcp-share-links": false }),
+                    );
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        expect(names).not.toContain("import_shared_recipe");
+                        const refused = await client
+                            .callTool({
+                                name: "import_shared_recipe",
+                                arguments: {
+                                    document: '{"version":1}',
+                                },
+                            })
+                            .then(
+                                (r) => (r as ToolResult).isError === true,
+                                () => true,
+                            );
+                        expect(refused).toBe(true);
+                    });
+                } finally {
+                    resetFlagsForTests();
+                }
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on: create, list and revoke (%p)",
+            async (era) => {
+                const recipe = await seedRecipe("hh-1");
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-share-links": true }),
+                );
+                try {
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        for (const name of SHARE_TOOLS)
+                            expect(names).toContain(name);
+
+                        const made = (await client.callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "recipe", target_id: recipe.id },
+                        })) as ToolResult;
+                        const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                            made.structuredContent,
+                        );
+                        expect(parsed.url).toMatch(
+                            /^http:\/\/test\.local\/s\/[A-Za-z0-9_-]{43}$/,
+                        );
+                        const token = parsed.url.split("/s/")[1]!;
+                        expect(
+                            await resolveShareToken(
+                                db.shareLinksStore,
+                                token,
+                                new Date(),
+                            ),
+                        ).not.toBeNull();
+
+                        const listed = (await client.callTool({
+                            name: "list_share_links",
+                            arguments: {},
+                        })) as ToolResult;
+                        expect(
+                            SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                                listed.structuredContent,
+                            ).links,
+                        ).toHaveLength(1);
+
+                        const revoked = (await client.callTool({
+                            name: "revoke_share_link",
+                            arguments: { id: parsed.id },
+                        })) as ToolResult;
+                        SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(
+                            revoked.structuredContent,
+                        );
+                        expect(
+                            await resolveShareToken(
+                                db.shareLinksStore,
+                                token,
+                                new Date(),
+                            ),
+                        ).toBeNull();
+
+                        const bad = (await client.callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "recipe", target_id: "nope" },
+                        })) as ToolResult;
+                        expect(bad.isError).toBe(true);
+                    });
+                } finally {
+                    resetFlagsForTests();
+                }
+            },
+        );
+
+        test.each(ERAS)("flag off: the tools are absent (%p)", async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    for (const name of SHARE_TOOLS)
+                        expect(names).not.toContain(name);
+                    const refused = await client
+                        .callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "grocery_list" },
+                        })
+                        .then(
+                            (r) => (r as ToolResult).isError === true,
+                            () => true,
+                        );
+                    expect(refused).toBe(true);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        });
     });
 });

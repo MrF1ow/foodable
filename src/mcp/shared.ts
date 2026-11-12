@@ -75,6 +75,7 @@ import {
     noticeCodeDismissible,
     noticeDismissLabel,
     noticeDismissPair,
+    noticeDismissScope,
     noticeDigestWire,
     noticeSentence,
 } from "../copy/notices.js";
@@ -227,6 +228,7 @@ const NOTICE_SUBJECT_KIND = z.enum([
     "recipe_ingredient",
     "fridge_item",
     "grocery_line",
+    "member",
 ]);
 
 const NOTICE_RELATED_KIND = z.enum([
@@ -297,6 +299,10 @@ function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
     if (noticeDismissPair(notice.code)) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         related_id = foodRel?.id ?? null;
+    } else {
+        // A scoped dismissal (until the next weigh-in, say) names its scope.
+        const scope = noticeDismissScope(notice);
+        related_id = scope === "" ? null : scope;
     }
     return {
         code: notice.code,
@@ -712,6 +718,11 @@ export const GOALS_ITEM = z.object({
     // alcohol, and 0 is a real one ("none at all") rather than "unset".
     caffeine_mg: z.number().nullable(),
     water_ml: z.number().nullable(),
+    // The name and note a member gave their goals, and the day (YYYY-MM-DD, in
+    // their timezone) the targets were last set. Null when never given.
+    goal_name: z.string().nullable(),
+    goal_note: z.string().nullable(),
+    goals_set_on: z.string().nullable(),
 });
 
 export const TOTALS_ITEM = z.object({
@@ -872,6 +883,9 @@ export function goalsPayloadOf(
         // (a stat line appears only once some value is recorded).
         caffeine_mg: goals.daily_caffeine_mg ?? null,
         water_ml: goals.daily_water_ml ?? null,
+        goal_name: goals.goal_name ?? null,
+        goal_note: goals.goal_note ?? null,
+        goals_set_on: goals.goals_set_on ?? null,
     };
 }
 
@@ -1155,7 +1169,12 @@ export function formatGoals(
         hasActiveTarget(v, "floor") ? render(v) : "not set";
     const ceiling = (v: number | null, render: (n: number) => string) =>
         hasActiveTarget(v, "ceiling") ? render(v) : "not set";
-    const parts: string[] = ["Current daily goals:"];
+    const parts: string[] = [
+        goals.goal_name
+            ? `Current daily goals: ${goals.goal_name}${goals.goals_set_on ? ` (set ${goals.goals_set_on})` : ""}`
+            : "Current daily goals:",
+    ];
+    if (goals.goal_note) parts.push(`Note: ${goals.goal_note}`);
     parts.push(
         `- Calories: ${floor(goals.daily_calories, (n) => `${n} kcal`)}`,
     );

@@ -100,9 +100,9 @@ test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
 
     // Structure: one inlined stylesheet + one inlined script, no external refs.
     expect((html.match(/<style>/g) ?? []).length).toBe(1);
-    expect((html.match(/<script>/g) ?? []).length).toBe(1);
+    expect((html.match(/<script\b/gi) ?? []).length).toBe(1);
     expect(html).not.toContain("<link");
-    expect(html).not.toMatch(/<script[^>]+src=/);
+    expect(html).not.toMatch(/<script[^>]+src=/i);
     expect(html.trimStart().startsWith("<!doctype html>")).toBe(true);
 
     // Shared bridge got inlined and the widget wires itself to it exactly once.

@@ -16,6 +16,7 @@
 //
 // Markers resolve relative to public/widgets/src/ and expand recursively.
 
+import { fileURLToPath } from "node:url";
 import { TOASTS } from "./copy/toasts.js";
 import { isNutritionCard, NUTRITION_CARDS } from "./domain/layout.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
@@ -510,17 +511,19 @@ export async function getAppJs(): Promise<string> {
             src = src
                 .replace(
                     "const THEME_PAGE_BG = null;",
-                    `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+                    () =>
+                        `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
                 )
                 .replace(
                     "const THEME_NAV_BG = null;",
-                    `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
+                    () =>
+                        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
                 );
         }
         if (path.endsWith("toast.js")) {
             src = src.replace(
                 "const TOAST_CATALOG = null;",
-                `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
+                () => `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
             );
         }
         parts.push(`(function () {\n${src}\n})();`);
@@ -570,12 +573,144 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/sheet.js",
     "./src/web/client/v2/stepper.js",
     "./src/web/client/v2/swipe-rows.js",
+    "./src/web/client/v2/scanner-pick.js",
+    "./src/web/client/v2/scanner.js",
     "./src/web/client/v2/log-sheet.js",
     "./src/web/client/v2/recipes.js",
+    "./src/web/client/v2/cook-sheet.js",
     "./src/web/client/v2/trends.js",
     "./src/web/client/v2/today.js",
     "./src/web/client/v2/kitchen.js",
+    "./src/web/client/v2/stores.js",
+    "./src/web/client/v2/score-settings.js",
+    "./src/web/client/v2/share-link.js",
+    "./src/web/client/v2/copy-address.js",
+    "./src/web/client/v2/copy-yesterday.js",
 ] as const;
+
+const SCANNER_ZXING_ENTRY = "./src/web/client/v2/scanner-zxing-entry.js";
+const SCANNER_WASM_PKG = "zxing-wasm/reader/zxing_reader.wasm";
+// Per instance by design: lazy decoder chunk and wasm; built once per process at boot.
+let scannerZxingJs: string | undefined;
+let scannerZxingJsHash: string | undefined;
+let scannerWasmBytes: ArrayBuffer | undefined;
+let scannerWasmHash: string | undefined;
+let scannerAssetsUnavailable = false;
+let scannerWarmFailureLogged = false;
+
+export class ScannerAssetsUnavailable extends Error {
+    constructor(message = "scanner assets unavailable") {
+        super(message);
+        this.name = "ScannerAssetsUnavailable";
+    }
+}
+
+function scannerWasmPath(): string {
+    return fileURLToPath(import.meta.resolve(SCANNER_WASM_PKG));
+}
+
+async function buildScannerZxingBundle(): Promise<string> {
+    const result = await Bun.build({
+        entrypoints: [SCANNER_ZXING_ENTRY],
+        format: "iife",
+        minify: true,
+        target: "browser",
+    });
+    if (!result.success) {
+        throw new Error(
+            `scanner zxing bundle failed: ${result.logs.map((l) => l.message).join("; ")}`,
+        );
+    }
+    return await result.outputs[0]!.text();
+}
+
+export async function getScannerZxingJs(): Promise<string> {
+    if (scannerAssetsUnavailable) {
+        throw new ScannerAssetsUnavailable();
+    }
+    if (scannerZxingJs !== undefined) return scannerZxingJs;
+    try {
+        scannerZxingJs = await buildScannerZxingBundle();
+        scannerZxingJsHash = await shortContentHash(scannerZxingJs);
+        return scannerZxingJs;
+    } catch (err) {
+        scannerAssetsUnavailable = true;
+        throw err instanceof ScannerAssetsUnavailable
+            ? err
+            : new ScannerAssetsUnavailable(
+                  err instanceof Error ? err.message : String(err),
+              );
+    }
+}
+
+export async function getScannerWasm(): Promise<ArrayBuffer> {
+    if (scannerAssetsUnavailable) {
+        throw new ScannerAssetsUnavailable();
+    }
+    if (scannerWasmBytes !== undefined) return scannerWasmBytes;
+    try {
+        const file = Bun.file(scannerWasmPath());
+        if (!(await file.exists())) {
+            throw new Error(
+                `scanner wasm missing in zxing-wasm: ${SCANNER_WASM_PKG}`,
+            );
+        }
+        scannerWasmBytes = await file.arrayBuffer();
+        scannerWasmHash = await shortContentHash(
+            new TextDecoder("latin1").decode(new Uint8Array(scannerWasmBytes)),
+        );
+        return scannerWasmBytes;
+    } catch (err) {
+        scannerAssetsUnavailable = true;
+        throw err instanceof ScannerAssetsUnavailable
+            ? err
+            : new ScannerAssetsUnavailable(
+                  err instanceof Error ? err.message : String(err),
+              );
+    }
+}
+
+/** Boot-time warm for the lazy scanner chunk; failures are non-fatal. */
+export async function warmScannerAssets(): Promise<boolean> {
+    if (scannerAssetsUnavailable) return false;
+    try {
+        await getScannerZxingJs();
+        await getScannerWasm();
+        return true;
+    } catch (err) {
+        scannerAssetsUnavailable = true;
+        if (!scannerWarmFailureLogged) {
+            scannerWarmFailureLogged = true;
+            console.error(
+                "Scanner assets unavailable; /app-v2-scanner.* will return 503:",
+                err instanceof Error ? err.message : err,
+            );
+        }
+        return false;
+    }
+}
+
+/** Clears cached scanner asset state (tests only). */
+export function resetScannerAssetsForTest(): void {
+    scannerZxingJs = undefined;
+    scannerZxingJsHash = undefined;
+    scannerWasmBytes = undefined;
+    scannerWasmHash = undefined;
+    scannerAssetsUnavailable = false;
+    scannerWarmFailureLogged = false;
+}
+
+export function scannerZxingScriptHref(): string {
+    return scannerZxingJsHash
+        ? `/app-v2-scanner.js?v=${scannerZxingJsHash}`
+        : "/app-v2-scanner.js";
+}
+
+export function scannerWasmHref(): string {
+    return scannerWasmHash
+        ? `/app-v2-scanner.wasm?v=${scannerWasmHash}`
+        : "/app-v2-scanner.wasm";
+}
 // Per instance by design: /app-v2.js bytes and hash; warmed at boot.
 let appV2Js: string | undefined;
 let appV2JsHash: string | undefined;
@@ -689,7 +824,7 @@ function applyViewerTheme(html: string, chrome: WidgetViewerChrome): string {
     if (chrome.theme === "system") return withoutTheme;
     return withoutTheme.replace(
         /<html\b/i,
-        `<html data-theme="${chrome.theme}"`,
+        () => `<html data-theme="${chrome.theme}"`,
     );
 }
 
@@ -699,9 +834,10 @@ export function withWidgetData(
     chrome?: WidgetViewerChrome,
 ): string {
     const json = JSON.stringify(data).replace(/</g, "\\u003c");
+    // A function replacement, so a `$` in the data is not a pattern.
     const seeded = html.replace(
         "<script>",
-        `<script>window.__WIDGET_DATA__=${json};`,
+        () => `<script>window.__WIDGET_DATA__=${json};`,
     );
     if (!chrome) return seeded;
     // A function replacement, so a `$` in the CSS is never read as a pattern.
@@ -725,6 +861,7 @@ export async function warmWidgets(): Promise<void> {
         getAppJs(),
         getAppV2Css(),
         getAppV2Js(),
+        warmScannerAssets(),
     ]);
     // Hashes of the framed documents. After the widgets and the skin are
     // cached, so boot does not assemble them twice.

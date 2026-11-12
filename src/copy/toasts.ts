@@ -2,6 +2,13 @@
  *  still render as banners; `error` is for actions that run in the browser. */
 export type ToastKind = "success" | "info" | "warning" | "error";
 
+/**
+ * The note on a grocery line the plan added at the recipe's full amount
+ * because what the kitchen holds could not be counted. The domain's own notice
+ * names the food and the amount, which the line already shows.
+ */
+export const PLAN_UNKNOWN_LINE_NOTE = "Check what you have";
+
 export const TOASTS = {
     "fridge.location.added": { kind: "success", text: "Location added" },
     "fridge.location.removed": { kind: "success", text: "Location removed" },
@@ -38,6 +45,8 @@ export const TOASTS = {
         text: "Put away in the fridge",
     },
 
+    "usuals.schedule.saved": { kind: "success", text: "Restock saved" },
+
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },
     "nutrition.meal.updated": { kind: "success", text: "Meal updated" },
     "nutrition.meal.deleted": { kind: "success", text: "Meal deleted" },
@@ -46,6 +55,14 @@ export const TOASTS = {
         text: "Meal restored",
     },
     "nutrition.meal.undo.noop": { kind: "info", text: "Meal already restored" },
+    "nutrition.meal.copy-yesterday.noop": {
+        kind: "info",
+        text: "Already copied from yesterday",
+    },
+    "nutrition.meal.copy-yesterday.none": {
+        kind: "info",
+        text: "Nothing to copy from yesterday",
+    },
     "nutrition.water.logged": { kind: "success", text: "Water logged" },
     "nutrition.weight.logged": { kind: "success", text: "Weight logged" },
     "nutrition.layout.saved": {
@@ -67,6 +84,34 @@ export const TOASTS = {
     "recipes.cooked.unmeasured": {
         kind: "info",
         text: "Recipe cooked. Nothing deducted for: {names}.",
+    },
+    "recipes.cooked.logged": {
+        kind: "success",
+        text: "Recipe cooked · 1 serving logged to {slot}",
+    },
+    "recipes.cooked.changed": {
+        kind: "warning",
+        text: "Recipe cooked, but your kitchen had changed since the preview: {names}",
+    },
+    "recipes.cooked.changed.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot}, but your kitchen had changed since the preview: {names}",
+    },
+    "recipes.cooked.shortfall.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot} — some ingredients were short",
+    },
+    "recipes.cooked.shortfall.unmeasured.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot} — some ingredients were short. Nothing deducted for: {names}.",
+    },
+    "recipes.cooked.unmeasured.logged": {
+        kind: "info",
+        text: "Recipe cooked · 1 serving logged to {slot}. Nothing deducted for: {names}.",
+    },
+    "recipes.cooked.already": {
+        kind: "info",
+        text: "Already cooked and logged",
     },
     "recipes.updated": { kind: "success", text: "Recipe saved" },
     "recipes.steps.saved": { kind: "success", text: "Steps saved" },
@@ -95,6 +140,41 @@ export const TOASTS = {
         kind: "success",
         text: "Added to the grocery list ({count})",
     },
+    "plan.added": { kind: "success", text: "Planned for {when}" },
+    "plan.already": { kind: "info", text: "Already planned for {when}" },
+    "plan.moved": { kind: "success", text: "Moved to {when}" },
+    "plan.removed": { kind: "success", text: "Removed from the plan" },
+    "plan.gone": { kind: "info", text: "That plan is already gone" },
+    "plan.notice": { kind: "warning", text: "{message}" },
+    "plan.missing.added": {
+        kind: "success",
+        text: "Added to the grocery list ({count})",
+    },
+    "plan.missing.added.unknown": {
+        kind: "warning",
+        text: "Added to the grocery list ({count}). Check what you have of: {names}",
+    },
+    "plan.missing.on-list": {
+        kind: "info",
+        text: "Already on the grocery list",
+    },
+    "plan.missing.none": {
+        kind: "info",
+        text: "Nothing is missing for the plan",
+    },
+    "notice.added": {
+        kind: "success",
+        text: "Added {name} to the grocery list",
+    },
+    "notice.added.check": {
+        kind: "warning",
+        text: "Added {name} to the grocery list. Check what you have",
+    },
+    "notice.gone": {
+        kind: "info",
+        text: "That one is already taken care of",
+    },
+    "notice.error": { kind: "warning", text: "{message}" },
     "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
     "recipes.unresolved.cleared": {
         kind: "success",
@@ -115,6 +195,10 @@ export const TOASTS = {
     "recipes.import.imported": {
         kind: "success",
         text: "Imported {name} from {site}.",
+    },
+    "recipes.import.shared": {
+        kind: "success",
+        text: "Imported {name}. {matched} matched your foods, {created} added.",
     },
     "recipes.import.unverified_needs_review": {
         kind: "warning",
@@ -180,6 +264,10 @@ export const TOASTS = {
         kind: "success",
         text: "Recipe settings saved",
     },
+    "household.plurals-same-food.saved": {
+        kind: "success",
+        text: "Food name matching updated",
+    },
     "household.fetch-refusal.cleared": {
         kind: "success",
         text: "{host} can be read again",
@@ -200,6 +288,29 @@ export const TOASTS = {
     "settings.nutrition.saved": {
         kind: "success",
         text: "Nutrition preferences saved",
+    },
+    "settings.goals.saved": { kind: "success", text: "Goals saved" },
+    "settings.goals.day-cleared": {
+        kind: "success",
+        text: "Day back on your daily goals",
+    },
+    "settings.score.saved": { kind: "success", text: "Score weights saved" },
+    "settings.score.household": {
+        kind: "success",
+        text: "Using the household default",
+    },
+    "settings.score.household-saved": {
+        kind: "success",
+        text: "Household default saved",
+    },
+    "settings.score.household-cleared": {
+        kind: "success",
+        text: "Household default cleared",
+    },
+    "settings.ai.disconnected": { kind: "success", text: "App disconnected" },
+    "settings.ai.already-disconnected": {
+        kind: "info",
+        text: "That app was already disconnected",
     },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household-settings.saved": {
@@ -222,6 +333,10 @@ export const TOASTS = {
         kind: "success",
         text: "Location updated",
     },
+    "settings.household.shared-link.revoked": {
+        kind: "success",
+        text: "Link revoked",
+    },
     "settings.household.ownership.transferred": {
         kind: "success",
         text: "Ownership transferred",
@@ -235,6 +350,24 @@ export const TOASTS = {
         kind: "success",
         text: "Section renamed",
     },
+    "stores.renamed": { kind: "success", text: "Store renamed" },
+    "stores.reordered": { kind: "success", text: "Store order saved" },
+    "stores.deleted": { kind: "success", text: "Store deleted" },
+    "stores.deleted-moved": {
+        kind: "success",
+        text: "Store deleted. {lines} moved to {store}",
+    },
+    "stores.preferences.saved": {
+        kind: "success",
+        text: "Store settings saved",
+    },
+    "stores.section.added": { kind: "success", text: "Section added" },
+    "stores.section.reordered": {
+        kind: "success",
+        text: "Section order saved",
+    },
+    "stores.section.hidden": { kind: "success", text: "Section hidden" },
+    "stores.section.shown": { kind: "success", text: "Section shown" },
     "settings.household.store-rule.added": {
         kind: "success",
         text: "Store rule added",

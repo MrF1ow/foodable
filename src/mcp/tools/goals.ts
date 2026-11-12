@@ -20,6 +20,11 @@ import {
 import { withAnalytics } from "../../analytics.js";
 import { todayInTz, dateInTz } from "../../domain/tz.js";
 import {
+    GOAL_NAME_MAX,
+    GOAL_NOTE_MAX,
+    cleanGoalLabel,
+} from "../../domain/goal-label.js";
+import {
     GOAL_DAY_FIELDS,
     dateDiffDays,
     isCalendarDate,
@@ -49,6 +54,21 @@ import {
 import type { ToolContext } from "../shared.js";
 
 const MAX_GOAL_DAYS_PER_CALL = 92;
+
+// The fields that change what the targets are. Writing any of them is a save of
+// the goals, which stamps goals_set_on; a write of only the name or note is not.
+const GOAL_TARGET_ARGS = [
+    "daily_calories",
+    "daily_protein_g",
+    "daily_carbs_g",
+    "daily_fat_g",
+    "daily_fiber_g",
+    "daily_sugar_g",
+    "daily_alcohol_g",
+    "daily_caffeine_mg",
+    "daily_water_ml",
+    "target_weight",
+] as const;
 
 export const SET_NUTRITION_GOALS_OUTPUT_SCHEMA = z.object({
     scope: z.enum(["default", "days"]),
@@ -146,7 +166,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Set Nutrition Goals",
             description:
-                "Set the user's daily calorie and macro targets, and optionally a target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null explicitly to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. Every gram target is in grams and the caffeine limit is in MILLIGRAMS. For a limit, 0 is a real value meaning 'none at all' rather than 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Per-day overrides do not accept target_weight — set that on the defaults instead. Pass clear: true with a date or range to remove those overrides and fall back to the defaults. Targets are the user's own choice; this server does not provide medical or dietary advice.",
+                "Set the user's daily calorie and macro targets, and optionally a target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null explicitly to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. Every gram target is in grams and the caffeine limit is in MILLIGRAMS. For a limit, 0 is a real value meaning 'none at all' rather than 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Per-day overrides do not accept target_weight — set that on the defaults instead. Pass clear: true with a date or range to remove those overrides and fall back to the defaults. goal_name (at most 40 characters) and goal_note (at most 280) label the standing goals, for example Recomp; they apply to the defaults only, an omitted one keeps its stored value, and null or blank clears it. Saving any target also records today (in the user's timezone) as the day the goals were set; changing only the name or note leaves that day alone. Targets are the user's own choice; this server does not provide medical or dietary advice.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -266,6 +286,23 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                     .describe(
                         "When true, remove per-day overrides for date or from/to and fall back to the defaults.",
                     ),
+                // Length is checked in the handler, not here: a schema-level
+                // rejection is a bare protocol error, while the handler's is a
+                // message the caller can act on, like every other goal bound.
+                goal_name: z
+                    .string()
+                    .nullable()
+                    .optional()
+                    .describe(
+                        `Name for the standing goals, at most ${GOAL_NAME_MAX} characters (for example "Recomp"). Omit to keep the stored name; null or blank to clear it. Defaults only, not per-day overrides.`,
+                    ),
+                goal_note: z
+                    .string()
+                    .nullable()
+                    .optional()
+                    .describe(
+                        `Short note beside the goal name, at most ${GOAL_NOTE_MAX} characters. Omit to keep it; null or blank to clear it. Defaults only.`,
+                    ),
             }),
             outputSchema: SET_NUTRITION_GOALS_OUTPUT_SCHEMA,
         },
@@ -278,6 +315,16 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         args.target_member,
                     );
                     const dayScoped = hasGoalDayScope(args);
+                    // Validate the label up front, before any read or write, so
+                    // an over-long name is refused whatever else the call says.
+                    const goalName =
+                        args.goal_name === undefined
+                            ? undefined
+                            : cleanGoalLabel("goal_name", args.goal_name);
+                    const goalNote =
+                        args.goal_note === undefined
+                            ? undefined
+                            : cleanGoalLabel("goal_note", args.goal_note);
                     // Only a per-day override needs the household (its rows
                     // carry household_id); the standing defaults never did.
                     const [existing, preferredUnit, householdId] =
@@ -299,6 +346,14 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         if (args.target_weight !== undefined) {
                             throw new Error(
                                 "target_weight applies to default goals only, not per-day overrides. Omit date, from and to to set it.",
+                            );
+                        }
+                        if (
+                            args.goal_name !== undefined ||
+                            args.goal_note !== undefined
+                        ) {
+                            throw new Error(
+                                "goal_name and goal_note apply to default goals only, not per-day overrides. Omit date, from and to to set them.",
                             );
                         }
 
@@ -429,7 +484,18 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                 ? (existing?.daily_water_ml ?? null)
                                 : args.daily_water_ml,
                         target_weight_g,
+                        // Undefined leaves the stored value alone: a write
+                        // without a name keeps the name.
+                        goal_name: goalName,
+                        goal_note: goalNote,
+                        goals_set_on: undefined as string | null | undefined,
                     };
+                    if (GOAL_TARGET_ARGS.some((f) => args[f] !== undefined)) {
+                        const profile = await getProfile(userId);
+                        merged.goals_set_on = todayInTz(
+                            timezoneFromProfile(profile) ?? "UTC",
+                        );
+                    }
                     const goals = await upsertNutritionGoals(userId, merged);
                     // An alcohol target set by someone who has alcohol tracking
                     // off is saved but invisible everywhere else, so say so here

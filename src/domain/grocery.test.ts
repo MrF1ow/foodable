@@ -1935,3 +1935,104 @@ test("grocery line note round-trips row mappers and memory store", async () => {
     });
     expect((await grocery.listLines(HH))[0]?.note).toBe(saved.note);
 });
+
+test("ticking a line off stamps the usual's last restocked day, never backwards", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store, dairy } = await seedStore();
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const product = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Oatly Milk",
+            genericFoodId: plain.id,
+        }),
+    );
+    const line = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    // Unticking and a tick without the stamp options leave the date alone.
+    await checkGroceryLine(grocery, HH, line.id, true);
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBeNull();
+    await checkGroceryLine(grocery, HH, line.id, false, {
+        foods,
+        today: "2026-06-06",
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBeNull();
+
+    await checkGroceryLine(grocery, HH, line.id, true, {
+        foods,
+        today: "2026-06-06",
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBe(
+        "2026-06-06",
+    );
+    await checkGroceryLine(grocery, HH, line.id, true, {
+        foods,
+        today: "2026-06-01",
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBe(
+        "2026-06-06",
+    );
+
+    // A line naming a product stamps its plain food, not the product.
+    const productLine = await grocery.insertLine({
+        ...line,
+        id: "product-line",
+        foodId: product.id,
+        checked: false,
+    });
+    await checkGroceryLine(grocery, HH, productLine.id, true, {
+        foods,
+        today: "2026-06-13",
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBe(
+        "2026-06-13",
+    );
+    expect((await foods.getFood(HH, product.id))?.lastRestockedOn).toBeNull();
+});
+
+test("a failing stamp does not fail a tick that already saved", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store, dairy } = await seedStore();
+    await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const line = await addGroceryManualFood(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        sectionId: dairy.id,
+        name: "Milk",
+        amount: 1,
+        unit: "l",
+    });
+    const broken: typeof foods = {
+        ...foods,
+        updateFoodRow: async () => {
+            throw new Error("db down");
+        },
+    };
+    const errors: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args);
+    try {
+        const updated = await checkGroceryLine(grocery, HH, line.id, true, {
+            foods: broken,
+            today: "2026-06-06",
+        });
+        expect(updated?.checked).toBe(true);
+    } finally {
+        console.error = original;
+    }
+    expect((await grocery.listLines(HH))[0]?.checked).toBe(true);
+    expect(errors).toHaveLength(1);
+});

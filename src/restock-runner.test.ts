@@ -3,6 +3,7 @@ import { createMemoryFlags } from "./flags.js";
 import { EMPTY_HOUSEHOLD_PREFERENCES } from "./household.js";
 import {
     filterRestockRunnerHouseholds,
+    liveRestockCheckDeps,
     restockHouseholdsFromRows,
 } from "./restock-runner.js";
 import type { RestockEnabledHouseholdRow } from "./db/restock.js";
@@ -78,4 +79,8 @@ test("filterRestockRunnerHouseholds skips only households with restock-runner of
     expect(logs[0]).toBe(
         "[restock] household=bbbbbbbb skipped: restock runner disabled",
     );
+});
+
+test("the live restock runner stays on the legacy source", () => {
+    expect(liveRestockCheckDeps().source).toBe("legacy");
 });

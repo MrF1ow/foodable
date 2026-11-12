@@ -322,6 +322,67 @@ export type TodayDayTotals = {
     caffeine_mg: number | null;
 };
 
+export type YesterdayCopyHint = {
+    label: string;
+    kcal: number | null;
+};
+
+const YESTERDAY_HINT_LABEL_MAX = 48;
+
+function mealRowTitle(meal: Meal): string {
+    for (const group of mealRows([meal])) {
+        for (const row of group.rows) {
+            if (row.mealId === meal.id) return row.title;
+        }
+    }
+    return meal.description.trim() || "Meal";
+}
+
+function shortenYesterdayHintLabel(text: string): string {
+    const t = text.trim();
+    if (t.length <= YESTERDAY_HINT_LABEL_MAX) return t;
+    return `${t.slice(0, YESTERDAY_HINT_LABEL_MAX - 1).trimEnd()}…`;
+}
+
+/** One-line label for a copy-yesterday chip (meal titles in the slot, shortened). */
+export function yesterdaySlotHintLabel(
+    slotMeals: readonly Meal[],
+): string | null {
+    if (slotMeals.length === 0) return null;
+    return shortenYesterdayHintLabel(
+        slotMeals.map((meal) => mealRowTitle(meal)).join(" & "),
+    );
+}
+
+function slotMealsFor(meals: readonly Meal[], slot: MealTypeSlot): Meal[] {
+    return meals.filter((meal) => resolveMealType(meal.meal_type) === slot);
+}
+
+function todayHasSlot(meals: readonly Meal[], slot: MealTypeSlot): boolean {
+    return slotMealsFor(meals, slot).length > 0;
+}
+
+/** Copy-yesterday hints for empty slots when viewing the member's today. */
+export function yesterdayCopyHints(
+    viewingToday: boolean,
+    todayMeals: readonly Meal[],
+    yesterdayMeals: readonly Meal[],
+): Partial<Record<MealTypeSlot, YesterdayCopyHint>> {
+    if (!viewingToday) return {};
+    const out: Partial<Record<MealTypeSlot, YesterdayCopyHint>> = {};
+    for (const slot of MEAL_TYPE_ORDER) {
+        if (todayHasSlot(todayMeals, slot)) continue;
+        const rows = slotMealsFor(yesterdayMeals, slot);
+        const label = yesterdaySlotHintLabel(rows);
+        if (!label) continue;
+        out[slot] = {
+            label,
+            kcal: nullAwareSum(rows.map((row) => row.calories)),
+        };
+    }
+    return out;
+}
+
 export function todayDayTotals(
     meals: readonly Meal[],
     waterMl: number,

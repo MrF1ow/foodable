@@ -4,8 +4,12 @@ import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { renderNeedsAttentionInventoryPage } from "../loaders.js";
 import { canonicalAppPath } from "../route-map.js";
 import { isSafeAppBackPath } from "../settings-back.js";
+import { noticeActionRoutes } from "./notices.js";
 
 export const needsAttentionRoutes = new Hono();
+
+// The new app's one-tap notice actions ride along with the notice pages.
+needsAttentionRoutes.route("/", noticeActionRoutes);
 
 const DISMISS_RETURN_ALLOWLIST = new Set([
     "/kitchen/groceries",

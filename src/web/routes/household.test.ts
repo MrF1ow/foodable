@@ -4,13 +4,22 @@ import { legacyRedirects } from "../legacy-redirects.js";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
 import * as actualDbGrocery from "../../db/grocery.js";
+import * as actualDbGroceryStores from "../../db/grocery-stores.js";
 import * as actualDbHousehold from "../../db/household.js";
 import * as actualDbProfiles from "../../db/profiles.js";
 import * as actualDbRecipes from "../../db/recipes.js";
 import * as actualDbRules from "../../db/rules.js";
+import * as actualDbScoreSettings from "../../db/score-settings.js";
+import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
 import * as actualDbSettings from "../../db/settings.js";
+import * as actualDbShareLinks from "../../db/share-links.js";
+import { createMemoryShareLinkStore } from "../../domain/sharing.js";
 import * as actualDbStock from "../../db/stock.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
+import * as actualDbPlans from "../../db/plans.js";
+import * as actualDbWeighIns from "../../db/weigh-ins.js";
+import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
+import { createMemoryPlansStore } from "../../domain/plan.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import * as actualFoods from "../../foods.js";
 import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
@@ -21,6 +30,7 @@ import {
     createMemoryGroceryStore,
 } from "../../domain/grocery.js";
 import { createGroceryStore } from "../../domain/settings.js";
+import { createMemoryStoreManagement } from "../../domain/grocery-stores.js";
 import { createMemoryRecipesStore } from "../../domain/recipes.js";
 import { createMemoryRulesStore } from "../../domain/rules.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
@@ -50,13 +60,18 @@ process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 const realDbFoods = { ...actualDbFoods };
 const realDbFridge = { ...actualDbFridge };
 const realDbGrocery = { ...actualDbGrocery };
+const realDbGroceryStores = { ...actualDbGroceryStores };
 const realDbHousehold = { ...actualDbHousehold };
 const realDbProfiles = { ...actualDbProfiles };
 const realDbRecipes = { ...actualDbRecipes };
 const realDbRules = { ...actualDbRules };
+const realDbScoreSettings = { ...actualDbScoreSettings };
 const realDbSettings = { ...actualDbSettings };
+const realDbShareLinks = { ...actualDbShareLinks };
 const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbPlans = { ...actualDbPlans };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realFoods = { ...actualFoods };
 const realDbSocialReaders = { ...actualDbSocialReaders };
 const realDbFetchMemory = { ...actualDbFetchMemory };
@@ -81,6 +96,7 @@ const db: {
     profile: actualDbProfiles.Profile;
     members: HouseholdMember[];
     household: HouseholdConfig;
+    pluralsSameFood: boolean;
     configWrites: number;
     dismissalsStore: ReturnType<typeof createMemoryNoticeDismissalsStore>;
     socialReaderStatusStore: ReturnType<
@@ -94,6 +110,7 @@ const db: {
     settingsStore: ReturnType<typeof createMemorySettingsStore>;
     rulesStore: ReturnType<typeof createMemoryRulesStore>;
     barcodeFoods: Record<string, FoodResult>;
+    barcodeLookupThrows: boolean;
 } = {
     profile: PROFILE,
     members: [
@@ -112,6 +129,7 @@ const db: {
             restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
         },
     } as HouseholdConfig,
+    pluralsSameFood: false,
     configWrites: 0,
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
     foodsStore: createMemoryFoodsStore(),
@@ -123,6 +141,7 @@ const db: {
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
+    barcodeLookupThrows: false,
 };
 
 mock.module("../../db/foods.js", () => ({
@@ -141,6 +160,14 @@ mock.module("../../db/grocery.js", () => ({
     ...realDbGrocery,
     liveGroceryStore: () => db.groceryStore,
 }));
+mock.module("../../db/grocery-stores.js", () => ({
+    ...realDbGroceryStores,
+    liveStoreManagement: () =>
+        createMemoryStoreManagement(db.settingsStore, db.groceryStore, {
+            foods: db.foodsStore,
+            dismissals: db.dismissalsStore,
+        }),
+}));
 mock.module("../../db/recipes.js", () => ({
     ...realDbRecipes,
     liveRecipesStore: () => db.recipesStore,
@@ -149,9 +176,26 @@ mock.module("../../db/settings.js", () => ({
     ...realDbSettings,
     liveSettingsStore: () => db.settingsStore,
 }));
+mock.module("../../db/share-links.js", () => ({
+    ...realDbShareLinks,
+    liveShareLinkStore: () => createMemoryShareLinkStore(),
+}));
+mock.module("../../db/score-settings.js", () => ({
+    ...realDbScoreSettings,
+    liveScoreSettingsStore: () => createMemoryScoreSettingsStore(),
+}));
 mock.module("../../db/rules.js", () => ({
     ...realDbRules,
     liveRulesStore: () => db.rulesStore,
+}));
+// The new app's notices read plans and weigh-ins; none exist in these tests.
+mock.module("../../db/plans.js", () => ({
+    ...realDbPlans,
+    liveRecipePlansStore: () => createMemoryPlansStore(),
+}));
+mock.module("../../db/weigh-ins.js", () => ({
+    ...realDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore([]),
 }));
 mock.module("../../db/notice-dismissals.js", () => ({
     ...realDbNoticeDismissals,
@@ -186,6 +230,11 @@ mock.module("../../db/household.js", () => ({
     },
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+    getPluralsSameFood: async () => db.pluralsSameFood,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) => {
+        db.pluralsSameFood = enabled;
+        return enabled;
+    },
 }));
 mock.module("../../db/social-readers.js", () => ({
     ...realDbSocialReaders,
@@ -201,7 +250,12 @@ mock.module("../../db/profiles.js", () => ({
 }));
 mock.module("../../foods.js", () => ({
     ...realFoods,
-    lookupBarcode: async (barcode: string) => db.barcodeFoods[barcode] ?? null,
+    lookupBarcode: async (barcode: string) => {
+        if (db.barcodeLookupThrows) {
+            throw new Error("Network down");
+        }
+        return db.barcodeFoods[barcode] ?? null;
+    },
 }));
 
 afterAll(() => {
@@ -209,14 +263,19 @@ afterAll(() => {
     mock.module("../../db/fridge.js", () => realDbFridge);
     mock.module("../../db/stock.js", () => realDbStock);
     mock.module("../../db/grocery.js", () => realDbGrocery);
+    mock.module("../../db/grocery-stores.js", () => realDbGroceryStores);
     mock.module("../../db/recipes.js", () => realDbRecipes);
     mock.module("../../db/settings.js", () => realDbSettings);
+    mock.module("../../db/share-links.js", () => realDbShareLinks);
     mock.module("../../db/rules.js", () => realDbRules);
+    mock.module("../../db/score-settings.js", () => realDbScoreSettings);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("../../db/profiles.js", () => realDbProfiles);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("../../db/plans.js", () => realDbPlans);
+    mock.module("../../db/weigh-ins.js", () => realDbWeighIns);
     mock.module("../../foods.js", () => realFoods);
 });
 
@@ -224,6 +283,7 @@ const { householdRoutes } = await import("./household.js");
 const { settingsRoutes } = await import("./settings.js");
 const { groceryRoutes } = await import("./grocery.js");
 const { fridgeRoutes } = await import("./fridge.js");
+const { foodsRoutes } = await import("./foods.js");
 const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
 
 function cookieFor(userId: string): string {
@@ -275,6 +335,7 @@ beforeEach(() => {
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
+    db.barcodeLookupThrows = false;
     db.profile = { ...PROFILE };
     db.members = [
         {
@@ -296,6 +357,7 @@ describe("settings household routes", () => {
 
     beforeEach(() => {
         db.configWrites = 0;
+        db.pluralsSameFood = false;
         db.household = {
             name: "Home",
             recipeSearchPlaces: [],
@@ -1723,6 +1785,73 @@ describe("household members page ui-v2", () => {
         expect(r.status).toBe(403);
     });
 
+    test("owner can toggle plurals_same_food under ui-v2", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.pluralsSameFood = false;
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(303);
+        expect(db.pluralsSameFood).toBe(true);
+    });
+
+    test("member POST plurals_same_food is refused", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(BOB),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(403);
+    });
+
+    test("POST plurals_same_food is 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+            },
+        );
+        expect(r.status).toBe(404);
+    });
+
+    test("member POST plurals_same_food is 404 when ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await app().request(
+            "http://x/settings/household/plurals-same-food",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(BOB),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "plurals_same_food=true",
+                redirect: "manual",
+            },
+        );
+        expect(r.status).toBe(404);
+    });
+
     test("GET member page shows Today link for a peer", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const r = await app().request(
@@ -1925,5 +2054,838 @@ describe("kitchen usuals ui-v2", () => {
         const html = await r.text();
         expect(html).toContain(`name="return_to" value="${back}"`);
         resetFlagsForTests();
+    });
+});
+
+describe("kitchen usuals restock ui-v2", () => {
+    function restockApp() {
+        const hono = new Hono();
+        hono.route("/", householdRoutes);
+        hono.route("/", foodsRoutes);
+        return hono;
+    }
+    function postSchedule(foodId: string, body: string) {
+        return restockApp().request(
+            `http://x/kitchen/usuals/${foodId}/schedule`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body,
+            },
+        );
+    }
+    async function getUsuals(path = "/kitchen/usuals") {
+        const res = await restockApp().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        return { status: res.status, html: await res.text() };
+    }
+    async function seedUsual() {
+        const seeded = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, seeded.eggs.id))!,
+            usualProductId: seeded.kirkland.id,
+        });
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, seeded.kirkland.id))!,
+            usualAmount: { amount: 24, unit: "each" },
+        });
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        return seeded;
+    }
+    const RESTORE_RESTOCK = { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" };
+    beforeEach(() => {
+        db.household.preferences.restock = { ...RESTORE_RESTOCK };
+    });
+
+    test("POST saves the schedule, paused and low level, then the row shows them", async () => {
+        const { eggs } = await seedUsual();
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=every_n_weeks&restock_every_weeks=3&restock_low_level=5&return_to=%2Fkitchen%2Fusuals",
+        );
+        expect(r.status).toBe(303);
+        // Back to the edit sheet the Restock sheet sits in.
+        expect(r.headers.get("location")).toBe(
+            `/kitchen/usuals?food=${eggs.id}`,
+        );
+        expect(r.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 3,
+            restockPaused: false,
+            restockLowLevel: 5,
+        });
+        const { html } = await getUsuals();
+        expect(html).toContain("Every 3 weeks");
+        resetFlagsForTests();
+    });
+
+    test("POST with the paused box ticked pauses, and blank clears the low level", async () => {
+        const { eggs } = await seedUsual();
+        await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly&restock_low_level=5",
+        );
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly&restock_paused=1&restock_low_level=",
+        );
+        expect(r.status).toBe(303);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "weekly",
+            restockEveryWeeks: null,
+            restockPaused: true,
+            restockLowLevel: null,
+        });
+        const { html } = await getUsuals();
+        expect(html).toContain("Paused");
+        resetFlagsForTests();
+    });
+
+    function postEdit(foodId: string, body: string) {
+        return restockApp().request(`http://x/kitchen/usuals/${foodId}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+    }
+
+    test("the edit sheet's Save commits the switch with the rest, and an unchecked box turns it off", async () => {
+        const { eggs } = await seedUsual();
+        await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=monthly&restock_low_level=",
+        );
+        const on = await postEdit(
+            eggs.id,
+            `product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1&restock_when_low=1&return_to=${encodeURIComponent("/kitchen/usuals?store=s1")}`,
+        );
+        expect(on.status).toBe(303);
+        expect(on.headers.get("location")).toBe("/kitchen/usuals?store=s1");
+        let food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "monthly",
+            restockWhenLow: true,
+        });
+        // An unchecked checkbox posts nothing; the marker alone means off.
+        await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1",
+        );
+        food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "monthly",
+            restockWhenLow: false,
+        });
+        resetFlagsForTests();
+    });
+
+    test("an edit post without the marker (the old app) leaves when-low alone", async () => {
+        const { eggs } = await seedUsual();
+        await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1&restock_when_low=1",
+        );
+        const r = await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=4&usual_unit=each",
+        );
+        expect(r.status).toBe(303);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockWhenLow).toBe(true);
+        resetFlagsForTests();
+    });
+
+    test("an invalid N re-renders 400 with the Restock sheet open and nothing saved", async () => {
+        const { eggs } = await seedUsual();
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=every_n_weeks&restock_every_weeks=0&return_to=%2Fkitchen%2Fusuals",
+        );
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("whole number of weeks");
+        expect(html).toMatch(
+            new RegExp(
+                `id="fd-usual-${eggs.id}-restock"[^>]*data-sheet-open-on-load`,
+            ),
+        );
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("a product is refused with a 400 and keeps its row untouched", async () => {
+        const { kirkland } = await seedUsual();
+        const r = await postSchedule(
+            kirkland.id,
+            "scope=schedule&restock_schedule=weekly",
+        );
+        expect(r.status).toBe(400);
+        expect(await r.text()).toContain("product of another food");
+        const food = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("POST is 404 when ui-v2 is off", async () => {
+        const { eggs } = await seedUsual();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly",
+        );
+        expect(r.status).toBe(404);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("the header names the household restock day only when restocking is on", async () => {
+        await seedUsual();
+        const off = await getUsuals();
+        expect(off.html).not.toContain("restock on");
+        db.household.preferences.restock = {
+            ...RESTORE_RESTOCK,
+            enabled: true,
+            weekday: 0,
+        };
+        const on = await getUsuals();
+        expect(on.html).toContain("1 usual · restock on Sundays");
+        resetFlagsForTests();
+    });
+});
+
+const PRODUCT_BARCODE = "737628064502";
+
+function productApp() {
+    const hono = new Hono();
+    hono.route("/", foodsRoutes);
+    return hono;
+}
+
+function offProduct(): FoodResult {
+    return {
+        name: "OFF Greek Yogurt",
+        brand: "Fage",
+        serving: "170 g",
+        serving_quantity: 170,
+        serving_quantity_unit: "g",
+        calories: 59,
+        protein_g: 10,
+        carbs_g: 4,
+        fat_g: 0.4,
+        fiber_g: 0,
+        sugar_g: 4,
+        alcohol_g: null,
+        nutriscore_grade: "a",
+        nova_group: 1,
+        source: `off:${PRODUCT_BARCODE}`,
+        source_name: "openfoodfacts" as const,
+        barcode: PRODUCT_BARCODE,
+    };
+}
+
+describe("product routes (v2 foods)", () => {
+    beforeEach(async () => {
+        await createGroceryStore(db.settingsStore, HH, "Safeway");
+    });
+
+    test("GET /foods/:id 404 for archived food", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Archived" }),
+        );
+        await db.foodsStore.updateFoodRow({
+            ...food,
+            archivedAt: "2026-01-01T00:00:00.000Z",
+        });
+        const res = await productApp().request(`http://x/foods/${food.id}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(res.status).toBe(404);
+        resetFlagsForTests();
+    });
+
+    test("POST add-to-grocery returns 400 when no store", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.settingsStore = createMemorySettingsStore();
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const res = await productApp().request(
+            `http://x/foods/${food.id}/add-to-grocery`,
+            {
+                method: "POST",
+                headers: { cookie: cookieFor(ALICE) },
+            },
+        );
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("Add a store first");
+        resetFlagsForTests();
+    });
+
+    test("GET by-barcode lookup error shows retry copy not OFF empty", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.barcodeLookupThrows = true;
+        const res = await productApp().request(
+            `http://x/foods/by-barcode/${PRODUCT_BARCODE}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("Could not look up this barcode");
+        expect(html).not.toContain("Open Food Facts does not know");
+        resetFlagsForTests();
+    });
+
+    test("POST by-barcode twice is duplicate-safe", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const code = "8880001112222";
+        const post = () =>
+            productApp().request(`http://x/foods/by-barcode/${code}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Trail+mix",
+            });
+        const first = await post();
+        const second = await post();
+        expect(first.status).toBe(303);
+        expect(second.status).toBe(303);
+        expect(first.headers.get("location")).toBe(
+            second.headers.get("location"),
+        );
+        expect((await db.foodsStore.listFoods(HH)).length).toBe(1);
+        resetFlagsForTests();
+    });
+
+    test("GET by-barcode known food redirects without duplicating catalog", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const existing = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Household food" }),
+        );
+        await db.foodsStore.setBarcode(HH, PRODUCT_BARCODE, existing.id);
+        db.barcodeFoods[PRODUCT_BARCODE] = offProduct();
+        const res = await productApp().request(
+            `http://x/foods/by-barcode/${PRODUCT_BARCODE}`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/foods/${existing.id}`);
+        expect((await db.foodsStore.listFoods(HH)).length).toBe(1);
+        resetFlagsForTests();
+    });
+});
+
+describe("settings stores routes ui-v2", () => {
+    const STORES = "http://x/settings/household/stores";
+    const FORM = "application/x-www-form-urlencoded";
+
+    afterAll(() => {
+        resetFlagsForTests();
+    });
+
+    beforeEach(() => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: BOB,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+    });
+
+    function post(path: string, user: string, body: string) {
+        return app().request(`${STORES}${path}`, {
+            method: "POST",
+            headers: { cookie: cookieFor(user), "content-type": FORM },
+            body,
+            redirect: "manual",
+        });
+    }
+
+    async function seed() {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const trader = await createGroceryStore(
+            db.settingsStore,
+            HH,
+            "Trader Joe's",
+        );
+        return { costco, trader };
+    }
+
+    async function addLines(storeId: string, names: string[]) {
+        for (const name of names) {
+            await addGroceryManualFood(
+                db.groceryStore,
+                db.settingsStore,
+                db.foodsStore,
+                { householdId: HH, storeId, name, amount: 1, unit: "each" },
+            );
+        }
+    }
+
+    async function storeNames() {
+        return (await db.settingsStore.listStores(HH)).map((row) => row.name);
+    }
+
+    test("every stores route is 404 while ui-v2 is off, for a member too", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const { costco } = await seed();
+        for (const user of [ALICE, BOB]) {
+            const list = await app().request(STORES, {
+                headers: { cookie: cookieFor(user) },
+            });
+            expect(list.status).toBe(404);
+            const one = await app().request(`${STORES}/${costco.id}`, {
+                headers: { cookie: cookieFor(user) },
+            });
+            expect(one.status).toBe(404);
+            for (const path of [
+                "/add",
+                "/order",
+                "/preferences",
+                `/${costco.id}/rename`,
+                `/${costco.id}/delete`,
+                `/${costco.id}/sections`,
+                `/${costco.id}/sections/order`,
+                `/${costco.id}/rules/add`,
+            ]) {
+                const res = await post(path, user, "name=X");
+                expect([path, res.status]).toEqual([path, 404]);
+            }
+        }
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+    });
+
+    test("a member reads the list and a store but cannot write", async () => {
+        const { costco } = await seed();
+        const list = await app().request(STORES, {
+            headers: { cookie: cookieFor(BOB) },
+        });
+        expect(list.status).toBe(200);
+        const html = await list.text();
+        expect(html).toContain("Costco");
+        expect(html).not.toContain(`${"/settings/household/stores"}/add`);
+        expect(html).not.toContain("fd-stores-add");
+        const one = await app().request(`${STORES}/${costco.id}`, {
+            headers: { cookie: cookieFor(BOB) },
+        });
+        expect(one.status).toBe(200);
+        expect(await one.text()).not.toContain("Delete store");
+        for (const [path, body] of [
+            ["/add", "name=Aldi"],
+            ["/order", `order=${costco.id}`],
+            ["/preferences", "use_usual_store=1"],
+            [`/${costco.id}/rename`, "name=Nope"],
+            [`/${costco.id}/delete`, "mode=delete"],
+            [`/${costco.id}/sections`, "name=Deli"],
+            [`/${costco.id}/rules/add`, "body=Bring+bags"],
+        ] as const) {
+            const res = await post(path, BOB, body);
+            expect([path, res.status]).toEqual([path, 403]);
+        }
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+    });
+
+    test("the list shows sections, lines on the list and the default store", async () => {
+        const { costco, trader } = await seed();
+        await addLines(costco.id, ["Oats", "Rice"]);
+        await addLines(trader.id, ["Beans"]);
+        await post("/preferences", ALICE, `default_store_id=${costco.id}`);
+        const res = await app().request(STORES, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await res.text();
+        expect(html).toContain("9 sections");
+        expect(html).toContain("2 on the list");
+        expect(html).toContain("1 on the list");
+        expect(html).toContain(
+            `href="/settings/household/stores/${costco.id}"`,
+        );
+        expect(html).toContain('class="fd-stores-pref__value">Costco<');
+    });
+
+    test("add a store, and a repeated name is an error in the sheet", async () => {
+        await seed();
+        const ok = await post("/add", ALICE, "name=Aldi");
+        expect(ok.status).toBe(303);
+        expect(ok.headers.get("location")).toBe("/settings/household/stores");
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's", "Aldi"]);
+        const dup = await post("/add", ALICE, "name=Aldi");
+        expect(dup.status).toBe(400);
+        const html = await dup.text();
+        expect(html).toContain("That store already exists.");
+        expect(html).toContain("data-sheet-open-on-load");
+    });
+
+    test("rename a store, refusing a repeated or empty name", async () => {
+        const { costco } = await seed();
+        const ok = await post(
+            `/${costco.id}/rename`,
+            ALICE,
+            "name=Costco+Wholesale",
+        );
+        expect(ok.status).toBe(303);
+        expect(ok.headers.get("location")).toBe(
+            `/settings/household/stores/${costco.id}`,
+        );
+        expect(await storeNames()).toEqual([
+            "Costco Wholesale",
+            "Trader Joe's",
+        ]);
+        const dup = await post(
+            `/${costco.id}/rename`,
+            ALICE,
+            "name=Trader+Joe%27s",
+        );
+        expect(dup.status).toBe(400);
+        expect(await dup.text()).toContain("That store already exists.");
+        const empty = await post(`/${costco.id}/rename`, ALICE, "name=+");
+        expect(empty.status).toBe(400);
+        expect(await empty.text()).toContain("Enter a store name.");
+    });
+
+    test("reorder writes the posted order; up and down move one step", async () => {
+        const { costco, trader } = await seed();
+        const aldi = await createGroceryStore(db.settingsStore, HH, "Aldi");
+        const drag = await post(
+            "/order",
+            ALICE,
+            `order=${aldi.id}&order=${costco.id}&order=${trader.id}`,
+        );
+        expect(drag.status).toBe(303);
+        expect(drag.headers.get("location")).toBe(
+            "/settings/household/stores?reorder=1",
+        );
+        expect(await storeNames()).toEqual(["Aldi", "Costco", "Trader Joe's"]);
+        const down = await post(
+            "/order",
+            ALICE,
+            `order=${aldi.id}&order=${costco.id}&order=${trader.id}&move=${aldi.id}%3Adown`,
+        );
+        expect(down.status).toBe(303);
+        expect(await storeNames()).toEqual(["Costco", "Aldi", "Trader Joe's"]);
+        // An arrow press comes back to the same arrow, with the sheet open.
+        expect(down.headers.get("location")).toBe(
+            `/settings/household/stores?reorder=1&focus=${aldi.id}%3Adown`,
+        );
+    });
+
+    test("a stale order is an error banner and writes nothing", async () => {
+        const { costco, trader } = await seed();
+        const res = await post("/order", ALICE, `order=${trader.id}`);
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("List every store once.");
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+        const gone = await post(
+            "/order",
+            ALICE,
+            `order=${costco.id}&order=${trader.id}&order=${crypto.randomUUID()}`,
+        );
+        expect(gone.status).toBe(400);
+        expect(await gone.text()).toContain("Unknown store.");
+    });
+
+    test("preferences: default store and the switch save apart and a foreign store is refused", async () => {
+        const { trader } = await seed();
+        const def = await post(
+            "/preferences",
+            ALICE,
+            `default_store_id=${trader.id}`,
+        );
+        expect(def.status).toBe(303);
+        expect(await db.settingsStore.getGroceryPreferences(HH)).toEqual({
+            defaultStoreId: trader.id,
+            useUsualStore: false,
+        });
+        const on = await post("/preferences", ALICE, "use_usual_store=1");
+        expect(on.status).toBe(303);
+        expect(await db.settingsStore.getGroceryPreferences(HH)).toEqual({
+            defaultStoreId: trader.id,
+            useUsualStore: true,
+        });
+        const off = await post("/preferences", ALICE, "use_usual_store=0");
+        expect(off.status).toBe(303);
+        const none = await post("/preferences", ALICE, "default_store_id=");
+        expect(none.status).toBe(303);
+        expect(await db.settingsStore.getGroceryPreferences(HH)).toEqual({
+            defaultStoreId: null,
+            useUsualStore: false,
+        });
+        const foreign = await post(
+            "/preferences",
+            ALICE,
+            `default_store_id=${crypto.randomUUID()}`,
+        );
+        expect(foreign.status).toBe(400);
+        expect(await foreign.text()).toContain("Unknown store.");
+    });
+
+    test("deleting a store with lines moves them to the chosen store", async () => {
+        const { costco, trader } = await seed();
+        await addLines(costco.id, ["Oats", "Rice"]);
+        const res = await post(
+            `/${costco.id}/delete`,
+            ALICE,
+            `mode=move&move_to=${trader.id}`,
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/household/stores");
+        expect(await storeNames()).toEqual(["Trader Joe's"]);
+        const lines = await db.groceryStore.listLines(HH);
+        expect(lines.map((row) => row.storeId)).toEqual([trader.id, trader.id]);
+    });
+
+    test("deleting a store can delete its lines with it", async () => {
+        const { costco, trader } = await seed();
+        await addLines(costco.id, ["Oats", "Rice"]);
+        await addLines(trader.id, ["Beans"]);
+        const res = await post(`/${costco.id}/delete`, ALICE, "mode=delete");
+        expect(res.status).toBe(303);
+        expect(await storeNames()).toEqual(["Trader Joe's"]);
+        expect(
+            (await db.groceryStore.listLines(HH)).map((r) => r.displayName),
+        ).toEqual(["Beans"]);
+    });
+
+    test("a store with no lines is deleted after a plain confirm", async () => {
+        const { costco } = await seed();
+        const res = await post(`/${costco.id}/delete`, ALICE, "");
+        expect(res.status).toBe(303);
+        expect(await storeNames()).toEqual(["Trader Joe's"]);
+    });
+
+    test("a delete decided on a stale line count is refused with the new count", async () => {
+        const { costco, trader } = await seed();
+        await addLines(costco.id, ["Oats", "Rice"]);
+        // The dialog quoted 1 line; a second one arrived before the press.
+        for (const mode of [
+            `mode=delete&lines=1`,
+            `mode=move&move_to=${trader.id}&lines=1`,
+        ]) {
+            const res = await post(`/${costco.id}/delete`, ALICE, mode);
+            expect(res.status).toBe(400);
+            const html = await res.text();
+            expect(html).toContain("now has 2 lines on the list, not 1");
+            expect(html).toContain("Delete the store and its 2 lines");
+            expect(html).toContain('name="lines" value="2"');
+            expect(html).toContain("data-sheet-open-on-load");
+            expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+        }
+        const ok = await post(
+            `/${costco.id}/delete`,
+            ALICE,
+            "mode=delete&lines=2",
+        );
+        expect(ok.status).toBe(303);
+        expect(await storeNames()).toEqual(["Trader Joe's"]);
+    });
+
+    test("a plain confirm quoting 0 lines refuses once lines arrive", async () => {
+        const { costco } = await seed();
+        await addLines(costco.id, ["Oats"]);
+        const res = await post(`/${costco.id}/delete`, ALICE, "lines=0");
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("now has 1 line on the list, not 0");
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+    });
+
+    test("a plain confirm on a store that gained lines asks again and deletes nothing", async () => {
+        const { costco } = await seed();
+        await addLines(costco.id, ["Oats"]);
+        const res = await post(`/${costco.id}/delete`, ALICE, "");
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("Choose what to do with it.");
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
+    });
+
+    test("deleting the default store clears the default; the delete dialog offers the move", async () => {
+        const { costco, trader } = await seed();
+        await addLines(costco.id, ["Oats", "Rice", "Beans"]);
+        await post("/preferences", ALICE, `default_store_id=${trader.id}`);
+        const page = await app().request(`${STORES}/${costco.id}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const html = await page.text();
+        expect(html).toContain("Move 3 lines to Trader Joe's");
+        expect(html).toContain("Delete the store and its 3 lines");
+        const res = await post(`/${trader.id}/delete`, ALICE, "mode=delete");
+        expect(res.status).toBe(303);
+        expect(await db.settingsStore.getGroceryPreferences(HH)).toEqual({
+            defaultStoreId: null,
+            useUsualStore: false,
+        });
+    });
+
+    test("an unknown store page is 404 and deleting it is an error", async () => {
+        await seed();
+        const id = crypto.randomUUID();
+        const page = await app().request(`${STORES}/${id}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        expect(page.status).toBe(404);
+        const res = await post(`/${id}/delete`, ALICE, "mode=delete");
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("Unknown store.");
+    });
+
+    test("sections: add, rename, reorder, hide and show on a store's page", async () => {
+        const { costco } = await seed();
+        const added = await post(`/${costco.id}/sections`, ALICE, "name=Deli");
+        expect(added.status).toBe(303);
+        const sections = () => db.settingsStore.listSections(costco.id);
+        expect((await sections()).at(-2)!.name).toBe("Deli");
+        const dup = await post(`/${costco.id}/sections`, ALICE, "name=Deli");
+        expect(dup.status).toBe(400);
+        expect(await dup.text()).toContain("That section already exists.");
+
+        const produce = (await sections()).find((s) => s.name === "Produce")!;
+        const renamed = await post(
+            `/${costco.id}/sections/${produce.id}/rename`,
+            ALICE,
+            "name=Fruit+and+veg",
+        );
+        expect(renamed.status).toBe(303);
+        expect((await sections())[0]!.name).toBe("Fruit and veg");
+
+        const movable = (await sections())
+            .filter((s) => !s.isOther)
+            .map((s) => s.id);
+        const reversed = [...movable].reverse();
+        const ordered = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            reversed.map((id) => `order=${id}`).join("&"),
+        );
+        expect(ordered.status).toBe(303);
+        expect((await sections())[0]!.id).toBe(reversed[0]!);
+        expect((await sections()).at(-1)!.isOther).toBe(true);
+
+        const hide = await post(
+            `/${costco.id}/sections/${produce.id}/visibility`,
+            ALICE,
+            "hidden=1",
+        );
+        expect(hide.status).toBe(303);
+        const page = await (
+            await app().request(`${STORES}/${costco.id}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            })
+        ).text();
+        expect(page).toContain("Hidden sections");
+        const show = await post(
+            `/${costco.id}/sections/${produce.id}/visibility`,
+            ALICE,
+            "hidden=0",
+        );
+        expect(show.status).toBe(303);
+        expect(
+            (await sections()).find((s) => s.id === produce.id)!.hidden,
+        ).toBe(false);
+    });
+
+    test("a section arrow press redirects back to the same arrow", async () => {
+        const { costco } = await seed();
+        const movable = (await db.settingsStore.listSections(costco.id))
+            .filter((s) => !s.isOther)
+            .map((s) => s.id);
+        const first = movable[0]!;
+        const ids = movable.map((id) => `order=${id}`).join("&");
+        const press = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            `${ids}&move=${first}%3Adown`,
+        );
+        expect(press.status).toBe(303);
+        expect(press.headers.get("location")).toBe(
+            `/settings/household/stores/${costco.id}?focus=${first}%3Adown`,
+        );
+        const drag = await post(`/${costco.id}/sections/order`, ALICE, ids);
+        expect(drag.headers.get("location")).toBe(
+            `/settings/household/stores/${costco.id}`,
+        );
+    });
+
+    test("a stale section order is an error banner and writes nothing", async () => {
+        const { costco } = await seed();
+        const before = (await db.settingsStore.listSections(costco.id)).map(
+            (s) => s.id,
+        );
+        const res = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            `order=${before[1]}&order=${before[0]}`,
+        );
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("List every section once.");
+        expect(
+            (await db.settingsStore.listSections(costco.id)).map((s) => s.id),
+        ).toEqual(before);
+    });
+
+    test("another store's section id is refused", async () => {
+        const { costco, trader } = await seed();
+        const foreign = (await db.settingsStore.listSections(trader.id))[0]!;
+        const res = await post(
+            `/${costco.id}/sections/${foreign.id}/rename`,
+            ALICE,
+            "name=Hijack",
+        );
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("Unknown section.");
+        expect(
+            (await db.settingsStore.getSection(HH, foreign.id))!.name,
+        ).not.toBe("Hijack");
+    });
+
+    test("store rules are added on the store's page and shown there", async () => {
+        const { costco } = await seed();
+        const ok = await post(
+            `/${costco.id}/rules/add`,
+            ALICE,
+            "body=Bring+your+own+bags",
+        );
+        expect(ok.status).toBe(303);
+        const empty = await post(`/${costco.id}/rules/add`, ALICE, "body=+");
+        expect(empty.status).toBe(400);
+        expect(await empty.text()).toContain("Enter a store rule.");
+        const page = await (
+            await app().request(`${STORES}/${costco.id}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            })
+        ).text();
+        expect(page).toContain("Bring your own bags");
+        const stranger = await post(
+            `/${crypto.randomUUID()}/rules/add`,
+            ALICE,
+            "body=Hi",
+        );
+        expect(stranger.status).toBe(400);
+        expect(await stranger.text()).toContain("Unknown store.");
     });
 });

@@ -37,11 +37,6 @@
     color: var(--text-primary);
 }
 
-.fd-today-title-desk {
-    display: none;
-    margin: 0;
-}
-
 .fd-today-subtitle,
 .fd-today-peer {
     margin: var(--fd-s-4) 0 0;
@@ -467,6 +462,60 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     padding: var(--fd-s-6) 0;
 }
 
+.fd-today-yesterday {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.fd-today-yesterday__btn {
+    display: block;
+    width: 100%;
+    /* The app's native button floor (44px) would stretch the desktop row. */
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    font: 400 13px/20px var(--font-body);
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.fd-today-yesterday__btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+/* Hint column of an empty slot: the copy-yesterday hint, then recipes that fit. */
+.fd-today-empty-stack {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+}
+
+.fd-today-suggest {
+    display: block;
+    font: 400 13px/20px var(--font-body);
+    color: var(--text-tertiary);
+    text-decoration: none;
+}
+
+.fd-today-suggest:hover {
+    color: var(--text-secondary);
+}
+
+.fd-today-suggest:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
 .fd-today-section__add {
     color: var(--text-secondary);
 }
@@ -683,6 +732,75 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     color: var(--status-warn);
 }
 
+.fd-today-rail-row--with-use .fd-today-rail-row__link {
+    padding-bottom: 2px;
+}
+
+.fd-today-rail-row__use {
+    display: block;
+    /* Lines up under the item name: the dot plus its gap. */
+    padding: 0 0 var(--space-row) calc(7px + var(--fd-s-6));
+    font: 400 12px/16px var(--font-body);
+    color: var(--accent-text);
+    text-decoration: none;
+}
+
+.fd-today-rail-row__use:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.fd-today-useall {
+    margin-top: var(--fd-s-10);
+    padding: var(--fd-s-10);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fd-today-useall__eyebrow {
+    margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-today-useall__name {
+    margin: 0;
+    font: 600 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-today-useall__meta {
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-today-useall__cook {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 42px;
+    margin-top: var(--fd-s-10);
+    padding: 0 var(--space-gutter);
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+    font: 600 15px/20px var(--font-body);
+    text-decoration: none;
+}
+
+.fd-today-useall__cook:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
 .fd-today-rail-row__action,
 .fd-today-rail-row__action-form button {
     flex-shrink: 0;
@@ -694,6 +812,21 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     color: var(--accent-text);
     text-decoration: none;
     cursor: pointer;
+}
+
+/* The dismiss ×, kept small so the row's sentence keeps its room. */
+.fd-today-rail-row__dismiss {
+    min-width: 18px;
+    font-size: 16px;
+    line-height: 17px;
+}
+
+/* The × keeps a tall tap area without growing the row past the frame's
+   41px (FigCraft 41837 Needs attention): the padding is given back. */
+.fd-today-rail-row .fd-today-rail-row__dismiss {
+    min-height: 0;
+    margin: -12px 0;
+    padding: 12px 0;
 }
 
 .fd-today-weight__chart {
@@ -771,6 +904,11 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
 }
 
 @media (min-width: 1024px) {
+    /* The Needs attention card in the rail carries these on the desktop. */
+    .fd-today-notices {
+        display: none;
+    }
+
     .fd-today-page {
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 360px);
@@ -954,26 +1092,9 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
         text-decoration: none;
     }
 
-    /* Desktop shows the combined line below; the h1 stays for assistive tech. */
     .fd-today-title {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-    }
-
-    .fd-today-title-desk {
-        display: block;
-        font: 600 22px/28px var(--font-display);
-        letter-spacing: -0.35px;
-        color: var(--text-primary);
-    }
-
-    .fd-today-subtitle {
-        display: none;
+        font: 600 34px/41px var(--font-display);
+        letter-spacing: -0.5px;
     }
 
     .fd-today-header {

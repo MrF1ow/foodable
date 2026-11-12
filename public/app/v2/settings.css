@@ -5,7 +5,8 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: var(--space-gutter);
+    /* The shell's main already holds the phone gutter (FigCraft 23562: 20px). */
+    padding: var(--space-gutter) 0;
     padding-bottom: calc(var(--space-gutter) + 5.5rem);
     max-width: 40rem;
 }
@@ -563,6 +564,13 @@
 }
 
 .fd-settings-btn {
+    /* One box for <button> and <a>: an anchor would otherwise sit shorter and
+     * its text higher than the button beside it. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-decoration: none;
     padding: var(--fd-s-6) var(--fd-s-12);
     border-radius: var(--radius-pill);
     border: 1px solid var(--line);
@@ -706,7 +714,7 @@
 }
 
 .fd-settings-goals-dl {
-    padding: 0 var(--fd-s-14);
+    padding: 0 16px;
     border: 0;
     border-radius: var(--radius-lg);
     background: var(--surface-panel);
@@ -722,13 +730,30 @@
 .fd-settings-goals-dl dt {
     display: flex;
     align-items: center;
-    gap: var(--fd-s-12);
+    gap: var(--fd-s-14);
     color: var(--text-primary);
     font-size: 1rem;
 }
 
 .fd-settings-goals-dl dd {
     font-weight: 400;
+}
+
+/* Calories, water and the limits carry the frame's 24px row icon; the
+   macros keep their dot, centred in the same 24px column. */
+.fd-settings-goals-icon {
+    display: inline-flex;
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-settings-goals-icon .fd-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.fd-settings-goals-dl dt > .fd-dot {
+    margin-left: 8px;
 }
 
 .fd-settings-saved-search {
@@ -822,6 +847,613 @@
     .fd-settings-content
     > .fd-settings-profile {
     display: none;
+}
+
+/* The goals form: the saved name above it (FigCraft 23562), then rows with a
+   dot and a label on the left and the input on the right. */
+.fd-settings-goals-name {
+    margin: 0;
+    font: 600 22px/26px var(--font-display);
+    letter-spacing: -0.35px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-since {
+    margin: var(--fd-s-4) 0 var(--fd-s-12);
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-name:not(:has(+ .fd-settings-goals-since)) {
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-goals-unit {
+    color: var(--text-tertiary);
+}
+
+/* "Edit goals": the full-width pill under the cards (FigCraft 23562). */
+.fd-settings-goals-edit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 52px;
+    margin: var(--space-gutter) 0 var(--fd-s-12);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/1 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-settings-goals-edit:focus-visible,
+.fd-settings-goaldays__clear:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+/* The edit sheet (FigCraft 48374): a label above each filled field. */
+.fd-settings-goals-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-settings-goals-form__title {
+    margin: 8px 0 0;
+    font: 600 0.6875rem/1.1 var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-settings-goals-form__title:first-child {
+    margin-top: 0;
+}
+
+.fd-settings-goals-form .fd-settings-field__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input {
+    min-height: 48px;
+    padding: 0 var(--fd-s-14);
+    border: 1px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    /* 16px keeps iOS from zooming the page on focus. */
+    font: 400 16px/1.25 var(--font-body);
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 1px;
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input[aria-invalid="true"] {
+    border-color: var(--status-over);
+}
+
+/* Per-day overrides: one card, each day with a Clear that posts on its own. */
+.fd-settings-goaldays {
+    margin: 0 0 var(--fd-s-12);
+}
+
+.fd-settings-goaldays__list {
+    margin: 0;
+    padding: 0 var(--fd-s-14);
+    list-style: none;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-goaldays .fd-settings-goals-note {
+    margin: var(--fd-s-10) 0 0;
+    padding-left: 4px;
+}
+
+.fd-settings-goaldays__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    min-height: 52px;
+    padding: var(--fd-s-10) 0;
+}
+
+.fd-settings-goaldays__row + .fd-settings-goaldays__row {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-goaldays__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-settings-goaldays__date,
+.fd-settings-goaldays__what {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goaldays__date {
+    font: 400 1rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-settings-goaldays__what {
+    font: 400 0.8125rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-goaldays__clear {
+    min-height: 36px;
+    padding: 0 var(--fd-s-14);
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 0.875rem/1 var(--font-body);
+    cursor: pointer;
+}
+
+/* AI connections (FigCraft 23638): one card of apps, each with a Disconnect,
+ * then the address to connect a new agent. */
+.fd-settings-ai__lead {
+    margin: 0 0 14px;
+    font: 400 0.8125rem/1.4 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-ai__row {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    min-height: 63px;
+    padding: var(--fd-s-12) 16px;
+}
+
+.fd-settings-ai__row + .fd-settings-ai__row {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-ai__logo {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__icon {
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-settings-ai__name,
+.fd-settings-ai__meta {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-ai__name {
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__meta {
+    font: 400 0.75rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__name + .fd-settings-ai__meta {
+    margin-top: 2px;
+}
+
+.fd-settings-ai__disconnect {
+    flex: none;
+    min-height: 36px;
+    padding: 0 var(--fd-s-6);
+    border: 0;
+    background: transparent;
+    color: var(--status-over);
+    font: 400 0.8125rem/1 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-settings-ai__disconnect:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-settings-ai__empty {
+    margin: 0;
+    padding: var(--fd-s-14) 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+}
+
+.fd-settings-ai__connect-title {
+    margin-top: 22px;
+}
+
+.fd-settings-ai__address {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 13px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-bg);
+}
+
+.fd-settings-ai__address code {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.fd-settings-ai__copy {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm, 8px);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-settings-ai__copy:hover,
+.fd-settings-ai__copy:focus-visible {
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__copy .fd-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.fd-settings-ai__help {
+    margin: 8px 0 0;
+    padding-left: 4px;
+    font: 400 0.75rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* Last active reads on desktop only (FigCraft 49584); the phone list is name and role. */
+.fd-row__last-active,
+.fd-settings-members-head {
+    display: none;
+}
+
+/* Product score (FigCraft 23689): a preset, four weight sliders, two switches
+ * and the household default. Rows are hairline-separated, not carded. */
+.fd-scoreset {
+    display: flex;
+    flex-direction: column;
+}
+
+.fd-scoreset__lead {
+    margin: 0 0 14px;
+    font: 400 0.8125rem/1.4 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__label {
+    margin: 22px 0 8px;
+    font: 600 0.6875rem/1.1 var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-scoreset__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.fd-scoreset__choice .fd-choice-group {
+    margin: 0;
+}
+
+.fd-scoreset__weights-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+}
+
+.fd-scoreset__weights-head .fd-scoreset__label {
+    margin: 22px 0 0;
+}
+
+.fd-scoreset__total {
+    font: 400 0.75rem/1.3 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__weight {
+    padding: 12px 0 9px;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-scoreset__weight-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    margin-bottom: 4px;
+}
+
+.fd-scoreset__weight-label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.fd-scoreset__weight-title {
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-scoreset__weight-source {
+    font: 400 0.75rem/1.2 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__weight-value {
+    font: 600 0.9375rem/1.3 var(--font-body);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.fd-scoreset__range {
+    appearance: none;
+    -webkit-appearance: none;
+    display: block;
+    width: 100%;
+    height: 22px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.fd-scoreset__range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(
+        to right,
+        var(--accent-fill) var(--fd-fill, 0%),
+        var(--surface-track) var(--fd-fill, 0%)
+    );
+}
+
+.fd-scoreset__range::-moz-range-track {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(
+        to right,
+        var(--accent-fill) var(--fd-fill, 0%),
+        var(--surface-track) var(--fd-fill, 0%)
+    );
+}
+
+.fd-scoreset__range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    margin-top: -9px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--text-primary);
+    box-shadow: 0 1px 4px var(--overlay-shadow);
+}
+
+.fd-scoreset__range::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--text-primary);
+    box-shadow: 0 1px 4px var(--overlay-shadow);
+}
+
+.fd-scoreset__range:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 4px;
+    border-radius: var(--radius-pill);
+}
+
+.fd-scoreset__form .fd-settings-submit {
+    align-self: flex-start;
+    margin-top: 16px;
+}
+
+.fd-scoreset__note {
+    margin: 12px 0 0;
+    font: 400 0.8125rem/1.4 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__reset {
+    align-self: flex-start;
+    margin: 12px 0 0;
+}
+
+.fd-scoreset__use-default {
+    margin: 0;
+    padding: 6px 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    color: var(--accent-text);
+    font: 500 0.8125rem/1.3 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-scoreset__rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-scoreset__row {
+    min-height: 63px;
+    border-top: 1px solid var(--line);
+}
+
+.fd-scoreset__rows .fd-scoreset__row:last-child {
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-scoreset__switch-form,
+.fd-scoreset__link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    min-height: 62px;
+    margin: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.fd-scoreset__row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.fd-scoreset__row-title {
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-scoreset__row-sub {
+    font: 400 0.75rem/1.3 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__chev {
+    display: flex;
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__link:focus-visible,
+.fd-scoreset__household:focus-visible,
+.fd-scoreset__use-default:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-scoreset__household {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 51px;
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.fd-scoreset__household-icon {
+    display: flex;
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-scoreset__household-title {
+    flex: 1 1 auto;
+    font: 400 0.9375rem/1.3 var(--font-body);
+}
+
+.fd-scoreset__household-value {
+    font: 400 0.8125rem/1.3 var(--font-body);
+    color: var(--text-tertiary);
+}
+
+/* Members in one panel with initials avatars (FigCraft 23470 phone,
+ * 49474 desktop). */
+.fd-settings-members-card {
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-members-card .fd-row--settings-member:last-child {
+    border-bottom: 0;
+}
+
+.fd-row--settings-member .fd-settings-member-avatar {
+    box-sizing: border-box;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-right: var(--fd-s-6);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 13px/1 var(--font-body);
 }
 
 @media (min-width: 1024px) {
@@ -972,5 +1604,62 @@
         border-radius: var(--radius-lg);
         background: var(--surface-panel);
         box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    /* Goals and AI connections read in a 680px column beside the menu
+     * (FigCraft 49849, 50224). */
+    .fd-settings[data-fd-settings-page="goals"] .fd-settings-main,
+    .fd-settings[data-fd-settings-page="ai"] .fd-settings-main {
+        max-width: 680px;
+    }
+
+    /* Members table: Member | Role | Last active (FigCraft 49584). The row's
+     * name, role and last-active share fixed columns with the header; the
+     * chevron or Manage button sits in a fixed slot on the right. */
+    .fd-settings-members-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 8rem 9rem 5rem;
+        gap: var(--fd-s-6);
+        padding: var(--fd-s-6) 0 var(--fd-s-4);
+        font: 600 11px/14px var(--font-body);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+    }
+
+    .fd-row--settings-member .fd-row__main,
+    .fd-row--settings-member .fd-row__line {
+        display: contents;
+    }
+
+    .fd-row--settings-member .fd-row__title {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .fd-row--settings-member .fd-row__meta--lg {
+        flex: 0 0 8rem;
+    }
+
+    .fd-row--settings-member .fd-row__last-active {
+        display: block;
+        flex: 0 0 9rem;
+        font: 400 13px/17px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-row--settings-member .fd-row__chevron,
+    .fd-row--settings-member .fd-row__trailing {
+        flex: 0 0 5rem;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .fd-scoreset {
+        max-width: 42.5rem;
+    }
+
+    .fd-settings-members-card {
+        padding: var(--fd-s-6) 22px;
     }
 }

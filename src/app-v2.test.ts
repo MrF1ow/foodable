@@ -7,7 +7,11 @@ import {
     appV2StylesheetHref,
     getAppV2Css,
     getAppV2Js,
+    getScannerWasm,
+    getScannerZxingJs,
     getWidgetHtml,
+    scannerWasmHref,
+    scannerZxingScriptHref,
     WIDGET_TEMPLATES,
 } from "./widgets.js";
 
@@ -153,9 +157,40 @@ describe("/app-v2.js", () => {
         // +~0.9 KB Kitchen usuals rows, unit select and add sheet;
         // +~0.5 KB usual product row sync and "No amount".
         // +~0.8 KB Recipes list desktop/phone search field swap.
+        // +~0.4 KB Log search result score badges.
+        // +~4 KB scanner UI (ZXing stays in /app-v2-scanner.js).
+        // +~1.5 KB scanner session lifecycle, desktop layout sync and navigation guards.
+        // +~1 KB Recent chips that log a multi-item or free-text meal again.
+        // +~6 KB Stores drag reorder, name autosubmit and arrow focus return.
+        // +~3.3 KB Recipe cook sheet: preview refresh on servings change.
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
         // +~0.2 KB log search waits for a tap on touch screens.
-        expect(js.length).toBeLessThan(87_800);
+        // +~2.9 KB Product score: presets move the sliders, sliders pick Custom.
+        // +~3 KB Share link: copy the new link's address.
+        // +~1.9 KB Settings AI connections: copy the connect address.
+        // +~1.9 KB Log sheet: Copy yesterday tile follows the chosen meal.
+        expect(js.length).toBeLessThan(127_500);
+        expect(js).not.toContain("readBarcodes");
+        expect(js).not.toContain("prepareZXingModule");
+    });
+});
+
+describe("/app-v2-scanner", () => {
+    test("builds a valid IIFE with FoodableScannerZxing and content-hashes", async () => {
+        const js = await getScannerZxingJs();
+        expect(() => new Function(js)).not.toThrow();
+        expect(js).toContain("FoodableScannerZxing");
+        expect(scannerZxingScriptHref()).toBe(
+            `/app-v2-scanner.js?v=${await shortHash(js)}`,
+        );
+    });
+
+    test("serves wasm from zxing-wasm with a content hash", async () => {
+        const buf = await getScannerWasm();
+        expect(buf.byteLength).toBeGreaterThan(100_000);
+        expect(scannerWasmHref()).toMatch(
+            /^\/app-v2-scanner\.wasm\?v=[0-9a-f]{12}$/,
+        );
     });
 });
 

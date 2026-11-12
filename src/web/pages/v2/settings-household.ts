@@ -45,7 +45,14 @@ import {
     socialReaderTurnOnLabel,
     type SocialReaderId,
 } from "../../../copy/social-readers.js";
+import { STORES_PATH } from "./settings-stores.js";
+import {
+    renderSharedLinksSection,
+    type SharedLinkRow,
+} from "./settings-household-shared-links.js";
 import { sourceIcon } from "../../components/source-icon.js";
+import { lastActiveLabel } from "../../../domain/last-active.js";
+import { initialsOf } from "../../shell-v2.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
 
 export type SettingsHouseholdV2View = {
@@ -62,6 +69,12 @@ export type SettingsHouseholdV2View = {
     socialReaders?: SocialReadersPreferences;
     socialReaderStatus?: SocialReaderStatusRow[];
     timezone?: string;
+    /** When each member was last active, by user id; null = never. Without it the column is left out. */
+    lastSeen?: ReadonlyMap<string, Date | null>;
+    /** The clock the last-active labels read; defaults to the real one. */
+    now?: Date;
+    /** The household's active share links; absent leaves the section out. */
+    sharedLinks?: readonly SharedLinkRow[];
     noticeResult: NoticesForResult;
     duplicatePairs: PossibleDuplicatePair[];
     refCounts: ReadonlyMap<string, number>;
@@ -71,6 +84,7 @@ export type SettingsHouseholdV2View = {
         keepId: string;
         picks: Partial<Record<string, string>>;
     };
+    pluralsSameFood?: boolean;
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
@@ -150,8 +164,26 @@ function memberRow(
     const trailing = manage
         ? `<div class="fd-row__trailing">${manage}</div>`
         : "";
+    // Desktop only (CSS): the phone list stays name and role.
+    const lastActive = view.lastSeen
+        ? `<span class="fd-row__last-active">${esc(
+              lastActiveLabel(
+                  view.lastSeen.get(member.userId) ?? null,
+                  view.now ?? new Date(),
+                  view.timezone ?? "UTC",
+              ),
+          )}</span>`
+        : "";
     return raw(
-        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${chevron}</a>${trailing}</div></li>`,
+        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">${esc(initialsOf(member.displayName))}</span><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
+    );
+}
+
+/** The desktop column titles above the members; hidden on the phone. */
+function membersHead(view: SettingsHouseholdV2View): Html {
+    if (!view.lastSeen) return raw("");
+    return raw(
+        `<div class="fd-settings-members-head" aria-hidden="true"><span>Member</span><span>Role</span><span>Last active</span></div>`,
     );
 }
 
@@ -167,13 +199,29 @@ function storeRows(stores: GroceryStore[]): Html {
     }
     const items = stores.map((store) =>
         raw(
-            `<li class="fd-row fd-row--store"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(store.name)}</span></span></div></div></li>`,
+            `<li class="fd-row fd-row--store"><a class="fd-row__body fd-row__body--link" href="${esc(`${STORES_PATH}/${encodeURIComponent(store.id)}`)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(store.name)}</span></span></div><span class="fd-row__chevron" aria-hidden="true">${String(iconChevronRight())}</span></a></li>`,
         ),
     );
     return rowList(items, {
         label: "Grocery stores",
         className: "fd-list--stores",
     });
+}
+
+const PLURALS_SAME_FOOD_LABEL = "Treat singular and plural as the same food";
+
+function pluralsSameFoodBlock(view: SettingsHouseholdV2View): Html {
+    const enabled = view.pluralsSameFood === true;
+    if (view.canManage) {
+        const checked = enabled ? " checked" : "";
+        return raw(
+            `<form method="post" action="/settings/household/plurals-same-food" class="fd-settings-form fd-settings-form--inline fd-settings-form--prefs"><span class="fd-settings-check"><input type="checkbox" name="plurals_same_food" value="true" id="plurals_same_food"${checked} /><span class="fd-settings-check__text">${esc(PLURALS_SAME_FOOD_LABEL)}</span></span>${settingsPrimarySubmit("Save")}</form>`,
+        );
+    }
+    const state = enabled ? "On" : "Off";
+    return raw(
+        `<li class="fd-row fd-row--prefs"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(PLURALS_SAME_FOOD_LABEL)}</span><span class="fd-row__meta">${esc(state)}</span></span></div></div></li>`,
+    );
 }
 
 function socialReaderV2Rows(view: SettingsHouseholdV2View): Html {
@@ -264,14 +312,26 @@ export function renderSettingsHouseholdV2Body(
         socialReaders: view.socialReaders,
     });
 
+    const pluralsBlock = view.canManage
+        ? pluralsSameFoodBlock(view)
+        : raw(
+              `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(rowList([pluralsSameFoodBlock(view)], { label: PLURALS_SAME_FOOD_LABEL }))}`,
+          );
+
     const sections = join([
         raw(`${nameField}${token}`),
+        view.canManage
+            ? raw(
+                  `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(pluralsBlock)}`,
+              )
+            : pluralsBlock,
         raw(
-            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(rowList(memberRows(view), { label: "Members" }))}`,
+            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}<div class="fd-settings-members-card">${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}</div>`,
         ),
         raw(
-            `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}${addStoreTrigger ? `<div class="fd-settings-household-actions">${addStoreTrigger}</div>` : ""}${String(storeRows(view.stores))}`,
+            `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,
         ),
+        view.sharedLinks ? raw(renderSharedLinksSection(view.sharedLinks)) : "",
         raw(
             `${String(sectionHeader({ title: "Dismissed notices", level: 2 }))}${String(dismissedNoticesSection(view.noticeResult))}`,
         ),

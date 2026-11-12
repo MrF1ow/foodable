@@ -7,6 +7,7 @@ import {
     findManualFood,
     findOrCreateManualFood,
     FoodsInputError,
+    markUsualRestocked,
     type OnSimilar,
     normalizeFoodName,
     type Food,
@@ -15,6 +16,7 @@ import {
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
 import type {
+    GroceryPreferences,
     GrocerySection,
     GroceryStore,
     SettingsStore,
@@ -40,6 +42,7 @@ export const GROCERY_LINE_SOURCES = [
     "recipe",
     "restock",
     "notice",
+    "plan",
 ] as const;
 export type GroceryLineSource = (typeof GROCERY_LINE_SOURCES)[number];
 
@@ -47,7 +50,12 @@ export type GroceryKind = "food" | "supply";
 
 export type GroceryQuantity = { amount: number; unit: string };
 
-export type GroceryStorePickReason = "chosen" | "usual" | "list" | "default";
+/**
+ * `preferred` is the household's saved default store; `default` is the
+ * first-store fallback when nothing else decided.
+ */
+export type GroceryStorePickReason =
+    "chosen" | "usual" | "list" | "preferred" | "default";
 export type GroceryAmountPickReason = "chosen" | "usual" | "default";
 
 export type GroceryLine = {
@@ -522,6 +530,13 @@ export function pickGroceryStore(input: {
     lines: GroceryLine[];
     foodId: string | null;
     familyById?: ReadonlyMap<string, string>;
+    /**
+     * Household preferences. A saved default store always beats the first-store
+     * fallback; with `useUsualStore: true` it also beats the list history,
+     * coming right after the food's usual store. With no default store saved,
+     * the pick is what it always was.
+     */
+    prefs?: GroceryPreferences;
 }): { storeId: string; reason: GroceryStorePickReason } {
     const chosen = input.chosenStoreId?.trim();
     if (chosen) {
@@ -531,6 +546,12 @@ export function pickGroceryStore(input: {
     const usual = input.usualStoreId;
     if (usual && idSet.has(usual)) {
         return { storeId: usual, reason: "usual" };
+    }
+    const savedDefault = input.prefs?.defaultStoreId ?? null;
+    const preferred =
+        savedDefault && idSet.has(savedDefault) ? savedDefault : null;
+    if (preferred && input.prefs?.useUsualStore) {
+        return { storeId: preferred, reason: "preferred" };
     }
     if (input.foodId) {
         const fam = familyFromMap(input.foodId, input.familyById);
@@ -542,6 +563,9 @@ export function pickGroceryStore(input: {
                 return { storeId: line.storeId, reason: "list" };
             }
         }
+    }
+    if (preferred) {
+        return { storeId: preferred, reason: "preferred" };
     }
     if (input.stores.length === 0) {
         throw new GroceryInputError("Add a store first.");
@@ -658,7 +682,7 @@ export async function resolveGroceryLineSource(
     }
 
     if (sourceFridgeItemId) {
-        if (source === "manual" || source === "recipe") {
+        if (source === "manual" || source === "recipe" || source === "plan") {
             throw new GroceryInputError(
                 "A fridge item can only be named for a restock or notice line.",
             );
@@ -931,6 +955,9 @@ export async function addGroceryFoodById(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1059,6 +1086,9 @@ export async function addGroceryFoodByBarcode(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1186,6 +1216,9 @@ export async function addGroceryManualFood(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1334,6 +1367,9 @@ export async function addGrocerySupply(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1379,16 +1415,38 @@ export async function addGrocerySupply(
     }
 }
 
+/**
+ * Ticks a line off or back on. Ticking a food-backed line off stamps the day
+ * its usual was last restocked when `restocked` names the foods store and the
+ * household-local day (`YYYY-MM-DD`); unticking never touches the stamp.
+ */
 export async function checkGroceryLine(
     grocery: GroceryListStore,
     householdId: string,
     lineId: string,
     checked: boolean,
+    restocked?: { foods: FoodsStore; today: string },
 ): Promise<GroceryLine | null> {
     const lines = await grocery.listLines(householdId);
     const current = lines.find((line) => line.id === lineId);
     if (!current) return null;
-    return grocery.updateLine({ ...current, checked });
+    const updated = await grocery.updateLine({ ...current, checked });
+    if (checked && restocked && current.foodId) {
+        // The tick is saved; a failed stamp only delays the next schedule.
+        try {
+            await markUsualRestocked(
+                restocked.foods,
+                householdId,
+                current.foodId,
+                restocked.today,
+            );
+        } catch (err) {
+            console.error(
+                `[restock] stamp failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
+    return updated;
 }
 
 export async function clearCheckedLines(

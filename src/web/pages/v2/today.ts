@@ -21,6 +21,7 @@ import {
     calorieGauge,
     type MacroKey,
 } from "../../../domain/geometry.js";
+import type { SlotSuggestion } from "../../../domain/suggestions.js";
 import { shiftLocalDate } from "../../../domain/tz.js";
 import type { AppChromeBase } from "../../attention.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
@@ -38,8 +39,10 @@ import {
     iconTrash,
 } from "../../components/v2/icons.js";
 import { settingsErrorBanner } from "./settings-shared.js";
+import { goalName } from "./settings-goals-label.js";
 import {
     FD_LOG_SEARCH_SHEET_ID,
+    type CopyYesterdayOpts,
     type RenderLogSheetsOpts,
 } from "./log-sheet.js";
 import { FD_LOG_HREF } from "../../shell-v2.js";
@@ -47,7 +50,14 @@ import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
+import { noticeStrip, stripNotices, todayNoticeBack } from "./notice-strip.js";
 import { renderTodayRail } from "./today-rail.js";
+import {
+    renderMissingSheet,
+    renderPlanEditSheets,
+    renderWeekPhoneSection,
+    type WeekPlanView,
+} from "./recipes-plan.js";
 import type { Notice } from "../../../domain/notices.js";
 import type { FridgeItem } from "../../../domain/fridge.js";
 
@@ -64,6 +74,8 @@ export type TodayPageData = {
     error?: string;
     openEditMealId?: string;
     editError?: string;
+    /** The household's week plan: the rail card, the phone section, their sheets. */
+    plan?: WeekPlanView;
 };
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -173,14 +185,17 @@ function headerMarkup(data: TodayPageData): Html {
     const weekday = formatCalendarWeekday(view.date);
     const dateLine = formatCalendarDayMonth(view.date);
     const streakPart = view.streak > 0 ? ` · ${view.streak}-day streak` : "";
-    const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${streakPart}`)}</p>`;
-    const deskTitle = `${weekday}, ${dateLine}${streakPart}`;
+    // The goals' own name sits in the subtitle between the date and the
+    // streak; nameless goals add nothing.
+    const name = goalName(view.goals);
+    const namePart = name != null ? ` · ${name}` : "";
+    const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${namePart}${streakPart}`)}</p>`;
     const peer =
         data.chrome.subjectLabel != null
             ? `<p class="fd-today-peer" role="status">${esc(`Viewing ${data.chrome.subjectLabel}`)}</p>`
             : "";
     return raw(
-        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1><p class="fd-today-title-desk">${esc(deskTitle)}</p>${subtitle}${peer}</div></header>`,
+        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1>${subtitle}${peer}</div></header>`,
     );
 }
 
@@ -522,9 +537,10 @@ function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
         ? ""
         : ` data-fd-meal-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
+            () => `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
         ),
     );
 }
@@ -574,6 +590,43 @@ function mealSectionAddRow(readOnly: boolean): string {
     return `<a class="fd-today-section__add-food" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${iconPlus()}<span>Add food</span></a>`;
 }
 
+function yesterdayCopyMarkup(
+    mealType: MealTypeSlot,
+    data: TodayPageData,
+): string {
+    const hint = data.view.yesterdayCopy?.[mealType];
+    if (!hint) return "";
+    const returnTo = todayHref({
+        date: data.view.date,
+        member: data.memberQuery,
+    });
+    const kcal =
+        hint.kcal != null && Number.isFinite(hint.kcal)
+            ? ` · ${esc(fmtKcal(hint.kcal))}`
+            : "";
+    return `<form class="fd-today-yesterday" method="post" action="/log/copy-yesterday"><input type="hidden" name="slot" value="${esc(mealType)}" /><input type="hidden" name="return_to" value="${esc(returnTo)}" /><button type="submit" class="fd-today-yesterday__btn">Same as yesterday? ${esc(hint.label)}${kcal}</button></form>`;
+}
+
+/** "Salmon & rice fits · uses 2 things expiring" for one suggestion. */
+export function slotSuggestionText(suggestion: SlotSuggestion): string {
+    const used = suggestion.usesExpiring.length;
+    if (used === 0) return `${suggestion.name} fits`;
+    return `${suggestion.name} fits · uses ${used} ${used === 1 ? "thing" : "things"} expiring`;
+}
+
+function slotSuggestionsMarkup(
+    mealType: MealTypeSlot,
+    data: TodayPageData,
+): string {
+    const picked = data.view.slotSuggestions?.[mealType] ?? [];
+    return picked
+        .map(
+            (suggestion) =>
+                `<a class="fd-today-suggest" href="/recipes/${esc(suggestion.recipeId)}">${esc(slotSuggestionText(suggestion))}</a>`,
+        )
+        .join("");
+}
+
 function mealsMarkup(data: TodayPageData): Html {
     const { view } = data;
     const readOnly = isReadOnlyPeer(data);
@@ -588,6 +641,18 @@ function mealsMarkup(data: TodayPageData): Html {
             fat_g: null,
         };
         const head = mealSectionHead(mealType, rows, sub);
+        const yesterdayHint =
+            rows.length === 0 && !readOnly
+                ? yesterdayCopyMarkup(mealType, data)
+                : "";
+        const suggestions =
+            rows.length === 0 && !readOnly
+                ? slotSuggestionsMarkup(mealType, data)
+                : "";
+        const emptyLabel = suggestions
+            ? `<div class="fd-today-empty-stack">${yesterdayHint}${suggestions}</div>`
+            : yesterdayHint ||
+              `<span class="fd-today-section__empty">Nothing yet</span>`;
         const list =
             rows.length > 0
                 ? rowList(
@@ -598,7 +663,7 @@ function mealsMarkup(data: TodayPageData): Html {
                   )
                 : readOnly
                   ? `<p class="fd-today-section__empty">Nothing yet</p>`
-                  : `<div class="fd-today-section__empty-row"><span class="fd-today-section__empty">Nothing yet</span><a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
+                  : `<div class="fd-today-section__empty-row">${emptyLabel}<a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
         const addFood = mealSectionAddRow(readOnly);
         return `<section class="fd-today-section" aria-labelledby="fd-today-${mealType}">${head}${list}${addFood}</section>`;
     });
@@ -622,11 +687,64 @@ export function renderTodayBody(data: TodayPageData): Html {
                           : undefined,
               });
     const summary = `<section class="fd-today-summary" aria-label="Day summary"><div class="fd-today-summary__layout">${gaugeMarkup(view)}<div class="fd-today-summary__side">${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</div></div></section>`;
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>`;
+    // The week plan is the household's, not the day's: a peer's day has none.
+    const plan = isReadOnlyPeer(data) ? undefined : data.plan;
+    const planPhone = plan ? renderWeekPhoneSection(plan) : "";
+    // The desktop Needs attention card carries these; the phone has no card, so
+    // the weigh-in and what the plan is missing show in place. A peer's day is
+    // read-only, and the plan is the household's, not theirs.
+    const phoneNotices = (
+        codes: Parameters<typeof stripNotices>[1],
+        label: string,
+    ) =>
+        isReadOnlyPeer(data)
+            ? ""
+            : String(
+                  noticeStrip(
+                      stripNotices(
+                          view.attention.notices,
+                          codes,
+                          view.attention.viewerUserId,
+                      ),
+                      {
+                          back: todayNoticeBack(view),
+                          viewerUserId: view.attention.viewerUserId,
+                          label,
+                          className: "fd-today-notices",
+                      },
+                  ),
+              );
+    const weighInPhone = phoneNotices(["nutrition.weigh_in_due"], "Weigh-in");
+    const planMissingPhone = phoneNotices(
+        ["plan.missing_ingredient"],
+        "Missing for the plan",
+    );
+    const planSheets = plan
+        ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
+        : "";
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}${weighInPhone}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}${planMissingPhone}`;
     const rail = renderTodayRail(data);
     return raw(
-        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}</div>`,
+        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,
     );
+}
+
+/**
+ * The log sheet's Copy yesterday tile, on the days the Today prompt can show
+ * (the member's own today): the slots with a hint, and back to this page.
+ */
+function yesterdaySheetOpts(
+    data: TodayPageData,
+): CopyYesterdayOpts | undefined {
+    const hints = data.view.yesterdayCopy;
+    const viewingToday = data.view.week.days.some(
+        (day) => day.isToday && day.isSelected,
+    );
+    if (!hints || !viewingToday || isReadOnlyPeer(data)) return undefined;
+    return {
+        slots: Object.keys(hints),
+        returnTo: todayHref({ date: data.view.date, member: data.memberQuery }),
+    };
 }
 
 export function renderTodayV2Page(data: TodayPageData): string {
@@ -636,7 +754,10 @@ export function renderTodayV2Page(data: TodayPageData): string {
         active: "nutrition",
         v2Active: "today",
         v2Timezone: data.view.timezone,
-        v2LogSheet: data.logSheet,
+        v2LogSheet: {
+            ...data.logSheet,
+            copyYesterday: yesterdaySheetOpts(data),
+        },
         body: renderTodayBody(data),
     });
 }
@@ -871,7 +992,25 @@ export function buildPreviewTodayView(today: string): TodayView {
         expiringFridge: [],
         attention: { count: 0, notices: [], noticeFoods: new Map() },
         weight: { latest: null, series30d: [] },
+        yesterdayCopy: {},
+        slotSuggestions: {},
+        useSoonUses: [],
+        useSoonHighlight: null,
     };
+}
+
+/** Preview: dinner empty with a copy-yesterday hint (FigCraft 19573). */
+export function buildPreviewTodayViewWithYesterdayHint(
+    today: string,
+): TodayView {
+    const view = buildPreviewTodayView(today);
+    const meals = view.meals.filter((g) => g.mealType !== "dinner");
+    view.meals = meals;
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "dinner");
+    view.yesterdayCopy = {
+        dinner: { label: "Eggs & toast", kcal: 432 },
+    };
+    return view;
 }
 
 const PREVIEW_FRIDGE: FridgeItem[] = [
@@ -972,6 +1111,64 @@ export function buildPreviewTodayViewWithRail(today: string): TodayView {
         attention: previewAttentionNotices(today),
         weight: previewWeightSeries(),
     };
+}
+
+/** Preview: dinner empty with a fitting recipe, and Use soon with recipe lines. */
+export function buildPreviewTodayViewWithSuggestions(today: string): TodayView {
+    const view = buildPreviewTodayViewWithRail(today);
+    view.meals = view.meals.filter((g) => g.mealType !== "dinner");
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "dinner");
+    view.yesterdayCopy = { breakfast: { label: "Eggs & toast", kcal: 432 } };
+    view.meals = view.meals.filter((g) => g.mealType !== "breakfast");
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "breakfast");
+    const used = view.expiringFridge.map((item) => ({
+        id: item.id,
+        displayName: item.displayName,
+        expiresOn: item.expiresOn ?? today,
+    }));
+    view.slotSuggestions = {
+        dinner: [
+            {
+                recipeId: "r-salmon-rice",
+                name: "Salmon & rice",
+                macrosPerPortion: {
+                    calories: 640,
+                    protein_g: 48,
+                    carbs_g: 62,
+                    fat_g: 20,
+                },
+                usesExpiring: used,
+            },
+        ],
+    };
+    view.useSoonUses = used.map((item, i) => ({
+        item,
+        recipes: [
+            {
+                recipeId: "r-salmon-rice",
+                name: "Salmon & rice",
+                incomplete: false,
+            },
+            ...(i === 0
+                ? [
+                      {
+                          recipeId: "r-salmon-bowl",
+                          name: "Salmon bowl",
+                          incomplete: false,
+                      },
+                  ]
+                : []),
+        ],
+    }));
+    view.useSoonHighlight = {
+        recipeId: "r-salmon-rice",
+        name: "Salmon & rice",
+        itemCount: used.length,
+        totalItems: used.length,
+        minutes: 25,
+        kcalPerPortion: 640,
+    };
+    return view;
 }
 
 export function buildPreviewTodayPageData(

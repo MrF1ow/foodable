@@ -28,6 +28,9 @@ flags:
     mcp-household-digest:
         default: false
         rules: []
+    mcp-share-links:
+        default: false
+        rules: []
     mcp-widgets-v2:
         default: false
         rules: []

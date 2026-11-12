@@ -20,6 +20,7 @@ export const APP_PATHS = {
     logWater: "/log-water",
     logWeight: "/log-weight",
     nutritionLayout: "/nutrition/layout",
+    product: "/foods",
 } as const;
 
 /** Longest match first — segment-boundary prefixes only. */

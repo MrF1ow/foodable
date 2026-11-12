@@ -6,6 +6,10 @@ import {
 } from "../loaders.js";
 import { formText } from "../form.js";
 import {
+    USUAL_WHEN_LOW_FIELD,
+    USUAL_WHEN_LOW_MARKER,
+} from "../pages/v2/kitchen-usuals.js";
+import {
     requireManager,
     requireMember,
     requireOwner,
@@ -48,6 +52,7 @@ import {
     setHouseholdMemberRole,
     transferHouseholdOwnership,
     removeHouseholdMemberAccount,
+    setPluralsSameFood,
     updateHouseholdConfig,
     updateSocialReaderEnabled,
 } from "../../db/household.js";
@@ -76,6 +81,7 @@ import {
     parseUsualPurchase,
     removeProduct,
     setUsualProduct,
+    setUsualSchedule,
     updateFood,
 } from "../../domain/foods.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
@@ -119,6 +125,7 @@ import {
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import { gatedRoute } from "../gated.js";
+import { householdStoresRoutes } from "./household-stores.js";
 import {
     createHouseholdInvite,
     listHouseholdInvites,
@@ -135,6 +142,9 @@ import { forbiddenDashboardHtml } from "../loaders.js";
 // TOAST_KEYS: "household.fetch-refusal.cleared"
 
 export const householdRoutes = new Hono();
+
+// Settings › Household › Stores in the new app (own file: ten routes of its own).
+householdRoutes.route("/", householdStoresRoutes);
 
 async function householdFormError(
     userId: string,
@@ -320,6 +330,20 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
                 stores: liveSettingsStore(),
             },
         );
+        // The new edit sheet posts "Add when it runs low" with the rest. An
+        // unchecked box posts nothing, so only the marker says it was on the
+        // form: a post without it (the old app) leaves the setting alone.
+        if (formText(body, USUAL_WHEN_LOW_MARKER) === "1") {
+            await setUsualSchedule(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+                {
+                    restockWhenLow:
+                        formText(body, USUAL_WHEN_LOW_FIELD) === "1",
+                },
+            );
+        }
     } catch (err) {
         const page = await usualPickerFormError(
             userId,
@@ -637,6 +661,24 @@ householdRoutes.post(
                 ? "household.social-reader.on"
                 : "household.social-reader.off",
             { platform: SOCIAL_READER_LABELS[reader] },
+        );
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/plurals-same-food",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        const enabled = formText(body, "plurals_same_food") === "true";
+        await setPluralsSameFood(manager.householdId, enabled);
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "household.plurals-same-food.saved",
         );
     },
 );

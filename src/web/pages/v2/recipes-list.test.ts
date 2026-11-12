@@ -3,6 +3,7 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js"
 import type { Recipe } from "../../../domain/recipes.js";
 import {
     applyV2RecipeListFilters,
+    parseV2RecipeListFilter,
     renderRecipesListBody,
     renderRecipesListV2Page,
     recipesListV2Href,
@@ -193,6 +194,91 @@ describe("recipes list v2 page", () => {
         expect(html).toContain("Import a link");
     });
 
+    describe("importing a recipe another Foodable shared", () => {
+        const base = {
+            chrome,
+            query: "",
+            filter: "" as const,
+            cards: [],
+            totalCount: 0,
+        };
+
+        function linkPanel(html: string): string {
+            const start = html.indexOf(
+                '<details class="fd-recipes-import-link"',
+            );
+            expect(start).toBeGreaterThan(-1);
+            return html.slice(start, html.indexOf("</details>", start));
+        }
+
+        test("the link panel carries a form that posts the pasted link or JSON", () => {
+            const panel = linkPanel(renderRecipesListBody(base));
+            const form =
+                /<form[^>]*data-fd-recipes-shared[^>]*>[\s\S]*?<\/form>/.exec(
+                    panel,
+                );
+            expect(form).not.toBeNull();
+            const html = form![0];
+            expect(html).toContain('method="post"');
+            expect(html).toContain('action="/recipes/import-shared"');
+            expect(html).toContain("data-busy-form");
+            expect(html).toMatch(/<textarea[^>]*name="shared"/);
+            expect(html).toMatch(/<textarea[^>]*required/);
+            expect(html).toMatch(/<textarea[^>]*aria-label="Shared recipe/);
+            expect(html).toContain("Import recipe");
+            // Explained where it is used.
+            expect(html).toMatch(/another Foodable/i);
+        });
+
+        test("the link form still posts to the web importer", () => {
+            const panel = linkPanel(renderRecipesListBody(base));
+            expect(panel).toContain('action="/recipes/import"');
+            expect(panel).toContain("data-fd-recipes-import");
+        });
+
+        test("closed with no error, and no error text", () => {
+            const html = renderRecipesListBody(base);
+            expect(html).not.toMatch(
+                /<details class="fd-recipes-import-link"[^>]*\sopen/,
+            );
+            expect(html).not.toContain("fd-recipes-import-shared-error");
+        });
+
+        test("an error opens the panel, shows the message in place and keeps what was pasted", () => {
+            const html = renderRecipesListBody({
+                ...base,
+                sharedImport: {
+                    error: "That isn't a Foodable share link.",
+                    input: 'https://kitchen.example/s/<script>alert(1)</script>"',
+                },
+            });
+            expect(html).toMatch(
+                /<details class="fd-recipes-import-link"[^>]*\sopen/,
+            );
+            const panel = linkPanel(html);
+            expect(panel).toMatch(
+                /<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">That isn't a Foodable share link\.<\/p>/,
+            );
+            expect(panel).toContain(
+                "https://kitchen.example/s/&lt;script&gt;alert(1)&lt;/script&gt;&quot;",
+            );
+            expect(html).not.toContain("<script>alert(1)");
+            // The link form beside it is not the one that failed.
+            expect(panel).toMatch(/<input[^>]*name="url"[^>]*value=""/);
+        });
+
+        test("a pasted document is kept verbatim, escaped", () => {
+            const doc = '{"version":1,"name":"Soup & <b>stew</b>"}';
+            const html = renderRecipesListBody({
+                ...base,
+                sharedImport: { error: "Nope.", input: doc },
+            });
+            expect(linkPanel(html)).toContain(
+                "{&quot;version&quot;:1,&quot;name&quot;:&quot;Soup &amp; &lt;b&gt;stew&lt;/b&gt;&quot;}",
+            );
+        });
+    });
+
     test("empty ingredient recipe shows no stock-ok label", () => {
         const html = renderRecipesListBody({
             chrome,
@@ -300,5 +386,141 @@ describe("recipes list v2 page", () => {
                 (c) => c.recipe.id,
             ),
         ).toEqual(["r1"]);
+    });
+});
+
+describe("recipes list v2 favourites", () => {
+    const FLAGS = {
+        cookable: true,
+        highProtein: false,
+        quick: true,
+        missingCount: 0,
+        hasIngredients: true,
+    };
+    const card = (id: string, name: string, favourite?: boolean) => ({
+        recipe: { ...RECIPE, id, name },
+        flags: FLAGS,
+        macrosPerPortion: MACROS,
+        missingNames: [],
+        favourite,
+    });
+
+    test("the Favourites chip follows Under 30 min and links to the filter", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "egg",
+            filter: "",
+            cards: [],
+            totalCount: 0,
+        });
+        expect(html).toContain('href="/recipes?q=egg&amp;filter=favourites"');
+        expect(html.indexOf("Under 30 min")).toBeLessThan(
+            html.indexOf("Favourites"),
+        );
+        expect(html).not.toMatch(
+            /aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+        );
+    });
+
+    test("the chip is current when the filter is on", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "favourites",
+            cards: [],
+            totalCount: 3,
+        });
+        expect(html).toMatch(
+            /<a class="fd-chip fd-chip--selected"[^>]*aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+        );
+    });
+
+    test("parseV2RecipeListFilter accepts favourites", () => {
+        expect(parseV2RecipeListFilter("favourites")).toBe("favourites");
+        expect(parseV2RecipeListFilter("favorites")).toBe("");
+    });
+
+    test("applyV2RecipeListFilters keeps only starred cards", () => {
+        const cards = [
+            card("r1", "Shakshuka", true),
+            card("r2", "Oatmeal", false),
+            card("r3", "Stew"),
+        ];
+        expect(
+            applyV2RecipeListFilters(cards, "", "favourites").map(
+                (c) => c.recipe.id,
+            ),
+        ).toEqual(["r1"]);
+        // Search narrows within the favourites.
+        expect(applyV2RecipeListFilters(cards, "oat", "favourites")).toEqual(
+            [],
+        );
+    });
+
+    test("an empty favourites filter says so", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "favourites",
+            cards: [],
+            totalCount: 4,
+        });
+        expect(html).toContain("No favourites yet");
+        expect(html).not.toContain("No recipes match");
+    });
+
+    test("each card carries a star form beside its link, not inside it", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "egg",
+            filter: "cookable",
+            totalCount: 2,
+            cards: [card("r1", "Shakshuka", false)],
+        });
+        const li = html.match(
+            /<li class="fd-row fd-row--recipe"[^>]*>[\s\S]*?<\/li>/,
+        )![0];
+        expect(li).toContain('id="recipe-r1"');
+        const link = li.match(/<a class="fd-recipes-card"[\s\S]*?<\/a>/)![0];
+        expect(link).not.toContain("<form");
+        expect(link).not.toContain("<button");
+        const form = li.match(/<form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('method="post"');
+        expect(form).toContain('action="/recipes/r1/favourite"');
+        expect(form).toContain('name="on" value="1"');
+        expect(form).toContain('name="back" value="list"');
+        expect(form).toContain('name="q" value="egg"');
+        expect(form).toContain('name="filter" value="cookable"');
+        expect(form).toContain('aria-label="Add Shakshuka to favourites"');
+        expect(form).not.toContain("fd-star--on");
+    });
+
+    test("a starred card offers to remove the star and is filled", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 1,
+            cards: [card("r1", "Shakshuka", true)],
+        });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('name="on" value="0"');
+        expect(form).toContain('aria-label="Remove Shakshuka from favourites"');
+        expect(form).toContain("fd-star--on");
+        expect(form).not.toContain('name="q"');
+        expect(form).not.toContain('name="filter"');
+    });
+
+    test("the recipe name is escaped in the star label", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 1,
+            cards: [card("r1", 'Mac "n" <cheese>', false)],
+        });
+        expect(html).toContain(
+            'aria-label="Add Mac &quot;n&quot; &lt;cheese&gt; to favourites"',
+        );
     });
 });

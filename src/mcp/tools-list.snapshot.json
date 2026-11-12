@@ -73,5 +73,9 @@
     "get_household_config",
     "update_household_config",
     "delete_account",
-    "get_household_digest"
+    "get_household_digest",
+    "create_share_link",
+    "list_share_links",
+    "revoke_share_link",
+    "import_shared_recipe"
 ]

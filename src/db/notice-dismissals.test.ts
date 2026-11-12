@@ -32,3 +32,33 @@ describeDb(pgAvailable !== null, "notice dismissals (live)", (getCtx) => {
         expect(a.id).toBe(b.id);
     });
 });
+
+describeDb(pgAvailable !== null, "member dismissals (live)", (getCtx) => {
+    afterEach(() => setSqlForTests(null));
+
+    test("a weigh-in dismissal for a member is stored and read back", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId, userId } = await seedHousehold(sql);
+        const store = liveNoticeDismissalsStore();
+        const row = await store.insert({
+            householdId,
+            code: "nutrition.weigh_in_due",
+            subjectKind: "member",
+            subjectId: userId,
+            relatedKey: "2026-11-01",
+            dismissedBy: userId,
+        });
+        expect(row.subjectKind).toBe("member");
+        const all = await store.listForHousehold(householdId);
+        expect(
+            all.some(
+                (d) =>
+                    d.subjectKind === "member" &&
+                    d.subjectId === userId &&
+                    d.relatedKey === "2026-11-01",
+            ),
+        ).toBe(true);
+    });
+});

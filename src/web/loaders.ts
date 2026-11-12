@@ -20,12 +20,13 @@ import {
 } from "../db/profiles.js";
 import {
     getHouseholdConfig,
+    getPluralsSameFood,
     getHouseholdMembership,
     getHouseholdOwnerProfile,
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
-import { authUserCount } from "../db/users.js";
+import { authUserCount, listMembersLastSeen } from "../db/users.js";
 import {
     canSignUp,
     getSignupPolicy,
@@ -33,6 +34,24 @@ import {
 } from "../domain/signup.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
+import { foodDisplayScore } from "../domain/product-screen.js";
+import {
+    DEFAULT_SCORE_PRESET,
+    SCORE_PRESET_LABELS,
+    type ScoreWeights,
+} from "../domain/product-score.js";
+import {
+    isUsableChoice,
+    scoreSettingsForHousehold,
+    scoreSettingsForViewer,
+} from "../domain/score-settings.js";
+import { ALLERGEN_LABELS } from "../domain/rules.js";
+import {
+    renderSettingsScoreHouseholdV2Page,
+    renderSettingsScoreV2Page,
+    type ScoreFormDraft,
+} from "./pages/v2/settings-score.js";
+import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
@@ -90,6 +109,7 @@ import {
     listRecipesFiltered,
     macrosForPerson,
     RecipeInputError,
+    RecipeUnverifiedError,
     recipeDislikeNote,
     recipeFilters,
     recipeNotices,
@@ -114,15 +134,36 @@ import {
 import {
     kitchenUsualRowMeta,
     renderKitchenUsualsV2Page,
+    restockWeekdayLabel,
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
 import type { GroceryLineView } from "./pages/grocery.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
+import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
+import { renderSettingsStoreV2Page } from "./pages/v2/settings-stores-detail.js";
+import {
+    deleteMoveTarget,
+    groceryLineCounts,
+} from "../domain/grocery-sections.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
 import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
 } from "./pages/v2/recipes-page.js";
+import {
+    COOK_SHEET_ID,
+    type CookSheetView,
+} from "./pages/v2/recipes-page-cook.js";
+import {
+    GROCERY_SHARE_SHEET_ID,
+    RECIPE_SHARE_SHEET_ID,
+} from "./pages/v2/share-sheet.js";
+import {
+    buildSharedLinkRows,
+    type SharedLinkRow,
+} from "./pages/v2/settings-household-shared-links.js";
+import { liveShareLinkStore } from "../db/share-links.js";
+import { guessMealType } from "./pages/v2/log-sheet.js";
 import { orderCards } from "../domain/layout.js";
 import { todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
@@ -133,16 +174,32 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
-import { loadToday } from "./loaders-today.js";
+import { loadToday, useSoonFor } from "./loaders-today.js";
+import {
+    listExpiring,
+    previewCookRecipe,
+    StockInputError,
+    type CookPreview,
+} from "../domain/stock.js";
+import { FoodsInputError } from "../domain/foods.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
+    loadViewerNotices,
     viewerChromeWithAttention,
     viewerFlagsFor,
 } from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
 import { householdToday } from "../db/restock.js";
+import { loadWeekPlanView } from "./loaders-plan.js";
+import { isPlanDate } from "../domain/plan.js";
+import {
+    PLAN_SHEET_ID,
+    withPlanEditDraft,
+    type PlanEditDraft,
+    type PlanSheetView,
+} from "./pages/v2/recipes-plan.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import { groceryRestockNotices } from "../domain/restock.js";
@@ -160,12 +217,19 @@ import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
 import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
+import type {
+    GoalsFormDraft,
+    GoalsFormField,
+} from "./pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
 import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
-import { getGoalsForDate } from "../db/nutrition.js";
+import { renderSettingsAiV2Page } from "./pages/v2/settings-ai.js";
+import { listConnections } from "../db/tokens.js";
+import { getAllGoalDays, getNutritionGoals } from "../db/nutrition.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
-function alcoholOf(
+/** The member's drink unit, or null when alcohol tracking is off. */
+export function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],
 ): AlcoholDisplay {
     if (!alcoholTrackingEnabledFromProfile(profile)) return null;
@@ -268,6 +332,8 @@ async function memberGate(viewerUserId: string): Promise<MemberGate> {
 export type V2TodayRenderOpts = {
     openEditMealId?: string;
     editError?: string;
+    /** A plan move that failed its checks: its edit sheet opens with this. */
+    planEdit?: PlanEditDraft;
 };
 
 export async function renderDashboardPage(
@@ -311,17 +377,29 @@ export async function renderDashboardPage(
             ? subjectProfile.timezone
             : "UTC";
 
+    const calendarToday = todayInTz(subjectTz);
+    const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
+
     const viewMemberId =
         requestedMember && requestedMember !== viewerUserId
             ? requestedMember
             : undefined;
 
+    // The new Today loads the household's notices itself; the chrome reuses
+    // them instead of loading them again. The flags need no query.
+    const flags = await viewerFlagsFor(access.viewer);
+    const todayView = flags.uiV2
+        ? await loadToday(access.subject, selectedDate, undefined, {
+              readOnly: access.subject.userId !== access.viewer.userId,
+          })
+        : null;
     const chrome = await viewerChromeWithAttention(
         viewerProfile,
         access.viewer,
+        todayView?.attention,
     );
 
-    if (chrome.flags.uiV2) {
+    if (todayView) {
         const weighInPrefill = await weighInPrefillForUser(
             access.viewer.userId,
         );
@@ -332,19 +410,29 @@ export async function renderDashboardPage(
                       ...v2LogSheet,
                       weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
                   };
-        const calendarToday = todayInTz(subjectTz);
-        const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
-        const view = await loadToday(access.subject, selectedDate);
+        const view = todayView;
         const subjectLabel =
             access.subject.userId !== access.viewer.userId
                 ? members.find((m) => m.userId === access.subject.userId)
                       ?.displayName
                 : undefined;
+        // The week plan is the household's, so a peer's read-only day has none.
+        const week = subjectLabel
+            ? undefined
+            : await loadWeekPlanView(
+                  access.viewer.householdId,
+                  view.householdDate,
+              );
+        const plan =
+            week && v2Today?.planEdit
+                ? (withPlanEditDraft(week, v2Today.planEdit) ?? week)
+                : week;
         return {
             status: 200,
             html: renderTodayV2Page({
                 chrome: { ...chrome, subjectLabel },
                 view,
+                plan,
                 today: calendarToday,
                 memberQuery: viewMemberId,
                 logSheet: mergedLogSheet,
@@ -456,10 +544,11 @@ export async function renderFridgeInventoryPage(
             },
         ]),
     );
+    const noticeResult = await loadViewerNotices(gate.viewer, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
-        await loadHouseholdNotices(householdId, { today }),
+        noticeResult,
     );
     if (flags.uiV2) {
         const knownIds = new Set(snapshot.items.map((row) => row.id));
@@ -480,7 +569,13 @@ export async function renderFridgeInventoryPage(
                 openModalId,
                 didYouMean: extras?.didYouMean,
                 foodsById,
+                // From the recipes the notices already loaded: no extra query.
+                useSoonUses: useSoonFor(
+                    noticeResult.recipesListPrefetch,
+                    listExpiring(snapshot.items, today, 7),
+                ).uses,
                 freezeDefaultExpiry: defaultFreezeExpiry(today),
+                notices: noticeResult.notices,
                 groceryLines,
                 groceryOverview:
                     buildKitchenFridgeGroceryOverview(grocerySnapshot),
@@ -530,6 +625,8 @@ function kitchenGroceryLineMeta(
         memberAllergens: Awaited<ReturnType<typeof groceryAllergenMembers>>;
         storeName: string;
         sectionName: string;
+        /** The viewer's score weights: the badge on the line uses them. */
+        scoreWeights: ScoreWeights;
     },
 ): KitchenGroceriesLineMeta {
     const foodRow = line.foodId
@@ -559,12 +656,16 @@ function kitchenGroceryLineMeta(
         ctx.memberAllergens,
         eff?.allergens ?? null,
     );
+    const productScore = foodRow
+        ? foodDisplayScore(foodRow, ctx.scoreWeights)
+        : null;
     return {
         plainFoodName,
         isUsual,
         allergenWarning: warning?.text ?? null,
         storeName: ctx.storeName,
         sectionName: ctx.sectionName,
+        productScore,
     };
 }
 
@@ -738,7 +839,7 @@ export async function renderGroceryListPage(
               opts.error,
           )
         : null;
-    const noticeResult = await loadHouseholdNotices(householdId, { today });
+    const noticeResult = await loadViewerNotices(gate.viewer, { today });
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -761,10 +862,16 @@ export async function renderGroceryListPage(
         const storeNameById = new Map(
             stores.map((store) => [store.id, store.name]),
         );
+        const { weights: scoreWeights } = await scoreSettingsForViewer(
+            liveScoreSettingsStore(),
+            householdId,
+            viewerUserId,
+        );
         const metaCtx = {
             allFoods,
             catalog,
             memberAllergens,
+            scoreWeights,
         };
         const lineMeta = new Map<string, KitchenGroceriesLineMeta>();
         const enrich = (line: GroceryLineView): GroceryLineView => {
@@ -879,6 +986,7 @@ export async function renderGroceryListPage(
                 openPutAway: opts.openPutAway,
                 putAwayDraft: opts.putAwayDraft,
                 openAdd: addStoreId != null,
+                openShare: opts.openModalId === GROCERY_SHARE_SHEET_ID,
                 addStoreId: addStoreId ?? selectedStoreId,
                 allergenNotices: opts.allergenNotices,
                 allergenRetry: opts.allergenRetry,
@@ -1006,14 +1114,23 @@ export async function renderSettingsDisplayV2Route(
 
 export async function renderSettingsGoalsV2Route(
     viewerUserId: string,
+    opts: {
+        error?: string;
+        draft?: GoalsFormDraft;
+        invalid?: readonly GoalsFormField[];
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
     const tz = profile?.timezone?.trim() || "UTC";
-    const goalDate = todayInTz(tz);
-    const goals = await getGoalsForDate(viewerUserId, goalDate);
+    const today = todayInTz(tz);
+    // The form edits the standing goals; a day's override is listed apart.
+    const goals = await getNutritionGoals(viewerUserId);
+    const days = (await getAllGoalDays(viewerUserId)).filter(
+        (d) => d.date >= today,
+    );
     const weightUnit = preferredWeightUnitFromProfile(profile) ?? "kg";
     const alcohol = alcoholTrackingEnabledFromProfile(profile)
         ? (preferredDrinkUnitFromProfile(profile) ?? "us")
@@ -1023,9 +1140,13 @@ export async function renderSettingsGoalsV2Route(
         html: renderSettingsGoalsV2Page({
             chrome,
             goals,
-            goalDate,
+            today,
             weightUnit,
             alcohol,
+            days,
+            draft: opts.draft,
+            error: opts.error,
+            invalid: opts.invalid,
         }),
     };
 }
@@ -1069,7 +1190,7 @@ export async function renderSettingsSavedV2Route(
         const lower = q.toLowerCase();
         recipes = recipes.filter((r) => r.name.toLowerCase().includes(lower));
     }
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderSettingsSavedV2Page({
@@ -1100,6 +1221,105 @@ export async function renderSettingsExportV2Route(
         html: renderSettingsExportV2Page({
             chrome,
             error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsAiV2Route(
+    viewerUserId: string,
+    opts: { mcpUrl: string; error?: string },
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    // Only the caller's own connections: the id is the session's.
+    const connections = await listConnections(viewerUserId);
+    return {
+        status: 200,
+        html: renderSettingsAiV2Page({
+            chrome,
+            connections,
+            now: new Date(),
+            timezone: profile?.timezone?.trim() || "UTC",
+            mcpUrl: opts.mcpUrl,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsScoreV2Route(
+    viewerUserId: string,
+    opts: { error?: string; draft?: ScoreFormDraft } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const householdId = gate.viewer.householdId;
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    const [settings, allergens] = await Promise.all([
+        scoreSettingsForViewer(
+            liveScoreSettingsStore(),
+            householdId,
+            viewerUserId,
+        ),
+        liveRulesStore().listAllergens(householdId, viewerUserId),
+    ]);
+    const householdPreset = isUsableChoice(settings.householdDefault)
+        ? settings.householdDefault.preset
+        : DEFAULT_SCORE_PRESET;
+    return {
+        status: 200,
+        html: renderSettingsScoreV2Page({
+            chrome,
+            preset: settings.preset,
+            weights: settings.weights,
+            followsHousehold: settings.member == null,
+            householdPresetLabel: SCORE_PRESET_LABELS[householdPreset],
+            canEditHousehold: canManageHousehold(gate.viewer),
+            warnTraces: settings.warnTraces,
+            compareGoals: settings.compareGoals,
+            allergensText:
+                allergens.length > 0
+                    ? allergens
+                          .map((row) => ALLERGEN_LABELS[row.allergen])
+                          .join(", ")
+                    : "None set",
+            allergensHref: `/settings/household/members/${viewerUserId}`,
+            error: opts.error,
+            draft: opts.draft,
+        }),
+    };
+}
+
+export async function renderSettingsScoreHouseholdV2Route(
+    viewerUserId: string,
+    opts: { error?: string; draft?: ScoreFormDraft } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    // Reading the default's editor is for the people who may change it.
+    if (!canManageHousehold(gate.viewer)) {
+        return { status: 403, html: forbiddenDashboardHtml() };
+    }
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    // The default alone: the viewer's own choice must not stand in for it.
+    const settings = await scoreSettingsForHousehold(
+        liveScoreSettingsStore(),
+        gate.viewer.householdId,
+    );
+    const current = settings.householdDefault;
+    const usable = isUsableChoice(current);
+    return {
+        status: 200,
+        html: renderSettingsScoreHouseholdV2Page({
+            chrome,
+            preset: usable ? current.preset : DEFAULT_SCORE_PRESET,
+            weights: settings.weights,
+            isSet: usable,
+            error: opts.error,
+            draft: opts.draft,
         }),
     };
 }
@@ -1263,7 +1483,7 @@ export async function renderSettingsFoodsPage(
         : null;
     const settings = liveSettingsStore();
     const stores = await settings.listStores(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
@@ -1289,6 +1509,7 @@ export async function renderUsualProductsListPage(
         q?: string;
         storeFilter?: string;
         openFoodId?: string;
+        openRestock?: boolean;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -1312,7 +1533,7 @@ export async function renderUsualProductsListPage(
         };
     }
     const [noticeResult, groceryLines] = await Promise.all([
-        loadHouseholdNotices(householdId),
+        loadViewerNotices(gate.viewer),
         liveGroceryStore().listLines(householdId),
     ]);
     const chrome = await viewerChromeWithAttention(
@@ -1325,13 +1546,21 @@ export async function renderUsualProductsListPage(
         groceryLines,
     );
     if (chromeWithCount.flags.uiV2) {
-        const stores = await liveSettingsStore().listStores(householdId);
+        const [stores, config] = await Promise.all([
+            liveSettingsStore().listStores(householdId),
+            getHouseholdConfig(householdId),
+        ]);
         const storesById = new Map(stores.map((row) => [row.id, row]));
         const foodsById = new Map(
             foods.map((row) => [
                 row.id,
                 { id: row.id, genericFoodId: row.genericFoodId },
             ]),
+        );
+        const lowFoodIds = new Set(
+            noticeResult.notices
+                .filter((notice) => notice.code === "grocery.running_low")
+                .map((notice) => notice.subject.id),
         );
         const rowMeta = new Map<string, KitchenUsualsRowMeta>();
         for (const row of rows) {
@@ -1341,6 +1570,7 @@ export async function renderUsualProductsListPage(
                     storesById,
                     groceryLines,
                     foodsById,
+                    lowFoodIds,
                 }),
             );
         }
@@ -1369,8 +1599,13 @@ export async function renderUsualProductsListPage(
                 selectedStoreId,
                 error,
                 openFoodId: knownOpen,
+                openRestock: opts.openRestock,
+                restockDay: config.preferences.restock.enabled
+                    ? restockWeekdayLabel(config.preferences.restock.weekday)
+                    : null,
                 addSearch,
                 openGroceriesCount: groceryOpenLineCount(groceryLines),
+                notices: noticeResult.notices,
             }),
         };
     }
@@ -1429,7 +1664,7 @@ export async function renderUsualProductsPickerPage(
         ? usualProduct.usualAmount
         : food.usualAmount;
     const stores = await liveSettingsStore().listStores(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
@@ -1448,6 +1683,22 @@ export async function renderUsualProductsPickerPage(
             error: opts.error,
         }),
     };
+}
+
+/** Settings › Household's Shared links: the active links with the names they show. */
+async function loadSharedLinkRows(
+    householdId: string,
+    members: readonly { userId: string; displayName: string }[],
+): Promise<SharedLinkRow[]> {
+    const links = await liveShareLinkStore().listForHousehold(householdId);
+    const recipes = links.some((link) => link.kind === "recipe")
+        ? await liveRecipesStore().listRecipes(householdId)
+        : [];
+    return buildSharedLinkRows(
+        links,
+        new Map(members.map((m) => [m.userId, m.displayName])),
+        new Map(recipes.map((r) => [r.id, r.name])),
+    );
 }
 
 export async function renderHouseholdSettingsRoute(
@@ -1511,7 +1762,7 @@ export async function renderHouseholdSettingsRoute(
               )}`
             : null;
 
-    const noticeResult = await loadHouseholdNotices(householdId, {
+    const noticeResult = await loadViewerNotices(gate.viewer, {
         refCounts,
     });
     const chrome = await viewerChromeWithAttention(
@@ -1520,11 +1771,20 @@ export async function renderHouseholdSettingsRoute(
         noticeResult,
     );
     if (chrome.flags.uiV2) {
+        const pluralsSameFood = await getPluralsSameFood(householdId);
+        // No catch: this section is the only place on the web to revoke a
+        // public link, so a failed read must fail the page, not hide it.
+        const sharedLinks = await loadSharedLinkRows(householdId, members);
+        // The Last active column is a nicety: if the read fails the page still renders.
+        const lastSeen = await listMembersLastSeen(householdId).catch(
+            () => undefined,
+        );
         return {
             status: 200,
             html: renderSettingsHouseholdV2Page({
                 chrome,
                 householdName: config.name,
+                lastSeen,
                 members,
                 stores: storeViews.map((row) => ({
                     id: row.id,
@@ -1545,6 +1805,8 @@ export async function renderHouseholdSettingsRoute(
                 duplicatePairs: noticeResult.possibleDuplicatePairs,
                 refCounts,
                 mergePost: opts.mergePost,
+                pluralsSameFood,
+                sharedLinks,
             }),
         };
     }
@@ -1571,6 +1833,100 @@ export async function renderHouseholdSettingsRoute(
             fetchRefusals,
             fetchRefusalsShowMore,
             fetchRefusalsPaged: refusalsAfter != null,
+        }),
+    };
+}
+
+export async function renderSettingsStoresV2Route(
+    viewerUserId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const settings = liveSettingsStore();
+    const [stores, prefs, lines] = await Promise.all([
+        settings.listStores(householdId),
+        settings.getGroceryPreferences(householdId),
+        liveGroceryStore().listLines(householdId),
+    ]);
+    const sectionLists = await Promise.all(
+        stores.map((row) => settings.listSections(row.id)),
+    );
+    const counts = groceryLineCounts(lines);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsStoresV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            stores: stores.map((row, index) => ({
+                id: row.id,
+                name: row.name,
+                sectionCount: sectionLists[index]!.filter((s) => !s.hidden)
+                    .length,
+                lineCount: counts.byStore.get(row.id) ?? 0,
+            })),
+            defaultStoreId: prefs.defaultStoreId,
+            useUsualStore: prefs.useUsualStore,
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+export async function renderSettingsStoreV2Route(
+    viewerUserId: string,
+    storeId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const householdId = gate.viewer.householdId;
+    const settings = liveSettingsStore();
+    const stores = await settings.listStores(householdId);
+    const store = stores.find((row) => row.id === storeId);
+    if (!store) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Store not found.")),
+        };
+    }
+    const profile = await getProfile(viewerUserId);
+    const [sections, rules, prefs, lines] = await Promise.all([
+        settings.listSections(store.id),
+        liveRulesStore().listStoreRules(store.id),
+        settings.getGroceryPreferences(householdId),
+        liveGroceryStore().listLines(householdId),
+    ]);
+    const counts = groceryLineCounts(lines);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsStoreV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            store,
+            sections,
+            sectionLineCounts: counts.bySection,
+            lineCount: counts.byStore.get(store.id) ?? 0,
+            rules,
+            moveTarget: deleteMoveTarget(
+                stores,
+                store.id,
+                prefs.defaultStoreId,
+            ),
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }
@@ -1609,7 +1965,7 @@ export async function renderHouseholdMemberRoute(
     if (!access.ok) {
         return { status: 403, html: forbiddenDashboardHtml() };
     }
-    const noticeResult = await loadHouseholdNotices(gate.viewer.householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -1658,6 +2014,12 @@ export async function renderRecipesListPage(
         importRetryDisabled?: boolean;
         shareArrived?: import("../domain/share.js").ReadShareResult;
         shareArrivedOpen?: boolean;
+        /** v2: a recipe pasted from another Foodable that could not be imported. */
+        sharedImport?: { error?: string; input?: string };
+        /** v2: picking a recipe for this day (`?plan_date=`). */
+        planDate?: string;
+        /** v2: a plan move that failed its checks: its edit sheet opens with this. */
+        planEdit?: PlanEditDraft;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -1666,7 +2028,7 @@ export async function renderRecipesListPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -1701,9 +2063,13 @@ export async function renderRecipesListPage(
             };
         });
         const flags = recipeFilters(rows, stock, foodsById);
+        const favouriteIds = new Set(
+            await liveRecipesStore().listFavourites(householdId, viewerUserId),
+        );
         const cards = rows.map((row, index) => ({
             recipe: row.recipe,
             flags: flags[index]!,
+            favourite: favouriteIds.has(row.recipe.id),
             macrosPerPortion: row.macrosPerPortion,
             missingNames: row.ingredients
                 .filter((ingredient) => {
@@ -1723,6 +2089,10 @@ export async function renderRecipesListPage(
             (card) => card.flags.cookable,
         ).length;
         const filtered = applyV2RecipeListFilters(cards, v2Query, v2Filter);
+        const loadedWeek = await loadWeekPlanView(householdId);
+        const week = opts.planEdit
+            ? (withPlanEditDraft(loadedWeek, opts.planEdit) ?? loadedWeek)
+            : loadedWeek;
         return {
             status: 200,
             html: renderRecipesListV2Page({
@@ -1732,6 +2102,12 @@ export async function renderRecipesListPage(
                 cards: filtered,
                 cookableCount,
                 totalCount: recipes.length,
+                week,
+                notices: noticeResult.notices,
+                planDate:
+                    opts.planDate && isPlanDate(opts.planDate)
+                        ? opts.planDate
+                        : undefined,
                 importError: opts.importError,
                 importPasteStep: opts.importPasteStep,
                 importUrl: opts.importUrl,
@@ -1746,6 +2122,7 @@ export async function renderRecipesListPage(
                 importCredit: opts.importCredit,
                 importSourceKind: opts.importSourceKind,
                 importSourceLabel: opts.importSourceLabel,
+                sharedImport: opts.sharedImport,
             }),
         };
     }
@@ -1854,6 +2231,70 @@ export async function renderRecipesListPage(
     };
 }
 
+/**
+ * What cooking `servings` portions of a recipe takes from the kitchen, as the
+ * cook sheet shows it. A recipe or ingredient the cook cannot run on is a
+ * message, not a thrown page: the sheet says so and the confirm reports it too.
+ */
+export async function loadCookPreview(
+    householdId: string,
+    recipeId: string,
+    servings: number,
+): Promise<{ preview: CookPreview | null; error?: string }> {
+    try {
+        const preview = await previewCookRecipe(
+            liveRecipesStore(),
+            liveFridgeStore(),
+            liveFoodsStore(),
+            { householdId, recipeId, totalPortions: servings },
+        );
+        return { preview };
+    } catch (err) {
+        if (
+            err instanceof StockInputError ||
+            err instanceof RecipeInputError ||
+            err instanceof RecipeUnverifiedError ||
+            err instanceof FoodsInputError
+        ) {
+            return { preview: null, error: err.message };
+        }
+        throw err;
+    }
+}
+
+async function planSheetView(
+    householdId: string,
+    recipeId: string,
+    recipe: { name: string; yieldPortions: number },
+    values: {
+        open?: boolean;
+        date?: string;
+        slot?: string;
+        servings?: number;
+    } = {},
+    error: string | undefined,
+    failed: boolean,
+): Promise<PlanSheetView> {
+    const today = await householdToday(householdId);
+    const date = values.date ?? today;
+    return {
+        recipeId,
+        recipeName: recipe.name,
+        yieldPortions: recipe.yieldPortions,
+        today,
+        date: isPlanDate(date) || failed ? date : today,
+        slot: values.slot ?? "dinner",
+        servings:
+            values.servings != null &&
+            Number.isFinite(values.servings) &&
+            values.servings > 0
+                ? values.servings
+                : recipe.yieldPortions,
+        open: values.open === true || failed,
+        error,
+    };
+}
+
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
@@ -1861,6 +2302,17 @@ export async function renderRecipeDetailRoute(
         member?: string;
         error?: string;
         openModalId?: string;
+        /** v2: open the cook sheet on load (`?cook=1`, or after a failed confirm). */
+        openCook?: boolean;
+        /** v2: the stepper value a failed confirm re-renders with. */
+        cookServings?: number;
+        /** v2: the Add to plan sheet: open on load (`?plan=1`, or after a failed add), and the values a failed add re-renders with. */
+        plan?: {
+            open?: boolean;
+            date?: string;
+            slot?: string;
+            servings?: number;
+        };
         linkProductId?: string;
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     } = {},
@@ -1961,7 +2413,7 @@ export async function renderRecipeDetailRoute(
         };
     });
     const importRow = await liveRecipesStore().getImport(householdId, recipeId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -1989,6 +2441,39 @@ export async function renderRecipeDetailRoute(
             fridge.locations,
             familyFoodMap,
         );
+        let cook: CookSheetView | undefined;
+        if (view.verification !== "unverified") {
+            const servings =
+                opts.cookServings != null &&
+                Number.isFinite(opts.cookServings) &&
+                opts.cookServings > 0
+                    ? opts.cookServings
+                    : view.yieldPortions;
+            const { preview, error: previewError } = await loadCookPreview(
+                householdId,
+                recipeId,
+                servings,
+            );
+            const open =
+                opts.openCook === true || opts.openModalId === COOK_SHEET_ID;
+            cook = {
+                recipeId,
+                recipeName: view.name,
+                servings,
+                yieldPortions: view.yieldPortions,
+                preview,
+                previewError,
+                slot: guessMealType(
+                    profile?.timezone && validateTz(profile.timezone)
+                        ? profile.timezone
+                        : "UTC",
+                ) as CookSheetView["slot"],
+                macrosPerPortion: macrosPerPortion ?? macros,
+                submitKey: crypto.randomUUID(),
+                open,
+                error: open ? opts.error : undefined,
+            };
+        }
         return {
             status: 200,
             html: renderRecipeDetailV2Page({
@@ -2008,6 +2493,22 @@ export async function renderRecipeDetailRoute(
                 })),
                 viewerId: viewerUserId,
                 portionCount: view.portionCount,
+                favourite: (
+                    await liveRecipesStore().listFavourites(
+                        householdId,
+                        viewerUserId,
+                    )
+                ).includes(recipeId),
+                cook,
+                share: { open: opts.openModalId === RECIPE_SHARE_SHEET_ID },
+                plan: await planSheetView(
+                    householdId,
+                    recipeId,
+                    view,
+                    opts.plan,
+                    opts.openModalId === PLAN_SHEET_ID ? opts.error : undefined,
+                    opts.openModalId === PLAN_SHEET_ID,
+                ),
                 error: opts.error,
             }),
         };
@@ -2119,7 +2620,9 @@ export async function renderNeedsAttentionInventoryPage(
         }
     }
 
-    const result = await loadHouseholdNotices(householdId, { today });
+    // The same notices the Today card counts: the one-tap ones are listed for
+    // a viewer on the new app and left out for everyone else.
+    const result = await loadViewerNotices(gate.viewer, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -2127,6 +2630,7 @@ export async function renderNeedsAttentionInventoryPage(
     );
     const html = renderNeedsAttentionPage({
         chrome,
+        viewerUserId: gate.viewer.userId,
         result,
         showDismissed,
         error: pageError,

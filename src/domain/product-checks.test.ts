@@ -289,3 +289,75 @@ test("dislike matching handles plurals and multi-word phrases", () => {
         ),
     ).toBe(true);
 });
+
+test("warnTraces off drops trace matches, including the gluten trace warning", () => {
+    const member: ProductCheckMember = {
+        ...MEMBER,
+        allergens: ["peanut", "wheat"],
+        warnTraces: false,
+    };
+    const traced = product({ tracesTags: ["en:peanuts", "en:gluten"] });
+    expect(checkProductForMember(traced, member, { remaining: {} })).toEqual(
+        [],
+    );
+    const on = checkProductForMember(
+        traced,
+        { ...member, warnTraces: true },
+        { remaining: {} },
+    );
+    expect(on.map((n) => n.code).sort()).toEqual([
+        "food.product_gluten",
+        "food.product_trace",
+    ]);
+});
+
+test("warnTraces off still blocks on contained allergens", () => {
+    const member: ProductCheckMember = {
+        ...MEMBER,
+        allergens: ["peanut"],
+        warnTraces: false,
+    };
+    const notices = checkProductForMember(
+        product({ allergensTags: ["en:peanuts"], tracesTags: ["en:peanuts"] }),
+        member,
+        { remaining: {} },
+    );
+    expect(notices.map((n) => n.code)).toEqual(["food.product_allergen"]);
+});
+
+test("compareGoals off omits the goals rows and leaves the rest", () => {
+    const member: ProductCheckMember = {
+        ...MEMBER,
+        dislikes: ["snack"],
+        compareGoals: false,
+    };
+    const input = product({ servingNutrition: { calories: 300 } });
+    const today = { remaining: { calories: 200 } };
+    const off = checkProductForMember(input, member, today);
+    expect(off.map((n) => n.code)).toEqual(["food.product_dislike"]);
+    const on = checkProductForMember(
+        input,
+        { ...member, compareGoals: true },
+        today,
+    );
+    expect(on.map((n) => n.code).sort()).toEqual([
+        "food.product_dislike",
+        "food.product_goal",
+    ]);
+});
+
+test("both switches default to on when the member does not carry them", () => {
+    const member: ProductCheckMember = { ...MEMBER, allergens: ["peanut"] };
+    const notices = checkProductForMember(
+        product({
+            tracesTags: ["en:peanuts"],
+            servingNutrition: { calories: 300 },
+        }),
+        member,
+        { remaining: { calories: 200 } },
+    );
+    expect(notices.map((n) => n.code).sort()).toEqual([
+        "food.product_goal",
+        "food.product_trace",
+    ]);
+});

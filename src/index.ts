@@ -37,7 +37,11 @@ import {
     getAppJs,
     getAppV2Css,
     getAppV2Js,
+    getScannerWasm,
+    getScannerZxingJs,
     getEmbedWidgetHtml,
+    scannerWasmHref,
+    scannerZxingScriptHref,
     warmWidgets,
 } from "./widgets.js";
 import { BRAND_SVGS } from "./brand.js";
@@ -48,7 +52,10 @@ import { fridgeRoutes } from "./web/routes/fridge.js";
 import { groceryRoutes } from "./web/routes/grocery.js";
 import { nutritionRoutes } from "./web/routes/nutrition.js";
 import { recipesRoutes } from "./web/routes/recipes.js";
+import { sharedRecipeImportRoutes } from "./web/routes/recipes-shared-import.js";
 import { shareRoutes } from "./web/routes/share.js";
+import { shareLinksRoutes } from "./web/routes/share-links.js";
+import { shareLinkManageRoutes } from "./web/routes/share-links-manage.js";
 import { manifestJson } from "./web/manifest.js";
 import { householdRoutes } from "./web/routes/household.js";
 import { settingsRoutes } from "./web/routes/settings.js";
@@ -168,7 +175,7 @@ app.use("*", async (c, next) => {
         // their own documents with their own copy (frame-ancestors 'self').
         c.header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
         );
     }
     c.header("Referrer-Policy", "no-referrer");
@@ -285,6 +292,11 @@ registerDiscoveryRoutes(app);
 
 app.route("/", createExportsRouter());
 
+// Public share pages (/s/:token). Before the flash-toast and legacy-redirect
+// middleware below, so neither touches them, and with no session lookup: the
+// token is the whole credential.
+app.route("/", shareLinksRoutes);
+
 // OAuth routes
 app.route("/", createOAuthRouter());
 
@@ -306,7 +318,9 @@ app.route("/", nutritionRoutes);
 app.route("/", foodsRoutes);
 app.route("/", fridgeRoutes);
 app.route("/", groceryRoutes);
+app.route("/", sharedRecipeImportRoutes);
 app.route("/", recipesRoutes);
+app.route("/", shareLinkManageRoutes);
 app.route("/", shareRoutes);
 app.route("/", householdRoutes);
 app.route("/", settingsRoutes);
@@ -374,6 +388,28 @@ app.get("/app-v2.js", async (c) => {
         "Content-Type": "text/javascript; charset=utf-8",
         "Cache-Control": appAssetCacheControl(c, href),
     });
+});
+app.get("/app-v2-scanner.js", async (c) => {
+    try {
+        const href = scannerZxingScriptHref();
+        return c.body(await getScannerZxingJs(), 200, {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": appAssetCacheControl(c, href),
+        });
+    } catch {
+        return c.text("Scanner unavailable", 503);
+    }
+});
+app.get("/app-v2-scanner.wasm", async (c) => {
+    try {
+        const href = scannerWasmHref();
+        return c.body(await getScannerWasm(), 200, {
+            "Content-Type": "application/wasm",
+            "Cache-Control": appAssetCacheControl(c, href),
+        });
+    } catch {
+        return c.text("Scanner unavailable", 503);
+    }
 });
 // Dashboard widget documents. No user data (the per-request JSON stays on
 // the framing element), so this is public like /app.css. The middleware

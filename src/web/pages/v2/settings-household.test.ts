@@ -66,6 +66,14 @@ function baseView(
 }
 
 describe("settings household v2", () => {
+    test("members sit in one card, each with an initials avatar", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).toContain('class="fd-settings-members-card"');
+        expect(html).toContain(
+            '<span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">B</span>',
+        );
+    });
+
     test("owner page shows household menu and management targets", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(html).toContain(SETTINGS_HOUSEHOLD_V2_MARKER);
@@ -76,6 +84,50 @@ describe("settings household v2", () => {
         expect(html).toContain('commandfor="household-add-member"');
         expect(html).toContain(`/settings/household/members/${bob.userId}`);
         expect(html).toContain('id="fd-dup-section"');
+    });
+
+    test("the members list shows each member's last active day in the household's timezone", () => {
+        const carol: HouseholdMember = {
+            ...bob,
+            userId: "33333333-3333-4333-8333-333333333333",
+            displayName: "Carol",
+        };
+        const dan: HouseholdMember = {
+            ...bob,
+            userId: "44444444-4444-4444-8444-444444444444",
+            displayName: "Dan",
+        };
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                members: [alice, bob, carol, dan],
+                timezone: "Pacific/Auckland",
+                now: new Date("2026-11-12T05:00:00.000Z"),
+                lastSeen: new Map<string, Date | null>([
+                    // 23:30 UTC on the 11th is already the 12th in Auckland.
+                    [alice.userId, new Date("2026-11-11T23:30:00.000Z")],
+                    [bob.userId, new Date("2026-11-10T23:30:00.000Z")],
+                    [carol.userId, new Date("2026-10-01T12:00:00.000Z")],
+                    [dan.userId, null],
+                ]),
+            }),
+        );
+        const cell = (name: string) =>
+            html.match(
+                new RegExp(
+                    `${name}</span>.*?fd-row__last-active">([^<]*)</span>`,
+                ),
+            )?.[1];
+        expect(cell("Alice")).toBe("Today");
+        expect(cell("Bob")).toBe("Yesterday");
+        expect(cell("Carol")).toBe("Oct 2");
+        expect(cell("Dan")).toBe("Not yet");
+        expect(html).toContain("fd-settings-members-head");
+    });
+
+    test("a page loaded without last-seen data leaves the column out", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).not.toContain("fd-row__last-active");
+        expect(html).not.toContain("fd-settings-members-head");
     });
 
     test("manageable members emit member-actions fill templates", () => {
@@ -101,6 +153,18 @@ describe("settings household v2", () => {
         const memberAddIdx = html.indexOf('commandfor="household-add-member"');
         expect(memberAddIdx).toBeGreaterThan(membersIdx);
         expect(memberAddIdx).toBeLessThan(storesIdx);
+    });
+
+    test("each store links to its page and every member can open the stores page", () => {
+        for (const canManage of [true, false]) {
+            const html = renderSettingsHouseholdV2Page(
+                baseView({ canManage, isOwner: canManage }),
+            );
+            expect(html).toContain('href="/settings/household/stores/s1"');
+            expect(html).toContain(
+                'href="/settings/household/stores">Manage stores</a>',
+            );
+        }
     });
 
     test("validation error with add-member modal does not duplicate page banner", () => {
@@ -134,6 +198,28 @@ describe("settings household v2", () => {
         expect(html).toMatch(
             /<a class="fd-row__link"[^>]*>(?:(?!<\/a>).)*fd-row__chevron/,
         );
+    });
+
+    test("owner sees plurals_same_food control", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).toContain(
+            'action="/settings/household/plurals-same-food"',
+        );
+        expect(html).toContain("Treat singular and plural as the same food");
+    });
+
+    test("member viewer sees plurals_same_food as read-only", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                isOwner: false,
+                canManage: false,
+                pluralsSameFood: true,
+            }),
+        );
+        expect(html).not.toContain(
+            'action="/settings/household/plurals-same-food"',
+        );
+        expect(html).toContain(">On</span>");
     });
 
     test("member viewer is read-only for household name and stores", () => {

@@ -13,6 +13,10 @@ import { stepper } from "../../components/v2/stepper.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { sheet } from "../../components/v2/sheet.js";
 import { searchResultRow } from "../../components/v2/rows.js";
+import {
+    FD_BARCODE_SCAN_SHEET_ID,
+    renderBarcodeScannerSheet,
+} from "./scanner-sheet.js";
 
 export const FD_LOG_SEARCH_SHEET_ID = "fd-log-search";
 export const FD_LOG_AMOUNT_SHEET_ID = "fd-log-amount";
@@ -98,8 +102,20 @@ export type WeighInPrefill = {
     lastLoggedAt?: string | null;
 };
 
+/**
+ * The Quick grid's "Copy yesterday" tile: the slots whose yesterday meals can
+ * be copied (empty today, filled yesterday: the Today prompt's own rule) and
+ * the page to come back to. Only the member's own Today knows this, so every
+ * other page renders no tile.
+ */
+export type CopyYesterdayOpts = {
+    slots: readonly string[];
+    returnTo: string;
+};
+
 export type RenderLogSheetsOpts = {
     timezone: string;
+    copyYesterday?: CopyYesterdayOpts;
     /** Reopen the amount sheet after a validation error. */
     amountOpenOnLoad?: boolean;
     /** Reopen search (preview shots). */
@@ -117,7 +133,17 @@ export type RenderLogSheetsOpts = {
     previewSearch?: "empty" | "results";
     /** Preview-only: pre-filled search query (e.g. "chick"). */
     previewQuery?: string;
+    /** Kill switch `barcode-camera`: when false, hide Scan actions. */
+    barcodeCamera?: boolean;
+    /** Lazy decoder chunk URLs for the scanner sheet. */
+    scannerZxingHref?: string;
+    scannerWasmHref?: string;
+    /** Preview-only: static scanner sheet. */
+    previewScanner?: boolean;
+    scannerOpenOnLoad?: boolean;
 };
+
+export { FD_BARCODE_SCAN_SHEET_ID };
 
 function datetimeLocalValue(raw: string): string {
     const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(raw.trim());
@@ -238,6 +264,31 @@ const PREVIEW_RECENTS: Array<{
         kcal: 105,
         payload: { name: "Banana", food_id: "f-banana", kcal: 105 },
     },
+    {
+        name: "Oatmeal",
+        kcal: 150,
+        payload: { name: "Oatmeal", food_id: "f-oats", kcal: 150 },
+    },
+    {
+        name: "Avocado toast",
+        kcal: 320,
+        payload: { name: "Avocado toast", food_id: "f-avo", kcal: 320 },
+    },
+    {
+        name: "Salmon bowl",
+        kcal: 540,
+        payload: { name: "Salmon bowl", recipe_id: "r-salmon", kcal: 540 },
+    },
+    {
+        name: "Cottage cheese",
+        kcal: 110,
+        payload: { name: "Cottage cheese", food_id: "f-cottage", kcal: 110 },
+    },
+    {
+        name: "Peanut butter",
+        kcal: 190,
+        payload: { name: "Peanut butter", food_id: "f-pb", kcal: 190 },
+    },
 ];
 
 function quickIconBolt(): string {
@@ -248,15 +299,40 @@ function quickIconWater(): string {
     return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3c-4.5 6-7 9.8-7 13a7 7 0 1 0 14 0c0-3.2-2.5-7-7-13z"/></svg>`;
 }
 
+function quickIconScan(): string {
+    return fdIcon("scan");
+}
+
 function quickIconScale(): string {
     return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 20h12M7 20v-2h10v2M8.5 18V10a3.5 3.5 0 0 1 7 0v8"/><path d="M10 8h4"/></svg>`;
 }
 
-function quickActionsHtml(): string {
+function quickIconCopy(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 9h10v11H9z"/><path d="M15 9V5H5v11h4"/></svg>`;
+}
+
+/**
+ * Posts to the route behind Today's "Same as yesterday?" prompt, so a repeat
+ * is the same idempotent write. Disabled (not hidden) while the chosen meal has
+ * nothing to copy; copy-yesterday.js re-points it when the meal changes.
+ */
+function copyYesterdayTile(copy: CopyYesterdayOpts, selected: string): string {
+    const disabled = copy.slots.includes(selected) ? "" : " disabled";
+    return `<form class="fd-quick-form" method="post" action="/log/copy-yesterday" data-fd-copy-yesterday data-fd-copy-yesterday-slots="${escapeHtml(copy.slots.join(" "))}"><input type="hidden" name="slot" value="${escapeHtml(selected)}" /><input type="hidden" name="return_to" value="${escapeHtml(copy.returnTo)}" /><button type="submit" class="fd-quick-tile" data-fd-copy-yesterday-button${disabled}><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCopy()}</span><span class="fd-quick-tile__label">Copy yesterday</span></button></form>`;
+}
+
+function quickActionsHtml(
+    barcodeCamera: boolean,
+    copy?: CopyYesterdayOpts,
+    selectedMeal = "dinner",
+): string {
     const water = `<form class="fd-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250" /><input type="hidden" name="return_to" value="/" /><button type="submit" class="fd-quick-tile"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconWater()}</span><span class="fd-quick-tile__label">Water +250 ml</span></button></form>`;
     const cal = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconBolt()}</span><span class="fd-quick-tile__label">Quick calories</span></button>`;
     const weight = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScale()}</span><span class="fd-quick-tile__label">Weigh in</span></button>`;
-    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}</div>`;
+    const scan = barcodeCamera
+        ? `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Scan barcode</span></button>`
+        : `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Enter barcode</span></button>`;
+    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}${scan}${copy ? copyYesterdayTile(copy, selectedMeal) : ""}</div>`;
 }
 
 function macroField(
@@ -304,10 +380,9 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals-quick")}
         actions,
         openOnLoad: opts.quickCaloriesOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-quick-cal"',
-        'class="fd-sheet fd-sheet--edit fd-log-quick-cal-sheet" id="fd-log-quick-cal" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-quick-cal-sheet",
+        focus: "panel",
+    });
 }
 
 function logWeighInSheet(opts: RenderLogSheetsOpts): string {
@@ -363,10 +438,9 @@ ${stepper({
         actions,
         openOnLoad: opts.weighInOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-weigh-in"',
-        'class="fd-sheet fd-sheet--edit fd-log-weigh-in-sheet" id="fd-log-weigh-in" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-weigh-in-sheet",
+        focus: "panel",
+    });
 }
 
 function recentChipsHtml(items: typeof PREVIEW_RECENTS): string {
@@ -528,7 +602,8 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
     const searchError = opts.searchError
         ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
         : "";
-    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml()}`;
+    const cameraOn = opts.barcodeCamera !== false;
+    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">Recent</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn, opts.copyYesterday, meal)}`;
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;
@@ -549,12 +624,11 @@ ${filterChipsHtml(!showResults)}
         openOnLoad: opts.searchOpenOnLoad,
         closeLabel: "Close search",
         showClose: true,
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-search"',
+        className: "fd-log-search-sheet",
         // Focus goes to the panel; log-sheet.js focuses the search field only
         // with a fine pointer, so a phone's keyboard waits for a tap.
-        'class="fd-sheet fd-sheet--edit fd-log-search-sheet" id="fd-log-search" data-fd-sheet-focus="panel"',
-    );
+        focus: "panel",
+    });
 }
 
 function amountHiddenFields(prefill: LogAmountPrefill | undefined): string {
@@ -678,15 +752,21 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
         actions,
         openOnLoad: opts.amountOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-amount"',
-        'class="fd-sheet fd-sheet--edit fd-log-amount-sheet" id="fd-log-amount" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-amount-sheet",
+        focus: "panel",
+    });
 }
 
 /** Search and amount sheets included once in the v2 shell. */
 export function renderLogSheets(opts: RenderLogSheetsOpts): string {
-    return `${logSearchSheet(opts)}${logAmountSheet(opts)}${logQuickCaloriesSheet(opts)}${logWeighInSheet(opts)}`;
+    const scanner = renderBarcodeScannerSheet({
+        barcodeCamera: opts.barcodeCamera,
+        previewStatic: opts.previewScanner,
+        openOnLoad: opts.scannerOpenOnLoad,
+        zxingScriptHref: opts.scannerZxingHref,
+        wasmHref: opts.scannerWasmHref,
+    });
+    return `${logSearchSheet(opts)}${logAmountSheet(opts)}${logQuickCaloriesSheet(opts)}${logWeighInSheet(opts)}${scanner}`;
 }
 
 /** For tests: unit chips offered on the amount sheet for the given factors. */

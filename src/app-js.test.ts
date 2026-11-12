@@ -29,10 +29,24 @@ function shellPage(
     });
 }
 
+/** Inline script bodies, read with an HTML parser rather than a tag regex. */
 function scriptBodies(html: string): string[] {
-    return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
-        .map((m) => (m[2] ?? "").trim())
-        .filter((body) => body.length > 0);
+    const bodies: string[] = [];
+    let current = "";
+    new HTMLRewriter()
+        .on("script", {
+            element(el) {
+                current = "";
+                el.onEndTag(() => {
+                    bodies.push(current.trim());
+                });
+            },
+            text(chunk) {
+                current += chunk.text;
+            },
+        })
+        .transform(html);
+    return bodies.filter((body) => body.length > 0);
 }
 
 test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
@@ -61,17 +75,19 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
             src = src
                 .replace(
                     "const THEME_PAGE_BG = null;",
-                    `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+                    () =>
+                        `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
                 )
                 .replace(
                     "const THEME_NAV_BG = null;",
-                    `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
+                    () =>
+                        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
                 );
         }
         if (path.endsWith("toast.js")) {
             src = src.replace(
                 "const TOAST_CATALOG = null;",
-                `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
+                () => `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
             );
         }
         expect(js).toContain(`(function () {\n${src}\n})();`);

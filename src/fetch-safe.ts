@@ -6,6 +6,7 @@ export const FOODABLE_USER_AGENT = `Mozilla/5.0 (compatible; Foodable/${VERSION}
 const ROBOTS_UA = "Foodable";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_MIN_ATTEMPT_MS = 2_000;
 const DEFAULT_MAX_BYTES = 3 * 1024 * 1024;
 const ROBOTS_MAX_BYTES = 512 * 1024;
 const MAX_PAGE_REDIRECTS = 3;
@@ -202,52 +203,43 @@ function isPrivateIpv4(octets: number[]): boolean {
 }
 
 function isPrivateIpv6(parts: bigint[]): boolean {
-    if (parts.every((p) => p === 0n)) return true;
-    if (parts.slice(0, 7).every((p) => p === 0n) && parts[7] === 1n) {
-        return true;
-    }
+    // Every prefix below is refused outright rather than by its embedded
+    // IPv4 address: a recipe site never needs a tunnel or transition address,
+    // and refusing the prefix leaves nothing to mis-parse.
     const checks: Array<[bigint[], number]> = [
+        // ::/96: unspecified, loopback and the deprecated IPv4-compatible form
+        [[0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 96],
+        // ::ffff:0:0:0/96: IPv4-translated (SIIT)
+        [[0n, 0n, 0n, 0n, 0xffffn, 0n, 0n, 0n], 96],
+        // 100::/64: discard-only
+        [[0x0100n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 64],
+        // 64:ff9b::/96 NAT64 and 64:ff9b:1::/48 local-use NAT64
+        [[0x0064n, 0xff9bn, 0n, 0n, 0n, 0n, 0n, 0n], 96],
+        [[0x0064n, 0xff9bn, 0x0001n, 0n, 0n, 0n, 0n, 0n], 48],
+        // 2001::/32 Teredo, 2001:db8::/32 documentation
+        [[0x2001n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
+        [[0x2001n, 0x0db8n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
+        // 2002::/16 6to4
+        [[0x2002n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 16],
+        // fc00::/7 unique local, fe80::/10 link-local, fec0::/10 site-local,
+        // ff00::/8 multicast
         [[0xfc00n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 7],
         [[0xfe80n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 10],
+        [[0xfec0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 10],
         [[0xff00n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 8],
-        [[0x2001n, 0x0db8n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
-        [[0x0064n, 0xff9bn, 0n, 0n, 0n, 0n, 0n, 0n], 96],
-        // 6to4 tunnels an IPv4 address inside the prefix; a recipe site never
-        // needs one, so the whole prefix is refused.
-        [[0x2002n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 16],
     ];
     if (checks.some(([base, len]) => ipv6InCidr(parts, base, len))) {
         return true;
     }
-    if (
-        parts[0] === 0n &&
-        parts[1] === 0n &&
-        parts[2] === 0n &&
-        parts[3] === 0n
-    ) {
-        if (parts[4] === 0n && parts[5] === 0xffffn) {
-            const octets = [
-                Number(parts[6]! >> 8n),
-                Number(parts[6]! & 0xffn),
-                Number(parts[7]! >> 8n),
-                Number(parts[7]! & 0xffn),
-            ];
-            return isPrivateIpv4(octets);
-        }
-        if (parts[4] === 0n && parts[5] === 0n) {
-            const v32 =
-                (Number(parts[6]! >> 8n) << 24) |
-                (Number(parts[6]! & 0xffn) << 16) |
-                (Number(parts[7]! >> 8n) << 8) |
-                Number(parts[7]! & 0xffn);
-            const octets = [
-                (v32 >>> 24) & 0xff,
-                (v32 >>> 16) & 0xff,
-                (v32 >>> 8) & 0xff,
-                v32 & 0xff,
-            ];
-            return isPrivateIpv4(octets);
-        }
+    // ::ffff:a.b.c.d (IPv4-mapped) is judged by the address it carries.
+    if (parts.slice(0, 5).every((p) => p === 0n) && parts[5] === 0xffffn) {
+        const octets = [
+            Number(parts[6]! >> 8n),
+            Number(parts[6]! & 0xffn),
+            Number(parts[7]! >> 8n),
+            Number(parts[7]! & 0xffn),
+        ];
+        return isPrivateIpv4(octets);
     }
     return false;
 }
@@ -335,10 +327,15 @@ function memoryFetchHost(hostname: string): string {
     return h;
 }
 
+/** Every address the host resolved to, each one checked public. */
+type CheckedAddresses = { ok: true; addresses: string[] };
+
 async function resolveHost(
     host: string,
     resolve: (host: string) => Promise<string[]>,
-): Promise<{ ok: true } | { ok: false; reason: FetchFailure; detail: string }> {
+): Promise<
+    CheckedAddresses | { ok: false; reason: FetchFailure; detail: string }
+> {
     try {
         const addresses = await resolve(host);
         if (addresses.length === 0) {
@@ -357,7 +354,7 @@ async function resolveHost(
                 };
             }
         }
-        return { ok: true };
+        return { ok: true, addresses };
     } catch (err) {
         return {
             ok: false,
@@ -500,21 +497,131 @@ function pathAllowed(policy: RobotsPolicy, pageUrl: string): boolean {
     return parser.isAllowed(pageUrl, ROBOTS_UA) !== false;
 }
 
-type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
+type FetchFn = (
+    input: string | URL,
+    init?: BunFetchRequestInit,
+) => Promise<Response>;
+
+function isIpLiteralHost(hostname: string): boolean {
+    const bare = stripIpv6Brackets(hostname);
+    return parseIpv4(bare) !== null || bare.includes(":");
+}
+
+/** `url` with its host swapped for `address`, which must be a public IP. */
+function addressedTo(url: URL, address: string): URL {
+    const bare = stripIpv6Brackets(address);
+    const pinned = new URL(url.href);
+    pinned.hostname = bare.includes(":") ? `[${bare}]` : bare;
+    // What is handed to fetch is judged again, not trusted to have parsed as
+    // the address that was checked.
+    if (!isPublicAddress(pinned.hostname)) {
+        throw new Error("Refusing to connect to a non-public address");
+    }
+    return pinned;
+}
 
 export function createSafeFetcher(deps?: {
     fetch?: FetchFn;
+    /**
+     * Connect to the address that was checked (the default). Off hands
+     * `fetch` the URL as written, so a test double can route on the hostname.
+     */
+    pinAddresses?: boolean;
     resolve?: (host: string) => Promise<string[]>;
     now?: () => number;
     robotsTtlMs?: number;
     defaultTimeoutMs?: number;
+    /**
+     * The least a connection attempt gets while other addresses remain
+     * (default 2 s); the shortest slice of the deadline one address is held to.
+     */
+    minAttemptMs?: number;
 }) {
     const doFetch: FetchFn = deps?.fetch ?? globalThis.fetch.bind(globalThis);
+    const pinAddresses = deps?.pinAddresses !== false;
     const resolve = deps?.resolve ?? defaultResolve;
     const now = deps?.now ?? (() => Date.now());
     const robotsTtlMs = deps?.robotsTtlMs ?? DEFAULT_ROBOTS_TTL_MS;
     const defaultTimeoutMs = deps?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const minAttemptMs = deps?.minAttemptMs ?? DEFAULT_MIN_ATTEMPT_MS;
     const robotsCache = new Map<string, RobotsCacheEntry>();
+
+    /**
+     * GET `url`, connecting to one of `addresses` (all already checked public)
+     * rather than letting the runtime resolve the hostname a second time: a
+     * DNS answer that changes between the check and the connection (rebinding)
+     * then cannot reach an address that was not checked. The `Host` header and
+     * the TLS server name stay the original hostname, so virtual hosting, SNI
+     * and certificate verification are unchanged. Addresses are tried in
+     * order, so a host with a dead IPv6 route still answers over IPv4.
+     *
+     * While more than one address remains an attempt gets a slice of what is
+     * left of `deadlineAt` (the fetch's own deadline, as a Date.now() time):
+     * its share, but at least `minAttemptMs`. A blackholed first address then
+     * cannot spend the whole deadline before the next one is tried, and the
+     * whole fetch still ends on `deadlineAt`. The last address, or the only
+     * one, gets everything that is left. The slice ends with the response
+     * headers; reading the body is bound by the fetch's deadline alone.
+     */
+    async function fetchChecked(
+        url: URL,
+        addresses: string[],
+        init: BunFetchRequestInit & { headers: Record<string, string> },
+        deadlineAt: number,
+    ): Promise<Response> {
+        if (!pinAddresses || isIpLiteralHost(url.hostname)) {
+            return doFetch(url.href, init);
+        }
+        // SNI is a hostname, never with the root-label dot.
+        const serverName = url.hostname.replace(/\.$/, "");
+        const parent = init.signal;
+        let lastError: unknown;
+        for (const [index, address] of addresses.entries()) {
+            const left = addresses.length - index;
+            const attempt = new AbortController();
+            // The fetch's own deadline (or a caller's abort) ends the attempt,
+            // and the response body after it.
+            const onParentAbort = () => attempt.abort(parent?.reason);
+            if (parent?.aborted) onParentAbort();
+            else parent?.addEventListener("abort", onParentAbort);
+            let sliceEnded = false;
+            let slice: ReturnType<typeof setTimeout> | undefined;
+            if (left > 1) {
+                const remaining = Math.max(0, deadlineAt - Date.now());
+                slice = setTimeout(
+                    () => {
+                        sliceEnded = true;
+                        attempt.abort();
+                    },
+                    Math.min(
+                        remaining,
+                        Math.max(minAttemptMs, remaining / left),
+                    ),
+                );
+            }
+            try {
+                return await doFetch(addressedTo(url, address).href, {
+                    ...init,
+                    headers: { ...init.headers, Host: url.host },
+                    tls: { serverName },
+                    signal: attempt.signal,
+                });
+            } catch (err) {
+                parent?.removeEventListener("abort", onParentAbort);
+                if (
+                    !sliceEnded &&
+                    (parent?.aborted ||
+                        (err instanceof Error && err.name === "AbortError"))
+                ) {
+                    throw err;
+                }
+                lastError = err;
+            } finally {
+                clearTimeout(slice);
+            }
+        }
+        throw lastError;
+    }
 
     async function fetchBytes(
         url: URL,
@@ -547,26 +654,33 @@ export function createSafeFetcher(deps?: {
         }
 
         let current = url;
+        let addresses = resolved.addresses;
         let redirects = 0;
         const controller = new AbortController();
+        const deadlineAt = Date.now() + opts.timeoutMs;
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
         try {
             while (true) {
                 let response: Response;
                 try {
-                    response = await doFetch(current.href, {
-                        method: "GET",
-                        redirect: "manual",
-                        headers: {
-                            "User-Agent": FOODABLE_USER_AGENT,
-                            Accept: opts.accept
-                                ? `${opts.accept.join(", ")}, */*;q=0.1`
-                                : "*/*",
-                            "Accept-Language": "en",
+                    response = await fetchChecked(
+                        current,
+                        addresses,
+                        {
+                            method: "GET",
+                            redirect: "manual",
+                            headers: {
+                                "User-Agent": FOODABLE_USER_AGENT,
+                                Accept: opts.accept
+                                    ? `${opts.accept.join(", ")}, */*;q=0.1`
+                                    : "*/*",
+                                "Accept-Language": "en",
+                            },
+                            signal: controller.signal,
                         },
-                        signal: controller.signal,
-                    });
+                        deadlineAt,
+                    );
                 } catch (err) {
                     const message =
                         err instanceof Error ? err.message : String(err);
@@ -655,6 +769,7 @@ export function createSafeFetcher(deps?: {
                             detail: hopResolved.detail,
                         };
                     }
+                    addresses = hopResolved.addresses;
                     current = next;
                     continue;
                 }
@@ -767,11 +882,12 @@ export function createSafeFetcher(deps?: {
             maxBytes: number;
             timeoutMs: number;
             allowedHosts?: readonly string[];
+            redirectAllowed?: (next: URL) => boolean;
         },
     ): Promise<FetchOutcome> {
-        // Known gap: the address is checked before the connection and fetch
-        // cannot pin it (DNS rebinding). Accepted for a one-household app
-        // behind sign-in.
+        // Each hop is resolved and checked, then connected to by the address
+        // that was checked (`fetchChecked`), so a second DNS answer cannot
+        // send the request somewhere the check did not see.
         if (!urlAllowedForFetch(start)) {
             return {
                 ok: false,
@@ -804,16 +920,23 @@ export function createSafeFetcher(deps?: {
         }
 
         let current = start;
+        // The addresses a redirect hop was checked against, carried to the
+        // request for that hop so it is resolved once, not twice.
+        let carried: CheckedAddresses | null = null;
         let redirects = 0;
         const controller = new AbortController();
+        const deadlineAt = Date.now() + opts.timeoutMs;
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
         try {
             while (true) {
-                const resolved = await beforeDeadline(
-                    resolveHost(current.hostname, resolve),
-                    controller.signal,
-                );
+                const resolved =
+                    carried ??
+                    (await beforeDeadline(
+                        resolveHost(current.hostname, resolve),
+                        controller.signal,
+                    ));
+                carried = null;
                 if (resolved === "timeout")
                     return {
                         ok: false,
@@ -832,16 +955,21 @@ export function createSafeFetcher(deps?: {
 
                 let response: Response;
                 try {
-                    response = await doFetch(current.href, {
-                        method: "GET",
-                        redirect: "manual",
-                        headers: {
-                            "User-Agent": FOODABLE_USER_AGENT,
-                            Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
-                            "Accept-Language": "en",
+                    response = await fetchChecked(
+                        current,
+                        resolved.addresses,
+                        {
+                            method: "GET",
+                            redirect: "manual",
+                            headers: {
+                                "User-Agent": FOODABLE_USER_AGENT,
+                                Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
+                                "Accept-Language": "en",
+                            },
+                            signal: controller.signal,
                         },
-                        signal: controller.signal,
-                    });
+                        deadlineAt,
+                    );
                 } catch (err) {
                     const message =
                         err instanceof Error ? err.message : String(err);
@@ -903,6 +1031,14 @@ export function createSafeFetcher(deps?: {
                             detail: next.href,
                         };
                     }
+                    if (opts.redirectAllowed && !opts.redirectAllowed(next)) {
+                        return {
+                            ok: false,
+                            reason: "invalid_link",
+                            status: response.status,
+                            detail: next.href,
+                        };
+                    }
                     if (
                         opts.allowedHosts?.length &&
                         !hostnameAllowedForList(
@@ -957,6 +1093,7 @@ export function createSafeFetcher(deps?: {
                             };
                         }
                     }
+                    carried = hopResolved;
                     current = next;
                     continue;
                 }
@@ -1031,6 +1168,12 @@ export function createSafeFetcher(deps?: {
                 maxBytes?: number;
                 timeoutMs?: number;
                 allowedHosts?: readonly string[];
+                /**
+                 * Vetoes a redirect hop: called with the next URL once it has
+                 * passed the address checks, and before it is resolved or
+                 * requested. Returning false ends the fetch as `invalid_link`.
+                 */
+                redirectAllowed?: (next: URL) => boolean;
             },
         ): Promise<FetchOutcome> {
             try {
@@ -1042,6 +1185,7 @@ export function createSafeFetcher(deps?: {
                     maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
                     timeoutMs: opts.timeoutMs ?? defaultTimeoutMs,
                     allowedHosts: opts.allowedHosts,
+                    redirectAllowed: opts.redirectAllowed,
                 });
             } catch {
                 return Promise.resolve({

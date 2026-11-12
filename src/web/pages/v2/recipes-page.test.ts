@@ -172,39 +172,141 @@ describe("groupRecipeIngredientsByPlace", () => {
 });
 
 describe("renderRecipeDetailBody", () => {
-    test("cook form exposes the fields the cook route reads", () => {
-        const html = renderRecipeDetailBody({
-            chrome,
-            recipe: RECIPE,
-            ingredients: [],
-            ingredientGroups: [],
-            macrosPerPortion: {
-                calories: 200,
-                protein_g: 8,
-                carbs_g: 30,
-                fat_g: 5,
-                fiber_g: null,
-                sugar_g: null,
-                alcohol_g: null,
-                incomplete: false,
-            },
-            gapReasons: [],
-            members: [{ userId: "u1", displayName: "Alice" }],
-            viewerId: "u1",
-            portionCount: 2,
-        });
-        expect(html).toContain('action="/recipes/r1/cook"');
-        expect(html).toContain('name="portion:u1"');
-        expect(html).toContain('name="total_portions"');
-        expect(html).toContain('name="meal_type"');
-        expect(html).toContain('name="deduct_stock"');
-        expect(html).toContain('name="log_meals"');
+    const viewBase = {
+        chrome,
+        recipe: RECIPE,
+        ingredients: [],
+        ingredientGroups: [],
+        macrosPerPortion: {
+            calories: 200,
+            protein_g: 8,
+            carbs_g: 30,
+            fat_g: 5,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: false,
+        },
+        gapReasons: [],
+        members: [{ userId: "u1", displayName: "Alice" }],
+        viewerId: "u1",
+        portionCount: 2,
+    };
+
+    const cook = {
+        recipeId: "r1",
+        recipeName: "Pancakes",
+        servings: 4,
+        yieldPortions: 4,
+        preview: {
+            totalPortions: 4,
+            lines: [],
+            movements: [],
+            shortfalls: [],
+            unmeasured: [],
+        },
+        slot: "dinner" as const,
+        macrosPerPortion: viewBase.macrosPerPortion,
+        submitKey: "k1",
+    };
+
+    test("Cook opens the cook sheet instead of an inline form", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, cook });
+        expect(html).toContain(
+            'commandfor="fd-recipe-cook-sheet" command="show-modal"',
+        );
+        expect(html).toContain('id="fd-recipe-cook-sheet"');
+        expect(html).toContain('action="/recipes/r1/cook/confirm"');
+        expect(html).not.toContain('action="/recipes/r1/cook"');
+        expect(html).not.toContain('name="portion:u1"');
+        expect(html).toContain('id="fd-recipe-cook-heading"');
         expect(html).toContain("fd-recipe-macro-tiles");
         expect(html).toContain("fd-recipe-macros-kicker");
         expect(html).toContain("Per serving");
         expect(html).toContain('id="fd-recipe-method-heading">Steps</');
         expect(html).toContain("fd-recipe-back__btn");
         expect(html).toContain("fd-dot--protein");
+    });
+
+    test("the header actions run Share, Add to plan, Cook, with Cook last", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            cook,
+            plan: {
+                recipeId: "r1",
+                recipeName: "Pancakes",
+                yieldPortions: 4,
+                today: "2026-11-12",
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 4,
+            },
+        });
+        const row = html.match(
+            /<div class="fd-recipe-actions"[\s\S]*?<\/div>/,
+        )![0];
+        const share = row.indexOf('commandfor="fd-recipe-share-sheet"');
+        const plan = row.indexOf("fd-recipe-plan-sheet");
+        const cookAt = row.indexOf('commandfor="fd-recipe-cook-sheet"');
+        expect(share).toBeGreaterThan(-1);
+        expect(plan).toBeGreaterThan(share);
+        expect(cookAt).toBeGreaterThan(plan);
+    });
+
+    test("Share opens a sheet that posts to this recipe's share route", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).toContain(
+            'commandfor="fd-recipe-share-sheet" command="show-modal"',
+        );
+        expect(html).toContain('id="fd-recipe-share-sheet"');
+        expect(html).toContain('action="/recipes/r1/share"');
+        expect(html).toContain("Share recipe");
+    });
+
+    test("a refused share shows its error in the open sheet, not above the page", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            error: "Choose how long the link should work.",
+            share: { open: true },
+        });
+        expect(html).toContain('id="fd-recipe-share-sheet"');
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).not.toContain("fd-recipe-error");
+        expect(
+            html.split("Choose how long the link should work.").length - 1,
+        ).toBe(1);
+    });
+
+    test("without a cook view there is no Cook button or sheet", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).not.toContain("fd-recipe-cook-sheet");
+        expect(html).not.toContain("fd-recipe-cook-btn");
+    });
+
+    test("the star sits in the back row, outside the heading, and posts back to the recipe", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('action="/recipes/r1/favourite"');
+        expect(form).toContain('name="on" value="1"');
+        expect(form).toContain('name="back" value="recipe"');
+        expect(form).toContain('aria-label="Add Pancakes to favourites"');
+        expect(form).not.toContain("fd-star--on");
+        const back = html.match(/<p class="fd-recipe-back">[\s\S]*?<\/p>/);
+        expect(back?.[0] ?? "").not.toContain("<form");
+        expect(html.indexOf("fd-recipe-back")).toBeLessThan(
+            html.indexOf("fd-star-form"),
+        );
+        expect(html.indexOf("fd-star-form")).toBeLessThan(
+            html.indexOf("fd-recipe-title"),
+        );
+    });
+
+    test("a starred recipe shows a filled star that removes itself", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, favourite: true });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('name="on" value="0"');
+        expect(form).toContain('aria-label="Remove Pancakes from favourites"');
+        expect(form).toContain("fd-star--on");
     });
 
     test("incomplete macros show missing-factor copy", () => {

@@ -13,6 +13,7 @@ import {
     withSiteMembershipPeek,
 } from "../db/actor.js";
 import { getHouseholdMembership } from "../db/household.js";
+import { recordUserSeen } from "../last-seen.js";
 import { readSiteSession, SITE_COOKIE } from "../site-session.js";
 import { forbiddenDashboardHtml } from "./loaders.js";
 
@@ -32,6 +33,12 @@ async function ensureSiteMembershipResolved(
     if (c.get("siteMembershipResolved")) {
         return c.get("siteMembership") ?? null;
     }
+    // Every signed-in site request counts as the user being active: pages,
+    // form posts and the widget frames a page embeds. Static assets never get
+    // here and MCP has its own token use. Fire and forget: the recorder
+    // throttles to one write an hour and never rejects, so no request waits on
+    // it or fails because of it.
+    void recordUserSeen(userId);
     const member = await runAsSystem("site membership", () =>
         getHouseholdMembership(userId),
     );

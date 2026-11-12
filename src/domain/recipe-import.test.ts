@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { test, expect, describe } from "bun:test";
 import { TOASTS } from "../copy/toasts.js";
 import type { FetchFailure, SafeFetcher } from "../fetch-safe.js";
-import { createMemoryFoodsStore } from "./foods.js";
+import { createMemoryFoodsStore, findOrCreateManualFood } from "./foods.js";
 import {
     importOutcomeMessage,
     importOutcomeToastKey,
@@ -1971,5 +1971,34 @@ describe("source links", () => {
         expect(dup.recipeName).toBe("Soup");
         expect(dup.source?.url).toBe("https://example.com/soup");
         expect(fetcher.calls.fetch).toBe(0);
+    });
+
+    test("links large eggs to existing Eggs without changing the stored name", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        foods.setPluralsSameFood(HH, false);
+        const eggs = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+        const result = await importRecipeFromSharedText(
+            {
+                recipes,
+                foods,
+                fetcher: fakeFetcher({}),
+                transaction: (fn) => fn(),
+            },
+            {
+                householdId: HH,
+                creatorId: USER,
+                text: "Omelette\n\n2 large eggs (beaten)\n\n1. Whisk and cook.",
+            },
+        );
+        expect(result.status).toBe("imported");
+        const ingredients = await recipes.listIngredients(HH, result.recipeId!);
+        expect(ingredients).toHaveLength(1);
+        expect(ingredients[0]?.foodId).toBe(eggs.id);
+        expect(ingredients[0]?.displayName).toBe("Eggs");
+        expect((await foods.getFood(HH, eggs.id))?.name).toBe("Eggs");
+        expect(
+            (await foods.listFoods(HH)).filter((f) => !f.archivedAt),
+        ).toHaveLength(1);
     });
 });

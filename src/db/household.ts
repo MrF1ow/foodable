@@ -12,6 +12,11 @@ import {
     setSocialReaderEnabled,
 } from "../household.js";
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
+import {
+    GROCERY_DEFAULT_STORE_KEY,
+    GROCERY_USE_USUAL_STORE_KEY,
+} from "../domain/settings.js";
+import { SCORE_DEFAULT_KEY } from "../domain/score-settings.js";
 import { liveAuthStore } from "./users.js";
 import { getProfile, type Profile } from "./profiles.js";
 import { deleteAllUserData } from "./nutrition.js";
@@ -352,6 +357,64 @@ export async function listHouseholdsForRecipeSweep(): Promise<
     });
 }
 
+function pluralsSameFoodFromRow(value: unknown): boolean {
+    return value === true;
+}
+
+export async function getPluralsSameFood(
+    householdId: string,
+): Promise<boolean> {
+    return run(async (tx) => {
+        let data;
+        try {
+            data = await maybeOne<{ plurals_same_food: unknown }>(
+                tx,
+                tx`
+                    select plurals_same_food
+                    from ${tx.unsafe(HOUSEHOLDS)}
+                    where id = ${householdId}
+                `,
+                "load plurals_same_food",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to load plurals_same_food: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to load plurals_same_food");
+        }
+        return pluralsSameFoodFromRow(data.plurals_same_food);
+    });
+}
+
+export async function setPluralsSameFood(
+    householdId: string,
+    enabled: boolean,
+): Promise<boolean> {
+    return run(async (tx) => {
+        let data;
+        try {
+            data = await maybeOne<{ plurals_same_food: unknown }>(
+                tx,
+                tx`
+                    update ${tx.unsafe(HOUSEHOLDS)}
+                    set plurals_same_food = ${enabled}
+                    where id = ${householdId}
+                    returning plurals_same_food
+                `,
+                "update plurals_same_food",
+            );
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to update plurals_same_food: ${message}`);
+        }
+        if (!data) {
+            throw new Error("Failed to update plurals_same_food");
+        }
+        return pluralsSameFoodFromRow(data.plurals_same_food);
+    });
+}
+
 export async function getHouseholdConfig(
     householdId: string,
 ): Promise<HouseholdConfig> {
@@ -421,6 +484,18 @@ export async function updateHouseholdConfig(
                             ),
                             true
                         )
+                        -- The grocery and score keys are not part of the typed config; keep them.
+                        || jsonb_strip_nulls(jsonb_build_object(
+                            ${GROCERY_DEFAULT_STORE_KEY}::text,
+                            household_preferences ->
+                                ${GROCERY_DEFAULT_STORE_KEY}::text,
+                            ${GROCERY_USE_USUAL_STORE_KEY}::text,
+                            household_preferences ->
+                                ${GROCERY_USE_USUAL_STORE_KEY}::text,
+                            ${SCORE_DEFAULT_KEY}::text,
+                            household_preferences ->
+                                ${SCORE_DEFAULT_KEY}::text
+                        ))
                     where id = ${householdId}
                     returning name, recipe_search_places, household_preferences
                 `,

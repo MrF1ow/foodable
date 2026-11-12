@@ -30,6 +30,7 @@ const RECIPES = "recipes";
 const RECIPE_INGREDIENTS = "recipe_ingredients";
 const RECIPE_PORTIONS = "recipe_portions";
 const RECIPE_IMPORTS = "recipe_imports";
+const RECIPE_FAVOURITES = "recipe_favourites";
 const RECIPE_COLS =
     "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes, verification, updated_at";
 const RECIPE_INGREDIENT_COLS =
@@ -522,6 +523,69 @@ export function liveRecipesStore(): RecipesStore {
                     return data.map((row) => recipeImportFromRow(row as never));
                 } catch (err) {
                     throw pgError("list recipe imports", err);
+                }
+            });
+        },
+        async setFavourite(householdId, userId, recipeId, on) {
+            return run(async (tx) => {
+                try {
+                    // A recipe id from outside the household is refused, not starred.
+                    const recipe = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            select id
+                            from ${tx.unsafe(RECIPES)}
+                            where id = ${recipeId}
+                              and household_id = ${householdId}
+                        `,
+                    );
+                    if (recipe.length === 0) return false;
+                    if (on) {
+                        await rows(
+                            tx,
+                            tx`
+                                insert into ${tx.unsafe(RECIPE_FAVOURITES)} (
+                                    household_id, user_id, recipe_id
+                                )
+                                values (${householdId}, ${userId}, ${recipeId})
+                                on conflict (user_id, recipe_id) do nothing
+                                returning recipe_id
+                            `,
+                        );
+                    } else {
+                        await rows(
+                            tx,
+                            tx`
+                                delete from ${tx.unsafe(RECIPE_FAVOURITES)}
+                                where household_id = ${householdId}
+                                  and user_id = ${userId}
+                                  and recipe_id = ${recipeId}
+                                returning recipe_id
+                            `,
+                        );
+                    }
+                    return true;
+                } catch (err) {
+                    throw pgError("set recipe favourite", err);
+                }
+            });
+        },
+        async listFavourites(householdId, userId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows<{ recipe_id: string }>(
+                        tx,
+                        tx`
+                            select recipe_id
+                            from ${tx.unsafe(RECIPE_FAVOURITES)}
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                            order by created_at asc, recipe_id asc
+                        `,
+                    );
+                    return data.map((row) => String(row.recipe_id));
+                } catch (err) {
+                    throw pgError("list recipe favourites", err);
                 }
             });
         },

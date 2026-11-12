@@ -29,6 +29,8 @@ export type LogSearchSourceItem = {
     fat_g_per_portion?: number | null;
     /** Meal total kcal for history rows (not per 100 g). */
     meal_kcal?: number | null;
+    /** History rows: the logged meal, so a multi-item or free-text log can be logged again whole. */
+    meal_id?: string | null;
     /** Fridge quantity on hand, for the row subtitle only (never a log amount). */
     stock_amount?: number | null;
     stock_unit?: string | null;
@@ -39,6 +41,8 @@ export type LogSearchSourceItem = {
     grams_per_each?: number | null;
     grams_per_ml?: number | null;
     logged_at?: string | null;
+    /** Household / OFF product score 0–100 when scored. */
+    product_score?: number | null;
 };
 
 export type LogSearchSources = Partial<
@@ -69,9 +73,12 @@ export type LogSearchResultItem = {
     barcode?: string | null;
     /** Meal total kcal for history row subtitles only. */
     meal_kcal?: number | null;
+    /** History rows: the logged meal's id. */
+    meal_id?: string | null;
     /** Fridge quantity on hand, for the row subtitle only (never a log amount). */
     stock_amount?: number | null;
     stock_unit?: string | null;
+    product_score?: number | null;
 };
 
 export type LogSearchResult = {
@@ -172,11 +179,13 @@ function toResultItem(item: LogSearchSourceItem): LogSearchResultItem {
         out.carbs_g = item.carbs_g_per_portion;
     if (item.fat_g_per_portion != null) out.fat_g = item.fat_g_per_portion;
     if (item.meal_kcal != null) out.meal_kcal = item.meal_kcal;
+    if (item.meal_id != null) out.meal_id = item.meal_id;
     if (item.stock_amount != null) out.stock_amount = item.stock_amount;
     if (item.stock_unit != null) out.stock_unit = item.stock_unit;
     if (item.amount != null) out.amount = item.amount;
     if (item.unit != null) out.unit = item.unit;
     if (item.barcode != null) out.barcode = item.barcode;
+    if (item.product_score != null) out.product_score = item.product_score;
     return out;
 }
 

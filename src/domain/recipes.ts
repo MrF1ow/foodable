@@ -9,6 +9,7 @@ import {
     findOrCreateFoodByBarcode,
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
+    findOrCreateManualFoodForRecipeImport,
     FoodsInputError,
     similarFoodsForNames,
     SimilarFoodsError,
@@ -186,6 +187,18 @@ export type RecipesStore = {
         urls: string[],
     ): Promise<Recipe | null>;
     listImports(householdId: string): Promise<RecipeImport[]>;
+    /**
+     * Stars (`on`) or unstars a recipe for one member. Either way is idempotent.
+     * Returns false when the recipe is not in the household, true otherwise.
+     */
+    setFavourite(
+        householdId: string,
+        userId: string,
+        recipeId: string,
+        on: boolean,
+    ): Promise<boolean>;
+    /** The ids of the recipes this member has starred, oldest star first. */
+    listFavourites(householdId: string, userId: string): Promise<string[]>;
 };
 
 export type RecipePatch = {
@@ -772,6 +785,12 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
     const recipes: MemoryRecipeRow[] = [];
     const ingredients: RecipeIngredient[] = [];
     const portions: RecipePortion[] = [];
+    // One row per star, in the order they were given.
+    const favourites: {
+        householdId: string;
+        userId: string;
+        recipeId: string;
+    }[] = [];
     let linkedDismissals: NoticeDismissalsStore | undefined;
     const imports = new Map<string, RecipeImport>();
 
@@ -871,6 +890,12 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             );
             portions.length = 0;
             portions.push(...keepPortions);
+            const keepFavourites = favourites.filter(
+                (row) =>
+                    !(row.householdId === householdId && row.recipeId === id),
+            );
+            favourites.length = 0;
+            favourites.push(...keepFavourites);
             imports.delete(id);
             return removed;
         },
@@ -1019,6 +1044,33 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 });
             }
             return out;
+        },
+        async setFavourite(householdId, userId, recipeId, on) {
+            const exists = recipes.some(
+                (row) => row.householdId === householdId && row.id === recipeId,
+            );
+            if (!exists) return false;
+            const at = favourites.findIndex(
+                (row) =>
+                    row.householdId === householdId &&
+                    row.userId === userId &&
+                    row.recipeId === recipeId,
+            );
+            if (on && at < 0) {
+                favourites.push({ householdId, userId, recipeId });
+            } else if (!on && at >= 0) {
+                favourites.splice(at, 1);
+            }
+            return true;
+        },
+        async listFavourites(householdId, userId) {
+            return favourites
+                .filter(
+                    (row) =>
+                        row.householdId === householdId &&
+                        row.userId === userId,
+                )
+                .map((row) => row.recipeId);
         },
         async deleteStaleUnverified(householdId, before) {
             const cutoff = before.toISOString();
@@ -2146,7 +2198,7 @@ export async function importRecipeFromText(
                         )
                     ).food;
                 } else {
-                    food = await findOrCreateManualFood(
+                    food = await findOrCreateManualFoodForRecipeImport(
                         foods,
                         input.householdId,
                         "food",

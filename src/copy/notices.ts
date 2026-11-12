@@ -2,7 +2,13 @@ import type { Notice, NoticeCode } from "../domain/notices.js";
 import type { RecipeGapNutrient } from "../domain/recipes.js";
 
 export type NoticeRoute =
-    "usualProductPicker" | "addFridgeItemToGrocery" | "possibleDuplicatePair";
+    | "usualProductPicker"
+    | "addFridgeItemToGrocery"
+    | "possibleDuplicatePair"
+    /** The one-tap actions of the running-low and missing-for-plan notices. */
+    | "actOnNotice"
+    /** Opens the weigh-in sheet. */
+    | "weighInSheet";
 
 export const POSSIBLE_DUPLICATE_OF_PREFIX = "Possible duplicate of";
 
@@ -23,6 +29,12 @@ export type NoticeCopy = {
     dismissible: boolean;
     dismissLabel?: string;
     dismissPair?: true;
+    /**
+     * What a dismissal is tied to, beyond the subject: it stops hiding the
+     * notice once this changes (a newer weigh-in, the next restock). Stored in
+     * the dismissal's related key.
+     */
+    dismissScope?: (notice: Notice) => string;
     badgeTone?: "bad" | "warn" | "dim";
 };
 
@@ -38,6 +50,16 @@ export function noticeCodeDismissible(code: NoticeCode): boolean {
 
 export function noticeDismissPair(code: NoticeCode): boolean {
     return NOTICE_COPY[code].dismissPair === true;
+}
+
+/** The scope a dismissal of this notice is tied to; "" when it has none. */
+export function noticeDismissScope(notice: Notice): string {
+    return NOTICE_COPY[notice.code].dismissScope?.(notice) ?? "";
+}
+
+function dismissScopeParam(notice: Notice): string {
+    const scope = notice.params.dismissScope;
+    return typeof scope === "string" ? scope : "";
 }
 
 export const UNKNOWN_ALLERGEN_TEXT = "unknown allergen data";
@@ -99,6 +121,40 @@ function groceryRestockedSentence(notice: Notice): string {
         return `Added because ${itemName} expired`;
     }
     return `Added because ${itemName} expires ${when}`;
+}
+
+function runningLowSentence(notice: Notice): string {
+    return `Running low: ${String(notice.params.name)} (${String(notice.params.reason)})`;
+}
+
+function planMissingSentence(notice: Notice): string {
+    const name = String(notice.params.name);
+    // Already worded: "200 g", or "200 g + 250 ml" when one food is short in
+    // two kinds of unit.
+    const amount =
+        typeof notice.params.amounts === "string"
+            ? notice.params.amounts
+            : null;
+    const count = Number(notice.params.recipeCount ?? 1);
+    const recipe =
+        count > 1
+            ? `${String(notice.params.recipeName)} and ${count - 1} more`
+            : String(notice.params.recipeName);
+    const when = restockWhen(
+        String(notice.params.plannedOn),
+        Number(notice.params.daysLeft),
+    );
+    if (notice.params.unknown === "yes") {
+        const needed =
+            amount != null ? `, ${amount} needed for` : ", needed for";
+        return `${name}: can't tell how much you have${needed} ${recipe}, ${when}`;
+    }
+    return `${name}${amount != null ? `, ${amount},` : ""} missing for ${recipe}, ${when}`;
+}
+
+function weighInDueSentence(notice: Notice): string {
+    const days = Number(notice.params.days);
+    return `${String(notice.params.name)} hasn't weighed in for ${days} day${days === 1 ? "" : "s"}`;
 }
 
 function fridgeExpiringSentence(notice: Notice): string {
@@ -234,6 +290,30 @@ export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
         sentence: groceryRestockedSentence,
         help: "restock",
         dismissible: true,
+    },
+    "grocery.running_low": {
+        badge: "Running low",
+        sentence: runningLowSentence,
+        action: { label: "Add to list", to: "actOnNotice", method: "post" },
+        help: "restock",
+        dismissible: true,
+        dismissScope: dismissScopeParam,
+    },
+    "plan.missing_ingredient": {
+        badge: "Missing for plan",
+        sentence: planMissingSentence,
+        action: { label: "Add", to: "actOnNotice", method: "post" },
+        help: "needs-attention",
+        dismissible: true,
+        dismissScope: dismissScopeParam,
+    },
+    "nutrition.weigh_in_due": {
+        badge: "Weigh-in due",
+        sentence: weighInDueSentence,
+        action: { label: "Weigh in", to: "weighInSheet", method: "get" },
+        help: "needs-attention",
+        dismissible: true,
+        dismissScope: dismissScopeParam,
     },
     "recipe.allergen": {
         badge: "Allergen",
@@ -605,6 +685,42 @@ function digestProductCheck(notice: Notice): NoticeDigestWire {
     };
 }
 
+function digestRunningLow(notice: Notice): NoticeDigestWire {
+    return {
+        title: String(notice.params.name),
+        detail: String(notice.params.reason),
+        detail_tone: null,
+        group_key: "running_low",
+        group_label: "Running low",
+        dot_tone: "warn",
+    };
+}
+
+function digestPlanMissing(notice: Notice): NoticeDigestWire {
+    const daysLeft = Number(notice.params.daysLeft);
+    const recipe = String(notice.params.recipeName);
+    const count = Number(notice.params.recipeCount ?? 1);
+    return {
+        title: String(notice.params.name),
+        detail: `${restockWhen(String(notice.params.plannedOn), daysLeft)} · ${recipe.toLowerCase()}${count > 1 ? ` +${count - 1}` : ""}`,
+        detail_tone: daysLeft <= 1 ? "warn" : null,
+        group_key: "recipe_gaps",
+        group_label: "Missing for planned meals",
+        dot_tone: "warn",
+    };
+}
+
+function digestWeighIn(notice: Notice): NoticeDigestWire {
+    return {
+        title: String(notice.params.name),
+        detail: `${Number(notice.params.days)} days since last weigh-in`,
+        detail_tone: null,
+        group_key: "household",
+        group_label: "Household",
+        dot_tone: "dim",
+    };
+}
+
 /** Attention widget row fields derived from notice params (not message parsing). */
 export function noticeDigestWire(notice: Notice): NoticeDigestWire {
     switch (notice.code) {
@@ -613,6 +729,12 @@ export function noticeDigestWire(notice: Notice): NoticeDigestWire {
             return digestFridge(notice);
         case "grocery.restocked":
             return digestGroceryRestocked(notice);
+        case "grocery.running_low":
+            return digestRunningLow(notice);
+        case "plan.missing_ingredient":
+            return digestPlanMissing(notice);
+        case "nutrition.weigh_in_due":
+            return digestWeighIn(notice);
         case "grocery.allergen":
             return digestGroceryAllergen(notice);
         case "recipe.allergen":

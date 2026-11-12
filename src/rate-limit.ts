@@ -24,6 +24,11 @@ export const WEB_SEARCH_LIMIT_PER_WINDOW = 120;
 // headroom for legitimate use — even shared NAT'd IPs — while blocking bulk
 // signup/credential-stuffing abuse.
 export const AUTH_LIMIT_PER_WINDOW = 30;
+// Per-IP limit for the public share page (/s/:token). Anyone can hit it with
+// no sign-in, so guessing tokens is the abuse; its own bucket keeps that from
+// eating the sign-in budget. A real visitor loads a page and its stylesheet at
+// most a few times a minute, which this leaves ample headroom for.
+export const SHARE_LIMIT_PER_WINDOW = 60;
 
 // Strike-based banning for IPs that keep failing authentication. A sliding
 // window alone can't distinguish "client with a stale token retrying" from
@@ -387,6 +392,19 @@ export async function checkWebSearchRateLimit(
 export async function checkAuthRateLimit(ip: string): Promise<RateLimitResult> {
     return bucketFailOpen("checkAuthRateLimit", AUTH_LIMIT_PER_WINDOW, () =>
         activeStore.checkBucket(`auth:${ip}`, AUTH_LIMIT_PER_WINDOW, WINDOW_MS),
+    );
+}
+
+// Per-IP limiter for the public share page.
+export async function checkShareRateLimit(
+    ip: string,
+): Promise<RateLimitResult> {
+    return bucketFailOpen("checkShareRateLimit", SHARE_LIMIT_PER_WINDOW, () =>
+        activeStore.checkBucket(
+            `share:${ip}`,
+            SHARE_LIMIT_PER_WINDOW,
+            WINDOW_MS,
+        ),
     );
 }
 

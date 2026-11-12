@@ -335,6 +335,7 @@ test("readFacebook refuses graph redirect to facebook.com", async () => {
     const PUBLIC = "93.184.216.34";
     let fetchCount = 0;
     const fetcher = createSafeFetcher({
+        pinAddresses: false, // this fake routes on the hostname
         resolve: async () => [PUBLIC],
         fetch: async (url) => {
             fetchCount += 1;

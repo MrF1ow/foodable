@@ -76,8 +76,16 @@ test("bottom nav hrefs and tab order", () => {
         "Recipes",
         "Household",
     ]);
-    const inner = html.replace(/^<nav[^>]*>/, "").replace(/<\/nav>$/, "");
-    expect(inner.replace(/<[^>]+>/g, "").trim()).toBe("");
+    // Parsed, not stripped with a regex: every visible character is text.
+    let text = "";
+    new HTMLRewriter()
+        .on("*", {
+            text(chunk) {
+                text += chunk.text;
+            },
+        })
+        .transform(html);
+    expect(text.trim()).toBe("");
 });
 
 test("unset theme follows the system", () => {
@@ -613,10 +621,11 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
     };
     const injected = SHELL_JS.replace(
         "const THEME_PAGE_BG = null;",
-        `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
+        () =>
+            `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
     ).replace(
         "const THEME_NAV_BG = null;",
-        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
+        () => `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
     );
     new Function("document", "window", "Element", injected)(
         document,

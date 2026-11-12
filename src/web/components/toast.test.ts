@@ -17,10 +17,16 @@ import {
 import {
     addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
+    cookSheetToastFlash,
     groceryLineCheckToastKey,
     householdPersonRuleRemovedKey,
 } from "./toast-flash.js";
 import { renderBarePage } from "../shell.js";
+import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "./v2/test-helpers.js";
 
 describe("toast flash codec", () => {
     test("round-trips a catalog key with params", () => {
@@ -69,6 +75,14 @@ describe("toast flash codec", () => {
         ).toBe(`Added to the grocery list (${raw})`);
     });
 
+    test("formatToastText keeps $-patterns literal in a catalog param", () => {
+        for (const name of ["$&", "$`", "$'", "$$", "Mac $& Cheese $1"]) {
+            expect(formatToastText("notice.added", { name })).toBe(
+                `Added ${name} to the grocery list`,
+            );
+        }
+    });
+
     test("toastSeedElement escapes text once for the attribute", () => {
         const plain = formatToastText("recipes.added-to-grocery", {
             count: '<b>&"',
@@ -99,6 +113,87 @@ describe("toast-flash helpers", () => {
             key: "recipes.cooked.shortfall.unmeasured",
             params: { names: "Salt" },
         });
+    });
+
+    test("cookSheetToastFlash", () => {
+        const plain = {
+            loggedSlot: null,
+            shortfallCount: 0,
+            unmeasuredNames: [],
+            changedNames: [],
+        };
+        expect(cookSheetToastFlash(plain)).toEqual({ key: "recipes.cooked" });
+        expect(cookSheetToastFlash({ ...plain, loggedSlot: "dinner" })).toEqual(
+            { key: "recipes.cooked.logged", params: { slot: "dinner" } },
+        );
+        expect(cookSheetToastFlash({ ...plain, shortfallCount: 1 })).toEqual({
+            key: "recipes.cooked.shortfall",
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "lunch",
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.unmeasured.logged",
+            params: { names: "Salt", slot: "lunch" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                shortfallCount: 1,
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.unmeasured",
+            params: { names: "Salt" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 1,
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.logged",
+            params: { slot: "dinner" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 1,
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.unmeasured.logged",
+            params: { names: "Salt", slot: "dinner" },
+        });
+        // The kitchen moved under the preview: that outranks everything.
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 2,
+                changedNames: ["Salmon", "Rice"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.changed.logged",
+            params: { names: "Salmon, Rice", slot: "dinner" },
+        });
+        expect(
+            cookSheetToastFlash({ ...plain, changedNames: ["Salmon"] }),
+        ).toEqual({
+            key: "recipes.cooked.changed",
+            params: { names: "Salmon" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                changedNames: ["x".repeat(120)],
+            }).params?.names,
+        ).toHaveLength(80);
     });
 
     test("addRecipeToGroceryToastFlash", () => {
@@ -240,6 +335,27 @@ describe("flashToastMiddleware", () => {
         expect(html).toContain('data-toast-text="Water logged"');
         expect(res.headers.get("set-cookie")).toContain(`${TOAST_COOKIE}=`);
         expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+    });
+
+    // A recipe title scraped from a web page lands in a toast; the seed goes
+    // into the page with String.replace, which reads `$\`` and `$'` in a
+    // replacement string as "paste the page before / after here".
+    test("every DOLLAR_PAYLOADS param stays text in the seed, page arrives once", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const flash = encodeToastFlash({
+                key: "notice.added",
+                params: { name: payload },
+            })!;
+            const res = await appWithFlash(flash)("/page");
+            const html = await res.text();
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "#toast-seed", "data-toast-text"),
+            ).toEqual([`Added ${payload} to the grocery list`]);
+            // The page itself arrives once, whole.
+            expect(html.match(/<\/body>/g)).toHaveLength(1);
+            expect(html.match(/<p>hi<\/p>/g)).toHaveLength(1);
+        }
     });
 
     test("does not consume on POST, 4xx, or non-HTML", async () => {

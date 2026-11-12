@@ -8,11 +8,17 @@ import { groceryRestockNotices } from "../domain/restock.js";
 import { recipeNotices, type RecipeIngredient } from "../domain/recipes.js";
 import { allergenNotices } from "../domain/grocery.js";
 import { possibleDuplicateNotices } from "../domain/notices-for.js";
+import {
+    planMissingNotices,
+    runningLowNotices,
+    weighInDueNotices,
+} from "../domain/notices-actionable.js";
 import { checkProductForMember } from "../domain/product-checks.js";
 import { addAllergen, createMemoryRulesStore } from "../domain/rules.js";
 import {
     createMemoryFoodsStore,
     effectiveFoodsByIds,
+    effectiveFoodsFromListed,
     findOrCreateManualFood,
     newFood,
     updateFood,
@@ -367,6 +373,68 @@ async function producerNotices(): Promise<Notice[]> {
             },
             { remaining: { calories: 500 } },
         ),
+    );
+    // Running low, missing for the plan, weigh-in due.
+    const milk = effectiveFoodsFromListed([
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Milk",
+            defaultUnit: "ml",
+            restockWhenLow: true,
+            usualAmount: { amount: 1000, unit: "ml" },
+        }),
+    ]);
+    out.push(
+        ...runningLowNotices({
+            foodsById: milk,
+            stock: [],
+            lines: [],
+            today: "2026-06-01",
+        }),
+        ...planMissingNotices({
+            plans: [
+                {
+                    id: "plan-1",
+                    householdId: HH,
+                    recipeId: "r-bread",
+                    date: "2026-06-02",
+                    slot: "dinner",
+                    servings: 1,
+                    createdBy: null,
+                    createdAt: "2026-06-01T00:00:00+00:00",
+                },
+            ],
+            recipes: [
+                {
+                    id: "r-bread",
+                    name: "Bread",
+                    yieldPortions: 1,
+                    ingredients: [
+                        {
+                            displayName: "Flour",
+                            foodId: "flour",
+                            quantity: { amount: 200, unit: "g" },
+                        },
+                    ],
+                },
+            ],
+            stock: [],
+            lines: [],
+            foodsById: new Map(),
+            today: "2026-06-01",
+        }),
+        ...weighInDueNotices({
+            members: [
+                {
+                    userId: "u1",
+                    displayName: "Alex",
+                    lastLoggedAt: "2026-05-20T12:00:00Z",
+                },
+            ],
+            today: "2026-06-01",
+            timezone: "UTC",
+        }),
     );
     return out;
 }

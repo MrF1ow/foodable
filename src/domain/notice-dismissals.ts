@@ -4,6 +4,7 @@ import {
     NOTICE_COPY,
     noticeCodeDismissible,
     noticeDismissPair,
+    noticeDismissScope,
 } from "../copy/notices.js";
 
 export type NoticeSubjectKind = NoticeSubject["kind"];
@@ -62,7 +63,6 @@ export function normalizePairIds(
 
 export function dismissalKey(notice: Notice): DismissalKey {
     const subject = notice.subject;
-    let relatedKey = "";
     if (noticeDismissPair(notice.code)) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         if (foodRel) {
@@ -79,7 +79,8 @@ export function dismissalKey(notice: Notice): DismissalKey {
         code: notice.code,
         subjectKind: subject.kind,
         subjectId: subject.id,
-        relatedKey,
+        // Empty unless the notice ties its dismissal to something that changes.
+        relatedKey: noticeDismissScope(notice),
     };
 }
 
@@ -305,9 +306,11 @@ export function assertDismissibleCode(code: NoticeCode): void {
     if (!NOTICE_COPY[code]) {
         throw new NoticeDismissError("Unknown notice.");
     }
-    if (NOTICE_SEVERITY[code] !== "info" || !noticeCodeDismissible(code)) {
+    // The registry says what can be dismissed; a block never can. Running low
+    // and missing-for-plan are warnings that the person may still dismiss.
+    if (NOTICE_SEVERITY[code] === "block" || !noticeCodeDismissible(code)) {
         throw new NoticeDismissError(
-            "Only suggestions (info notices) can be dismissed; fix the cause instead.",
+            "This notice can't be dismissed; fix the cause instead.",
         );
     }
 }

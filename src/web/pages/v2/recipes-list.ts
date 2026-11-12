@@ -6,19 +6,32 @@ import {
 } from "../../../domain/recipes.js";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 import type { RecipeSourceKind } from "../../../domain/recipe-import.js";
+import type { Notice } from "../../../domain/notices.js";
 import type { AppChromeBase } from "../../attention.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { chipLink, chipNav } from "../../components/v2/chips.js";
 import { esc, srOnly } from "../../components/v2/html.js";
 import { renderAppShell } from "../../shell.js";
+import { noticeStrip, stripNotices } from "./notice-strip.js";
+import { favouriteStarForm } from "./recipes-favourite.js";
+import {
+    planDayLabel,
+    renderMissingSheet,
+    renderPlanEditSheets,
+    renderWeekStrip,
+    type WeekPlanView,
+} from "./recipes-plan.js";
 
-export type V2RecipeListFilter = "" | "cookable" | "protein" | "quick";
+export type V2RecipeListFilter =
+    "" | "cookable" | "protein" | "quick" | "favourites";
 
 export type V2RecipeCard = {
     recipe: Recipe;
     flags: RecipeFilterFlags;
     macrosPerPortion: RecipeMacros;
     missingNames: string[];
+    /** The viewer has starred it. Absent means not. */
+    favourite?: boolean;
 };
 
 export type RecipesListV2View = {
@@ -28,6 +41,12 @@ export type RecipesListV2View = {
     cards: V2RecipeCard[];
     cookableCount?: number;
     totalCount: number;
+    /** This week's plan: the strip, and the sheets its buttons open. */
+    week?: WeekPlanView;
+    /** The household's open notices; what the plan is missing shows under the week. */
+    notices?: readonly Notice[];
+    /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
+    planDate?: string;
     importError?: string;
     importPasteStep?: boolean;
     importUrl?: string;
@@ -42,6 +61,11 @@ export type RecipesListV2View = {
     importCredit?: string;
     importSourceKind?: RecipeSourceKind;
     importSourceLabel?: string;
+    /**
+     * A recipe pasted from another Foodable (its share link or its JSON) that
+     * could not be imported: what was pasted, and why. Reopens the import panel.
+     */
+    sharedImport?: { error?: string; input?: string };
 };
 
 export function recipesListV2Href(opts: {
@@ -59,7 +83,12 @@ export function recipesListV2Href(opts: {
 export function parseV2RecipeListFilter(
     raw: string | undefined,
 ): V2RecipeListFilter {
-    if (raw === "cookable" || raw === "protein" || raw === "quick") {
+    if (
+        raw === "cookable" ||
+        raw === "protein" ||
+        raw === "quick" ||
+        raw === "favourites"
+    ) {
         return raw;
     }
     return "";
@@ -113,7 +142,7 @@ function listMacroLine(macros: RecipeMacros): string {
         : "";
 }
 
-function recipeCard(card: V2RecipeCard): string {
+function recipeCard(card: V2RecipeCard, view: RecipesListV2View): string {
     const { recipe, flags, macrosPerPortion, missingNames } = card;
     const minutes = recipeTimeLabel(recipe);
     const metaParts = [servingsLabel(recipe.yieldPortions)];
@@ -138,11 +167,25 @@ function recipeCard(card: V2RecipeCard): string {
         macrosPerPortion.calories != null
             ? `<span class="fd-recipes-card__kcal">${esc(String(Math.round(macrosPerPortion.calories)))} kcal</span>`
             : "";
-    return `<li class="fd-row fd-row--recipe"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${kcal}${
+    // The star is a form, so it sits beside the card's link, not inside it.
+    const star = favouriteStarForm({
+        recipeId: recipe.id,
+        recipeName: recipe.name,
+        on: card.favourite === true,
+        back: { kind: "list", query: view.query.trim(), filter: view.filter },
+        className: "fd-recipes-card__star",
+    });
+    const planDay = view.planDate
+        ? `&date=${encodeURIComponent(view.planDate)}`
+        : "";
+    const plan = view.week
+        ? `<a class="fd-recipes-card__plan" href="/recipes/${esc(recipe.id)}?plan=1${esc(planDay)}" aria-label="Plan ${esc(recipe.name)}">Plan</a>`
+        : "";
+    return `<li class="fd-row fd-row--recipe" id="recipe-${esc(recipe.id)}"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${kcal}${
         stock
             ? `<span class="fd-recipes-card__stock ${stockClass}">${dot}<span class="fd-recipes-card__stock-text">${esc(stock)}</span></span>`
             : ""
-    }</a></li>`;
+    }</a>${star}${plan}</li>`;
 }
 
 function importPasteBlock(view: RecipesListV2View): string {
@@ -229,6 +272,7 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
                 selected: view.filter === "quick",
                 title: "Only recipes with a known total time; unknown time is excluded.",
             }),
+            filterChip("Favourites", "favourites", view),
         ],
         { label: "Recipe filters", className: "fd-recipes-chips" },
     );
@@ -239,22 +283,52 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
             : "";
     const emptyFilter =
         view.totalCount > 0 && view.cards.length === 0
-            ? `<p class="fd-recipes-empty">No recipes match this search.</p>`
+            ? view.filter === "favourites" && !view.query.trim()
+                ? `<p class="fd-recipes-empty">No favourites yet. Tap the star on a recipe to keep it here.</p>`
+                : `<p class="fd-recipes-empty">No recipes match this search.</p>`
             : "";
     const grid =
         view.cards.length > 0
             ? `<section class="fd-recipes-all" aria-labelledby="fd-recipes-all-heading">
 <div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-all-heading">All recipes</h2></div>
-<ul class="fd-list fd-recipes-list">${view.cards.map((card) => recipeCard(card)).join("")}</ul>
+<ul class="fd-list fd-recipes-list${view.planDate ? " fd-recipes-list--planning" : ""}">${view.cards.map((card) => recipeCard(card, view)).join("")}</ul>
 </section>`
             : "";
-    const importLinkBlock = `<details class="fd-recipes-import-link">
+    const shared = view.sharedImport;
+    const sharedError = shared?.error
+        ? `<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">${esc(shared.error)}</p>`
+        : "";
+    const importLinkBlock = `<details class="fd-recipes-import-link"${shared ? " open" : ""}>
 <summary class="fd-recipes-import-link__summary">Import a link</summary>
 <form class="fd-recipes-import-link__form" method="post" action="/recipes/import" data-fd-recipes-import data-busy-form>
 <input class="fd-recipes-import-input" name="url" type="url" inputmode="url" autocomplete="off" required placeholder="https://…" aria-label="Recipe link" value="${esc(view.importUrl ?? "")}" />
 <button type="submit" class="fd-recipes-import-submit">Import</button>
 </form>
+<form class="fd-recipes-import-link__form fd-recipes-import-shared" method="post" action="/recipes/import-shared" data-fd-recipes-shared data-busy-form>
+<p class="fd-recipes-import-note">Got a recipe from another Foodable? Paste its share link, or the recipe's JSON.</p>
+${sharedError}
+<textarea class="fd-recipes-import-text" name="shared" rows="4" required spellcheck="false" autocomplete="off" placeholder="https://…/s/… or {…}" aria-label="Shared recipe link or JSON">${esc(shared?.input ?? "")}</textarea>
+<button type="submit" class="fd-recipes-import-submit">Import recipe</button>
+</form>
 </details>`;
+    const planPick = view.planDate
+        ? `<p class="fd-plan-pick" role="status">Pick a recipe for ${esc(planDayLabel(view.planDate))}. <a href="/recipes">Cancel</a></p>`
+        : "";
+    const weekStrip = view.week
+        ? `${renderWeekStrip(view.week)}${String(
+              noticeStrip(
+                  stripNotices(
+                      view.notices ?? [],
+                      ["plan.missing_ingredient"],
+                      undefined,
+                  ),
+                  { back: "/recipes", label: "Missing for the plan" },
+              ),
+          )}`
+        : "";
+    const weekSheets = view.week
+        ? `${renderPlanEditSheets(view.week, "recipes")}\n${renderMissingSheet(view.week, "recipes")}`
+        : "";
     const savedLabel =
         view.totalCount === 1 ? "1 saved" : `${view.totalCount} saved`;
     const cookableSuffix =
@@ -288,10 +362,11 @@ ${filterHidden}
 </form>
 ${chipsHtml}
 </div>
-${importLinkBlock}
+${planPick}${weekStrip}${importLinkBlock}
 ${emptyAll}
 ${emptyFilter}
 ${grid}
+${weekSheets}
 </div>`;
 }
 
@@ -317,6 +392,7 @@ export function applyV2RecipeListFilters(
         if (filter === "cookable" && !card.flags.cookable) return false;
         if (filter === "protein" && !card.flags.highProtein) return false;
         if (filter === "quick" && !card.flags.quick) return false;
+        if (filter === "favourites" && card.favourite !== true) return false;
         return true;
     });
 }

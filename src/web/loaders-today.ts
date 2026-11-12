@@ -15,14 +15,31 @@ import {
 } from "../db/nutrition.js";
 import { getProfile } from "../db/profiles.js";
 import { liveFridgeStore } from "../db/fridge.js";
-import { householdToday } from "../db/restock.js";
+import { householdClock } from "../db/restock.js";
 import {
+    activeCalorieGoal,
     buildDailyBuckets,
     loggingStreakFromDates,
 } from "../domain/insights.js";
 import { listExpiring } from "../domain/stock.js";
-import type { NoticesForResult } from "../domain/notices-for.js";
+import type {
+    NoticesForResult,
+    RecipesListPrefetch,
+} from "../domain/notices-for.js";
 import type { Food } from "../domain/foods.js";
+import {
+    macrosForPerson,
+    recipeTotalMinutes,
+    type RecipeFilterRow,
+} from "../domain/recipes.js";
+import {
+    recipesUsingExpiring,
+    suggestForSlot,
+    type ExpiringItem,
+    type ExpiringUse,
+    type MacrosLeft,
+    type SlotSuggestion,
+} from "../domain/suggestions.js";
 import { needsAttentionCount } from "../domain/notices.js";
 import {
     adjacentWeekStarts,
@@ -33,11 +50,15 @@ import {
     weekDates,
     weekDayTotalsFromBucket,
     weekDots,
+    yesterdayCopyHints,
     type MealTypeGroup,
+    type MealTypeSlot,
     type TodayDayTotals,
     type WeekDot,
     type WeekStripLayout,
+    type YesterdayCopyHint,
 } from "../domain/today.js";
+import { recentHistoryStart } from "../domain/log-search.js";
 import {
     dateInTz,
     shiftLocalDate,
@@ -55,6 +76,8 @@ export type TodayWeightPoint = {
 };
 
 export type TodayAttention = {
+    /** The member the page is for; a weigh-in reminder has an action only for them. */
+    viewerUserId?: string;
     count: number;
     notices: Notice[];
     noticeFoods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
@@ -81,9 +104,162 @@ export type TodayView = {
         latest: WeightEntry | null;
         series30d: TodayWeightPoint[];
     };
+    /** Per-slot copy-yesterday hints when today's slot is empty (today view only). */
+    yesterdayCopy: Partial<Record<MealTypeSlot, YesterdayCopyHint>>;
+    /** Up to two recipes that fit, per empty slot (today view only). */
+    slotSuggestions: Partial<Record<MealTypeSlot, SlotSuggestion[]>>;
+    /** For each item in `expiringFridge`, the recipes that use it. */
+    useSoonUses: ExpiringUse[];
+    /** One recipe that uses several of the expiring items, when there is one. */
+    useSoonHighlight: UseSoonHighlight | null;
 };
 
+export type UseSoonHighlight = {
+    recipeId: string;
+    name: string;
+    /** How many of the expiring items the recipe uses. */
+    itemCount: number;
+    /** How many items are expiring. */
+    totalItems: number;
+    minutes: number | null;
+    kcalPerPortion: number | null;
+};
+
+/** Recipes as the Recipes page reads them, from data already loaded. */
+export function recipeRowsFromPrefetch(
+    prefetch: RecipesListPrefetch,
+): RecipeFilterRow[] {
+    const byRecipe = new Map<string, RecipesListPrefetch["allIngredients"]>();
+    for (const row of prefetch.allIngredients) {
+        const list = byRecipe.get(row.recipeId) ?? [];
+        list.push(row);
+        byRecipe.set(row.recipeId, list);
+    }
+    return prefetch.recipes.map((recipe) => {
+        const ingredients = byRecipe.get(recipe.id) ?? [];
+        return {
+            recipe,
+            ingredients,
+            macrosPerPortion: macrosForPerson(
+                ingredients,
+                recipe.yieldPortions,
+                1,
+                prefetch.foodsById,
+            ),
+        };
+    });
+}
+
+function stockFromPrefetch(prefetch: RecipesListPrefetch) {
+    return prefetch.fridgeItems.map((item) => ({
+        quantity: item.quantity,
+        foodId: item.foodId,
+    }));
+}
+
+/** What is left of the day's targets; null when there is no calorie goal. */
+export function macrosLeftFor(
+    goals: NutritionGoals | null,
+    totals: Pick<
+        TodayDayTotals,
+        "calories" | "protein_g" | "carbs_g" | "fat_g"
+    >,
+): MacrosLeft | null {
+    const calorieGoal = activeCalorieGoal(goals);
+    if (calorieGoal == null) return null;
+    const left = (goal: number | null | undefined, eaten: number | null) =>
+        goal != null && Number.isFinite(goal) && goal > 0
+            ? goal - (eaten ?? 0)
+            : null;
+    return {
+        calories: calorieGoal - (totals.calories ?? 0),
+        protein_g: left(goals?.daily_protein_g, totals.protein_g),
+        carbs_g: left(goals?.daily_carbs_g, totals.carbs_g),
+        fat_g: left(goals?.daily_fat_g, totals.fat_g),
+    };
+}
+
+/** Suggestions for each empty slot, from the recipes the page already loaded. */
+export function slotSuggestionsFor(
+    prefetch: RecipesListPrefetch,
+    opts: {
+        emptySlots: readonly MealTypeSlot[];
+        macrosLeft: MacrosLeft | null;
+        expiring: readonly ExpiringItem[];
+    },
+): Partial<Record<MealTypeSlot, SlotSuggestion[]>> {
+    if (opts.macrosLeft == null || opts.emptySlots.length === 0) return {};
+    const recipes = recipeRowsFromPrefetch(prefetch);
+    const stock = stockFromPrefetch(prefetch);
+    const out: Partial<Record<MealTypeSlot, SlotSuggestion[]>> = {};
+    for (const slot of opts.emptySlots) {
+        const picked = suggestForSlot({
+            slot,
+            recipes,
+            stock,
+            macrosLeft: opts.macrosLeft,
+            expiring: opts.expiring,
+            foodsById: prefetch.foodsById,
+        });
+        if (picked.length > 0) out[slot] = picked;
+    }
+    return out;
+}
+
+/** The recipes that use each expiring item, plus the one using the most. */
+export function useSoonFor(
+    prefetch: RecipesListPrefetch,
+    expiring: readonly ExpiringItem[],
+): { uses: ExpiringUse[]; highlight: UseSoonHighlight | null } {
+    if (expiring.length === 0) return { uses: [], highlight: null };
+    const rows = recipeRowsFromPrefetch(prefetch);
+    const uses = recipesUsingExpiring(
+        rows,
+        stockFromPrefetch(prefetch),
+        expiring,
+        prefetch.foodsById,
+    );
+    const counts = new Map<string, number>();
+    for (const use of uses) {
+        for (const recipe of use.recipes) {
+            counts.set(recipe.recipeId, (counts.get(recipe.recipeId) ?? 0) + 1);
+        }
+    }
+    let best: { recipeId: string; count: number } | null = null;
+    for (const use of uses) {
+        for (const recipe of use.recipes) {
+            const count = counts.get(recipe.recipeId) ?? 0;
+            if (count >= 2 && (best == null || count > best.count)) {
+                best = { recipeId: recipe.recipeId, count };
+            }
+        }
+    }
+    if (best == null) return { uses, highlight: null };
+    const row = rows.find((r) => r.recipe.id === best.recipeId);
+    if (!row) return { uses, highlight: null };
+    return {
+        uses,
+        highlight: {
+            recipeId: row.recipe.id,
+            name: row.recipe.name,
+            itemCount: best.count,
+            totalItems: uses.length,
+            minutes: recipeTotalMinutes(row.recipe),
+            kcalPerPortion: row.macrosPerPortion.incomplete
+                ? null
+                : row.macrosPerPortion.calories,
+        },
+    };
+}
+
 const STREAK_LOOKBACK_DAYS = 400;
+
+const MEAL_SLOTS: readonly MealTypeSlot[] = [
+    "breakfast",
+    "lunch",
+    "dinner",
+    "snack",
+];
 
 export type LoadTodayDeps = {
     getProfile: typeof getProfile;
@@ -96,7 +272,7 @@ export type LoadTodayDeps = {
     getLatestWeight: typeof getLatestWeight;
     getWeightInRange: typeof getWeightInRange;
     loadHouseholdNotices: typeof loadHouseholdNotices;
-    householdToday: typeof householdToday;
+    householdClock: typeof householdClock;
     todayInTz: typeof todayInTz;
     listFridgeLocations: (
         householdId: string,
@@ -114,7 +290,7 @@ const defaultTodayDeps = (): LoadTodayDeps => ({
     getLatestWeight,
     getWeightInRange,
     loadHouseholdNotices,
-    householdToday,
+    householdClock,
     todayInTz,
     listFridgeLocations: (householdId) =>
         liveFridgeStore().listLocations(householdId),
@@ -177,6 +353,7 @@ export async function loadToday(
     viewer: HouseholdMember,
     date?: string,
     deps: LoadTodayDeps = defaultTodayDeps(),
+    opts: { readOnly?: boolean } = {},
 ): Promise<TodayView> {
     const profile = await deps.getProfile(viewer.userId);
     const tz = tzFromProfile(profile);
@@ -191,10 +368,17 @@ export async function loadToday(
     const householdId = viewer.householdId;
     const userId = viewer.userId;
 
-    const householdDate = await deps.householdToday(householdId);
+    const clock = await deps.householdClock(householdId);
+    const householdDate = clock.today;
+
+    const viewingToday = targetDate === today;
+    // A peer's day is read-only: no copy hint, so no yesterday query either.
+    const wantsCopyHint = viewingToday && opts.readOnly !== true;
+    const yesterdayDate = wantsCopyHint ? recentHistoryStart(today, 1) : null;
 
     const [
         dayMeals,
+        yesterdayMeals,
         weekMeals,
         weekWater,
         weekGoals,
@@ -205,6 +389,9 @@ export async function loadToday(
         noticeResult,
     ] = await Promise.all([
         deps.getMealsByDate(userId, targetDate, tz),
+        yesterdayDate
+            ? deps.getMealsByDate(userId, yesterdayDate, tz)
+            : Promise.resolve([] as Meal[]),
         deps.getMealsInRangeWithoutItems(userId, weekStart, weekEnd, tz),
         deps.getWaterInRange(userId, weekStart, weekEnd, tz),
         deps.getGoalsForRange(userId, weekStart, weekEnd),
@@ -222,7 +409,12 @@ export async function loadToday(
             today,
             tz,
         ),
-        deps.loadHouseholdNotices(householdId, { today: householdDate }),
+        deps.loadHouseholdNotices(householdId, {
+            today: householdDate,
+            clock,
+            // Only the new app renders this view, and it acts on these notices.
+            actionable: true,
+        }),
     ]);
 
     const waterMl = sumWaterForDate(weekWater, targetDate, tz);
@@ -263,6 +455,32 @@ export async function loadToday(
         fridgeLocations.map((loc) => [loc.id, loc.name]),
     );
 
+    const yesterdayCopy = yesterdayCopyHints(
+        wantsCopyHint,
+        dayMeals,
+        yesterdayMeals,
+    );
+
+    // Suggestions only for the viewer's own today: a past day or a peer's day
+    // is not theirs to plan.
+    const slotSuggestions = wantsCopyHint
+        ? slotSuggestionsFor(noticeResult.recipesListPrefetch, {
+              emptySlots: MEAL_SLOTS.filter(
+                  (slot) =>
+                      !meals.some(
+                          (group) =>
+                              group.mealType === slot && group.rows.length > 0,
+                      ),
+              ),
+              macrosLeft: macrosLeftFor(goals, totals),
+              expiring: expiringFridge,
+          })
+        : {};
+    const useSoon = useSoonFor(
+        noticeResult.recipesListPrefetch,
+        expiringFridge,
+    );
+
     return {
         date: targetDate,
         householdDate,
@@ -278,6 +496,7 @@ export async function loadToday(
         streak,
         expiringFridge,
         attention: {
+            viewerUserId: userId,
             count: needsAttentionCount(noticeResult.notices),
             notices: [...noticeResult.notices],
             noticeFoods: noticeResult.noticeFoods,
@@ -286,5 +505,9 @@ export async function loadToday(
             latest: latestWeight,
             series30d: weightSeries30d(weightRange, tz),
         },
+        yesterdayCopy,
+        slotSuggestions,
+        useSoonUses: useSoon.uses,
+        useSoonHighlight: useSoon.highlight,
     };
 }

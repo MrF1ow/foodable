@@ -17,10 +17,18 @@ import {
     panel,
     row,
 } from "../components/ui.js";
-import { noticeBadge, noticeList } from "../components/notices.js";
+import {
+    noticeBadge,
+    noticeList,
+    NOTICE_DISMISS_PATH,
+    type NoticeListDismissOpts,
+} from "../components/notices.js";
+import { isOneTapNotice } from "./v2/notice-strip.js";
 
 export type NeedsAttentionView = {
     chrome: AppChromeBase;
+    /** The viewer, for a weigh-in reminder that is theirs (new app only). */
+    viewerUserId?: string;
     result: NoticesForResult;
     showDismissed?: boolean;
     error?: string;
@@ -43,6 +51,9 @@ function groupOpenLink(
         case "grocery_line":
             return { href: "/kitchen/groceries", label: "Open grocery" };
         case "food":
+            // A usual running low or a food the plan is missing has its own
+            // action on the row; the items list adds nothing.
+            if (isOneTapNotice(sample)) return null;
             if (sample.code === "food.possible_duplicate") {
                 return {
                     href: "/settings/household/possible-duplicates",
@@ -90,9 +101,12 @@ function sortGroupKeys(
 export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
     const { groups, order } = groupNotices(view.result.notices);
     const sortedKeys = sortGroupKeys(order, view.result.subjectTimes);
+    const uiV2 = view.chrome.flags.uiV2;
     const ctx = {
         from: "/needs-attention",
         foods: view.result.noticeFoods,
+        // The one-tap notices only exist for a viewer on the new app.
+        ...(uiV2 ? { v2: { viewerUserId: view.viewerUserId } } : {}),
     };
     const panels: string[] = [];
     for (const key of sortedKeys) {
@@ -103,6 +117,7 @@ export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
             view.result.subjectNames.get(
                 `${head.subject.kind}:${head.subject.id}`,
             ) ??
+            (typeof head.params.name === "string" ? head.params.name : null) ??
             "Item";
         const open = groupOpenLink(key, head);
         const openLink = open
@@ -110,22 +125,36 @@ export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
             : "";
         const list = noticeList(notices, {
             ctx,
-            dismiss: (notice) =>
+            dismiss: (notice): NoticeListDismissOpts | null =>
                 noticeCodeDismissible(notice.code)
-                    ? {
-                          action: "/needs-attention/dismiss",
-                          hidden: {
-                              code: notice.code,
-                              subject_kind: notice.subject.kind,
-                              subject_id: notice.subject.id,
-                              ...(dismissalKey(notice).relatedKey
-                                  ? {
-                                        related_id:
-                                            dismissalKey(notice).relatedKey,
-                                    }
-                                  : {}),
-                          },
-                      }
+                    ? isOneTapNotice(notice)
+                        ? {
+                              // Their dismissal is held for the plan or day
+                              // the notice carries, and only the one-tap route
+                              // looks them up.
+                              action: NOTICE_DISMISS_PATH,
+                              hidden: {
+                                  code: notice.code,
+                                  subject_kind: notice.subject.kind,
+                                  subject_id: notice.subject.id,
+                                  related_id: dismissalKey(notice).relatedKey,
+                                  back: "/needs-attention",
+                              },
+                          }
+                        : {
+                              action: "/needs-attention/dismiss",
+                              hidden: {
+                                  code: notice.code,
+                                  subject_kind: notice.subject.kind,
+                                  subject_id: notice.subject.id,
+                                  ...(dismissalKey(notice).relatedKey
+                                      ? {
+                                            related_id:
+                                                dismissalKey(notice).relatedKey,
+                                        }
+                                      : {}),
+                              },
+                          }
                     : null,
         });
         panels.push(

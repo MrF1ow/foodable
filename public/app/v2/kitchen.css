@@ -89,8 +89,17 @@
     color: var(--text-secondary);
 }
 
+.fd-kitchen-use-card__use {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    overflow: hidden;
+    margin-top: 2px;
+    font: 400 12px/16px var(--font-body);
+    color: var(--accent-text);
+}
+
 .fd-kitchen-use-card__when {
-    margin-top: auto;
     font: 400 12px/16px var(--font-body);
     color: var(--text-tertiary);
 }
@@ -768,6 +777,145 @@ button.fd-kitchen-sheet-row {
     color: var(--text-secondary);
 }
 
+/* Usual sheet: the Restock row and the "Add when it runs low" switch sit in
+   one card under Amount (FigCraft 22694). */
+.fd-kitchen-restock-group {
+    margin-top: var(--fd-s-12);
+}
+
+.fd-kitchen-restock-group .fd-kitchen-sheet-row {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.fd-kitchen-restock-group .fd-kitchen-sheet-row__label {
+    margin-right: auto;
+}
+
+.fd-kitchen-restock-group .fd-kitchen-sheet-row__value {
+    margin-left: 0;
+}
+
+/* A checkbox drawn like `.fd-switch`, so the Restock form posts it with the
+   rest of its fields and needs no script. */
+.fd-kitchen-switch {
+    position: relative;
+    flex: none;
+    width: 48px;
+    height: 28px;
+    margin: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    appearance: none;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.fd-kitchen-switch::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+
+.fd-kitchen-switch:checked {
+    background: var(--accent-fill);
+}
+
+.fd-kitchen-switch:checked::after {
+    background: var(--accent-on);
+    transform: translateX(20px);
+}
+
+.fd-kitchen-switch:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-kitchen-restock-form {
+    gap: var(--fd-s-10);
+}
+
+.fd-kitchen-restock-form .fd-kitchen-sheet-rows {
+    margin-top: var(--fd-s-10);
+}
+
+/* The weeks stepper only matters for "Every N weeks". */
+.fd-kitchen-restock-form:not(
+        :has(input[name="restock_schedule"][value="every_n_weeks"]:checked)
+    )
+    .fd-kitchen-restock-weeks {
+    display: none;
+}
+
+.fd-kitchen-restock-level {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-10);
+}
+
+.fd-kitchen-restock-level__input {
+    flex: 0 1 8rem;
+    min-height: 44px;
+    padding: 0 var(--fd-s-12);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    font: 500 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-kitchen-restock-level__unit {
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-kitchen-restock-hint {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* The desktop Kitchen tabs (Overview / Groceries / Usuals): a pill track with
+   the current tab as a light pill. `.fd-seg` is only styled on Trends, so the
+   Kitchen carries its own copy. */
+.fd-kitchen-overview-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-panel);
+}
+
+.fd-kitchen-overview-seg .fd-seg-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 14px;
+    border-radius: var(--radius-pill);
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.fd-kitchen-overview-seg .fd-seg-btn--on {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+    font-weight: 500;
+}
+
+.fd-kitchen-overview-seg .fd-seg-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .fd-kitchen-use-soon__scroll {
         scroll-behavior: auto;
@@ -803,6 +951,13 @@ button.fd-kitchen-sheet-row {
 }
 
 .fd-kitchen-use-card--desktop-only {
+    display: none;
+}
+
+/* Desktop table cells and column titles (FigCraft 48217); the phone row
+   shows the product as meta and the rest on its sub-line instead. */
+.fd-kitchen-usual-thead,
+.fd-usual-cell {
     display: none;
 }
 
@@ -1035,5 +1190,82 @@ button.fd-kitchen-sheet-row {
 
     .fd-kitchen-usual-title.fd-kitchen-fridge-title--phone {
         display: none;
+    }
+
+    /* Usuals as a table in one panel (FigCraft 48217). */
+    .fd-kitchen-usuals-page .fd-section-head {
+        display: none;
+    }
+
+    .fd-kitchen-usual-table {
+        padding: var(--fd-s-12) 22px var(--fd-s-12);
+        border-radius: var(--radius-lg);
+        background: var(--surface-panel);
+        box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    .fd-kitchen-usual-thead,
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
+        display: grid;
+        grid-template-columns:
+            minmax(0, 196fr) minmax(0, 330fr) minmax(0, 166fr)
+            minmax(0, 116fr) minmax(0, 237fr) 24px;
+        align-items: center;
+        gap: 0;
+    }
+
+    .fd-kitchen-usual-thead {
+        padding: var(--fd-s-10) 0;
+        border-bottom: 1px solid var(--line);
+        font: 600 11px/14px var(--font-body);
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual:last-child {
+        border-bottom: 0;
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
+        min-height: 50px;
+        padding: var(--fd-s-10) 0;
+        cursor: pointer;
+    }
+
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__meta,
+    .fd-kitchen-usual-table .fd-row--usual .fd-row__sub {
+        display: none;
+    }
+
+    .fd-usual-cell {
+        display: block;
+        min-width: 0;
+        padding-right: var(--fd-s-12);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 400 14px/18px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-usual-cell--product {
+        color: var(--text-primary);
+    }
+
+    .fd-usual-cell--muted {
+        color: var(--text-tertiary);
+    }
+
+    .fd-usual-cell--restock {
+        font-size: 13px;
+    }
+
+    .fd-usual-cell.fd-tone--warn {
+        color: var(--status-warn);
+    }
+
+    .fd-usual-cell.fd-tone--accent {
+        color: var(--accent-text);
     }
 }

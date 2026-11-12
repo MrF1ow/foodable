@@ -6,9 +6,13 @@ import { qualityFromOff } from "./off-quality.js";
 import {
     DEFAULT_SCORE_PRESET,
     nutrientLevel,
+    parseScoreChoice,
     productInfoRows,
+    resolveWeights,
     SCORE_PRESETS,
     scoreProduct,
+    type ScorePresetId,
+    validateScoreChoice,
     type ScoreQuality,
     type ScoreWeights,
 } from "./product-score.js";
@@ -301,4 +305,199 @@ describe("OFF fixture scores (balanced preset)", () => {
         }
         expect(rows.join("\n")).toMatchSnapshot();
     });
+});
+
+describe("resolveWeights", () => {
+    const CUSTOM: ScoreWeights = {
+        nutrition: 10,
+        processing: 10,
+        additives: 10,
+        environment: 70,
+    };
+    const planetDefault = { preset: "planet", weights: null } as const;
+
+    test("a member's own preset wins over the household default", () => {
+        expect(
+            resolveWeights(
+                { preset: "health_first", weights: null },
+                planetDefault,
+            ),
+        ).toEqual(SCORE_PRESETS.health_first);
+    });
+
+    test("a member's custom weights win and score differently from the default", () => {
+        const quality: ScoreQuality = {
+            nutriscoreGrade: "a",
+            novaGroup: 4,
+            ecoscoreGrade: "e",
+            additives: [],
+        };
+        const own = resolveWeights(
+            { preset: "custom", weights: CUSTOM },
+            planetDefault,
+        );
+        expect(own).toEqual(CUSTOM);
+        const mine = scoreProduct(quality, own);
+        const theirs = scoreProduct(
+            quality,
+            resolveWeights(null, planetDefault),
+        );
+        expect(mine.score).not.toBe(theirs.score);
+    });
+
+    test("a member without settings uses the household default", () => {
+        expect(resolveWeights(null, planetDefault)).toEqual(
+            SCORE_PRESETS.planet,
+        );
+        expect(
+            resolveWeights(null, { preset: "custom", weights: CUSTOM }),
+        ).toEqual(CUSTOM);
+    });
+
+    test("no member settings and no household default is Balanced", () => {
+        expect(resolveWeights(null, null)).toEqual(SCORE_PRESETS.balanced);
+    });
+
+    test("a custom choice with unusable weights falls through to the next level", () => {
+        expect(
+            resolveWeights({ preset: "custom", weights: null }, planetDefault),
+        ).toEqual(SCORE_PRESETS.planet);
+        expect(
+            resolveWeights({ preset: "custom", weights: null }, null),
+        ).toEqual(SCORE_PRESETS.balanced);
+    });
+
+    test("a preset choice ignores stored weights", () => {
+        expect(
+            resolveWeights({ preset: "planet", weights: CUSTOM }, null),
+        ).toEqual(SCORE_PRESETS.planet);
+    });
+});
+
+describe("parseScoreChoice", () => {
+    test("reads a preset and a custom choice", () => {
+        expect(parseScoreChoice({ preset: "planet", weights: null })).toEqual({
+            preset: "planet",
+            weights: null,
+        });
+        const weights = {
+            nutrition: 1,
+            processing: 2,
+            additives: 3,
+            environment: 4,
+        };
+        expect(parseScoreChoice({ preset: "custom", weights })).toEqual({
+            preset: "custom",
+            weights,
+        });
+    });
+
+    test("invalid jsonb on a preset row falls back to the preset", () => {
+        expect(
+            parseScoreChoice({ preset: "planet", weights: { nutrition: "x" } }),
+        ).toEqual({ preset: "planet", weights: null });
+        expect(parseScoreChoice({ preset: "planet", weights: 7 })).toEqual({
+            preset: "planet",
+            weights: null,
+        });
+    });
+
+    test("invalid custom weights keep the custom preset with no weights", () => {
+        expect(
+            parseScoreChoice({ preset: "custom", weights: { nutrition: -1 } }),
+        ).toEqual({ preset: "custom", weights: null });
+        expect(
+            parseScoreChoice({
+                preset: "custom",
+                weights: {
+                    nutrition: 0,
+                    processing: 0,
+                    additives: 0,
+                    environment: 0,
+                },
+            }),
+        ).toEqual({ preset: "custom", weights: null });
+    });
+
+    test("an unknown preset or a non-object is no choice", () => {
+        expect(parseScoreChoice({ preset: "keto", weights: null })).toBeNull();
+        expect(parseScoreChoice("planet")).toBeNull();
+        expect(parseScoreChoice(null)).toBeNull();
+        expect(parseScoreChoice([])).toBeNull();
+    });
+});
+
+describe("validateScoreChoice", () => {
+    const ok = {
+        nutrition: 30,
+        processing: 30,
+        additives: 20,
+        environment: 20,
+    };
+
+    test("accepts a preset and custom weights within bounds", () => {
+        expect(
+            validateScoreChoice({ preset: "balanced", weights: null }),
+        ).toEqual({
+            ok: true,
+            value: { preset: "balanced", weights: null },
+        });
+        expect(validateScoreChoice({ preset: "custom", weights: ok })).toEqual({
+            ok: true,
+            value: { preset: "custom", weights: ok },
+        });
+    });
+
+    test("rejects custom weights that sum to 0", () => {
+        const res = validateScoreChoice({
+            preset: "custom",
+            weights: {
+                nutrition: 0,
+                processing: 0,
+                additives: 0,
+                environment: 0,
+            },
+        });
+        expect(res.ok).toBe(false);
+        if (!res.ok) expect(res.error).toMatch(/at least one/i);
+    });
+
+    test("rejects custom without weights, unknown presets and out-of-range weights", () => {
+        expect(
+            validateScoreChoice({ preset: "custom", weights: null }).ok,
+        ).toBe(false);
+        expect(validateScoreChoice({ preset: "keto", weights: null }).ok).toBe(
+            false,
+        );
+        for (const bad of [
+            -1,
+            101,
+            1.5,
+            Number.NaN,
+            Number.POSITIVE_INFINITY,
+        ]) {
+            expect(
+                validateScoreChoice({
+                    preset: "custom",
+                    weights: { ...ok, nutrition: bad },
+                }).ok,
+            ).toBe(false);
+        }
+    });
+
+    test("a preset choice drops any weights sent with it", () => {
+        expect(validateScoreChoice({ preset: "planet", weights: ok })).toEqual({
+            ok: true,
+            value: { preset: "planet", weights: null },
+        });
+    });
+});
+
+test("every built-in preset is a valid choice", () => {
+    for (const preset of Object.keys(SCORE_PRESETS) as ScorePresetId[]) {
+        expect(validateScoreChoice({ preset, weights: null }).ok).toBe(true);
+        expect(parseScoreChoice({ preset, weights: null })?.preset).toBe(
+            preset,
+        );
+    }
 });

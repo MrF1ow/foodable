@@ -186,6 +186,18 @@
     color: var(--status-over);
 }
 
+.fd-sheet .fd-btn--accent {
+    flex: 0.85 1 0;
+    gap: 6px;
+    background: var(--surface-raised);
+    color: var(--accent-text);
+}
+
+.fd-sheet .fd-btn--accent .fd-icon {
+    width: 16px;
+    height: 16px;
+}
+
 .fd-sheet .fd-btn:disabled {
     opacity: 0.5;
     cursor: default;

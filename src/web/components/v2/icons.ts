@@ -45,3 +45,37 @@ export function iconRepeat(): Html {
         '<path d="M20 12a8 8 0 1 1-2.6-5.9L20 8.5"/><path d="M20 4v4.5h-4.5"/>',
     );
 }
+
+/** Shopping cart for product and grocery actions (FigCraft Icon/cart 21094). */
+export function iconCart(): Html {
+    return icon(
+        '<path d="M3 4h2l2 11h11l2-8H6.5"/><path d="M7.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/><path d="M14.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/>',
+    );
+}
+
+/** Restock row icon (FigCraft Icon/refresh 22696): two arrows chasing round. */
+export function iconRefresh(): Html {
+    return icon(
+        '<path d="M19 11a7 7 0 0 0-12.5-3.4L5 9"/><path d="M5 4.5V9h4.5"/><path d="M5 13a7 7 0 0 0 12.5 3.4L19 15"/><path d="M19 19.5V15h-4.5"/>',
+    );
+}
+
+/** "Add when it runs low" icon (FigCraft Icon/bolt 22704): a lightning bolt. */
+export function iconBolt(): Html {
+    return icon('<path d="M13 3L6 13.5h5L10 21l7-10.5h-5L13 3Z"/>');
+}
+
+/** Water goal icon (FigCraft Icon/drop 23601): a drop, 12x17 in the 24 box. */
+export function iconDrop(): Html {
+    return icon('<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11Z"/>');
+}
+
+/** Fiber and sugar goal icon (FigCraft Icon/list 23607): a page of lines. */
+export function iconList(): Html {
+    return icon('<path d="M9 8h6M9 12h6M9 16h3M5 4h14v16H5z"/>');
+}
+
+/** Copy glyph (FigCraft Icon/copy 23674): two overlapping pages, 16x16 in the 24 box. */
+export function iconCopy(): Html {
+    return icon('<path d="M9 9h10v11H9z"/><path d="M15 9V5H5v11h4"/>');
+}

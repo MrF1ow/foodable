@@ -1,5 +1,35 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+
+/** Every global these tests (or the scripts they eval) put on globalThis. */
+const STUBBED_GLOBALS = [
+    "window",
+    "document",
+    "HTMLElement",
+    "HTMLButtonElement",
+    "HTMLFormElement",
+    "FoodableApp",
+    "setTimeout",
+    "clearTimeout",
+    "FOODABLE_EXPOSE_TODAY_WEEK",
+    "FOODABLE_EXPOSE_TODAY_EDIT",
+] as const;
+const REAL_GLOBALS = new Map(
+    STUBBED_GLOBALS.map((key) => [
+        key,
+        Object.getOwnPropertyDescriptor(globalThis, key),
+    ]),
+);
+const REAL_SET_TIMEOUT = globalThis.setTimeout;
+
+function restoreGlobals(): void {
+    for (const [key, descriptor] of REAL_GLOBALS) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete (globalThis as Record<string, unknown>)[key];
+    }
+}
+
+afterEach(restoreGlobals);
 
 type WeekApi = (opts: {
     dx: number;
@@ -22,6 +52,7 @@ const weekDecision: WeekApi = (() => {
     };
     g.FoodableApp = { onLoad() {} };
     eval(src);
+    restoreGlobals();
     return fn;
 })();
 
@@ -416,4 +447,19 @@ test("tile update keeps the unit and a tenth under 10 g", () => {
     expect(out.get("Protein")).toEqual({ text: "—", unitKept: true });
     expect(out.get("Fat")?.text).toBe("5.1");
     expect(out.get("Fat")?.unitKept).toBe(true);
+});
+
+test("the browser globals the other tests stub are back as they were", () => {
+    // Bun runs every test file in one process, so a global left behind here is
+    // seen by whatever file runs next. Compared with the values this file
+    // found, not with "absent": an earlier file may have left its own.
+    for (const key of STUBBED_GLOBALS) {
+        const had = REAL_GLOBALS.get(key);
+        const now = Object.getOwnPropertyDescriptor(globalThis, key);
+        expect({ key, value: now?.value }).toEqual({
+            key,
+            value: had?.value,
+        });
+    }
+    expect(globalThis.setTimeout).toBe(REAL_SET_TIMEOUT);
 });

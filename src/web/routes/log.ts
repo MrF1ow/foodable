@@ -4,7 +4,13 @@ import type { FoodResult } from "../../foods.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { getMealsInRange, searchMeals } from "../../db/nutrition.js";
+import { recentLogs } from "../../db/meals.js";
+import {
+    getMealsByDate,
+    insertMeal,
+    searchMeals,
+    type MealInput,
+} from "../../db/nutrition.js";
 import type { Meal } from "../../db/nutrition.js";
 import { getProfile } from "../../db/profiles.js";
 import { checkWebSearchRateLimit } from "../../rate-limit.js";
@@ -30,10 +36,25 @@ import {
 } from "../../domain/log-search.js";
 import { todayInTz, validateTz } from "../../domain/tz.js";
 import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
-import { MealItemsError, type MealItemSpec } from "../../domain/meals.js";
+import { resolveMealType } from "../../domain/today.js";
+import {
+    copyYesterdayIdempotencyKey,
+    MealItemsError,
+    type MealItemSpec,
+} from "../../domain/meals.js";
 import { toGrams } from "../../domain/food-quantity.js";
 import { unitHintsForLog } from "../../domain/log-search.js";
-import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";
+import {
+    foodDisplayScore,
+    offHitDisplayScore,
+} from "../../domain/product-screen.js";
+import type { ScoreWeights } from "../../domain/product-score.js";
+import {
+    scoreSettingsForViewer,
+    type ScoreSettingsStore,
+} from "../../domain/score-settings.js";
+import { liveScoreSettingsStore } from "../../db/score-settings.js";
+import { insertWater, insertWeight } from "../../db/nutrition.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { MAX_CALORIES, MAX_MACRO_G } from "../../domain/import.js";
 import {
@@ -59,10 +80,10 @@ import { safeReturnPath } from "../usual-products-path.js";
 import { gatedRoute } from "../gated.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
+import { mealInputForSlotRelog } from "./log-relog.js";
 
 export const logRoutes = new Hono();
 
-const RECENT_HISTORY_DAYS = 14;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
@@ -87,11 +108,13 @@ function trimSources(result: LogSearchResult, limit: number): LogSearchResult {
 function historyItemFromMeal(
     meal: Meal,
     foodsById: Map<string, Food>,
+    weights: ScoreWeights,
 ): LogSearchSourceItem {
     const items = meal.items ?? [];
     const base: LogSearchSourceItem = {
         kind: "history",
         id: meal.id,
+        meal_id: meal.id,
         name: meal.description,
         source: "meal",
         logged_at: meal.logged_at,
@@ -117,6 +140,7 @@ function historyItemFromMeal(
     }
     if (line.food_id) {
         const food = foodsById.get(line.food_id);
+        const score = food ? foodDisplayScore(food, weights) : null;
         return {
             ...base,
             food_id: line.food_id,
@@ -128,6 +152,7 @@ function historyItemFromMeal(
             protein_per_100g: food?.proteinG ?? null,
             carbs_per_100g: food?.carbsG ?? null,
             fat_per_100g: food?.fatG ?? null,
+            ...(score != null ? { product_score: score } : {}),
         };
     }
     return base;
@@ -174,21 +199,18 @@ async function loadHistoryMeals(
     limit: number,
     tz: string,
     foodsById: Map<string, Food>,
+    weights: ScoreWeights,
 ): Promise<LogSearchSourceItem[]> {
     const trimmed = query.trim();
     let meals: Meal[];
     if (trimmed) {
         meals = await searchMeals(userId, [trimmed], { limit });
     } else {
-        const end = todayInTz(tz);
-        const start = recentHistoryStart(end, RECENT_HISTORY_DAYS);
-        const range = await getMealsInRange(userId, start, end, tz);
-        meals = range
-            .slice()
-            .sort((a, b) => b.logged_at.localeCompare(a.logged_at))
-            .slice(0, limit);
+        meals = await recentLogs(userId, limit);
     }
-    const items = meals.map((meal) => historyItemFromMeal(meal, foodsById));
+    const items = meals.map((meal) =>
+        historyItemFromMeal(meal, foodsById, weights),
+    );
     return Promise.all(
         items.map((item) =>
             enrichHistoryItem(item, householdId, userId, foodsById),
@@ -196,8 +218,12 @@ async function loadHistoryMeals(
     );
 }
 
-function offToSource(hit: FoodResult): LogSearchSourceItem {
+function offToSource(
+    hit: FoodResult,
+    weights: ScoreWeights,
+): LogSearchSourceItem {
     const per100 = catalogNutritionFromOff(hit);
+    const score = offHitDisplayScore(hit, weights);
     return {
         kind: "off",
         id: hit.source,
@@ -209,6 +235,7 @@ function offToSource(hit: FoodResult): LogSearchSourceItem {
         protein_per_100g: per100.proteinG,
         carbs_per_100g: per100.carbsG,
         fat_per_100g: per100.fatG,
+        ...(score != null ? { product_score: score } : {}),
     };
 }
 
@@ -244,7 +271,8 @@ async function splitOffByHouseholdBarcode(
     return { kept, householdFoodIds };
 }
 
-function foodToSource(row: Food): LogSearchSourceItem {
+function foodToSource(row: Food, weights: ScoreWeights): LogSearchSourceItem {
+    const score = foodDisplayScore(row, weights);
     return {
         kind: "food",
         id: row.id,
@@ -258,6 +286,7 @@ function foodToSource(row: Food): LogSearchSourceItem {
         protein_per_100g: row.proteinG,
         carbs_per_100g: row.carbsG,
         fat_per_100g: row.fatG,
+        ...(score != null ? { product_score: score } : {}),
     };
 }
 
@@ -267,7 +296,19 @@ export async function buildLogSearchSources(input: {
     query: string;
     limit: number;
     timezone: string;
-}): Promise<{ sources: LogSearchSources; foodsById: Map<string, Food> }> {
+    /** Where the viewer's score weights are read from; the live store by default. */
+    scoreSettings?: ScoreSettingsStore;
+}): Promise<{
+    sources: LogSearchSources;
+    foodsById: Map<string, Food>;
+    /** The viewer's weights: every score badge in these results uses them. */
+    weights: ScoreWeights;
+}> {
+    const { weights } = await scoreSettingsForViewer(
+        input.scoreSettings ?? liveScoreSettingsStore(),
+        input.householdId,
+        input.userId,
+    );
     const foodsStore = liveFoodsStore();
     const listed = await foodsStore.listFoods(input.householdId);
     const foodsById = new Map(listed.map((row) => [row.id, row]));
@@ -278,15 +319,16 @@ export async function buildLogSearchSources(input: {
         input.limit,
         input.timezone,
         foodsById,
+        weights,
     );
     // An empty query shows recent meals only: nothing else to load.
     if (!input.query.trim()) {
-        return { sources: { history }, foodsById };
+        return { sources: { history }, foodsById, weights };
     }
 
     const aliasMap = await foodsStore.listAllAliases(input.householdId);
-    const food = matchFoodsByWords(input.query, listed, aliasMap).map(
-        foodToSource,
+    const food = matchFoodsByWords(input.query, listed, aliasMap).map((row) =>
+        foodToSource(row, weights),
     );
 
     const recipes = await listRecipes(liveRecipesStore(), input.householdId);
@@ -326,6 +368,7 @@ export async function buildLogSearchSources(input: {
         const foodRow = item.foodId
             ? (foodsById.get(item.foodId) ?? null)
             : null;
+        const score = foodRow ? foodDisplayScore(foodRow, weights) : null;
         stock.push({
             kind: "stock",
             id: item.id,
@@ -341,10 +384,11 @@ export async function buildLogSearchSources(input: {
             fat_per_100g: foodRow?.fatG ?? null,
             stock_amount: item.quantity.amount,
             stock_unit: item.quantity.unit,
+            ...(score != null ? { product_score: score } : {}),
         });
     }
 
-    return { sources: { food, recipe, history, stock }, foodsById };
+    return { sources: { food, recipe, history, stock }, foodsById, weights };
 }
 
 function countHouseholdHits(sources: LogSearchSources, query: string): number {
@@ -419,11 +463,14 @@ logRoutes.get(
             for (const id of householdFoodIds) {
                 const row = built.foodsById.get(id);
                 if (row && !listed.has(id)) {
-                    food.push(foodToSource(row));
+                    food.push(foodToSource(row, built.weights));
                 }
             }
             sources = { ...sources, food };
-            if (kept.length > 0) sources.off = kept.map(offToSource);
+            if (kept.length > 0)
+                sources.off = kept.map((hit) =>
+                    offToSource(hit, built.weights),
+                );
         }
 
         const merged = mergeLogResults(sources, q);
@@ -878,6 +925,76 @@ logRoutes.post(
                 weighInError: message,
                 weighIn: prefill,
             });
+        }
+    },
+);
+
+logRoutes.post(
+    "/log/copy-yesterday",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const userId = member.userId;
+        const profile = await getProfile(userId);
+        const tz =
+            profile?.timezone && validateTz(profile.timezone)
+                ? profile.timezone
+                : "UTC";
+        const body = await c.req.parseBody();
+        const slot = formText(body, "slot");
+        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+        let meal_type: MealInput["meal_type"];
+        try {
+            meal_type = parseMealType(slot);
+        } catch {
+            return c.text("Choose a meal type.", 400);
+        }
+        const today = todayInTz(tz);
+        const yesterday = recentHistoryStart(today, 1);
+        const dayMeals = await getMealsByDate(userId, yesterday, tz);
+        const slotMeals = dayMeals.filter(
+            (row) => resolveMealType(row.meal_type) === meal_type,
+        );
+        // A stale hint (yesterday's slot changed since the page loaded) goes
+        // back to the page with a toast rather than a bare error response.
+        if (slotMeals.length === 0) {
+            return redirectWithToast(
+                c,
+                returnTo,
+                "nutrition.meal.copy-yesterday.none",
+            );
+        }
+        const idempotency_key = copyYesterdayIdempotencyKey(
+            userId,
+            today,
+            meal_type,
+        );
+        try {
+            const input = await mealInputForSlotRelog(
+                member.householdId,
+                slotMeals,
+                meal_type,
+                new Date().toISOString(),
+            );
+            if (!input) {
+                return redirectWithToast(
+                    c,
+                    returnTo,
+                    "nutrition.meal.copy-yesterday.none",
+                );
+            }
+            const result = await insertMeal(userId, {
+                ...input,
+                meal_type,
+                idempotency_key,
+            });
+            const msg = result.deduplicated
+                ? "nutrition.meal.copy-yesterday.noop"
+                : "nutrition.meal.logged";
+            return redirectWithToast(c, returnTo, msg);
+        } catch {
+            return c.text("Could not copy yesterday's meal.", 400);
         }
     },
 );

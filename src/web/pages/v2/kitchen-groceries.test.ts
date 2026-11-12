@@ -7,10 +7,12 @@ import {
     addStoreIdFromModal,
     groceryCheckedCount,
     groceryHeaderSubtitle,
+    groceryLineRowMarkup,
     groceryLineSheetId,
     groceryOpenLineCount,
     groceryRowLabels,
     groceryV2QuantityLabel,
+    GROCERY_V2_RETURN_TO,
     groceryV2ReturnTo,
     renderKitchenGroceriesBody,
     renderKitchenGroceriesV2Page,
@@ -19,6 +21,11 @@ import {
     FD_GROCERY_ADD_SHEET_ID,
 } from "./kitchen-groceries.js";
 import type { GroceryLineView } from "../grocery.js";
+import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
 
 const HH = "hh-1";
 
@@ -295,6 +302,25 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("8 to get");
     });
 
+    test("Share sits in the title row and opens a sheet that posts to the share route", () => {
+        const body = renderKitchenGroceriesBody(baseView());
+        expect(body).toMatch(
+            /<div class="fd-kitchen-grocery-head"><h1[\s\S]*?<\/h1><button[^>]*fd-kitchen-grocery-share/,
+        );
+        expect(body).toContain(
+            'commandfor="fd-grocery-share-sheet" command="show-modal"',
+        );
+        expect(body).toContain('action="/kitchen/groceries/share"');
+    });
+
+    test("a refused share shows its error in the open sheet only", () => {
+        const body = renderKitchenGroceriesBody(
+            baseView({ error: "Nope.", openShare: true }),
+        );
+        expect(body).toContain("data-sheet-open-on-load");
+        expect(body.split("Nope.").length - 1).toBe(1);
+    });
+
     test("add-to-list field opens the grocery add sheet", () => {
         const body = renderKitchenGroceriesBody(baseView());
         expect(body).toContain("fd-kitchen-grocery-add");
@@ -448,4 +474,90 @@ describe("groceryCheckedCount", () => {
 test("addStoreIdFromModal parses grocery add modal ids", () => {
     expect(addStoreIdFromModal("grocery-add-food-st-1")).toBe("st-1");
     expect(addStoreIdFromModal("grocery-add-store")).toBe(null);
+});
+
+describe("groceryLineRowMarkup score badge", () => {
+    test("shows score badge only for scored packaged foods", () => {
+        const row = lineView(
+            line({ id: "soup", displayName: "Chicken soup", foodId: "f-soup" }),
+        );
+        const view = {
+            lineMeta: new Map<string, KitchenGroceriesLineMeta>([
+                [
+                    "soup",
+                    {
+                        plainFoodName: null,
+                        isUsual: false,
+                        allergenWarning: null,
+                        storeName: "Costco",
+                        sectionName: "Pantry",
+                        productScore: 41,
+                    },
+                ],
+            ]),
+        };
+        const html = String(
+            groceryLineRowMarkup(row, view, GROCERY_V2_RETURN_TO),
+        );
+        expect(html).toContain("fd-score--middling");
+        expect(html).toContain(">41<");
+
+        const plain = String(
+            groceryLineRowMarkup(
+                row,
+                {
+                    lineMeta: new Map([
+                        [
+                            "soup",
+                            {
+                                plainFoodName: null,
+                                isUsual: false,
+                                allergenWarning: null,
+                                storeName: "Costco",
+                                sectionName: "Pantry",
+                                productScore: null,
+                            },
+                        ],
+                    ]),
+                },
+                GROCERY_V2_RETURN_TO,
+            ),
+        );
+        expect(plain).not.toContain("fd-score");
+    });
+});
+
+describe("groceryLineRowMarkup with $-patterns in the line", () => {
+    test("a line id or name made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const row = lineView(line({ id: payload, displayName: payload }));
+            const html = String(
+                groceryLineRowMarkup(
+                    row,
+                    { lineMeta: new Map() },
+                    GROCERY_V2_RETURN_TO,
+                ),
+            );
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "li[data-fd-grocery-row]", "id"),
+            ).toEqual([`fd-grocery-row-${payload}`]);
+            const overview = String(
+                groceryLineRowMarkup(
+                    row,
+                    { lineMeta: new Map() },
+                    GROCERY_V2_RETURN_TO,
+                    { overview: true },
+                ),
+            );
+            expect(await injectedAttributes(overview)).toEqual([]);
+            expect(
+                await attributeValues(
+                    overview,
+                    "li[data-fd-grocery-row-overview]",
+                    "id",
+                ),
+            ).toEqual([`fd-grocery-row-${payload}`]);
+        }
+    });
 });

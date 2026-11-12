@@ -5,6 +5,7 @@ import {
     renderFoodsSettingsPage,
 } from "../web/pages/foods.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
+import { NO_USUAL_SCHEDULE } from "./foods.js";
 
 const chrome = {
     theme: "light" as const,
@@ -39,6 +40,7 @@ const food = {
     usualProductId: null,
     usualStoreId: null,
     usualAmount: null,
+    ...NO_USUAL_SCHEDULE,
     offQuality: null,
     createdBy: null,
     archivedAt: null,

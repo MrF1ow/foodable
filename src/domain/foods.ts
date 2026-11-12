@@ -19,6 +19,17 @@ export type NutritionSource =
 
 export type UsualAmount = { amount: number; unit: string };
 
+/** How often a usual is bought again; null on the food means no schedule. */
+export const RESTOCK_SCHEDULES = [
+    "weekly",
+    "every_n_weeks",
+    "monthly",
+] as const;
+export type RestockSchedule = (typeof RESTOCK_SCHEDULES)[number];
+
+/** The largest N a household can enter for "every N weeks" (two years). */
+export const RESTOCK_MAX_EVERY_WEEKS = 104;
+
 export type FoodQuality = {
     nutriscoreGrade: "a" | "b" | "c" | "d" | "e" | null;
     novaGroup: 1 | 2 | 3 | 4 | null;
@@ -58,12 +69,44 @@ export type Food = {
     usualProductId: string | null;
     usualStoreId: string | null;
     usualAmount: UsualAmount | null;
+    /** The usual's restock schedule; lives on the plain food, never on a product. */
+    restockSchedule: RestockSchedule | null;
+    /** N for `every_n_weeks` (required exactly then), null otherwise. */
+    restockEveryWeeks: number | null;
+    restockPaused: boolean;
+    /** Add the usual to the list when its stock is below the low level. */
+    restockWhenLow: boolean;
+    /** In the usual amount's unit; null means a quarter of the usual amount. */
+    restockLowLevel: number | null;
+    /** `YYYY-MM-DD` of the last put-away or tick-off, in the household's day. */
+    lastRestockedOn: string | null;
     offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
     updatedAt: string;
 };
+
+export type UsualScheduleKey =
+    | "restockSchedule"
+    | "restockEveryWeeks"
+    | "restockPaused"
+    | "restockWhenLow"
+    | "restockLowLevel"
+    | "lastRestockedOn";
+
+/** The six schedule fields of a usual, as stored on the plain food. */
+export type UsualScheduleFields = Pick<Food, UsualScheduleKey>;
+
+/** A usual with no schedule, never paused, not added when low, never restocked. */
+export const NO_USUAL_SCHEDULE: Readonly<UsualScheduleFields> = Object.freeze({
+    restockSchedule: null,
+    restockEveryWeeks: null,
+    restockPaused: false,
+    restockWhenLow: false,
+    restockLowLevel: null,
+    lastRestockedOn: null,
+});
 
 export type FoodPatch = {
     name?: string;
@@ -165,6 +208,12 @@ export type FoodsStore = {
         foodId: string,
         patch: FoodOffNutritionPatch,
     ): Promise<Food | null>;
+    /**
+     * The household's "treat singular and plural as the same food" setting.
+     * Name resolution reads it only after an exact name and alias miss. A
+     * store without it behaves as off.
+     */
+    pluralsSameFood?(householdId: string): Promise<boolean>;
 };
 
 export type FoodOffNutritionPatch = {
@@ -632,6 +681,7 @@ export type MemoryFoodsStore = FoodsStore &
             extra?: Record<string, unknown>,
         ): MemoryFoodRefRow;
         linkRefs(holder: MemoryFoodRefHolder): void;
+        setPluralsSameFood(householdId: string, enabled: boolean): void;
     };
 
 export function createMemoryFoodsStore(): MemoryFoodsStore {
@@ -643,9 +693,17 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
     const refs: MemoryFoodRefRow[] = [];
     const refHolders: MemoryFoodRefHolder[] = [];
     let linkedDismissals: NoticeDismissalsStore | undefined;
+    const pluralsOn = new Set<string>();
 
     const store: MemoryFoodsStore = {
         refs,
+        setPluralsSameFood(householdId, enabled) {
+            if (enabled) pluralsOn.add(householdId);
+            else pluralsOn.delete(householdId);
+        },
+        async pluralsSameFood(householdId) {
+            return pluralsOn.has(householdId);
+        },
         linkDismissals(s) {
             linkedDismissals = s;
         },
@@ -1044,6 +1102,12 @@ export function newFood(input: {
     usualProductId?: string | null;
     usualStoreId?: string | null;
     usualAmount?: UsualAmount | null;
+    restockSchedule?: RestockSchedule | null;
+    restockEveryWeeks?: number | null;
+    restockPaused?: boolean;
+    restockWhenLow?: boolean;
+    restockLowLevel?: number | null;
+    lastRestockedOn?: string | null;
     offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
@@ -1080,6 +1144,12 @@ export function newFood(input: {
         usualStoreId: input.usualStoreId ?? null,
         usualAmount:
             input.usualAmount == null ? null : { ...input.usualAmount },
+        restockSchedule: input.restockSchedule ?? null,
+        restockEveryWeeks: input.restockEveryWeeks ?? null,
+        restockPaused: input.restockPaused ?? false,
+        restockWhenLow: input.restockWhenLow ?? false,
+        restockLowLevel: input.restockLowLevel ?? null,
+        lastRestockedOn: input.lastRestockedOn ?? null,
         offQuality:
             input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
@@ -1258,6 +1328,35 @@ async function existingByNameOrAlias(
     return aliased;
 }
 
+async function storePluralsSameFood(
+    store: FoodsStore,
+    householdId: string,
+): Promise<boolean> {
+    return store.pluralsSameFood ? store.pluralsSameFood(householdId) : false;
+}
+
+/**
+ * Live foods of `kind` whose name has the same loose key as `name`. With
+ * `plurals`, the plural-free key is tried when the loose key finds nothing,
+ * so an exact spelling still wins over a singular or plural one.
+ */
+function filterLooseNameMatches(
+    foods: readonly Food[],
+    kind: FoodKind,
+    name: string,
+    plurals: boolean,
+): Food[] {
+    const live = foods.filter(
+        (food) => food.kind === kind && food.archivedAt == null,
+    );
+    const key = looseFoodKey(name);
+    const loose = live.filter((food) => looseFoodKey(food.name) === key);
+    if (loose.length > 0 || !plurals) return loose;
+    const pluralFree = pluralFreeFoodKey(name);
+    if (!pluralFree) return [];
+    return live.filter((food) => pluralFreeFoodKey(food.name) === pluralFree);
+}
+
 function preferLooseNameMatch(a: Food, b: Food): number {
     const aPlain = a.brand == null ? 1 : 0;
     const bPlain = b.brand == null ? 1 : 0;
@@ -1274,14 +1373,9 @@ async function findFoodByLooseKey(
     name: string,
     opts?: { rejectBranded?: boolean; requiredBrand?: string | null },
 ): Promise<Food | null> {
-    const key = looseFoodKey(name);
     const listed = await store.listFoods(householdId);
-    let matches = listed.filter(
-        (food) =>
-            food.kind === kind &&
-            food.archivedAt == null &&
-            looseFoodKey(food.name) === key,
-    );
+    const plurals = await storePluralsSameFood(store, householdId);
+    let matches = filterLooseNameMatches(listed, kind, name, plurals);
     if (opts?.rejectBranded) {
         matches = matches.filter((food) => food.brand == null);
     }
@@ -1452,6 +1546,28 @@ export async function findManualFood(
     );
     if (existing) return existing;
     return findFoodByLooseKey(store, householdId, kind, trimmed);
+}
+
+/** Recipe import: try stripped names for lookup only, then create under `name`. */
+export async function findOrCreateManualFoodForRecipeImport(
+    store: FoodsStore,
+    householdId: string,
+    kind: FoodKind,
+    name: string,
+    opts?: { onSimilar?: OnSimilar },
+): Promise<Food> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+        throw new FoodsInputError(
+            kind === "supply" ? "Enter a supply name." : "Enter a food name.",
+        );
+    }
+    const plurals = await storePluralsSameFood(store, householdId);
+    for (const variant of ingredientLookupVariants(trimmed, { plurals })) {
+        const found = await findManualFood(store, householdId, kind, variant);
+        if (found) return found;
+    }
+    return findOrCreateManualFood(store, householdId, kind, trimmed, opts);
 }
 
 export async function findOrCreateManualFood(
@@ -1663,6 +1779,7 @@ export type MergedFoodFieldPick = Pick<
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | UsualScheduleKey
     | "offQuality"
     | "offNutrientLevels"
 >;
@@ -1692,6 +1809,7 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                 : drop.usualAmount != null
                   ? { ...drop.usualAmount }
                   : null,
+        ...mergedUsualSchedule(keep, drop),
         offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
         offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
@@ -1757,6 +1875,212 @@ export function looseFoodKey(name: string): string {
     return prepareFoodNameForTokens(name)
         .replace(/[^a-z0-9]+/g, " ")
         .trim();
+}
+
+/** Singular mass nouns whose "-es" is not a plural ending (see `(ss)es` rule). */
+const PLURAL_FREE_SS_ES_SINGULAR = new Set(["molasses"]);
+
+/**
+ * One name word with a regular English plural ending removed, for a key that
+ * makes two foods one. Stricter than `singularizeNameToken`, which only feeds
+ * suggestions. The result is a key, not a word: where a singular and its
+ * plural differ by more than an "s", both are cut to the stem they share.
+ * - words ending in "ss" or "us" are left alone ("glass", "hummus");
+ * - "-ies" and a consonant before "-y" meet at "…i"
+ *   ("berry"/"berries", "cookie"/"cookies"); "-ie" drops the trailing "e"
+ *   to join "-ies" ("cookie"/"cookies"); "pie"/"pies" share "pie";
+ * - after ch, sh, x, z, ss or o, "-es" and "-e" both come off
+ *   ("peach"/"peaches", "quiche"/"quiches", "glass"/"glasses",
+ *   "tomato"/"tomatoes", "sloe"/"sloes");
+ * - otherwise one trailing "s" comes off ("eggs", "dates", "greens").
+ * Irregular plurals ("leaves", "loaves") stay apart from their singulars.
+ */
+function pluralFreeNameToken(token: string): string {
+    if (/(ss|us)$/.test(token)) return token;
+    if (PLURAL_FREE_SS_ES_SINGULAR.has(token)) return token;
+    if (token.endsWith("ies") && token.length > 4) {
+        return token.slice(0, -3) + "i";
+    }
+    if (token.length > 3 && token.endsWith("ie")) return token.slice(0, -1);
+    if (/[^aeiou]y$/.test(token)) return token.slice(0, -1) + "i";
+    if (/(ch|sh|x|z|ss|o)es$/.test(token)) return token.slice(0, -2);
+    if (/(ch|sh|x|z|ss|o)e$/.test(token)) return token.slice(0, -1);
+    if (token.length <= 3) return token;
+    const single = singularizeNameToken(token);
+    return single === token ? token : pluralFreeNameToken(single);
+}
+
+/**
+ * `looseFoodKey` with each word's plural ending removed, so "Eggs" and "egg"
+ * share a key. Name resolution and the merge job use it only when the
+ * household treats singular and plural as the same food.
+ */
+export function pluralFreeFoodKey(name: string): string {
+    const loose = looseFoodKey(name);
+    if (!loose) return "";
+    return loose.split(" ").map(pluralFreeNameToken).join(" ");
+}
+
+const INGREDIENT_LOOKUP_SIZE_WORDS = new Set([
+    "extra",
+    "extra-large",
+    "jumbo",
+    "large",
+    "lg",
+    "md",
+    "med",
+    "medium",
+    "sm",
+    "small",
+    "x-large",
+    "xl",
+]);
+
+const INGREDIENT_LOOKUP_PREP_WORDS = new Set([
+    "beaten",
+    "chopped",
+    "crushed",
+    "cubed",
+    "diced",
+    "drained",
+    "fresh",
+    "grated",
+    "halved",
+    "julienned",
+    "melted",
+    "minced",
+    "peeled",
+    "quartered",
+    "rinsed",
+    "seeded",
+    "shredded",
+    "sliced",
+    "softened",
+    "thawed",
+    "trimmed",
+]);
+
+function stripIngredientParentheticals(name: string): string {
+    let s = name;
+    let prev = "";
+    while (s !== prev) {
+        prev = s;
+        s = s.replace(/\([^()]*\)/g, " ");
+    }
+    return s.replace(/\s+/g, " ").trim();
+}
+
+function ingredientLookupTokenKey(token: string): string {
+    return token.toLowerCase().replace(/[,.;:]+$/, "");
+}
+
+function isIngredientLookupSizeOrPrepToken(token: string): boolean {
+    const key = ingredientLookupTokenKey(token);
+    return (
+        INGREDIENT_LOOKUP_SIZE_WORDS.has(key) ||
+        INGREDIENT_LOOKUP_PREP_WORDS.has(key)
+    );
+}
+
+function stripOneLeadingSizePrepWord(
+    tokens: readonly string[],
+): string[] | null {
+    if (tokens.length === 0) return null;
+    if (isIngredientLookupSizeOrPrepToken(tokens[0]!)) {
+        return tokens.slice(1);
+    }
+    if (
+        tokens.length >= 2 &&
+        ingredientLookupTokenKey(tokens[0]!) === "extra" &&
+        isIngredientLookupSizeOrPrepToken(tokens[1]!)
+    ) {
+        return tokens.slice(2);
+    }
+    return null;
+}
+
+function stripOneTrailingSizePrepWord(
+    tokens: readonly string[],
+): string[] | null {
+    if (tokens.length === 0) return null;
+    const last = tokens[tokens.length - 1]!;
+    if (isIngredientLookupSizeOrPrepToken(last)) {
+        return tokens.slice(0, -1);
+    }
+    return null;
+}
+
+function stripTrailingCommaPrepClause(name: string): string | null {
+    const match = name.match(/^(.+?),\s*([\w-]+)\s*$/);
+    if (!match) return null;
+    const prep = ingredientLookupTokenKey(match[2]!);
+    if (
+        !INGREDIENT_LOOKUP_PREP_WORDS.has(prep) &&
+        !INGREDIENT_LOOKUP_SIZE_WORDS.has(prep)
+    ) {
+        return null;
+    }
+    return match[1]!.trim();
+}
+
+/** Strip leading/trailing prep+size one word at a time; comma clauses first. */
+function gradualIngredientLookupVariants(name: string): string[] {
+    const variants: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (s: string) => {
+        const t = s.trim();
+        if (!t || seen.has(t)) return;
+        seen.add(t);
+        variants.push(t);
+    };
+
+    const commaStripped = stripTrailingCommaPrepClause(name);
+    if (commaStripped) push(commaStripped);
+
+    const peelBase = commaStripped ?? name;
+    let tokens = peelBase.split(/\s+/).filter(Boolean);
+    for (;;) {
+        const leading = stripOneLeadingSizePrepWord(tokens);
+        const next = leading ?? stripOneTrailingSizePrepWord(tokens);
+        if (!next || next.length === 0) break;
+        tokens = next;
+        push(tokens.join(" "));
+    }
+    return variants;
+}
+
+function pushIngredientLookupVariant(variants: string[], name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (variants.includes(trimmed)) return;
+    variants.push(trimmed);
+}
+
+/**
+ * Names to try when recipe import links an ingredient line to an existing food.
+ * Each step only narrows the string for lookup; it never rewrites stored names.
+ */
+export function ingredientLookupVariants(
+    raw: string,
+    opts: { plurals: boolean },
+): string[] {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    const variants: string[] = [];
+    pushIngredientLookupVariant(variants, trimmed);
+    const noParens = stripIngredientParentheticals(trimmed);
+    pushIngredientLookupVariant(variants, noParens);
+    for (const step of gradualIngredientLookupVariants(noParens)) {
+        pushIngredientLookupVariant(variants, step);
+    }
+    const mostStripped =
+        variants.length > 0 ? variants[variants.length - 1]! : noParens;
+    if (opts.plurals) {
+        const pluralFree = pluralFreeFoodKey(mostStripped);
+        if (pluralFree) pushIngredientLookupVariant(variants, pluralFree);
+    }
+    return variants;
 }
 
 export function foodNameTokens(text: string): string[] {
@@ -2011,6 +2335,7 @@ function findManualFoodInListed(
     aliasesByFoodId: ReadonlyMap<string, string[]>,
     kind: FoodKind,
     name: string,
+    plurals: boolean,
 ): Food | null {
     const trimmed = name.trim();
     if (!trimmed) return null;
@@ -2029,13 +2354,7 @@ function findManualFoodInListed(
             if (normalizeFoodName(alias) === normalized) return food;
         }
     }
-    const key = looseFoodKey(trimmed);
-    let matches = foods.filter(
-        (food) =>
-            food.kind === kind &&
-            !food.archivedAt &&
-            looseFoodKey(food.name) === key,
-    );
+    const matches = filterLooseNameMatches(foods, kind, trimmed, plurals);
     if (matches.length === 0) return null;
     matches.sort(preferLooseNameMatch);
     return copyFood(matches[0]!);
@@ -2048,9 +2367,10 @@ export async function similarFoodsForNames(
     kind: FoodKind,
     names: readonly string[],
 ): Promise<SimilarFoodsEntry[]> {
-    const [foods, aliasesByFoodId] = await Promise.all([
+    const [foods, aliasesByFoodId, plurals] = await Promise.all([
         store.listFoods(householdId),
         store.listAllAliases(householdId),
+        storePluralsSameFood(store, householdId),
     ]);
     const seenNorm = new Set<string>();
     const entries: SimilarFoodsEntry[] = [];
@@ -2060,7 +2380,15 @@ export async function similarFoodsForNames(
         const norm = normalizeFoodName(trimmed);
         if (seenNorm.has(norm)) continue;
         seenNorm.add(norm);
-        if (findManualFoodInListed(foods, aliasesByFoodId, kind, trimmed)) {
+        if (
+            findManualFoodInListed(
+                foods,
+                aliasesByFoodId,
+                kind,
+                trimmed,
+                plurals,
+            )
+        ) {
             continue;
         }
         const candidates = similarFoods(trimmed, foods, aliasesByFoodId, {
@@ -2373,6 +2701,293 @@ export async function setUsualPurchase(
         };
     }
     return saveFood(store, next);
+}
+
+const USUAL_SCHEDULE_KEYS: readonly UsualScheduleKey[] = [
+    "restockSchedule",
+    "restockEveryWeeks",
+    "restockPaused",
+    "restockWhenLow",
+    "restockLowLevel",
+    "lastRestockedOn",
+];
+
+/**
+ * A change to a usual's schedule fields. A field left out keeps the stored
+ * value; the string forms exist so a web form can pass its text through.
+ */
+export type UsualSchedulePatch = {
+    restockSchedule?: string | null;
+    restockEveryWeeks?: number | string | null;
+    restockPaused?: boolean;
+    restockWhenLow?: boolean;
+    restockLowLevel?: number | string | null;
+    lastRestockedOn?: string | null;
+};
+
+function isBlankInput(value: unknown): boolean {
+    return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function parseRestockSchedule(raw: unknown): RestockSchedule | null {
+    if (isBlankInput(raw)) return null;
+    const value = String(raw).trim();
+    if ((RESTOCK_SCHEDULES as readonly string[]).includes(value)) {
+        return value as RestockSchedule;
+    }
+    throw new FoodsInputError(
+        "Pick weekly, every N weeks, monthly, or no schedule.",
+    );
+}
+
+function parseRestockEveryWeeks(raw: unknown): number | null {
+    if (isBlankInput(raw)) return null;
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (!Number.isInteger(n) || n < 1 || n > RESTOCK_MAX_EVERY_WEEKS) {
+        throw new FoodsInputError(
+            `Enter a whole number of weeks from 1 to ${RESTOCK_MAX_EVERY_WEEKS}.`,
+        );
+    }
+    return n;
+}
+
+function parseRestockLowLevel(raw: unknown): number | null {
+    if (isBlankInput(raw)) return null;
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(n) || n < 0) {
+        throw new FoodsInputError("The low level must be zero or more.");
+    }
+    return n;
+}
+
+function parseRestockFlag(raw: unknown, label: string): boolean {
+    if (typeof raw !== "boolean") {
+        throw new FoodsInputError(`${label} must be on or off.`);
+    }
+    return raw;
+}
+
+/** A real calendar day as `YYYY-MM-DD`; anything else is rejected. */
+function parseCalendarDay(raw: unknown): string | null {
+    if (isBlankInput(raw)) return null;
+    const text = String(raw).trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (match) {
+        const [y, m, d] = [
+            Number(match[1]),
+            Number(match[2]),
+            Number(match[3]),
+        ];
+        const probe = new Date(Date.UTC(y, m - 1, d));
+        if (
+            probe.getUTCFullYear() === y &&
+            probe.getUTCMonth() === m - 1 &&
+            probe.getUTCDate() === d
+        ) {
+            return text;
+        }
+    }
+    throw new FoodsInputError("Enter the date as YYYY-MM-DD.");
+}
+
+/**
+ * The schedule fields after `patch`, validated as one record: "every N weeks"
+ * needs its N and no other schedule carries one. Switching to another
+ * schedule drops the stored N unless the patch names one (which is then
+ * refused). Everything the patch does not mention is carried over unchanged.
+ */
+export function applyUsualSchedulePatch(
+    current: UsualScheduleFields,
+    patch: UsualSchedulePatch,
+): UsualScheduleFields {
+    let schedule = current.restockSchedule;
+    let everyWeeks = current.restockEveryWeeks;
+    if (patch.restockSchedule !== undefined) {
+        schedule = parseRestockSchedule(patch.restockSchedule);
+        if (
+            schedule !== "every_n_weeks" &&
+            patch.restockEveryWeeks === undefined
+        ) {
+            everyWeeks = null;
+        }
+    }
+    if (patch.restockEveryWeeks !== undefined) {
+        everyWeeks = parseRestockEveryWeeks(patch.restockEveryWeeks);
+    }
+    if (schedule === "every_n_weeks") {
+        if (everyWeeks == null) {
+            throw new FoodsInputError("Enter how many weeks between restocks.");
+        }
+    } else if (everyWeeks != null) {
+        throw new FoodsInputError(
+            "Only an every N weeks schedule takes a number of weeks.",
+        );
+    }
+    return {
+        restockSchedule: schedule,
+        restockEveryWeeks: everyWeeks,
+        restockPaused:
+            patch.restockPaused !== undefined
+                ? parseRestockFlag(patch.restockPaused, "Paused")
+                : current.restockPaused,
+        restockWhenLow:
+            patch.restockWhenLow !== undefined
+                ? parseRestockFlag(patch.restockWhenLow, "Add when low")
+                : current.restockWhenLow,
+        restockLowLevel:
+            patch.restockLowLevel !== undefined
+                ? parseRestockLowLevel(patch.restockLowLevel)
+                : current.restockLowLevel,
+        lastRestockedOn:
+            patch.lastRestockedOn !== undefined
+                ? parseCalendarDay(patch.lastRestockedOn)
+                : current.lastRestockedOn,
+    };
+}
+
+/**
+ * Sets a usual's schedule, paused flag, add-when-low switch and low level.
+ * The schedule lives on the plain food (a standalone food counts as one);
+ * a product reads its plain food's, so writing one on a product is refused.
+ * Writes are never gated, and a field the patch leaves out is kept.
+ */
+export async function setUsualSchedule(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    patch: UsualSchedulePatch,
+): Promise<Food> {
+    const current = await requireLiveFood(store, householdId, foodId);
+    assertPlainFoodTarget(current);
+    const next = applyUsualSchedulePatch(current, patch);
+    const unchanged = USUAL_SCHEDULE_KEYS.every(
+        (key) => current[key] === next[key],
+    );
+    if (unchanged) return current;
+    return saveFood(store, { ...current, ...next });
+}
+
+/**
+ * Stamps the day a usual was last restocked: call it when a grocery line of
+ * the food (or of one of its products) is ticked off or put away. `on` is the
+ * household-local day, `YYYY-MM-DD`. A product stamps its plain food, and the
+ * date only moves forward, so a late retry never rewinds it. Returns null when
+ * the food no longer exists.
+ */
+export async function markUsualRestocked(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    on: string,
+): Promise<Food | null> {
+    const day = parseCalendarDay(on);
+    if (day == null) throw new FoodsInputError("Enter the date as YYYY-MM-DD.");
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt) return null;
+    const plain = food.genericFoodId
+        ? await store.getFood(householdId, food.genericFoodId)
+        : food;
+    if (!plain || plain.archivedAt) return null;
+    if (plain.lastRestockedOn != null && plain.lastRestockedOn >= day) {
+        return plain;
+    }
+    return saveFood(store, { ...plain, lastRestockedOn: day });
+}
+
+/**
+ * The level a usual counts as running low below: the one the household set,
+ * else a quarter of the usual amount (computed here, never stored). Pass the
+ * effective food so a plain food reads its usual product's amount. Null when
+ * there is neither, so nothing is guessed.
+ */
+export function usualLowLevel(
+    food: Pick<Food, "restockLowLevel" | "usualAmount">,
+): number | null {
+    if (food.restockLowLevel != null) return food.restockLowLevel;
+    if (food.usualAmount != null) return food.usualAmount.amount / 4;
+    return null;
+}
+
+/**
+ * Merging two foods keeps the schedule that exists: the kept food's own, else
+ * the dropped one's (with its N). Paused and add-when-low come from the side
+ * whose schedule wins, so a discarded schedule never pauses the kept one; when
+ * neither side has a schedule, either side's "on" stands. The last restock
+ * date is the later of the two.
+ * A dropped low level comes along only with the dropped usual amount it is
+ * measured in.
+ */
+function mergedUsualSchedule(keep: Food, drop: Food): UsualScheduleFields {
+    const takeDrop =
+        keep.restockSchedule == null && drop.restockSchedule != null;
+    const neitherScheduled =
+        keep.restockSchedule == null && drop.restockSchedule == null;
+    // Paused and add-when-low belong with the schedule that wins: a discarded
+    // schedule must not pause the kept one. With no schedule on either side
+    // there is nothing to follow, so an "on" from either side stands.
+    const flagSource = neitherScheduled
+        ? {
+              restockPaused: keep.restockPaused || drop.restockPaused,
+              restockWhenLow: keep.restockWhenLow || drop.restockWhenLow,
+          }
+        : takeDrop
+          ? drop
+          : keep;
+    const later = [keep.lastRestockedOn, drop.lastRestockedOn]
+        .filter((day): day is string => day != null)
+        .sort()
+        .at(-1);
+    return {
+        restockSchedule: takeDrop ? drop.restockSchedule : keep.restockSchedule,
+        restockEveryWeeks: takeDrop
+            ? drop.restockEveryWeeks
+            : keep.restockEveryWeeks,
+        restockPaused: flagSource.restockPaused,
+        restockWhenLow: flagSource.restockWhenLow,
+        restockLowLevel:
+            keep.restockLowLevel ??
+            (keep.usualAmount == null ? drop.restockLowLevel : null),
+        lastRestockedOn: later ?? null,
+    };
+}
+
+function usualScheduleFromRow(row: {
+    restock_schedule?: unknown;
+    restock_every_weeks?: unknown;
+    restock_paused?: unknown;
+    restock_when_low?: unknown;
+    restock_low_level?: unknown;
+    last_restocked_on?: unknown;
+}): UsualScheduleFields {
+    const schedule = (RESTOCK_SCHEDULES as readonly unknown[]).includes(
+        row.restock_schedule,
+    )
+        ? (row.restock_schedule as RestockSchedule)
+        : null;
+    const everyWeeks =
+        row.restock_every_weeks == null
+            ? null
+            : Number(row.restock_every_weeks);
+    const lowLevel =
+        row.restock_low_level == null ? null : Number(row.restock_low_level);
+    const lastOn = row.last_restocked_on;
+    return {
+        restockSchedule: schedule,
+        restockEveryWeeks:
+            everyWeeks != null && Number.isInteger(everyWeeks) && everyWeeks > 0
+                ? everyWeeks
+                : null,
+        restockPaused: row.restock_paused === true,
+        restockWhenLow: row.restock_when_low === true,
+        restockLowLevel:
+            lowLevel != null && Number.isFinite(lowLevel) ? lowLevel : null,
+        lastRestockedOn:
+            lastOn == null || lastOn === ""
+                ? null
+                : lastOn instanceof Date
+                  ? lastOn.toISOString().slice(0, 10)
+                  : String(lastOn).slice(0, 10),
+    };
 }
 
 /**
@@ -3000,6 +3615,7 @@ const FIELDS_FILLED_KEY_ORDER: (
     "usualStoreId",
     "usualAmount",
     "usualProductId",
+    "restockSchedule",
 ];
 
 function fieldsFilledKeys(
@@ -3104,7 +3720,9 @@ export function duplicatePairs(
     foods: readonly Food[],
     refCounts: ReadonlyMap<string, number>,
     aliases: ReadonlyMap<string, string[]> = new Map(),
+    opts: { plurals?: boolean } = {},
 ): DuplicatePairsReport {
+    const groupKeyOf = opts.plurals ? pluralFreeFoodKey : looseFoodKey;
     const catalog = foods;
     const foodsById = new Map(catalog.map((row) => [row.id, row]));
     const aliasOwnerByNorm = aliasOwnersByNormalizedName(aliases);
@@ -3131,7 +3749,7 @@ export function duplicatePairs(
     const byKey = new Map<string, Food[]>();
 
     for (const row of livePlain) {
-        const loose = looseFoodKey(row.name);
+        const loose = groupKeyOf(row.name);
         if (!loose) continue;
         const brand = duplicateBrandKey(row.brand);
         const key = `${row.householdId}\0${row.kind}\0${loose}\0${brand === null ? "" : brand}`;
@@ -3147,7 +3765,7 @@ export function duplicatePairs(
             rows,
             householdId: first.householdId,
             kind: first.kind,
-            loose: looseFoodKey(first.name),
+            loose: groupKeyOf(first.name),
             brand: duplicateBrandKey(first.brand),
         });
     }
@@ -3979,6 +4597,12 @@ export function foodFromRow(row: {
     usual_store_id: unknown;
     usual_amount: unknown;
     usual_unit: unknown;
+    restock_schedule?: unknown;
+    restock_every_weeks?: unknown;
+    restock_paused?: unknown;
+    restock_when_low?: unknown;
+    restock_low_level?: unknown;
+    last_restocked_on?: unknown;
     nutriscore_grade?: unknown;
     nova_group?: unknown;
     ecoscore_grade?: unknown;
@@ -4062,6 +4686,7 @@ export function foodFromRow(row: {
                 ? row.usual_store_id
                 : null,
         usualAmount,
+        ...usualScheduleFromRow(row),
         offQuality: offQualityFromRow({
             nutriscore_grade: row.nutriscore_grade ?? null,
             nova_group: row.nova_group ?? null,
@@ -4115,6 +4740,12 @@ export function foodToRow(row: Food) {
         usual_store_id: row.usualStoreId,
         usual_amount: row.usualAmount?.amount ?? null,
         usual_unit: row.usualAmount?.unit ?? null,
+        restock_schedule: row.restockSchedule,
+        restock_every_weeks: row.restockEveryWeeks,
+        restock_paused: row.restockPaused,
+        restock_when_low: row.restockWhenLow,
+        restock_low_level: row.restockLowLevel,
+        last_restocked_on: row.lastRestockedOn,
         ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,

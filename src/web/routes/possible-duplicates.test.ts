@@ -13,8 +13,14 @@ import * as actualDbProfiles from "../../db/profiles.js";
 import * as actualDbRecipes from "../../db/recipes.js";
 import * as actualDbRules from "../../db/rules.js";
 import * as actualDbSettings from "../../db/settings.js";
+import * as actualDbShareLinks from "../../db/share-links.js";
+import { createMemoryShareLinkStore } from "../../domain/sharing.js";
 import * as actualDbStock from "../../db/stock.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
+import * as actualDbPlans from "../../db/plans.js";
+import * as actualDbWeighIns from "../../db/weigh-ins.js";
+import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
+import { createMemoryPlansStore } from "../../domain/plan.js";
 import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
@@ -59,8 +65,11 @@ const realDbFetchMemory = { ...actualDbFetchMemory };
 const realDbRecipes = { ...actualDbRecipes };
 const realDbRules = { ...actualDbRules };
 const realDbSettings = { ...actualDbSettings };
+const realDbShareLinks = { ...actualDbShareLinks };
 const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbPlans = { ...actualDbPlans };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realFoods = { ...actualFoods };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -137,9 +146,22 @@ mock.module("../../db/settings.js", () => ({
     ...realDbSettings,
     liveSettingsStore: () => db.settingsStore,
 }));
+mock.module("../../db/share-links.js", () => ({
+    ...realDbShareLinks,
+    liveShareLinkStore: () => createMemoryShareLinkStore(),
+}));
 mock.module("../../db/rules.js", () => ({
     ...realDbRules,
     liveRulesStore: () => db.rulesStore,
+}));
+// The new app's notices read plans and weigh-ins; none exist in these tests.
+mock.module("../../db/plans.js", () => ({
+    ...realDbPlans,
+    liveRecipePlansStore: () => createMemoryPlansStore(),
+}));
+mock.module("../../db/weigh-ins.js", () => ({
+    ...realDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore([]),
 }));
 mock.module("../../db/notice-dismissals.js", () => ({
     ...realDbNoticeDismissals,
@@ -153,6 +175,9 @@ mock.module("../../db/household.js", () => ({
     getHouseholdConfig: async () => structuredClone(db.household),
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+    getPluralsSameFood: async () => false,
+    setPluralsSameFood: async (_householdId: string, enabled: boolean) =>
+        enabled,
 }));
 // The Members page reads recipe-fetch memory and social reader status (#175).
 mock.module("../../db/social-readers.js", () => ({
@@ -179,12 +204,15 @@ afterAll(() => {
     mock.module("../../db/grocery.js", () => realDbGrocery);
     mock.module("../../db/recipes.js", () => realDbRecipes);
     mock.module("../../db/settings.js", () => realDbSettings);
+    mock.module("../../db/share-links.js", () => realDbShareLinks);
     mock.module("../../db/rules.js", () => realDbRules);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/profiles.js", () => realDbProfiles);
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("../../db/plans.js", () => realDbPlans);
+    mock.module("../../db/weigh-ins.js", () => realDbWeighIns);
     mock.module("../../foods.js", () => realFoods);
 });
 

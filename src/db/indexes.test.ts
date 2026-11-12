@@ -1,6 +1,7 @@
 import { beforeAll, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { GROCERY_LINE_COLS } from "./grocery.js";
+import { PLAN_COLS, PLAN_ORDER } from "./plans.js";
 import { describeDb } from "./testing/pg.js";
 import { seedFood, seedHousehold } from "./testing/fixtures.js";
 import {
@@ -19,6 +20,15 @@ const FOOD_LIST_COLS =
     "id, household_id, kind, name, normalized_name, brand, archived_at";
 
 const pgAvailable = await findPgBin();
+
+// foods_household_idx and the unique foods_household_name_uniq lead with the
+// same columns under the same predicate and take the same pages, so their
+// plans cost the same to within a page. Which one the planner names depends on
+// how the pages happened to fill, and a household read is right with either.
+const FOODS_HOUSEHOLD_INDEXES = [
+    "foods_household_idx",
+    "foods_household_name_uniq",
+] as const;
 
 // Index definitions as Postgres prints them (pg_indexes.indexdef).
 const EXPECTED: Record<string, string> = {
@@ -57,6 +67,18 @@ const EXPECTED: Record<string, string> = {
         "ON public.household_members USING btree (user_id)",
     household_invites_household_id_idx:
         "ON public.household_invites USING btree (household_id)",
+    recipe_favourites_household_user_idx:
+        "ON public.recipe_favourites USING btree (household_id, user_id)",
+    recipe_favourites_recipe_id_idx:
+        "ON public.recipe_favourites USING btree (recipe_id)",
+    share_links_household_id_idx:
+        "ON public.share_links USING btree (household_id, created_at DESC)",
+    member_score_settings_household_id_idx:
+        "ON public.member_score_settings USING btree (household_id)",
+    recipe_plans_household_date_idx:
+        "ON public.recipe_plans USING btree (household_id, date)",
+    recipe_plans_recipe_id_idx:
+        "ON public.recipe_plans USING btree (recipe_id)",
     nutrition_goal_days_user_id_idx:
         "ON public.nutrition_goal_days USING btree (user_id, date)",
 };
@@ -78,8 +100,13 @@ async function planOf(
     return rows.map((r) => r["QUERY PLAN"]).join("\n");
 }
 
-function expectIndexOnTable(plan: string, indexName: string, table: string) {
-    expect(plan).toContain(indexName);
+function expectIndexOnTable(
+    plan: string,
+    indexName: string | readonly string[],
+    table: string,
+) {
+    const names = typeof indexName === "string" ? [indexName] : indexName;
+    expect(names.some((name) => plan.includes(name))).toBe(true);
     expect(plan).toMatch(/Index Scan|Index Only Scan|Bitmap Index Scan/);
     expect(plan).not.toContain(`Seq Scan on ${table}`);
 }
@@ -319,7 +346,33 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
              order by name asc`,
             ["set enable_seqscan = off"],
         );
-        expectIndexOnTable(plan, "foods_household_idx", "public.foods");
+        expectIndexOnTable(plan, FOODS_HOUSEHOLD_INDEXES, "public.foods");
+    });
+
+    test("the food catalog read passes when the planner names the twin index", async () => {
+        const { sql } = ctx();
+        // Take the usual pick away and the planner names the other one; the
+        // assertion has to hold for that plan too, or it flakes on page layout.
+        await sql.unsafe("begin");
+        try {
+            await sql.unsafe("drop index public.foods_household_idx");
+            const plan = await planOf(
+                sql,
+                `select ${FOOD_LIST_COLS}
+                 from public.foods
+                 where household_id = '${bench.householdId}'
+                   and archived_at is null
+                 order by name asc`,
+                ["set enable_seqscan = off"],
+            );
+            expect(plan).toContain("foods_household_name_uniq");
+            expectIndexOnTable(plan, FOODS_HOUSEHOLD_INDEXES, "public.foods");
+            expect(() =>
+                expectIndexOnTable(plan, "foods_household_idx", "public.foods"),
+            ).toThrow();
+        } finally {
+            await sql.unsafe("rollback");
+        }
     });
 
     test("normalized food name lookup reads the household name index", async () => {
@@ -335,7 +388,7 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
              order by (brand is null) desc, created_at asc, id asc
              limit 1`,
         );
-        expectIndexOnTable(plan, "foods_household_idx", "public.foods");
+        expectIndexOnTable(plan, FOODS_HOUSEHOLD_INDEXES, "public.foods");
     });
 
     test("grocery sections for a household read the household index", async () => {
@@ -423,6 +476,40 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
             plan,
             "nutrition_goal_days_user_id_idx",
             "public.nutrition_goal_days",
+        );
+    });
+
+    test("a week of plans reads the household and date index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select ${PLAN_COLS}
+             from public.recipe_plans
+             where household_id = '${bench.householdId}'
+               and date between '2026-11-09'::date and '2026-11-15'::date
+             order by ${PLAN_ORDER}`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "recipe_plans_household_date_idx",
+            "public.recipe_plans",
+        );
+    });
+
+    test("deleting a recipe finds its plans through the recipe index", async () => {
+        const { sql } = ctx();
+        // The same lookup the foreign-key check runs when the recipe goes.
+        const plan = await planOf(
+            sql,
+            `select 1 from public.recipe_plans
+             where recipe_id = '00000000-0000-0000-0000-000000000000'`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "recipe_plans_recipe_id_idx",
+            "public.recipe_plans",
         );
     });
 });

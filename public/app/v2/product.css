@@ -1,0 +1,290 @@
+/* Product screen (phone + desktop) */
+
+.fd-product-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+    padding: 0 0 var(--fd-s-12);
+}
+
+.fd-product-top {
+    padding-top: 0;
+}
+
+/* The design's product screen has its own top bar (back, groceries) in place
+   of the account chip. */
+.fd-main:has(.fd-product-top) .fd-account-chip {
+    display: none;
+}
+
+.fd-product-top__cart .fd-icon {
+    width: 20px;
+    height: 20px;
+}
+
+.fd-product-page .fd-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0 var(--space-gutter);
+    border: 0;
+    border-radius: var(--radius-pill);
+    font: 600 15px/20px var(--font-body);
+    cursor: pointer;
+    text-decoration: none;
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-product-page .fd-btn--primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+.fd-product-page .fd-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-product-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: var(--space-gap);
+}
+
+.fd-product-title {
+    margin: 0;
+    font: 600 28px/34px var(--font-display);
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+}
+
+.fd-product-subtitle {
+    margin: 0;
+    padding-top: 4px;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-product-score {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-section);
+}
+
+.fd-product-score__hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-gap);
+    padding-top: var(--fd-s-2);
+}
+
+.fd-product-score__hero-aside {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.fd-product-score__weights {
+    margin: 0;
+    text-align: right;
+    font: 400 12px/16px var(--font-body);
+    color: var(--accent-text);
+}
+
+.fd-product-score__parts-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.fd-product-score__parts {
+    margin: var(--fd-s-2) 0 0;
+    font: 600 13px/17px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-product-score__parts-hint {
+    margin: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-row--member .fd-avatar--row {
+    box-sizing: border-box;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 13px/36px var(--font-body);
+}
+
+.fd-member-verdict {
+    flex: none;
+    font: 600 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-member-verdict--good {
+    color: var(--accent-text);
+}
+
+.fd-member-verdict--careful {
+    color: var(--status-warn);
+}
+
+.fd-member-verdict--avoid {
+    color: var(--status-over);
+}
+
+.fd-product-error {
+    margin: 0;
+    padding: var(--fd-s-4) var(--fd-s-6);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--status-over) 12%, transparent);
+    color: var(--status-over);
+    font: 400 14px/20px var(--font-body);
+}
+
+.fd-product-nutrition {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.fd-product-nutrition__serving {
+    margin: 0 0 var(--fd-s-4);
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-product-nutrition__head {
+    display: grid;
+    grid-template-columns: 1fr minmax(4.5rem, auto) minmax(4.5rem, auto);
+    gap: 0 16px;
+    padding: 0 0 var(--fd-s-2);
+    border-bottom: 1px solid var(--line);
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-product-nutrition__head--one {
+    grid-template-columns: 1fr minmax(4.5rem, auto);
+}
+
+.fd-product-nutrition__head-spacer {
+    display: block;
+}
+
+.fd-product-nutrition__head span:not(.fd-product-nutrition__head-spacer) {
+    text-align: right;
+}
+
+.fd-product-nutrition__row {
+    display: grid;
+    grid-template-columns: 1fr minmax(4.5rem, auto) minmax(4.5rem, auto);
+    gap: 0 16px;
+    align-items: center;
+    min-height: 43px;
+    border-bottom: 1px solid var(--line);
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-product-nutrition__row--one {
+    grid-template-columns: 1fr minmax(4.5rem, auto);
+}
+
+.fd-product-nutrition__label {
+    color: var(--text-primary);
+}
+
+.fd-product-nutrition__val {
+    text-align: right;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 17px;
+}
+
+.fd-product-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    padding-top: 22px;
+}
+
+.fd-product-actions__grocery {
+    display: contents;
+}
+
+.fd-product-actions__add,
+.fd-product-actions__log {
+    flex: 1 1 0;
+    min-height: 52px;
+    padding: 0 12px;
+    border-radius: var(--radius-pill);
+    font: 600 15px/20px var(--font-body);
+    white-space: nowrap;
+}
+
+.fd-product-actions__add {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-product-actions__add .fd-icon {
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+
+.fd-product-unknown-copy {
+    margin: 0;
+    font: 400 15px/22px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-product-unknown-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-6);
+    max-width: 24rem;
+}
+
+.fd-text-link {
+    color: var(--accent-text);
+    text-decoration: none;
+}
+
+.fd-text-link:hover {
+    text-decoration: underline;
+}
+
+@media (min-width: 1024px) {
+    .fd-product-page {
+        max-width: 40rem;
+    }
+
+    .fd-product-actions {
+        max-width: 28rem;
+    }
+
+    .fd-row--member .fd-avatar--row {
+        width: 32px;
+        height: 32px;
+        font: 600 13px/32px var(--font-body);
+    }
+}

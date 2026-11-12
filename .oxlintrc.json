@@ -10,7 +10,9 @@
         "scripts/lint-rules/fixtures/**",
         "src/domain/additive-risk.ts"
     ],
-    "rules": {},
+    "rules": {
+        "foodable/no-string-replacement-patterns": "error"
+    },
     "overrides": [
         {
             "files": ["**/*.test.ts"],
@@ -29,14 +31,18 @@
                                 "src/db/household",
                                 "src/db/notice-dismissals",
                                 "src/db/nutrition",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
+                                "src/db/score-settings",
                                 "src/db/settings",
+                                "src/db/share-links",
                                 "src/db/social-readers",
                                 "src/db/sql",
                                 "src/db/stock",
-                                "src/db/users"
+                                "src/db/users",
+                                "src/db/weigh-ins"
                             ],
                             "src/middleware.test.ts": ["src/db/tokens"],
                             "src/oauth.test.ts": ["src/db/tokens"],
@@ -62,14 +68,19 @@
                                 "src/db/foods",
                                 "src/db/fridge",
                                 "src/db/grocery",
+                                "src/db/grocery-stores",
                                 "src/db/household",
                                 "src/db/notice-dismissals",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
+                                "src/db/score-settings",
                                 "src/db/settings",
+                                "src/db/share-links",
                                 "src/db/social-readers",
-                                "src/db/stock"
+                                "src/db/stock",
+                                "src/db/weigh-ins"
                             ],
                             "src/web/routes/needs-attention.test.ts": [
                                 "src/db/foods",
@@ -77,11 +88,13 @@
                                 "src/db/grocery",
                                 "src/db/household",
                                 "src/db/notice-dismissals",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
                                 "src/db/settings",
-                                "src/db/stock"
+                                "src/db/stock",
+                                "src/db/weigh-ins"
                             ],
                             "src/web/routes/possible-duplicates.test.ts": [
                                 "src/db/fetch-memory",
@@ -90,12 +103,15 @@
                                 "src/db/grocery",
                                 "src/db/household",
                                 "src/db/notice-dismissals",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
                                 "src/db/settings",
+                                "src/db/share-links",
                                 "src/db/social-readers",
-                                "src/db/stock"
+                                "src/db/stock",
+                                "src/db/weigh-ins"
                             ],
                             "src/web/routes/recipes-list.test.ts": [
                                 "src/db/foods",
@@ -104,11 +120,13 @@
                                 "src/db/household",
                                 "src/db/notice-dismissals",
                                 "src/db/nutrition",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
                                 "src/db/settings",
-                                "src/db/stock"
+                                "src/db/stock",
+                                "src/db/weigh-ins"
                             ],
                             "src/web/routes/settings.test.ts": [
                                 "src/db/household",
@@ -147,6 +165,7 @@
                                 "src/db/restock",
                                 "src/db/settings",
                                 "src/db/rules",
+                                "src/db/score-settings",
                                 "src/db/stock"
                             ]
                         }

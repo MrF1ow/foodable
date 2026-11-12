@@ -6,7 +6,10 @@ import {
     consumeAuthCode,
     storeRefreshToken,
     consumeRefreshToken,
+    withCodeExchange,
+    withRefreshExchange,
     registerClient,
+    isRegisteredClient,
 } from "./db/tokens.js";
 import {
     signUpUser,
@@ -100,12 +103,24 @@ export async function renderLoginPage(
                     <p class="auth-note">${escapeHtml(LOGIN.inviteCodeHint)}</p>`
             : "";
     return template
-        .replaceAll("{{SESSION_ID}}", escapeHtml(sessionId))
-        .replaceAll("{{ERROR}}", errorHtml)
-        .replaceAll("{{CONNECT_HINT}}", connectHint)
-        .replaceAll("{{INVITE_FIELDS}}", inviteFields)
-        .replaceAll("{{APP_CSS_HREF}}", appStylesheetHref())
-        .replaceAll("{{APP_JS_HREF}}", appScriptHref());
+        .replaceAll("{{SESSION_ID}}", () => escapeHtml(sessionId))
+        .replaceAll("{{ERROR}}", () => errorHtml)
+        .replaceAll("{{CONNECT_HINT}}", () => connectHint)
+        .replaceAll("{{INVITE_FIELDS}}", () => inviteFields)
+        .replaceAll("{{APP_CSS_HREF}}", () => appStylesheetHref())
+        .replaceAll("{{APP_JS_HREF}}", () => appScriptHref());
+}
+
+/** A token-endpoint credential worth looking up: a string of printable
+ *  characters, no longer than any value this server issues. */
+function isGrantValue(value: unknown): value is string {
+    return (
+        typeof value === "string" &&
+        value.length > 0 &&
+        value.length <= 512 &&
+        // oxlint-disable-next-line no-control-regex -- refusing control characters is the point
+        !/[\u0000-\u001f\u007f]/.test(value)
+    );
 }
 
 function displayNameFromLogin(email: string): string {
@@ -138,6 +153,11 @@ async function finishAuthorization(
             session.redirectUri,
             userId,
             session.codeChallenge,
+            // The deploy-wide id names no single app, so a token issued under
+            // it records no client and reads as an unknown app.
+            session.clientId === process.env.OAUTH_CLIENT_ID
+                ? null
+                : session.clientId,
         ),
     );
 
@@ -372,17 +392,25 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_redirect_uri" }, 400);
         }
 
-        // Fire-and-forget: track who registers
-        void runAsSystem("oauth client registration", async () =>
-            registerClient(body.client_name ?? null, redirectUris),
+        // The registration's own id is the client_id, so a token can name the
+        // app it was issued to. When it cannot be stored the deploy-wide id
+        // still works: registration never fails on a database hiccup.
+        const registeredId = await runAsSystem(
+            "oauth client registration",
+            async () => registerClient(body.client_name ?? null, redirectUris),
         );
 
         return c.json({
-            client_id: clientId,
+            client_id: registeredId ?? clientId,
             token_endpoint_auth_method: "none",
             redirect_uris: redirectUris,
         });
     });
+
+    // The deploy-wide client id, or the id a dynamic registration was given.
+    const isKnownClient = async (id: string): Promise<boolean> =>
+        id === clientId ||
+        runAsSystem("oauth client check", () => isRegisteredClient(id));
 
     // Authorization endpoint
     oauth.get("/authorize", async (c) => {
@@ -406,7 +434,7 @@ export function createOAuthRouter() {
                 400,
             );
         }
-        if (reqClientId !== clientId) {
+        if (!(await isKnownClient(reqClientId))) {
             return c.json({ error: "invalid_client" }, 400);
         }
 
@@ -520,25 +548,48 @@ export function createOAuthRouter() {
         const reqClientId = body.client_id as string | undefined;
         const reqClientSecret = body.client_secret as string | undefined;
 
+        // A credential that is not a plain short string (a multipart file, a
+        // NUL byte, a megabyte) can never match a stored one; refuse it here
+        // rather than let the database reject it as a server error.
+        if (reqClientId && !isGrantValue(reqClientId)) {
+            return c.json({ error: "invalid_client" }, 401);
+        }
+
         if (grantType === "refresh_token") {
             const refreshToken = body.refresh_token as string;
             if (!refreshToken) {
                 return c.json({ error: "invalid_request" }, 400);
             }
+            if (!isGrantValue(refreshToken)) {
+                return c.json({ error: "invalid_grant" }, 400);
+            }
 
             // Look up the existing user from the refresh token
             const newAccessToken = crypto.randomUUID();
             const newRefreshToken = crypto.randomUUID();
-            const userId = await runAsSystem(
-                "oauth refresh token exchange",
-                async () => {
-                    const owner = await consumeRefreshToken(refreshToken);
-                    if (!owner) return null;
-                    await storeToken(newAccessToken, owner);
-                    await storeRefreshToken(newRefreshToken, owner);
-                    return owner;
-                },
-            );
+            // Consume and store are one transaction that excludes a
+            // Disconnect for the member, so a refresh racing one cannot leave
+            // a live pair behind.
+            const userId = await withRefreshExchange(refreshToken, async () => {
+                const owner = await consumeRefreshToken(refreshToken);
+                if (!owner) return null;
+                // A refresh token belongs to the client it was issued to.
+                if (
+                    reqClientId &&
+                    owner.clientId &&
+                    reqClientId !== owner.clientId
+                ) {
+                    return null;
+                }
+                // The new tokens belong to the same app as the old one.
+                await storeToken(newAccessToken, owner.userId, owner.clientId);
+                await storeRefreshToken(
+                    newRefreshToken,
+                    owner.userId,
+                    owner.clientId,
+                );
+                return owner.userId;
+            });
             if (!userId) {
                 return c.json({ error: "invalid_grant" }, 400);
             }
@@ -558,65 +609,92 @@ export function createOAuthRouter() {
         if (!code) {
             return c.json({ error: "invalid_request" }, 400);
         }
+        if (!isGrantValue(code)) {
+            return c.json({ error: "invalid_grant" }, 400);
+        }
 
         // Validate client credentials if provided
-        if (reqClientId && reqClientId !== clientId) {
+        if (reqClientId && !(await isKnownClient(reqClientId))) {
             return c.json({ error: "invalid_client" }, 401);
         }
         if (reqClientSecret && reqClientSecret !== clientSecret) {
             return c.json({ error: "invalid_client" }, 401);
         }
 
-        // Atomically consume the auth code
-        const authCodeData = await runAsSystem(
-            "oauth authorization code exchange",
-            () => consumeAuthCode(code),
-        );
-        if (!authCodeData) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+        // The code is consumed, checked and exchanged for a pair in one
+        // transaction that excludes a Disconnect for the member, so an
+        // exchange racing one cannot leave a live pair behind. A failed check
+        // returns instead of throwing: the consume stays committed, so the
+        // code is spent either way.
+        const refuse = (body: Record<string, string>) =>
+            ({ ok: false, body }) as const;
+        const exchanged = await withCodeExchange(code, async () => {
+            const authCodeData = await consumeAuthCode(code);
+            if (!authCodeData) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        if (!redirectUri) {
-            return c.json({ error: "invalid_request" }, 400);
-        }
-        if (redirectUri !== authCodeData.redirect_uri) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+            if (!redirectUri) {
+                return refuse({ error: "invalid_request" });
+            }
+            if (redirectUri !== authCodeData.redirect_uri) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        if (!authCodeData.code_challenge) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
-        if (!codeVerifier) {
-            return c.json(
-                {
+            // A code belongs to the client it was issued to.
+            if (
+                reqClientId &&
+                authCodeData.client_id &&
+                reqClientId !== authCodeData.client_id
+            ) {
+                return refuse({ error: "invalid_grant" });
+            }
+
+            if (!authCodeData.code_challenge) {
+                return refuse({ error: "invalid_grant" });
+            }
+            if (!codeVerifier) {
+                return refuse({
                     error: "invalid_request",
                     error_description: "code_verifier required",
-                },
-                400,
+                });
+            }
+            const hash = base64URLEncode(
+                Buffer.from(
+                    crypto.createHash("sha256").update(codeVerifier).digest(),
+                ),
             );
-        }
-        const hash = base64URLEncode(
-            Buffer.from(
-                crypto.createHash("sha256").update(codeVerifier).digest(),
-            ),
-        );
-        if (hash !== authCodeData.code_challenge) {
+            if (hash !== authCodeData.code_challenge) {
+                return refuse({ error: "invalid_grant" });
+            }
+
+            // Issue tokens linked to the authenticated user
+            const accessToken = crypto.randomUUID();
+            const refreshToken = crypto.randomUUID();
+            await storeToken(
+                accessToken,
+                authCodeData.user_id,
+                authCodeData.client_id,
+            );
+            await storeRefreshToken(
+                refreshToken,
+                authCodeData.user_id,
+                authCodeData.client_id,
+            );
+            return { ok: true, accessToken, refreshToken } as const;
+        });
+        if (!exchanged) {
             return c.json({ error: "invalid_grant" }, 400);
         }
-
-        // Issue tokens linked to the authenticated user
-        const accessToken = crypto.randomUUID();
-        const refreshToken = crypto.randomUUID();
-        await runAsSystem("oauth token exchange", async () => {
-            await storeToken(accessToken, authCodeData.user_id);
-            await storeRefreshToken(refreshToken, authCodeData.user_id);
-        });
+        if (!exchanged.ok) {
+            return c.json(exchanged.body, 400);
+        }
 
         return c.json({
-            access_token: accessToken,
+            access_token: exchanged.accessToken,
             token_type: "Bearer",
             expires_in: 365 * 24 * 60 * 60,
-            refresh_token: refreshToken,
+            refresh_token: exchanged.refreshToken,
         });
     });
 

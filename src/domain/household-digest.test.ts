@@ -953,6 +953,36 @@ test("a usual supply with stock on hand is not suggested", () => {
     ).toEqual([]);
 });
 
+test("usuals at zero land in the default store when the food has no usual store", () => {
+    const plain = newFood({ householdId: "hh", kind: "supply", name: "Soap" });
+    const product = newFood({
+        householdId: "hh",
+        kind: "supply",
+        name: "Soap bar",
+        genericFoodId: plain.id,
+    });
+    plain.usualProductId = product.id;
+    const foods = [plain, product];
+    const stores = [
+        { id: "s1", householdId: "hh", name: "A", sortOrder: 0 },
+        { id: "s2", householdId: "hh", name: "B", sortOrder: 1 },
+    ];
+    const run = (groceryPreferences?: {
+        defaultStoreId: string | null;
+        useUsualStore: boolean;
+    }) =>
+        usualsAtZeroForDigest({
+            items: [],
+            foods,
+            foodsById: effectiveFoodsFromListed(foods),
+            stores,
+            groceryPreferences,
+        }).map((row) => row.storeId);
+    expect(run()).toEqual(["s1"]);
+    expect(run({ defaultStoreId: "s2", useUsualStore: false })).toEqual(["s2"]);
+    expect(run({ defaultStoreId: "s2", useUsualStore: true })).toEqual(["s2"]);
+});
+
 test("the member summary never names a water-only day as best or roughest", () => {
     const meal = {
         id: "m1",
