@@ -158,7 +158,8 @@ export function formatToastText(key: ToastKey, params?: ToastParams): string {
         for (const name of allowed) {
             const raw = params[name];
             if (raw == null) continue;
-            text = text.replaceAll(`{${name}}`, String(raw));
+            // A function replacement, so a `$` in a name is not a pattern.
+            text = text.replaceAll(`{${name}}`, () => String(raw));
         }
     }
     return text;
@@ -309,7 +310,10 @@ export const flashToastMiddleware = createMiddleware(async (c, next) => {
         action: flash.action,
     });
     const injected = body.includes("</body>")
-        ? body.replace("</body>", `${seed}\n</body>`)
+        ? // A function replacement: the seed carries the toast text, and a
+          // string replacement would read a `$` in it as a pattern that pastes
+          // the page back in.
+          body.replace("</body>", () => `${seed}\n</body>`)
         : body + seed;
 
     respond(injected, true);
