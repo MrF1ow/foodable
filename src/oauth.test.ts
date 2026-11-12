@@ -1,5 +1,6 @@
 import { test, expect, mock, afterAll, beforeAll } from "bun:test";
 import { setClientIpConfigForTests } from "./client-ip.js";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
 
@@ -9,6 +10,14 @@ const VALID_CHALLENGE = "a".repeat(43);
 const ALLOWED_REDIRECT = "http://localhost:8080/callback";
 
 let authCodeStub: actualTokens.AuthCodeData | null = null;
+let refreshStub: { userId: string; clientId: string | null } | null = null;
+let registeredStub: string | null = null;
+const REGISTERED_CLIENT = "11111111-2222-4333-8444-555555555555";
+const issued: Array<{
+    kind: "access" | "refresh";
+    userId: string;
+    clientId: string | null;
+}> = [];
 
 mock.module("./db/tokens.js", () => ({
     ...actualTokens,
@@ -19,9 +28,23 @@ mock.module("./db/tokens.js", () => ({
               ? { status: "valid", kind: "household", householdId: "hh-1" }
               : { status: "invalid" },
     consumeAuthCode: async () => authCodeStub,
-    storeToken: async () => {},
-    storeRefreshToken: async () => {},
-    registerClient: async () => {},
+    consumeRefreshToken: async () => refreshStub,
+    storeToken: async (
+        _t: string,
+        userId: string,
+        clientId?: string | null,
+    ) => {
+        issued.push({ kind: "access", userId, clientId: clientId ?? null });
+    },
+    storeRefreshToken: async (
+        _t: string,
+        userId: string,
+        clientId?: string | null,
+    ) => {
+        issued.push({ kind: "refresh", userId, clientId: clientId ?? null });
+    },
+    registerClient: async () => registeredStub,
+    isRegisteredClient: async (id: string) => id === REGISTERED_CLIENT,
 }));
 afterAll(() => {
     mock.module("./db/tokens.js", () => realTokens);
@@ -775,6 +798,7 @@ test("/token authorization_code requires redirect_uri and code_verifier", async 
         redirect_uri: ALLOWED_REDIRECT,
         user_id: "user-1",
         code_challenge: VALID_CHALLENGE,
+        client_id: null,
     };
     const { app } = buildTestApp();
     const form = (fields: Record<string, string>) =>
@@ -793,6 +817,191 @@ test("/token authorization_code requires redirect_uri and code_verifier", async 
 
     const noVerifier = await form({ redirect_uri: ALLOWED_REDIRECT });
     expect(noVerifier.status).toBe(400);
+});
+
+// ---------- OAuth clients and the tokens they are issued ----------
+
+const PKCE_VERIFIER = "v".repeat(43);
+const PKCE_CHALLENGE = createHash("sha256")
+    .update(PKCE_VERIFIER)
+    .digest("base64url");
+
+function tokenForm(fields: Record<string, string>) {
+    const { app } = buildTestApp();
+    return app.request("http://localhost/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(fields),
+    });
+}
+
+function codeGrant(fields: Record<string, string> = {}) {
+    return tokenForm({
+        grant_type: "authorization_code",
+        code: "c",
+        redirect_uri: ALLOWED_REDIRECT,
+        code_verifier: PKCE_VERIFIER,
+        ...fields,
+    });
+}
+
+function codeFor(clientId: string | null): actualTokens.AuthCodeData {
+    return {
+        code: "c",
+        redirect_uri: ALLOWED_REDIRECT,
+        user_id: "user-1",
+        code_challenge: PKCE_CHALLENGE,
+        client_id: clientId,
+    };
+}
+
+test("/register hands back the registered client's id", async () => {
+    registeredStub = REGISTERED_CLIENT;
+    const { app } = buildTestApp();
+    const res = await app.request("http://localhost/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            client_name: "Claude",
+            redirect_uris: [ALLOWED_REDIRECT],
+        }),
+    });
+    expect(((await res.json()) as { client_id: string }).client_id).toBe(
+        REGISTERED_CLIENT,
+    );
+});
+
+test("/register falls back to the deploy's client id when the registration is not stored", async () => {
+    registeredStub = null;
+    const { app } = buildTestApp();
+    const res = await app.request("http://localhost/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: [ALLOWED_REDIRECT] }),
+    });
+    expect(((await res.json()) as { client_id: string }).client_id).toBe(
+        process.env.OAUTH_CLIENT_ID!,
+    );
+});
+
+test("/authorize accepts a registered client id and refuses an unknown one", async () => {
+    const { app } = buildTestApp();
+    const ok = await app.request(
+        `http://localhost${authorizeUrl(ALLOWED_REDIRECT, {
+            client_id: REGISTERED_CLIENT,
+        })}`,
+    );
+    expect(ok.status).toBe(200);
+    const unknown = await app.request(
+        `http://localhost${authorizeUrl(ALLOWED_REDIRECT, {
+            client_id: "99999999-2222-4333-8444-555555555555",
+        })}`,
+    );
+    expect(unknown.status).toBe(400);
+    expect(((await unknown.json()) as { error: string }).error).toBe(
+        "invalid_client",
+    );
+});
+
+test("a code exchange issues access and refresh tokens that carry the code's client", async () => {
+    authCodeStub = codeFor(REGISTERED_CLIENT);
+    issued.length = 0;
+    const res = await codeGrant({ client_id: REGISTERED_CLIENT });
+    expect(res.status).toBe(200);
+    expect(issued).toEqual([
+        { kind: "access", userId: "user-1", clientId: REGISTERED_CLIENT },
+        { kind: "refresh", userId: "user-1", clientId: REGISTERED_CLIENT },
+    ]);
+});
+
+test("a code from before clients were recorded issues tokens with no client", async () => {
+    authCodeStub = codeFor(null);
+    issued.length = 0;
+    const res = await codeGrant();
+    expect(res.status).toBe(200);
+    expect(issued.map((t) => t.clientId)).toEqual([null, null]);
+});
+
+test("a code exchange under a different client than the code was issued to is refused", async () => {
+    authCodeStub = codeFor(REGISTERED_CLIENT);
+    issued.length = 0;
+    const res = await codeGrant({ client_id: process.env.OAUTH_CLIENT_ID! });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+        "invalid_grant",
+    );
+    expect(issued).toEqual([]);
+});
+
+test("a code exchange under an unknown client id is refused before the code is spent", async () => {
+    authCodeStub = codeFor(REGISTERED_CLIENT);
+    issued.length = 0;
+    const res = await codeGrant({
+        client_id: "99999999-2222-4333-8444-555555555555",
+    });
+    expect(res.status).toBe(401);
+    expect(issued).toEqual([]);
+});
+
+test("a refresh keeps the client of the token it replaces", async () => {
+    refreshStub = { userId: "user-1", clientId: REGISTERED_CLIENT };
+    issued.length = 0;
+    const res = await tokenForm({
+        grant_type: "refresh_token",
+        refresh_token: "r",
+    });
+    expect(res.status).toBe(200);
+    expect(issued).toEqual([
+        { kind: "access", userId: "user-1", clientId: REGISTERED_CLIENT },
+        { kind: "refresh", userId: "user-1", clientId: REGISTERED_CLIENT },
+    ]);
+});
+
+test("a refresh naming a different client than the token's is refused and issues nothing", async () => {
+    refreshStub = { userId: "user-1", clientId: REGISTERED_CLIENT };
+    issued.length = 0;
+    const res = await tokenForm({
+        grant_type: "refresh_token",
+        refresh_token: "r",
+        client_id: process.env.OAUTH_CLIENT_ID!,
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+        "invalid_grant",
+    );
+    expect(issued).toEqual([]);
+});
+
+test("a refresh naming the token's own client, or no client, goes through", async () => {
+    refreshStub = { userId: "user-1", clientId: REGISTERED_CLIENT };
+    expect(
+        (
+            await tokenForm({
+                grant_type: "refresh_token",
+                refresh_token: "r",
+                client_id: REGISTERED_CLIENT,
+            })
+        ).status,
+    ).toBe(200);
+});
+
+test("a refresh of a token with no client accepts any sent client id", async () => {
+    refreshStub = { userId: "user-1", clientId: null };
+    issued.length = 0;
+    const res = await tokenForm({
+        grant_type: "refresh_token",
+        refresh_token: "r",
+        client_id: process.env.OAUTH_CLIENT_ID!,
+    });
+    expect(res.status).toBe(200);
+    expect(issued.map((t) => t.clientId)).toEqual([null, null]);
+});
+
+test("a refresh of a token with no client stays with no client", async () => {
+    refreshStub = { userId: "user-1", clientId: null };
+    issued.length = 0;
+    await tokenForm({ grant_type: "refresh_token", refresh_token: "r" });
+    expect(issued.map((t) => t.clientId)).toEqual([null, null]);
 });
 
 test("siteLoginReturnPath keeps /share query and refuses external next", () => {

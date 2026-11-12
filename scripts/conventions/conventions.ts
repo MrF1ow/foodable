@@ -429,6 +429,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/html.ts": "platform",
     "src/mcp.ts": "platform",
     "src/middleware.ts": "platform",
+    "src/token-use.ts": "platform",
     "src/client-ip.ts": "platform",
     "src/cloudflare-ips.ts": "platform",
     "src/client-ip.test.ts": "platform",
