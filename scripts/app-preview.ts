@@ -74,6 +74,7 @@ import {
 import {
     buildPreviewTodayPageData,
     buildPreviewTodayViewWithRail,
+    buildPreviewTodayViewWithSuggestions,
     buildPreviewTodayViewWithYesterdayHint,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
@@ -100,6 +101,7 @@ import {
     buildProductScoreSection,
     previewMemberCards,
 } from "../src/web/pages/v2/product-score.js";
+import { listExpiring } from "../src/domain/stock.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -1776,6 +1778,65 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                           "2026-11-10",
                       ),
                   }),
+                  "nutrition-today-suggestions": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithSuggestions("2026-11-10"),
+                  }),
+                  "kitchen-fridge-use-in": (() => {
+                      const snap = fridgeView(chrome);
+                      const items =
+                          snap.items as import("../src/domain/fridge.js").FridgeItem[];
+                      return renderKitchenFridgeV2Page(
+                          buildPreviewKitchenFridgeView(
+                              chrome as never,
+                              snap.today,
+                              {
+                                  locations: snap.locations,
+                                  items,
+                                  foodsById: new Map(
+                                      [...snap.foodsById.entries()].map(
+                                          ([id, row]) => [
+                                              id,
+                                              { ...row, usualAmount: null },
+                                          ],
+                                      ),
+                                  ),
+                                  freezeDefaultExpiry: defaultFreezeExpiry(
+                                      snap.today,
+                                  ),
+                                  // Every other expiring item has a recipe.
+                                  useSoonUses: listExpiring(
+                                      items,
+                                      snap.today,
+                                      7,
+                                  )
+                                      .filter((_, index) => index % 2 === 0)
+                                      .map((item) => ({
+                                          item: {
+                                              id: item.id,
+                                              displayName: item.displayName,
+                                              expiresOn: item.expiresOn ?? "",
+                                          },
+                                          recipes: [
+                                              {
+                                                  recipeId: "r-salmon-rice",
+                                                  name: "Salmon & rice",
+                                                  incomplete: false,
+                                              },
+                                          ],
+                                      })),
+                                  groceryLines: previewGroceryLines(),
+                                  groceryOverview:
+                                      buildKitchenFridgeGroceryOverview(
+                                          previewGrocerySnapshot(),
+                                      ),
+                              },
+                          ),
+                      );
+                  })(),
                   "nutrition-log-results": await logSheetPreview(
                       theme,
                       "results",

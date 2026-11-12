@@ -21,6 +21,7 @@ import {
     calorieGauge,
     type MacroKey,
 } from "../../../domain/geometry.js";
+import type { SlotSuggestion } from "../../../domain/suggestions.js";
 import { shiftLocalDate } from "../../../domain/tz.js";
 import type { AppChromeBase } from "../../attention.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
@@ -591,6 +592,26 @@ function yesterdayCopyMarkup(
     return `<form class="fd-today-yesterday" method="post" action="/log/copy-yesterday"><input type="hidden" name="slot" value="${esc(mealType)}" /><input type="hidden" name="return_to" value="${esc(returnTo)}" /><button type="submit" class="fd-today-yesterday__btn">Same as yesterday? ${esc(hint.label)}${kcal}</button></form>`;
 }
 
+/** "Salmon & rice fits · uses 2 things expiring" for one suggestion. */
+export function slotSuggestionText(suggestion: SlotSuggestion): string {
+    const used = suggestion.usesExpiring.length;
+    if (used === 0) return `${suggestion.name} fits`;
+    return `${suggestion.name} fits · uses ${used} ${used === 1 ? "thing" : "things"} expiring`;
+}
+
+function slotSuggestionsMarkup(
+    mealType: MealTypeSlot,
+    data: TodayPageData,
+): string {
+    const picked = data.view.slotSuggestions?.[mealType] ?? [];
+    return picked
+        .map(
+            (suggestion) =>
+                `<a class="fd-today-suggest" href="/recipes/${esc(suggestion.recipeId)}">${esc(slotSuggestionText(suggestion))}</a>`,
+        )
+        .join("");
+}
+
 function mealsMarkup(data: TodayPageData): Html {
     const { view } = data;
     const readOnly = isReadOnlyPeer(data);
@@ -609,9 +630,14 @@ function mealsMarkup(data: TodayPageData): Html {
             rows.length === 0 && !readOnly
                 ? yesterdayCopyMarkup(mealType, data)
                 : "";
-        const emptyLabel =
-            yesterdayHint ||
-            `<span class="fd-today-section__empty">Nothing yet</span>`;
+        const suggestions =
+            rows.length === 0 && !readOnly
+                ? slotSuggestionsMarkup(mealType, data)
+                : "";
+        const emptyLabel = suggestions
+            ? `<div class="fd-today-empty-stack">${yesterdayHint}${suggestions}</div>`
+            : yesterdayHint ||
+              `<span class="fd-today-section__empty">Nothing yet</span>`;
         const list =
             rows.length > 0
                 ? rowList(
@@ -896,6 +922,9 @@ export function buildPreviewTodayView(today: string): TodayView {
         attention: { count: 0, notices: [], noticeFoods: new Map() },
         weight: { latest: null, series30d: [] },
         yesterdayCopy: {},
+        slotSuggestions: {},
+        useSoonUses: [],
+        useSoonHighlight: null,
     };
 }
 
@@ -1011,6 +1040,64 @@ export function buildPreviewTodayViewWithRail(today: string): TodayView {
         attention: previewAttentionNotices(today),
         weight: previewWeightSeries(),
     };
+}
+
+/** Preview: dinner empty with a fitting recipe, and Use soon with recipe lines. */
+export function buildPreviewTodayViewWithSuggestions(today: string): TodayView {
+    const view = buildPreviewTodayViewWithRail(today);
+    view.meals = view.meals.filter((g) => g.mealType !== "dinner");
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "dinner");
+    view.yesterdayCopy = { breakfast: { label: "Eggs & toast", kcal: 432 } };
+    view.meals = view.meals.filter((g) => g.mealType !== "breakfast");
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "breakfast");
+    const used = view.expiringFridge.map((item) => ({
+        id: item.id,
+        displayName: item.displayName,
+        expiresOn: item.expiresOn ?? today,
+    }));
+    view.slotSuggestions = {
+        dinner: [
+            {
+                recipeId: "r-salmon-rice",
+                name: "Salmon & rice",
+                macrosPerPortion: {
+                    calories: 640,
+                    protein_g: 48,
+                    carbs_g: 62,
+                    fat_g: 20,
+                },
+                usesExpiring: used,
+            },
+        ],
+    };
+    view.useSoonUses = used.map((item, i) => ({
+        item,
+        recipes: [
+            {
+                recipeId: "r-salmon-rice",
+                name: "Salmon & rice",
+                incomplete: false,
+            },
+            ...(i === 0
+                ? [
+                      {
+                          recipeId: "r-salmon-bowl",
+                          name: "Salmon bowl",
+                          incomplete: false,
+                      },
+                  ]
+                : []),
+        ],
+    }));
+    view.useSoonHighlight = {
+        recipeId: "r-salmon-rice",
+        name: "Salmon & rice",
+        itemCount: used.length,
+        totalItems: used.length,
+        minutes: 25,
+        kcalPerPortion: 640,
+    };
+    return view;
 }
 
 export function buildPreviewTodayPageData(

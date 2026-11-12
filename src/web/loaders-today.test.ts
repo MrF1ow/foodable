@@ -2,8 +2,15 @@ import { describe, expect, test } from "bun:test";
 import type { HouseholdMember } from "../household.js";
 import type { Meal, NutritionGoals, WeightEntry } from "../db/nutrition.js";
 import type { NoticesForResult } from "../domain/notices-for.js";
+import { newFood, type EffectiveFood } from "../domain/foods.js";
+import type { FridgeItem } from "../domain/fridge.js";
+import type { Recipe, RecipeIngredient } from "../domain/recipes.js";
 import { dateInTz } from "../domain/tz.js";
-import { loadToday, type LoadTodayDeps } from "./loaders-today.js";
+import {
+    loadToday,
+    macrosLeftFor,
+    type LoadTodayDeps,
+} from "./loaders-today.js";
 
 const viewer: HouseholdMember = {
     householdId: "hh-1",
@@ -342,5 +349,239 @@ describe("loadToday", () => {
         expect(view.meals).toHaveLength(0);
         expect(view.totals.calories).toBeNull();
         expect(view.week.dots.some((d) => d.state === "empty")).toBe(true);
+    });
+});
+
+const HH = "hh-1";
+
+function effectiveFood(id: string, name: string): EffectiveFood {
+    return {
+        ...newFood({
+            householdId: HH,
+            kind: "food",
+            name,
+            calories: 150,
+            proteinG: 10,
+            carbsG: 10,
+            fatG: 5,
+        }),
+        id,
+        product: null,
+    };
+}
+
+function recipeWith(id: string, name: string, foodIds: string[]) {
+    const recipe: Recipe = {
+        id,
+        householdId: HH,
+        creatorId: viewer.userId,
+        name,
+        yieldPortions: 1,
+        instructions: "Cook.",
+        sourceUrl: null,
+        tags: [],
+        notes: null,
+        prepMinutes: 10,
+        cookMinutes: 15,
+        verification: "verified",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+    };
+    const ingredients: RecipeIngredient[] = foodIds.map((foodId, index) => ({
+        id: `${id}-i${index}`,
+        householdId: HH,
+        recipeId: id,
+        kind: "food",
+        displayName: foodId,
+        quantity: { amount: 200, unit: "g" },
+        foodId,
+        sortOrder: index,
+        note: null,
+    }));
+    return { recipe, ingredients };
+}
+
+function stockItem(id: string, foodId: string, expiresOn: string): FridgeItem {
+    return {
+        id,
+        householdId: HH,
+        locationId: "loc-fridge",
+        kind: "food",
+        displayName: foodId,
+        quantity: { amount: 1000, unit: "g" },
+        foodId,
+        expiresOn,
+        openedOn: null,
+        purchasedOn: null,
+    };
+}
+
+function noticesWithRecipes(recipeCount = 1): NoticesForResult {
+    const foods = [
+        effectiveFood("salmon", "Salmon"),
+        effectiveFood("rice", "Rice"),
+        effectiveFood("spinach", "Spinach"),
+    ];
+    const built = [
+        recipeWith("r-salmon-rice", "Salmon & rice", ["salmon", "rice"]),
+        ...Array.from({ length: recipeCount - 1 }, (_, i) =>
+            recipeWith(`r-extra-${i}`, `Extra ${i}`, ["spinach"]),
+        ),
+    ];
+    return {
+        ...emptyNotices(),
+        recipesListPrefetch: {
+            recipes: built.map((b) => b.recipe),
+            allIngredients: built.flatMap((b) => b.ingredients),
+            fridgeItems: [
+                stockItem("i-salmon", "salmon", "2026-03-04"),
+                stockItem("i-rice", "rice", "2026-03-05"),
+                stockItem("i-spinach", "spinach", "2026-03-30"),
+            ],
+            foodsById: new Map(foods.map((f) => [f.id, f])),
+        },
+    };
+}
+
+describe("loadToday slot suggestions", () => {
+    test("an empty slot gets a fitting recipe and Use soon names it", async () => {
+        const view = await loadToday(
+            viewer,
+            "2026-03-03",
+            fakeDeps({
+                loadHouseholdNotices: async () => noticesWithRecipes(),
+            }),
+        );
+        expect(view.slotSuggestions.dinner).toEqual([
+            expect.objectContaining({
+                recipeId: "r-salmon-rice",
+                usesExpiring: [
+                    expect.objectContaining({ id: "i-salmon" }),
+                    expect.objectContaining({ id: "i-rice" }),
+                ],
+            }),
+        ]);
+        expect(Object.keys(view.slotSuggestions).sort()).toEqual([
+            "breakfast",
+            "dinner",
+            "lunch",
+            "snack",
+        ]);
+        expect(view.useSoonUses.map((u) => u.recipes[0]?.name)).toEqual([
+            "Salmon & rice",
+            "Salmon & rice",
+        ]);
+        expect(view.useSoonHighlight).toEqual({
+            recipeId: "r-salmon-rice",
+            name: "Salmon & rice",
+            itemCount: 2,
+            totalItems: 2,
+            minutes: 25,
+            kcalPerPortion: expect.any(Number),
+        });
+    });
+
+    test("a slot with a meal gets no suggestion", async () => {
+        const lunch = meal({ id: "lunch", meal_type: "lunch", calories: 300 });
+        const view = await loadToday(
+            viewer,
+            "2026-03-03",
+            fakeDeps({
+                getMealsByDate: async () => [lunch],
+                loadHouseholdNotices: async () => noticesWithRecipes(),
+            }),
+        );
+        expect(view.slotSuggestions.lunch).toBeUndefined();
+        expect(view.slotSuggestions.dinner).toBeDefined();
+    });
+
+    test("no calorie goal, a past day or a peer's day gets no suggestions", async () => {
+        const noGoal = await loadToday(
+            viewer,
+            "2026-03-03",
+            fakeDeps({
+                getGoalsForRange: async () => ({
+                    defaults: null,
+                    forDate: () => null,
+                }),
+                loadHouseholdNotices: async () => noticesWithRecipes(),
+            }),
+        );
+        expect(noGoal.slotSuggestions).toEqual({});
+        const past = await loadToday(
+            viewer,
+            "2026-03-02",
+            fakeDeps({
+                loadHouseholdNotices: async () => noticesWithRecipes(),
+            }),
+        );
+        expect(past.slotSuggestions).toEqual({});
+        const peer = await loadToday(
+            viewer,
+            "2026-03-03",
+            fakeDeps({
+                loadHouseholdNotices: async () => noticesWithRecipes(),
+            }),
+            { readOnly: true },
+        );
+        expect(peer.slotSuggestions).toEqual({});
+    });
+
+    test("recipes cost no extra queries however many there are", async () => {
+        async function callsFor(recipeCount: number) {
+            const calls: string[] = [];
+            const base = fakeDeps({});
+            const counted = Object.fromEntries(
+                Object.entries(base).map(([name, fn]) => [
+                    name,
+                    (...args: unknown[]) => {
+                        calls.push(name);
+                        return (fn as (...a: unknown[]) => unknown)(...args);
+                    },
+                ]),
+            ) as LoadTodayDeps;
+            counted.loadHouseholdNotices = async () => {
+                calls.push("loadHouseholdNotices");
+                return noticesWithRecipes(recipeCount);
+            };
+            await loadToday(viewer, "2026-03-03", counted);
+            return calls.sort();
+        }
+        const one = await callsFor(1);
+        const many = await callsFor(40);
+        expect(many).toEqual(one);
+        expect(one.filter((c) => c === "loadHouseholdNotices")).toHaveLength(1);
+    });
+});
+
+describe("macrosLeftFor", () => {
+    const totals = {
+        calories: 600,
+        protein_g: 50,
+        carbs_g: null,
+        fat_g: 90,
+    };
+    test("subtracts what was eaten from each target", () => {
+        expect(
+            macrosLeftFor(
+                {
+                    ...goals,
+                    daily_protein_g: 150,
+                    daily_carbs_g: 200,
+                    daily_fat_g: 80,
+                },
+                totals,
+            ),
+        ).toEqual({
+            calories: 1400,
+            protein_g: 100,
+            carbs_g: 200,
+            fat_g: -10,
+        });
+    });
+    test("is null without a calorie goal", () => {
+        expect(macrosLeftFor(null, totals)).toBeNull();
+        expect(
+            macrosLeftFor({ ...goals, daily_calories: null }, totals),
+        ).toBeNull();
     });
 });

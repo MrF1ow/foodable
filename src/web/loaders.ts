@@ -142,7 +142,8 @@ import {
     viewerChromeFromProfile,
     type NutritionView,
 } from "./pages/nutrition.js";
-import { loadToday } from "./loaders-today.js";
+import { loadToday, useSoonFor } from "./loaders-today.js";
+import { listExpiring } from "../domain/stock.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
@@ -467,10 +468,11 @@ export async function renderFridgeInventoryPage(
             },
         ]),
     );
+    const noticeResult = await loadHouseholdNotices(householdId, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
-        await loadHouseholdNotices(householdId, { today }),
+        noticeResult,
     );
     if (flags.uiV2) {
         const knownIds = new Set(snapshot.items.map((row) => row.id));
@@ -491,6 +493,11 @@ export async function renderFridgeInventoryPage(
                 openModalId,
                 didYouMean: extras?.didYouMean,
                 foodsById,
+                // From the recipes the notices already loaded: no extra query.
+                useSoonUses: useSoonFor(
+                    noticeResult.recipesListPrefetch,
+                    listExpiring(snapshot.items, today, 7),
+                ).uses,
                 freezeDefaultExpiry: defaultFreezeExpiry(today),
                 groceryLines,
                 groceryOverview:

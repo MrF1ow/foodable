@@ -167,6 +167,54 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(strip).not.toContain("Fresh");
     });
 
+    test("use soon cards say which recipe uses the item", () => {
+        const view = buildPreviewKitchenFridgeView(chrome, today, {
+            items: [
+                item({
+                    id: "soon",
+                    displayName: "Salmon",
+                    expiresOn: "2026-11-11",
+                }),
+                item({
+                    id: "no",
+                    displayName: "Milk",
+                    expiresOn: "2026-11-11",
+                }),
+            ],
+            useSoonUses: [
+                {
+                    item: {
+                        id: "soon",
+                        displayName: "Salmon",
+                        expiresOn: "2026-11-11",
+                    },
+                    recipes: [
+                        {
+                            recipeId: "r1",
+                            name: "Salmon & <rice>",
+                            incomplete: false,
+                        },
+                    ],
+                },
+                {
+                    item: {
+                        id: "no",
+                        displayName: "Milk",
+                        expiresOn: "2026-11-11",
+                    },
+                    recipes: [],
+                },
+            ],
+        });
+        const body = renderKitchenFridgeBody(view);
+        const strip = body.slice(
+            body.indexOf("fd-kitchen-use-soon"),
+            body.indexOf("fd-kitchen-fridge-loc"),
+        );
+        expect(strip.match(/fd-kitchen-use-card__use"/g)).toHaveLength(1);
+        expect(strip).toContain("Use in: Salmon &amp; &lt;rice&gt;");
+    });
+
     test("hides use soon when nothing qualifies", () => {
         const view = buildPreviewKitchenFridgeView(chrome, today, {
             items: [
