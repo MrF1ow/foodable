@@ -788,6 +788,7 @@ describe("GET /api/log/search", () => {
         });
         const item = empty.groups[0]!.items[0]!;
         expect(item.id).toBe("meal-recipe");
+        expect(item.meal_id).toBe("meal-recipe");
         expect(item.recipe_id).toBe("recipe-chili");
         expect(item.kcal).toBe(400);
         expect(item.meal_kcal).toBe(400);

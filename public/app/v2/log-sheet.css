@@ -93,6 +93,10 @@
     cursor: pointer;
 }
 
+.fd-log-recent-form {
+    display: contents;
+}
+
 .fd-log-filters {
     margin-bottom: var(--space-row);
     flex-wrap: nowrap;

@@ -10,6 +10,7 @@ type LogMacroApi = {
         unit: string,
     ) => Record<string, number | null> | null;
     allowedUnits: (item: Record<string, unknown>) => string[];
+    recentChipHtml: (item: Record<string, unknown>) => string;
     rebuildUnitChips: (
         form: { querySelector: (sel: string) => unknown },
         units: string[],
@@ -114,6 +115,7 @@ g.HTMLFormElement = HTMLFormElement;
 g.HTMLButtonElement = HTMLButtonElement;
 g.HTMLDialogElement = class HTMLDialogElement extends HTMLElement {};
 g.window = {
+    location: { pathname: "/", search: "?date=2026-11-10" },
     FOODABLE_EXPOSE_LOG_MACROS: (fn: LogMacroApi) => {
         api = fn;
     },
@@ -253,6 +255,43 @@ test("formatLogMacroGrams matches domain helper", () => {
         if (server !== client) drifts.push(`${v}`);
     }
     expect(drifts).toEqual([]);
+});
+
+test("a recent single-food log picks the food; a multi-item log is logged again whole", () => {
+    const single = api.recentChipHtml({
+        id: "meal-1",
+        meal_id: "meal-1",
+        name: "Banana",
+        food_id: "f-banana",
+        meal_kcal: 105,
+    });
+    expect(single).toContain("data-fd-log-pick");
+    expect(single).not.toContain("<form");
+
+    const multi = api.recentChipHtml({
+        id: "meal-2",
+        meal_id: "meal-2",
+        name: "Eggs & toast",
+        meal_kcal: 432,
+    });
+    expect(multi).toContain('<form class="fd-log-recent-form" method="post"');
+    expect(multi).toContain('action="/meals/meal-2/again"');
+    expect(multi).toContain('name="return_to" value="/?date=2026-11-10"');
+    expect(multi).toContain('name="date" value="2026-11-10"');
+    expect(multi).toContain("Eggs &amp; toast");
+    expect(multi).toContain("432");
+    expect(multi).not.toContain("data-fd-log-pick");
+
+    expect(api.recentChipHtml({ name: "Mystery" })).toBe("");
+});
+
+test("only the empty search asks for ten recent logs", () => {
+    const src = readFileSync(
+        new URL("./log-sheet.js", import.meta.url),
+        "utf8",
+    );
+    expect(src).toContain('const limit = q ? "" : "&limit=10";');
+    expect(src).not.toContain('"&online=1" : ""}&limit=10');
 });
 
 test("isLogSearchShortcut accepts Meta+K and Control+K, not plain K", () => {

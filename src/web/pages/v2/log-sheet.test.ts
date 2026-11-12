@@ -39,7 +39,7 @@ describe("renderLogSheets", () => {
         expect(html).toContain("fd-log-search-field");
         expect(html).toContain("Search foods, recipes, barcodes");
         expect(html).toContain("ADD TO");
-        expect(html).toContain("RECENT");
+        expect(html).toContain("Recent");
     });
 
     test("amount stepper accepts default 100 g with step any", () => {

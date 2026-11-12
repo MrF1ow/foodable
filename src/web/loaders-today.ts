@@ -33,11 +33,15 @@ import {
     weekDates,
     weekDayTotalsFromBucket,
     weekDots,
+    yesterdayCopyHints,
     type MealTypeGroup,
+    type MealTypeSlot,
     type TodayDayTotals,
     type WeekDot,
     type WeekStripLayout,
+    type YesterdayCopyHint,
 } from "../domain/today.js";
+import { recentHistoryStart } from "../domain/log-search.js";
 import {
     dateInTz,
     shiftLocalDate,
@@ -81,6 +85,8 @@ export type TodayView = {
         latest: WeightEntry | null;
         series30d: TodayWeightPoint[];
     };
+    /** Per-slot copy-yesterday hints when today's slot is empty (today view only). */
+    yesterdayCopy: Partial<Record<MealTypeSlot, YesterdayCopyHint>>;
 };
 
 const STREAK_LOOKBACK_DAYS = 400;
@@ -177,6 +183,7 @@ export async function loadToday(
     viewer: HouseholdMember,
     date?: string,
     deps: LoadTodayDeps = defaultTodayDeps(),
+    opts: { readOnly?: boolean } = {},
 ): Promise<TodayView> {
     const profile = await deps.getProfile(viewer.userId);
     const tz = tzFromProfile(profile);
@@ -193,8 +200,14 @@ export async function loadToday(
 
     const householdDate = await deps.householdToday(householdId);
 
+    const viewingToday = targetDate === today;
+    // A peer's day is read-only: no copy hint, so no yesterday query either.
+    const wantsCopyHint = viewingToday && opts.readOnly !== true;
+    const yesterdayDate = wantsCopyHint ? recentHistoryStart(today, 1) : null;
+
     const [
         dayMeals,
+        yesterdayMeals,
         weekMeals,
         weekWater,
         weekGoals,
@@ -205,6 +218,9 @@ export async function loadToday(
         noticeResult,
     ] = await Promise.all([
         deps.getMealsByDate(userId, targetDate, tz),
+        yesterdayDate
+            ? deps.getMealsByDate(userId, yesterdayDate, tz)
+            : Promise.resolve([] as Meal[]),
         deps.getMealsInRangeWithoutItems(userId, weekStart, weekEnd, tz),
         deps.getWaterInRange(userId, weekStart, weekEnd, tz),
         deps.getGoalsForRange(userId, weekStart, weekEnd),
@@ -263,6 +279,12 @@ export async function loadToday(
         fridgeLocations.map((loc) => [loc.id, loc.name]),
     );
 
+    const yesterdayCopy = yesterdayCopyHints(
+        wantsCopyHint,
+        dayMeals,
+        yesterdayMeals,
+    );
+
     return {
         date: targetDate,
         householdDate,
@@ -286,5 +308,6 @@ export async function loadToday(
             latest: latestWeight,
             series30d: weightSeries30d(weightRange, tz),
         },
+        yesterdayCopy,
     };
 }

@@ -336,7 +336,9 @@ export async function renderDashboardPage(
                   };
         const calendarToday = todayInTz(subjectTz);
         const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
-        const view = await loadToday(access.subject, selectedDate);
+        const view = await loadToday(access.subject, selectedDate, undefined, {
+            readOnly: access.subject.userId !== access.viewer.userId,
+        });
         const subjectLabel =
             access.subject.userId !== access.viewer.userId
                 ? members.find((m) => m.userId === access.subject.userId)

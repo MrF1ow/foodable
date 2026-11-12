@@ -296,8 +296,19 @@ function searchRowHtml(item, kind, rowIndex) {
     return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span>${badge}</span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
 }
 
+/** Page the chip returns to after logging a whole meal again. */
+function againReturnPath() {
+    return `${window.location.pathname}${window.location.search}`;
+}
+
+function againDate() {
+    return new URLSearchParams(window.location.search).get("date") ?? "";
+}
+
 function recentChipHtml(item) {
-    if (!logItemIsRelivable(item)) return "";
+    const relivable = logItemIsRelivable(item);
+    const mealId = String(item.meal_id ?? "").trim();
+    if (!relivable && !mealId) return "";
     const kcal =
         item.meal_kcal ??
         item.kcal ??
@@ -306,6 +317,10 @@ function recentChipHtml(item) {
         kcal != null
             ? `<span class="fd-chip__count">${Math.round(kcal)}</span>`
             : "";
+    if (!relivable) {
+        // Several items or free text: log the whole meal again as it was.
+        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
+    }
     const payload = { ...item, kind: item.kind || "history" };
     return `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;
 }
@@ -483,7 +498,9 @@ function bindSearchSheet(root) {
     );
 
     async function fetchResults(q) {
-        const url = `/api/log/search?q=${encodeURIComponent(q)}${online ? "&online=1" : ""}`;
+        // Only the empty query is capped: it lists the ten latest distinct logs.
+        const limit = q ? "" : "&limit=10";
+        const url = `/api/log/search?q=${encodeURIComponent(q)}${online ? "&online=1" : ""}${limit}`;
         const res = await fetch(url, {
             headers: { Accept: "application/json" },
         });
@@ -964,6 +981,7 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
         formatLogMacroKcal,
         formatLogMacroGrams,
         rebuildUnitChips,
+        recentChipHtml,
     });
 }
 
