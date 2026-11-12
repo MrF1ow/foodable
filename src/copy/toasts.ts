@@ -329,6 +329,10 @@ export const TOASTS = {
         kind: "success",
         text: "Location updated",
     },
+    "settings.household.shared-link.revoked": {
+        kind: "success",
+        text: "Link revoked",
+    },
     "settings.household.ownership.transferred": {
         kind: "success",
         text: "Ownership transferred",
