@@ -576,6 +576,59 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
         expect(await tokensLeft(userId)).toEqual({ access: 0, refresh: 0 });
     });
 
+    test("a malformed code, refresh token or client id is refused as a bad grant, never a server error", async () => {
+        const post = (
+            body: string | FormData,
+            headers: Record<string, string> = {},
+        ) =>
+            oauthApp.request("http://test/token", {
+                method: "POST",
+                headers,
+                body,
+            });
+        const form = { "content-type": "application/x-www-form-urlencoded" };
+        const cases: [string, Response][] = [
+            [
+                "NUL code",
+                await post(
+                    "grant_type=authorization_code&code=%00&redirect_uri=x&code_verifier=y",
+                    form,
+                ),
+            ],
+            [
+                "NUL refresh token",
+                await post(
+                    "grant_type=refresh_token&refresh_token=a%00b",
+                    form,
+                ),
+            ],
+            [
+                "oversized refresh token",
+                await post(
+                    `grant_type=refresh_token&refresh_token=${"a".repeat(600)}`,
+                    form,
+                ),
+            ],
+        ];
+        const multipart = new FormData();
+        multipart.set("grant_type", "refresh_token");
+        multipart.set("refresh_token", new File(["x"], "token.txt"));
+        cases.push(["file as refresh token", await post(multipart)]);
+        for (const [label, res] of cases) {
+            expect({ label, status: res.status }).toEqual({
+                label,
+                status: 400,
+            });
+            expect(await res.json()).toEqual({ error: "invalid_grant" });
+        }
+        const badClient = await post(
+            `grant_type=refresh_token&refresh_token=abc&client_id=a%00b`,
+            form,
+        );
+        expect(badClient.status).toBe(401);
+        expect(await badClient.json()).toEqual({ error: "invalid_client" });
+    });
+
     test("apps refreshing in a loop never survive Disconnect", async () => {
         const { pg, sql } = getCtx();
         const pool = new SQL(pg.url, { prepare: false, max: 8 });
