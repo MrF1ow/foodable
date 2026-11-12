@@ -25,6 +25,9 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     "src/db/users.ts",
     // Invite code peek and single-use redeem during sign-up.
     "src/db/invites.ts",
+    // The public share page finds a link by the hash of its token: a visitor
+    // has no household or member, and the hash is the only key.
+    "src/db/share-links.ts",
     // Reading an archive by its signed link, which has no session.
     "src/exports-route.ts",
     // Process-wide flag pin and snapshot cache, and its sweep.

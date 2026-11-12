@@ -43,6 +43,7 @@ const EXPECTED_USER_FKS: {
     { table: "household_invites", column: "created_by", deltype: "n" },
     { table: "household_invites", column: "used_by", deltype: "n" },
     { table: "recipe_plans", column: "created_by", deltype: "n" },
+    { table: "share_links", column: "created_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "flag_assignments", column: "user_id", deltype: "c" },
@@ -199,6 +200,15 @@ async function seedCascadeAndSetNullRows(
         set issued_by = excluded.issued_by
     `;
     await sql`
+        insert into share_links (household_id, kind, token_hash, created_by)
+        values (
+            ${householdId},
+            ${"grocery_list"},
+            ${`cascade-share-${userId}`},
+            ${userId}
+        )
+    `;
+    await sql`
         insert into stock_movements (
             household_id,
             food_id,
@@ -293,6 +303,11 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             where food_id = ${foodId}
         `;
         expect(movement.actor_user_id).toBeNull();
+        const [share] = await sql`
+            select created_by from share_links
+            where household_id = ${householdId}
+        `;
+        expect(share.created_by).toBeNull();
     });
 
     test("no-action tables block delete until cleared", async () => {
