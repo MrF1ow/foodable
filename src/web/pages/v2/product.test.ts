@@ -69,9 +69,9 @@ function spans(html: string, cls: string, nth = 0): string[] {
         } else if (tok.startsWith("<span")) {
             depth += 1;
         } else if (depth > 0) {
-            // Spans are split out above; drop any other markup, then any
-            // stray angle bracket, so only cell text is compared.
-            cur += tok.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
+            // Cells hold only spans, which are split out above, so any
+            // angle bracket left here is stray: drop it.
+            cur += tok.replace(/[<>]/g, "");
         }
     }
     return cells;
