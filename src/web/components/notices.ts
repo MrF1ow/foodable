@@ -39,6 +39,10 @@ export const NOTICE_ROUTES: Record<
         if (subject.kind !== "fridge_item") return null;
         return `/kitchen/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
     },
+    // These notices act from the new app only; the old Needs attention
+    // page never produces them, so it has nothing to link.
+    actOnNotice: () => null,
+    weighInSheet: () => null,
     possibleDuplicatePair(notice, _ctx) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         if (notice.subject.kind !== "food" || !foodRel) return null;

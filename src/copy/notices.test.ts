@@ -86,7 +86,9 @@ test("NOTICE_COPY is complete and well-formed", () => {
         expect(typeof entry.sentence).toBe("function");
         expect(HELP_IDS).toContain(entry.help);
         if (entry.dismissible) {
-            expect(NOTICE_SEVERITY[code]).toBe("info");
+            // A block is never dismissed; suggestions and the two warnings
+            // that come with a one-tap action may be.
+            expect(NOTICE_SEVERITY[code]).not.toBe("block");
             expect(noticeDismissLabel(code).length).toBeGreaterThan(0);
             if (entry.dismissPair) {
                 expect(entry.dismissible).toBe(true);

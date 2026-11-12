@@ -5,7 +5,8 @@ export type NoticeSubject =
     | { kind: "recipe"; id: string }
     | { kind: "recipe_ingredient"; id: string; recipeId: string }
     | { kind: "fridge_item"; id: string }
-    | { kind: "grocery_line"; id: string };
+    | { kind: "grocery_line"; id: string }
+    | { kind: "member"; id: string };
 
 export type NoticeCode =
     | "fridge.expired"
@@ -25,7 +26,10 @@ export type NoticeCode =
     | "food.product_gluten"
     | "food.product_goal"
     | "food.product_dislike"
-    | "grocery.restocked";
+    | "grocery.restocked"
+    | "grocery.running_low"
+    | "plan.missing_ingredient"
+    | "nutrition.weigh_in_due";
 
 export const NOTICE_CODES: readonly NoticeCode[] = [
     "fridge.expired",
@@ -46,6 +50,9 @@ export const NOTICE_CODES: readonly NoticeCode[] = [
     "food.product_goal",
     "food.product_dislike",
     "grocery.restocked",
+    "grocery.running_low",
+    "plan.missing_ingredient",
+    "nutrition.weigh_in_due",
 ];
 
 export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
@@ -68,6 +75,9 @@ export const NOTICE_SEVERITY: Record<NoticeCode, NoticeSeverity> = {
     "food.product_goal": "info",
     "food.product_dislike": "info",
     "grocery.restocked": "info",
+    "grocery.running_low": "warn",
+    "plan.missing_ingredient": "warn",
+    "nutrition.weigh_in_due": "info",
 };
 
 export type NoticeRelated = {

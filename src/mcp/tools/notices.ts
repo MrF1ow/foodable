@@ -1,4 +1,4 @@
-import { householdToday } from "../../db/restock.js";
+import { householdClock } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
@@ -6,6 +6,9 @@ import { withAnalytics } from "../../analytics.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { liveRecipePlansStore } from "../../db/plans.js";
+import { liveWeighInStore } from "../../db/weigh-ins.js";
+import { isViewerFlagOn } from "../../viewer-flags.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import {
     dismissNotice,
@@ -37,6 +40,7 @@ const SUBJECT_KIND_SCHEMA = z.enum([
     "recipe_ingredient",
     "fridge_item",
     "grocery_line",
+    "member",
 ]);
 
 function noticeDeps(): NoticesForDeps {
@@ -46,11 +50,16 @@ function noticeDeps(): NoticesForDeps {
         recipes: liveRecipesStore(),
         dismissals: liveNoticeDismissalsStore(),
         grocery: liveGroceryStore(),
+        plans: liveRecipePlansStore(),
+        weighIns: liveWeighInStore(),
     };
 }
 
 export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, actorUserId, analytics } = ctx;
+    // Running low, missing for the plan and weigh-in due come with the new
+    // app's one-tap actions, so they ride its flag.
+    const actionable = () => isViewerFlagOn(ctx.flags, "ui-v2");
 
     registerV2OnlyWidgetResource(server, ctx, {
         key: "attention",
@@ -66,7 +75,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Notices",
             description:
-                "List open household notices that need attention (warnings and suggestions, not allergen blocks). count is the same as the web app's Needs attention badge; filters only narrow notices.",
+                "List open household notices that need attention (warnings and suggestions, not allergen blocks). count is how many warnings and suggestions are open before the filters are applied; filters only narrow the list. Each notice says whether it can be dismissed and, if so, carries the arguments dismiss_notice needs.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -89,11 +98,12 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                 "list_notices",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const today = await householdToday(householdId);
+                    const { today, timezone } =
+                        await householdClock(householdId);
                     const { notices: all } = await noticesFor(
                         noticeDeps(),
                         householdId,
-                        { today },
+                        { today, timezone, actionable: actionable() },
                     );
                     const count = needsAttentionCount(all);
                     let notices = all;
@@ -131,7 +141,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Dismiss Notice",
             description:
-                "Dismiss an info-level suggestion after the person agrees. Do not call without asking first. Pair notices (for example food.possible_duplicate) require related_id naming the other food in the pair.",
+                "Dismiss an open notice that list_notices marks as dismissable, after the person agrees. Do not call without asking first. Pass the notice's dismiss fields back exactly as listed: code, subject_kind, subject_id, and related_id whenever dismiss.related_id is not null (the other food of a pair, or the day or plan the dismissal is held for).",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -153,7 +163,8 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                     const householdId = await callerHouseholdId();
                     const userId = await actorUserId(undefined);
                     try {
-                        const today = await householdToday(householdId);
+                        const { today, timezone } =
+                            await householdClock(householdId);
                         await dismissNotice(
                             noticeDeps(),
                             householdId,
@@ -164,7 +175,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                                 subjectId: input.subject_id,
                                 relatedId: input.related_id,
                             },
-                            { today },
+                            { today, timezone, actionable: actionable() },
                         );
                         return {
                             content: [
