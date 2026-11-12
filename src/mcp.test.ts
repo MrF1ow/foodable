@@ -873,7 +873,10 @@ mock.module("./food-search.js", () => ({
 
 mock.module("./db/sql.js", () => ({
     ...actualDbSql,
-    run: async <T>(fn: (tx: unknown) => Promise<T>) => fn({}),
+    // A tx that can be called as a tagged template (the shared-import advisory
+    // lock) and answers with no rows.
+    run: async <T>(fn: (tx: unknown) => Promise<T>) =>
+        fn(Object.assign(async () => [], {})),
 }));
 
 mock.module("./db/users.js", () => ({

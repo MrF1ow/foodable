@@ -202,52 +202,43 @@ function isPrivateIpv4(octets: number[]): boolean {
 }
 
 function isPrivateIpv6(parts: bigint[]): boolean {
-    if (parts.every((p) => p === 0n)) return true;
-    if (parts.slice(0, 7).every((p) => p === 0n) && parts[7] === 1n) {
-        return true;
-    }
+    // Every prefix below is refused outright rather than by its embedded
+    // IPv4 address: a recipe site never needs a tunnel or transition address,
+    // and refusing the prefix leaves nothing to mis-parse.
     const checks: Array<[bigint[], number]> = [
+        // ::/96: unspecified, loopback and the deprecated IPv4-compatible form
+        [[0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 96],
+        // ::ffff:0:0:0/96: IPv4-translated (SIIT)
+        [[0n, 0n, 0n, 0n, 0xffffn, 0n, 0n, 0n], 96],
+        // 100::/64: discard-only
+        [[0x0100n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 64],
+        // 64:ff9b::/96 NAT64 and 64:ff9b:1::/48 local-use NAT64
+        [[0x0064n, 0xff9bn, 0n, 0n, 0n, 0n, 0n, 0n], 96],
+        [[0x0064n, 0xff9bn, 0x0001n, 0n, 0n, 0n, 0n, 0n], 48],
+        // 2001::/32 Teredo, 2001:db8::/32 documentation
+        [[0x2001n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
+        [[0x2001n, 0x0db8n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
+        // 2002::/16 6to4
+        [[0x2002n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 16],
+        // fc00::/7 unique local, fe80::/10 link-local, fec0::/10 site-local,
+        // ff00::/8 multicast
         [[0xfc00n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 7],
         [[0xfe80n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 10],
+        [[0xfec0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 10],
         [[0xff00n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 8],
-        [[0x2001n, 0x0db8n, 0n, 0n, 0n, 0n, 0n, 0n], 32],
-        [[0x0064n, 0xff9bn, 0n, 0n, 0n, 0n, 0n, 0n], 96],
-        // 6to4 tunnels an IPv4 address inside the prefix; a recipe site never
-        // needs one, so the whole prefix is refused.
-        [[0x2002n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 16],
     ];
     if (checks.some(([base, len]) => ipv6InCidr(parts, base, len))) {
         return true;
     }
-    if (
-        parts[0] === 0n &&
-        parts[1] === 0n &&
-        parts[2] === 0n &&
-        parts[3] === 0n
-    ) {
-        if (parts[4] === 0n && parts[5] === 0xffffn) {
-            const octets = [
-                Number(parts[6]! >> 8n),
-                Number(parts[6]! & 0xffn),
-                Number(parts[7]! >> 8n),
-                Number(parts[7]! & 0xffn),
-            ];
-            return isPrivateIpv4(octets);
-        }
-        if (parts[4] === 0n && parts[5] === 0n) {
-            const v32 =
-                (Number(parts[6]! >> 8n) << 24) |
-                (Number(parts[6]! & 0xffn) << 16) |
-                (Number(parts[7]! >> 8n) << 8) |
-                Number(parts[7]! & 0xffn);
-            const octets = [
-                (v32 >>> 24) & 0xff,
-                (v32 >>> 16) & 0xff,
-                (v32 >>> 8) & 0xff,
-                v32 & 0xff,
-            ];
-            return isPrivateIpv4(octets);
-        }
+    // ::ffff:a.b.c.d (IPv4-mapped) is judged by the address it carries.
+    if (parts.slice(0, 5).every((p) => p === 0n) && parts[5] === 0xffffn) {
+        const octets = [
+            Number(parts[6]! >> 8n),
+            Number(parts[6]! & 0xffn),
+            Number(parts[7]! >> 8n),
+            Number(parts[7]! & 0xffn),
+        ];
+        return isPrivateIpv4(octets);
     }
     return false;
 }

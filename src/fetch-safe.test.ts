@@ -93,6 +93,59 @@ describe("isPublicAddress", () => {
     });
 });
 
+describe("isPublicAddress: tunnelled and reserved IPv6 ranges", () => {
+    const refused = [
+        // ::ffff:0:0:0/96 (IPv4-translated), public and private embedded v4
+        "::ffff:0:8.8.8.8",
+        "::ffff:0:10.0.0.1",
+        "::ffff:0:808:808",
+        // 64:ff9b::/96 (NAT64) and 64:ff9b:1::/48 (local-use NAT64)
+        "64:ff9b::8.8.8.8",
+        "64:ff9b::a00:1",
+        "64:ff9b:1::1",
+        "64:ff9b:1:0:0:0:808:808",
+        // fec0::/10 (site-local)
+        "fec0::1",
+        "feff::1",
+        // 2001::/32 (Teredo)
+        "2001::1",
+        "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+        // 100::/64 (discard-only)
+        "100::1",
+        "100::8.8.8.8",
+        // 2002::/16 (6to4), public and private embedded v4
+        "2002:808:808::1",
+        "2002:a00:1::1",
+        // ::a.b.c.d (IPv4-compatible), public and private embedded v4
+        "::8.8.8.8",
+        "::10.0.0.1",
+        "::808:808",
+        // unspecified, loopback, multicast, documentation, ULA, link-local
+        "::",
+        "::1",
+        "ff02::1",
+        "ff00::",
+        "2001:db8::1",
+        "fc00::1",
+        "fd12:3456::1",
+        "fe80::1",
+    ];
+    for (const ip of refused) {
+        test(`rejects ${ip}`, () => {
+            expect(isPublicAddress(ip)).toBe(false);
+        });
+    }
+
+    test("still accepts neighbours of the refused ranges", () => {
+        expect(isPublicAddress("2001:4860:4860::8888")).toBe(true);
+        expect(isPublicAddress("2001:1::1")).toBe(true);
+        expect(isPublicAddress("100:0:0:1::1")).toBe(true);
+        expect(isPublicAddress("64:ff9b:2::1")).toBe(true);
+        expect(isPublicAddress("2606:4700::1111")).toBe(true);
+        expect(isPublicAddress("::ffff:8.8.8.8")).toBe(true);
+    });
+});
+
 describe("createSafeFetcher", () => {
     test("sends Foodable user agent on page and robots requests", async () => {
         const seen: string[] = [];
