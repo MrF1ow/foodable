@@ -86,7 +86,7 @@ Schema lives only in `db/migrations/`. Apply them with `bun run db:migrate` (`--
 - `bun run db:import-postgres` - Copy the `public` data of a migrated Postgres (`--from`) into an empty one at the same migration version (`--to`, default: `db:dev` URL; `--check-only` checks preconditions)
 - `bun run check:changed` - Run the checks CI would run for the files you changed (`--list` previews them, `--all` runs everything)
 - `bun run typecheck` - Typecheck the whole project, tests and `scripts/` included (CI runs this on every PR)
-- `bun run lint` - oxlint with the repo's own rules (`scripts/lint-rules/`, enabled in `.oxlintrc.json`; `foodable/no-string-replacement-patterns` bans a non-literal replacement string in `replace` / `replaceAll`, so pass a function); `check:changed` runs it. A suppression needs a reason: `// oxlint-disable-next-line foodable/<rule> -- <why>`
+- `bun run lint` - oxlint with the repo's own rules (`scripts/lint-rules/`, enabled in `.oxlintrc.json`); `check:changed` runs it. A suppression needs a reason: `// oxlint-disable-next-line foodable/<rule> -- <why>`
 - `bun run release [patch|minor|major] [--dry-run]` - Open the release PR (see "Releases" in `CONTRIBUTING.md`)
 - `bun run gen:tokens` - Write `public/widgets/src/shared/tokens.css` from `src/tokens.ts`
 
