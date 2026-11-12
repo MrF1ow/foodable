@@ -37,6 +37,9 @@ flags:
     widget-attention:
         default: false
         rules: []
+    widget-use-soon:
+        default: false
+        rules: []
     flags-epoch:
         default: 1
         rules: []

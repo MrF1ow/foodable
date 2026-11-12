@@ -49,6 +49,15 @@ export const FLAGS = {
         removeWhen:
             "the attention widget is on for everyone and the flag is removed.",
     },
+    "widget-use-soon": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Use soon card for list_expiring: expiring items and the recipe that uses them.",
+        removeWhen:
+            "the use-soon widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

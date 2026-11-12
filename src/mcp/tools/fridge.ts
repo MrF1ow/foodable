@@ -32,7 +32,9 @@ import {
 } from "../../domain/stock.js";
 import { sortNotices } from "../../domain/notices.js";
 import { fridgeExpiryLine } from "../../copy/notices.js";
-import { findFoodById } from "../../domain/foods.js";
+import { effectiveFoodsByIds, findFoodById } from "../../domain/foods.js";
+import { listRecipes, recipeTotalMinutes } from "../../domain/recipes.js";
+import { useSoonFromPrefetch } from "../../domain/suggestions.js";
 import {
     descriptionFromItems,
     itemListDigest,
@@ -43,7 +45,9 @@ import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { WIDGET_LOCALE } from "../../routes.js";
 import {
+    registerV2OnlyWidgetResource,
     registerWidgetResource,
+    uiMetaForKey,
     NOTICE_SCHEMA,
     NEW_FOOD_INPUT,
     ON_SIMILAR_INPUT,
@@ -91,6 +95,40 @@ export const GET_FRIDGE_OUTPUT_SCHEMA = z.object({
             items: z.array(fridgeItemSchema),
         }),
     ),
+});
+
+export const LIST_EXPIRING_OUTPUT_SCHEMA = z.object({
+    items: z.array(
+        z.object({
+            id: z.string(),
+            display_name: z.string(),
+            amount: z.number(),
+            unit: z.string(),
+            expires_on: z.string(),
+            /** The name of the location the item is filed in. */
+            location: z.string(),
+            /** Whole days from the household's today to `expires_on` (negative once past). */
+            days_left: z.number(),
+            /** The recipe to use it in: the first cookable one that uses it. */
+            recipe: z.object({ id: z.string(), name: z.string() }).nullable(),
+        }),
+    ),
+    /** The cookable recipe that uses the most of the listed items (two or more), or null. */
+    featured: z
+        .object({
+            id: z.string(),
+            name: z.string(),
+            /** How many of the listed items it uses. */
+            uses: z.number(),
+            /** Prep plus cook minutes; null when either is unknown. */
+            minutes: z.number().nullable(),
+            /** Per portion; null when any ingredient's nutrition is unknown. */
+            calories: z.number().nullable(),
+            protein_g: z.number().nullable(),
+            carbs_g: z.number().nullable(),
+            fat_g: z.number().nullable(),
+        })
+        .nullable(),
 });
 
 function shortfallText(
@@ -598,6 +636,15 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
+    registerV2OnlyWidgetResource(server, ctx, {
+        key: "use-soon",
+        resourceName: "use-soon",
+        title: "Use soon",
+        description:
+            "Items about to expire and the recipe that uses them, for list_expiring.",
+        flag: "widget-use-soon",
+    });
+
     server.registerTool(
         "list_expiring",
         {
@@ -613,16 +660,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             inputSchema: z.object({
                 days: z.coerce.number().int().min(0).max(365).optional(),
             }),
-            outputSchema: z.object({
-                items: z.array(
-                    z.object({
-                        id: z.string(),
-                        display_name: z.string(),
-                        amount: z.number(),
-                        unit: z.string(),
-                        expires_on: z.string(),
-                    }),
-                ),
+            outputSchema: LIST_EXPIRING_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "use-soon", {
+                v2: true,
+                flag: "widget-use-soon",
             }),
         },
         async (args) =>
@@ -630,19 +671,89 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 "list_expiring",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const [{ items }, today] = await Promise.all([
+                    const [{ locations, items }, today] = await Promise.all([
                         listFridge(liveFridgeStore(), householdId),
                         householdToday(householdId),
                     ]);
                     const expiring = listExpiring(items, today, args.days ?? 3);
+                    const locationNames = new Map(
+                        locations.map((row) => [row.id, row.name]),
+                    );
+                    // Recipes are only read when something is expiring: the
+                    // same inputs the household app's Use soon section reads.
+                    let uses: ReturnType<typeof useSoonFromPrefetch> = {
+                        uses: [],
+                        best: null,
+                    };
+                    if (expiring.length > 0) {
+                        const recipesStore = liveRecipesStore();
+                        const [recipes, allIngredients] = await Promise.all([
+                            listRecipes(recipesStore, householdId),
+                            recipesStore.listIngredientsForHousehold(
+                                householdId,
+                            ),
+                        ]);
+                        const foodsById = await effectiveFoodsByIds(
+                            liveFoodsStore(),
+                            householdId,
+                            allIngredients.map((row) => row.foodId),
+                        );
+                        uses = useSoonFromPrefetch(
+                            {
+                                recipes,
+                                allIngredients,
+                                fridgeItems: items,
+                                foodsById,
+                            },
+                            expiring,
+                        );
+                    }
+                    const recipeFor = new Map(
+                        uses.uses.map((use) => [
+                            use.item.id,
+                            use.recipes[0] ?? null,
+                        ]),
+                    );
+                    const best = uses.best;
                     const payload = {
-                        items: expiring.map((item) => ({
-                            id: item.id,
-                            display_name: item.displayName,
-                            amount: item.quantity.amount,
-                            unit: item.quantity.unit,
-                            expires_on: item.expiresOn ?? "",
-                        })),
+                        items: expiring.map((item) => {
+                            const recipe = recipeFor.get(item.id) ?? null;
+                            return {
+                                id: item.id,
+                                display_name: item.displayName,
+                                amount: item.quantity.amount,
+                                unit: item.quantity.unit,
+                                expires_on: item.expiresOn ?? "",
+                                location:
+                                    locationNames.get(item.locationId) ?? "",
+                                days_left: item.expiresOn
+                                    ? daysUntilExpiry(today, item.expiresOn)
+                                    : 0,
+                                recipe: recipe
+                                    ? { id: recipe.recipeId, name: recipe.name }
+                                    : null,
+                            };
+                        }),
+                        featured: best
+                            ? (() => {
+                                  const macros = best.row.macrosPerPortion;
+                                  const known = !macros.incomplete;
+                                  return {
+                                      id: best.row.recipe.id,
+                                      name: best.row.recipe.name,
+                                      uses: best.itemCount,
+                                      minutes: recipeTotalMinutes(
+                                          best.row.recipe,
+                                      ),
+                                      calories: known ? macros.calories : null,
+                                      protein_g: known
+                                          ? macros.protein_g
+                                          : null,
+                                      carbs_g: known ? macros.carbs_g : null,
+                                      fat_g: known ? macros.fat_g : null,
+                                  };
+                              })()
+                            : null,
                     };
                     return {
                         content: [

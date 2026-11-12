@@ -3171,10 +3171,118 @@ test("fridge v2: item names reach the markup escaped", async () => {
     expect(body).not.toContain("<img");
 });
 
+// ---- use-soon v2 ------------------------------------------------------------
+
+function useSoonItem(over: Record<string, unknown> = {}) {
+    return {
+        id: "i1",
+        display_name: "Salmon",
+        amount: 1,
+        unit: "lb",
+        expires_on: "2026-11-13",
+        location: "Fridge",
+        days_left: 1,
+        recipe: null,
+        ...over,
+    };
+}
+
+test("use-soon v2 sample renders urgent, soon and later rows and the featured recipe", async () => {
+    const body = renderWidget(await v2Widget("use-soon"), undefined);
+    expect(body).toContain("Use soon");
+    expect(body).toContain('class="hd-meta">4 items<');
+    expect(body).toContain("Tomorrow");
+    expect(body).toContain("5 days");
+    expect(body).toContain("½ bag");
+    expect(body).toContain("Use in: ");
+    expect(body).toContain("Uses 3 of them");
+    expect(body).toContain("25 min");
+    expect(body).toContain("640 kcal");
+    expect(body).toContain('class="p">P 48<');
+    // The design's Cook it / Add to plan buttons are not built here.
+    expect(body).not.toContain("Cook it");
+    expect(body).not.toContain("<button");
+});
+
+test("use-soon v2: rows sort by days left and the label and tone follow days_left", async () => {
+    const body = renderWidget(await v2Widget("use-soon"), {
+        items: [
+            useSoonItem({ id: "later", display_name: "Yogurt", days_left: 5 }),
+            useSoonItem({ id: "old", display_name: "Milk", days_left: -2 }),
+            useSoonItem({ id: "today", display_name: "Eggs", days_left: 0 }),
+            useSoonItem({ id: "soon", display_name: "Rice", days_left: 3 }),
+            useSoonItem({ id: "tmrw", display_name: "Salmon", days_left: 1 }),
+        ],
+        featured: null,
+    });
+    const order = ["Milk", "Eggs", "Salmon", "Rice", "Yogurt"].map((n) =>
+        body.indexOf(`>${n}<`),
+    );
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(body).toContain('class="row-end is-over">Expired<');
+    expect(body).toContain('class="row-end is-over">Today<');
+    expect(body).toContain('class="row-end is-over">Tomorrow<');
+    expect(body).toContain('class="row-end is-warn">3 days<');
+    expect(body).toContain('class="row-end">5 days<');
+    expect(body).toContain('class="dot lg s-dim"');
+    expect(body).not.toContain("Uses ");
+});
+
+test("use-soon v2: Use in names the recipe only for items that have one; unknown macros are left out", async () => {
+    const body = renderWidget(await v2Widget("use-soon"), {
+        items: [
+            useSoonItem({ recipe: { id: "r1", name: "Fish pie" } }),
+            useSoonItem({ id: "i2", display_name: "Yogurt", days_left: 4 }),
+        ],
+        featured: {
+            id: "r1",
+            name: "Fish pie",
+            uses: 2,
+            minutes: null,
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+        },
+    });
+    expect(body.match(/Use in: /g)).toHaveLength(1);
+    expect(body).toContain("<b>Fish pie</b>");
+    expect(body).toContain("Uses 2 of them");
+    expect(body).not.toContain("feat-meta");
+    expect(body).not.toContain(" min");
+});
+
+test("use-soon v2: nothing expiring says so; names reach the markup escaped", async () => {
+    const html = await v2Widget("use-soon");
+    const empty = renderWidget(html, { items: [], featured: null });
+    expect(empty).toContain("Nothing is expiring soon.");
+    const evil = renderWidget(html, {
+        items: [
+            useSoonItem({
+                display_name: EVIL,
+                recipe: { id: "r", name: EVIL },
+            }),
+        ],
+        featured: {
+            id: "r",
+            name: EVIL,
+            uses: 2,
+            minutes: 5,
+            calories: 1,
+            protein_g: 1,
+            carbs_g: 1,
+            fat_g: 1,
+        },
+    });
+    expect(evil).not.toContain("<img");
+});
+
 // ---- widget harness (v2-only keys) ------------------------------------------
 
 test("harnessNeedsV2 marks attention and not v1 twins", () => {
     expect(harnessNeedsV2("attention")).toBe(true);
+    expect(harnessNeedsV2("use-soon")).toBe(true);
     expect(harnessNeedsV2("trends")).toBe(false);
 });
 

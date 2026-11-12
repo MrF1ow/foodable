@@ -646,6 +646,61 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 { id: "loc-3", name: "Pantry", sort_order: 2, items: [] },
             ],
         },
+        // list_expiring: urgent, soon, later, and an item no recipe uses.
+        "use-soon": {
+            items: [
+                {
+                    id: "ex-1",
+                    display_name: "Salmon",
+                    amount: 1,
+                    unit: "lb",
+                    expires_on: "2026-07-16",
+                    location: "Fridge",
+                    days_left: 1,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-2",
+                    display_name: "Baby spinach",
+                    amount: 0.5,
+                    unit: "bag",
+                    expires_on: "2026-07-17",
+                    location: "Fridge",
+                    days_left: 2,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-3",
+                    display_name: "Cooked rice",
+                    amount: 3,
+                    unit: "cup",
+                    expires_on: "2026-07-18",
+                    location: "Fridge",
+                    days_left: 3,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-4",
+                    display_name: "Greek yogurt",
+                    amount: 12,
+                    unit: "oz",
+                    expires_on: "2026-07-20",
+                    location: "Fridge",
+                    days_left: 5,
+                    recipe: null,
+                },
+            ],
+            featured: {
+                id: "rec-1",
+                name: "Salmon, rice & spinach",
+                uses: 3,
+                minutes: 25,
+                calories: 640,
+                protein_g: 48,
+                carbs_g: 62,
+                fat_g: 22,
+            },
+        },
     };
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };

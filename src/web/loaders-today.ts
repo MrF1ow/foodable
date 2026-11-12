@@ -27,14 +27,11 @@ import type {
     RecipesListPrefetch,
 } from "../domain/notices-for.js";
 import type { Food } from "../domain/foods.js";
+import { recipeTotalMinutes } from "../domain/recipes.js";
 import {
-    macrosForPerson,
-    recipeTotalMinutes,
-    type RecipeFilterRow,
-} from "../domain/recipes.js";
-import {
-    recipesUsingExpiring,
+    recipeRowsFromPrefetch,
     suggestForSlot,
+    useSoonFromPrefetch,
     type ExpiringItem,
     type ExpiringUse,
     type MacrosLeft,
@@ -125,31 +122,6 @@ export type UseSoonHighlight = {
     kcalPerPortion: number | null;
 };
 
-/** Recipes as the Recipes page reads them, from data already loaded. */
-export function recipeRowsFromPrefetch(
-    prefetch: RecipesListPrefetch,
-): RecipeFilterRow[] {
-    const byRecipe = new Map<string, RecipesListPrefetch["allIngredients"]>();
-    for (const row of prefetch.allIngredients) {
-        const list = byRecipe.get(row.recipeId) ?? [];
-        list.push(row);
-        byRecipe.set(row.recipeId, list);
-    }
-    return prefetch.recipes.map((recipe) => {
-        const ingredients = byRecipe.get(recipe.id) ?? [];
-        return {
-            recipe,
-            ingredients,
-            macrosPerPortion: macrosForPerson(
-                ingredients,
-                recipe.yieldPortions,
-                1,
-                prefetch.foodsById,
-            ),
-        };
-    });
-}
-
 function stockFromPrefetch(prefetch: RecipesListPrefetch) {
     return prefetch.fridgeItems.map((item) => ({
         quantity: item.quantity,
@@ -211,38 +183,15 @@ export function useSoonFor(
     prefetch: RecipesListPrefetch,
     expiring: readonly ExpiringItem[],
 ): { uses: ExpiringUse[]; highlight: UseSoonHighlight | null } {
-    if (expiring.length === 0) return { uses: [], highlight: null };
-    const rows = recipeRowsFromPrefetch(prefetch);
-    const uses = recipesUsingExpiring(
-        rows,
-        stockFromPrefetch(prefetch),
-        expiring,
-        prefetch.foodsById,
-    );
-    const counts = new Map<string, number>();
-    for (const use of uses) {
-        for (const recipe of use.recipes) {
-            counts.set(recipe.recipeId, (counts.get(recipe.recipeId) ?? 0) + 1);
-        }
-    }
-    let best: { recipeId: string; count: number } | null = null;
-    for (const use of uses) {
-        for (const recipe of use.recipes) {
-            const count = counts.get(recipe.recipeId) ?? 0;
-            if (count >= 2 && (best == null || count > best.count)) {
-                best = { recipeId: recipe.recipeId, count };
-            }
-        }
-    }
+    const { uses, best } = useSoonFromPrefetch(prefetch, expiring);
     if (best == null) return { uses, highlight: null };
-    const row = rows.find((r) => r.recipe.id === best.recipeId);
-    if (!row) return { uses, highlight: null };
+    const { row, itemCount } = best;
     return {
         uses,
         highlight: {
             recipeId: row.recipe.id,
             name: row.recipe.name,
-            itemCount: best.count,
+            itemCount,
             totalItems: uses.length,
             minutes: recipeTotalMinutes(row.recipe),
             kcalPerPortion: row.macrosPerPortion.incomplete

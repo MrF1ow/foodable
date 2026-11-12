@@ -35,6 +35,7 @@ import pkg from "../package.json" with { type: "json" };
 import {
     ADD_FRIDGE_ITEM_OUTPUT_SCHEMA,
     GET_FRIDGE_OUTPUT_SCHEMA,
+    LIST_EXPIRING_OUTPUT_SCHEMA,
 } from "./mcp/tools/fridge.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
@@ -158,6 +159,7 @@ import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { LIST_NOTICES_OUTPUT_SCHEMA } from "./mcp/tools/notices.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
+import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
@@ -10014,6 +10016,259 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     expect(() =>
                         LIST_NOTICES_OUTPUT_SCHEMA.parse(sc),
                     ).not.toThrow();
+                });
+            },
+        );
+    });
+
+    describe("widget-use-soon flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const USE_SOON_V2_URI = widgetUri("use-soon.html", true);
+
+        function addDaysUtc(iso: string, delta: number): string {
+            const [y, m, d] = iso.split("-").map(Number);
+            return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                .toISOString()
+                .slice(0, 10);
+        }
+
+        test.each(ERAS)(
+            "flag off leaves list_expiring without ui meta and no use-soon resource, and the empty path still carries structuredContent (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-use-soon": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_expiring");
+                    expect(list?._meta?.ui).toBeUndefined();
+                    expect(
+                        list?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        USE_SOON_V2_URI,
+                    );
+
+                    const empty = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    expect((empty.content as { text: string }[])[0]!.text).toBe(
+                        "Nothing expiring soon.",
+                    );
+                    expect(
+                        LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                            empty.structuredContent,
+                        ),
+                    ).toEqual({ items: [], featured: null });
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links the use-soon uri and lists and reads the v2 resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-use-soon": true }),
+                );
+                const assembled = await getWidgetHtml("use-soon", { v2: true });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_expiring");
+                    expect(
+                        (list?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(USE_SOON_V2_URI);
+                    expect(list?._meta?.["openai/outputTemplate"]).toBe(
+                        USE_SOON_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        USE_SOON_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: USE_SOON_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                    const empty = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    expect(
+                        LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                            empty.structuredContent,
+                        ),
+                    ).toEqual({ items: [], featured: null });
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the text is unchanged (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = async (
+                        name: string,
+                        args: Record<string, unknown>,
+                    ) =>
+                        (await client.callTool({
+                            name,
+                            arguments: args,
+                        })) as {
+                            structuredContent: Record<string, unknown>;
+                            content: { text: string }[];
+                        };
+                    const food = async (name: string) =>
+                        (
+                            await call("upsert_food", {
+                                name,
+                                calories: 100,
+                                protein_g: 10,
+                                carbs_g: 20,
+                                fat_g: 5,
+                            })
+                        ).structuredContent.id as string;
+                    const salmon = await food("Salmon");
+                    const rice = await food("Rice");
+                    const kale = await food("Kale");
+                    const loc = await call("add_fridge_location", {
+                        name: "Fridge",
+                    });
+                    const locationId = loc.structuredContent.id as string;
+                    const today = utcTodayFromDate();
+                    const dated = new Map<string, number>();
+                    for (const [foodId, days] of [
+                        [salmon, 1],
+                        [rice, 2],
+                        [kale, 30],
+                    ] as const) {
+                        const added = await call("add_fridge_item", {
+                            location_id: locationId,
+                            kind: "food",
+                            food_id: foodId,
+                            amount: 500,
+                            unit: "g",
+                        });
+                        const id = added.structuredContent.id as string;
+                        const row = (
+                            await db.fridgeStore.listItems("hh-1")
+                        ).find((r) => r.id === id)!;
+                        await db.fridgeStore.updateItem({
+                            ...row,
+                            expiresOn: addDaysUtc(today, days),
+                        });
+                        dated.set(foodId, days);
+                    }
+                    const recipe = await call("create_recipe", {
+                        name: "Salmon rice",
+                        yield_portions: 2,
+                        prep_minutes: 10,
+                        cook_minutes: 15,
+                    });
+                    const recipeId = recipe.structuredContent.id as string;
+                    for (const foodId of [salmon, rice]) {
+                        await call("add_recipe_ingredient", {
+                            recipe_id: recipeId,
+                            food_id: foodId,
+                            amount: 200,
+                            unit: "g",
+                        });
+                    }
+
+                    const listed = await call("list_expiring", { days: 3 });
+                    const parsed = LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                        listed.structuredContent,
+                    );
+                    expect(parsed.items.map((i) => i.display_name)).toEqual([
+                        "Salmon",
+                        "Rice",
+                    ]);
+                    expect(parsed.items.map((i) => i.days_left)).toEqual([
+                        1, 2,
+                    ]);
+                    expect(parsed.items.map((i) => i.location)).toEqual([
+                        "Fridge",
+                        "Fridge",
+                    ]);
+                    for (const item of parsed.items) {
+                        expect(item.recipe).toEqual({
+                            id: recipeId,
+                            name: "Salmon rice",
+                        });
+                    }
+                    // 200 g salmon + 200 g rice over 2 portions: 100 g of each.
+                    expect(parsed.featured).toEqual({
+                        id: recipeId,
+                        name: "Salmon rice",
+                        uses: 2,
+                        minutes: 25,
+                        calories: 200,
+                        protein_g: 20,
+                        carbs_g: 40,
+                        fat_g: 10,
+                    });
+                    expect(listed.content[0]!.text.split("\n")).toEqual(
+                        parsed.items.map((item) =>
+                            fridgeExpiryLine({
+                                name: item.display_name,
+                                amount: item.amount,
+                                unit: item.unit,
+                                expiresOn: item.expires_on,
+                            }),
+                        ),
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_expiring gives an item no recipe uses recipe null and no featured recipe when only one item is used (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const loc = await client.callTool({
+                        name: "add_fridge_location",
+                        arguments: { name: "Fridge" },
+                    });
+                    const added = await client.callTool({
+                        name: "add_fridge_item",
+                        arguments: {
+                            location_id: (
+                                loc.structuredContent as { id: string }
+                            ).id,
+                            kind: "food",
+                            name: "Lonely yogurt",
+                            amount: 1,
+                            unit: "g",
+                        },
+                    });
+                    const id = (added.structuredContent as { id: string }).id;
+                    const row = (await db.fridgeStore.listItems("hh-1")).find(
+                        (r) => r.id === id,
+                    )!;
+                    await db.fridgeStore.updateItem({
+                        ...row,
+                        expiresOn: addDaysUtc(utcTodayFromDate(), -1),
+                    });
+                    const listed = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    const parsed = LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                        listed.structuredContent,
+                    );
+                    expect(parsed.items).toHaveLength(1);
+                    expect(parsed.items[0]).toMatchObject({
+                        display_name: "Lonely yogurt",
+                        days_left: -1,
+                        location: "Fridge",
+                        recipe: null,
+                    });
+                    expect(parsed.featured).toBeNull();
                 });
             },
         );
