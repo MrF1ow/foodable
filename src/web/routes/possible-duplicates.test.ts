@@ -15,6 +15,10 @@ import * as actualDbRules from "../../db/rules.js";
 import * as actualDbSettings from "../../db/settings.js";
 import * as actualDbStock from "../../db/stock.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
+import * as actualDbPlans from "../../db/plans.js";
+import * as actualDbWeighIns from "../../db/weigh-ins.js";
+import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
+import { createMemoryPlansStore } from "../../domain/plan.js";
 import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
@@ -61,6 +65,8 @@ const realDbRules = { ...actualDbRules };
 const realDbSettings = { ...actualDbSettings };
 const realDbStock = { ...actualDbStock };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbPlans = { ...actualDbPlans };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realFoods = { ...actualFoods };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -141,6 +147,15 @@ mock.module("../../db/rules.js", () => ({
     ...realDbRules,
     liveRulesStore: () => db.rulesStore,
 }));
+// The new app's notices read plans and weigh-ins; none exist in these tests.
+mock.module("../../db/plans.js", () => ({
+    ...realDbPlans,
+    liveRecipePlansStore: () => createMemoryPlansStore(),
+}));
+mock.module("../../db/weigh-ins.js", () => ({
+    ...realDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore([]),
+}));
 mock.module("../../db/notice-dismissals.js", () => ({
     ...realDbNoticeDismissals,
     liveNoticeDismissalsStore: () => db.dismissalsStore,
@@ -188,6 +203,8 @@ afterAll(() => {
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("../../db/plans.js", () => realDbPlans);
+    mock.module("../../db/weigh-ins.js", () => realDbWeighIns);
     mock.module("../../foods.js", () => realFoods);
 });
 

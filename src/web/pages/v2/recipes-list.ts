@@ -6,11 +6,13 @@ import {
 } from "../../../domain/recipes.js";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 import type { RecipeSourceKind } from "../../../domain/recipe-import.js";
+import type { Notice } from "../../../domain/notices.js";
 import type { AppChromeBase } from "../../attention.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { chipLink, chipNav } from "../../components/v2/chips.js";
 import { esc, srOnly } from "../../components/v2/html.js";
 import { renderAppShell } from "../../shell.js";
+import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { favouriteStarForm } from "./recipes-favourite.js";
 import {
     planDayLabel,
@@ -41,6 +43,8 @@ export type RecipesListV2View = {
     totalCount: number;
     /** This week's plan: the strip, and the sheets its buttons open. */
     week?: WeekPlanView;
+    /** The household's open notices; what the plan is missing shows under the week. */
+    notices?: readonly Notice[];
     /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
     planDate?: string;
     importError?: string;
@@ -295,7 +299,18 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
     const planPick = view.planDate
         ? `<p class="fd-plan-pick" role="status">Pick a recipe for ${esc(planDayLabel(view.planDate))}. <a href="/recipes">Cancel</a></p>`
         : "";
-    const weekStrip = view.week ? renderWeekStrip(view.week) : "";
+    const weekStrip = view.week
+        ? `${renderWeekStrip(view.week)}${String(
+              noticeStrip(
+                  stripNotices(
+                      view.notices ?? [],
+                      ["plan.missing_ingredient"],
+                      undefined,
+                  ),
+                  { back: "/recipes", label: "Missing for the plan" },
+              ),
+          )}`
+        : "";
     const weekSheets = view.week
         ? `${renderPlanEditSheets(view.week, "recipes")}\n${renderMissingSheet(view.week, "recipes")}`
         : "";

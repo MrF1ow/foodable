@@ -13,6 +13,8 @@ import {
     listExpiring,
 } from "../../../domain/stock.js";
 import type { AppChromeBase } from "../../attention.js";
+import type { Notice } from "../../../domain/notices.js";
+import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
 import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
@@ -60,6 +62,8 @@ export type KitchenFridgeV2View = FridgeSnapshot & {
     freezeDefaultExpiry: string;
     groceryLines?: readonly GroceryLine[];
     groceryOverview?: KitchenFridgeGroceryOverview;
+    /** The household's open notices; the usuals running low show in place. */
+    notices?: readonly Notice[];
 };
 
 export type FridgeLocationGroup = {
@@ -550,6 +554,7 @@ ${desktopHead}
 <div class="fd-kitchen-fridge-page">
 <div class="fd-kitchen-fridge-top">${addBtn}</div>
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
+${String(noticeStrip(stripNotices(view.notices ?? [], ["grocery.running_low"], undefined), { back: "/kitchen/fridge", label: "Running low" }))}
 ${useSoonStrip(view)}
 ${columns}
 ${empty}

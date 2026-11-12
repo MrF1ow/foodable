@@ -7,7 +7,11 @@ import {
     setFlagsForTests,
 } from "../flags.js";
 import type { HouseholdMember } from "../household.js";
-import { viewerChromeWithAttention, viewerFlagsFor } from "./attention.js";
+import {
+    loadViewerNotices,
+    viewerChromeWithAttention,
+    viewerFlagsFor,
+} from "./attention.js";
 import { gatedRoute } from "./gated.js";
 import { requireMember, requireSiteUser } from "./middleware.js";
 import {
@@ -277,6 +281,18 @@ describe("gated route harness on composed app", () => {
                 notFound: true,
             },
             {
+                method: "POST",
+                path: "/notices/:code/act",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/notices/dismiss",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
                 method: "GET",
                 path: "/dev/gallery-v2",
                 flag: "ui-v2",
@@ -464,6 +480,93 @@ describe("viewerChromeWithAttention flags", () => {
         expect(on.flags.uiV2).toBe(true);
         expect(identityLoads).toBe(1);
         expect(on.identity?.householdName).toBe("The Test household");
+    });
+
+    test("the one-tap notices light Kitchen, Today and Recipes on the new app only", async () => {
+        const withNotices = (): NoticesForResult => ({
+            ...emptyNotices,
+            notices: [
+                {
+                    code: "grocery.running_low",
+                    severity: "warn",
+                    subject: { kind: "food", id: "f1" },
+                    related: [],
+                    params: { name: "Eggs", reason: "0 left, below 4" },
+                },
+                {
+                    code: "plan.missing_ingredient",
+                    severity: "warn",
+                    subject: { kind: "food", id: "f2" },
+                    related: [],
+                    params: { name: "Flour" },
+                },
+                {
+                    code: "nutrition.weigh_in_due",
+                    severity: "info",
+                    subject: { kind: "member", id: ALICE },
+                    related: [],
+                    params: { name: "Alice", days: 9 },
+                },
+            ],
+        });
+        setFlagsForTests(createMemoryFlags());
+        const off = await viewerChromeWithAttention(
+            { theme: "light" },
+            member,
+            withNotices(),
+        );
+        expect(off.attention.tabs).toEqual({});
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const on = await viewerChromeWithAttention(
+            { theme: "light" },
+            member,
+            withNotices(),
+            async () => ({
+                viewerName: "Alice",
+                viewerRole: "owner",
+                householdName: "Home",
+                memberCount: 1,
+            }),
+        );
+        expect(on.attention.tabs).toEqual({
+            grocery: true,
+            nutrition: true,
+            recipes: true,
+        });
+        // Another member's weigh-in is not Alice's to act on: Today stays quiet.
+        const other = withNotices();
+        other.notices = other.notices.filter(
+            (n) => n.code === "nutrition.weigh_in_due",
+        );
+        other.notices[0]!.subject = { kind: "member", id: "someone-else" };
+        const quiet = await viewerChromeWithAttention(
+            { theme: "light" },
+            member,
+            other,
+            async () => ({
+                viewerName: "Alice",
+                viewerRole: "owner",
+                householdName: "Home",
+                memberCount: 2,
+            }),
+        );
+        expect(quiet.attention.tabs).toEqual({});
+    });
+
+    test("only a viewer on ui-v2 loads the one-tap notices", async () => {
+        const seen: (boolean | undefined)[] = [];
+        const load = async (
+            _householdId: string,
+            opts?: { actionable?: boolean },
+        ) => {
+            seen.push(opts?.actionable);
+            return emptyNotices;
+        };
+        setFlagsForTests(createMemoryFlags());
+        await loadViewerNotices(member, undefined, load);
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        await loadViewerNotices(member, { today: "2026-11-12" }, load);
+        expect(seen).toEqual([false, true]);
     });
 
     test("viewerFlagsFor evaluates like the tabbed chrome (loadViewerFlags)", async () => {

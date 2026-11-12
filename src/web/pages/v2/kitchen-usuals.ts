@@ -24,7 +24,9 @@ import {
 } from "../../components/v2/rows.js";
 import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
+import type { Notice } from "../../../domain/notices.js";
 import { renderAppShell } from "../../shell.js";
+import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { renderKitchenDesktopSeg } from "./kitchen-overview.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
@@ -154,6 +156,8 @@ export type KitchenUsualsRowMeta = {
     storeName: string | null;
     amountLabel: string | null;
     onList: boolean;
+    /** An open running-low notice says its stock is below the level now. */
+    lowNow?: boolean;
     /** The usual's restock settings; a row built without one shows none. */
     restock?: UsualRestockView;
 };
@@ -179,6 +183,8 @@ export type KitchenUsualsV2View = {
     restockDay?: string | null;
     addSearch?: KitchenUsualsAddSearch;
     openGroceriesCount?: number;
+    /** The household's open notices; the usuals running low show in place. */
+    notices?: readonly Notice[];
 };
 
 function sortStoresByName<T extends { name: string }>(stores: T[]): T[] {
@@ -219,6 +225,8 @@ export function kitchenUsualRowMeta(
         storesById: ReadonlyMap<string, { name: string }>;
         groceryLines: readonly Pick<GroceryLine, "foodId" | "checked">[];
         foodsById: ReadonlyMap<string, Pick<Food, "id" | "genericFoodId">>;
+        /** Usuals with an open running-low notice (the design's "low now"). */
+        lowFoodIds?: ReadonlySet<string>;
     },
 ): KitchenUsualsRowMeta {
     const purchase = resolvePurchase(row);
@@ -244,6 +252,7 @@ export function kitchenUsualRowMeta(
         storeName,
         amountLabel,
         onList,
+        lowNow: ctx.lowFoodIds?.has(row.food.id) ?? false,
         restock: usualRestockView(row),
     };
 }
@@ -255,6 +264,7 @@ export function kitchenUsualRowParts(
     if (meta.storeName) parts.push(meta.storeName);
     if (meta.amountLabel) parts.push(meta.amountLabel);
     if (meta.restock) parts.push(...usualRestockParts(meta.restock));
+    if (meta.lowNow) parts.push({ text: "low now", tone: "warn" });
     if (meta.onList) parts.push({ text: "on the list", tone: "accent" });
     return parts;
 }
@@ -694,6 +704,14 @@ ${renderKitchenDesktopSeg("usuals")}
 </header>`;
 }
 
+/** The usuals running low, with Add to list and Dismiss; empty when none is. */
+export function runningLowStrip(notices: readonly Notice[] | undefined) {
+    return noticeStrip(
+        stripNotices(notices ?? [], ["grocery.running_low"], undefined),
+        { back: "/kitchen/usuals", label: "Running low" },
+    );
+}
+
 export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const resolvedOpen = kitchenUsualsResolvedOpenFoodId(view);
     const rows = filteredRows(view);
@@ -727,6 +745,7 @@ ${renderUsualsDesktopHead(view)}
 <div class="fd-kitchen-usuals-page">
 ${pageError}
 <p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>
+${String(runningLowStrip(view.notices))}
 ${view.stores.length > 0 ? storeFilterChips(view) : ""}
 ${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}
 ${list}

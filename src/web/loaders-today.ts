@@ -15,7 +15,7 @@ import {
 } from "../db/nutrition.js";
 import { getProfile } from "../db/profiles.js";
 import { liveFridgeStore } from "../db/fridge.js";
-import { householdToday } from "../db/restock.js";
+import { householdClock } from "../db/restock.js";
 import {
     activeCalorieGoal,
     buildDailyBuckets,
@@ -76,6 +76,8 @@ export type TodayWeightPoint = {
 };
 
 export type TodayAttention = {
+    /** The member the page is for; a weigh-in reminder has an action only for them. */
+    viewerUserId?: string;
     count: number;
     notices: Notice[];
     noticeFoods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
@@ -270,7 +272,7 @@ export type LoadTodayDeps = {
     getLatestWeight: typeof getLatestWeight;
     getWeightInRange: typeof getWeightInRange;
     loadHouseholdNotices: typeof loadHouseholdNotices;
-    householdToday: typeof householdToday;
+    householdClock: typeof householdClock;
     todayInTz: typeof todayInTz;
     listFridgeLocations: (
         householdId: string,
@@ -288,7 +290,7 @@ const defaultTodayDeps = (): LoadTodayDeps => ({
     getLatestWeight,
     getWeightInRange,
     loadHouseholdNotices,
-    householdToday,
+    householdClock,
     todayInTz,
     listFridgeLocations: (householdId) =>
         liveFridgeStore().listLocations(householdId),
@@ -366,7 +368,8 @@ export async function loadToday(
     const householdId = viewer.householdId;
     const userId = viewer.userId;
 
-    const householdDate = await deps.householdToday(householdId);
+    const clock = await deps.householdClock(householdId);
+    const householdDate = clock.today;
 
     const viewingToday = targetDate === today;
     // A peer's day is read-only: no copy hint, so no yesterday query either.
@@ -406,7 +409,12 @@ export async function loadToday(
             today,
             tz,
         ),
-        deps.loadHouseholdNotices(householdId, { today: householdDate }),
+        deps.loadHouseholdNotices(householdId, {
+            today: householdDate,
+            clock,
+            // Only the new app renders this view, and it acts on these notices.
+            actionable: true,
+        }),
     ]);
 
     const waterMl = sumWaterForDate(weekWater, targetDate, tz);
@@ -488,6 +496,7 @@ export async function loadToday(
         streak,
         expiringFridge,
         attention: {
+            viewerUserId: userId,
             count: needsAttentionCount(noticeResult.notices),
             notices: [...noticeResult.notices],
             noticeFoods: noticeResult.noticeFoods,

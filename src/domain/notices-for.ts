@@ -38,7 +38,7 @@ import {
     type WeighInStore,
 } from "./notices-actionable.js";
 import type { PlansStore } from "./plan.js";
-import { addPlanDays, type PlanRecipe } from "./plan-week.js";
+import { addPlanDays, planRecipesOf } from "./plan-week.js";
 import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices } from "./stock.js";
 
@@ -449,21 +449,11 @@ async function actionableNotices(
                 input.today,
                 addPlanDays(input.today, PLAN_NOTICE_DAYS - 1),
             );
-            const planned = new Set(plans.map((p) => p.recipeId));
-            const recipes = input.recipes
-                .filter((recipe) => planned.has(recipe.id))
-                .map((recipe): PlanRecipe => ({
-                    id: recipe.id,
-                    name: recipe.name,
-                    yieldPortions: recipe.yieldPortions,
-                    ingredients: input.allIngredients
-                        .filter((row) => row.recipeId === recipe.id)
-                        .map((row) => ({
-                            displayName: row.displayName,
-                            quantity: row.quantity,
-                            foodId: row.foodId,
-                        })),
-                }));
+            const recipes = planRecipesOf(
+                plans,
+                input.recipes,
+                input.allIngredients,
+            );
             notices.push(
                 ...planMissingNotices({
                     plans,

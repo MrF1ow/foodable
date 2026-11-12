@@ -114,10 +114,16 @@ mock.module("../loaders-plan.js", () => ({
         }),
 }));
 
+// What the page handed the chrome as already-loaded notices, per render.
+const chromeSeen: { prefetched: unknown; todayNotices: unknown }[] = [];
+let lastTodayView: ReturnType<typeof todayViewForDate> | null = null;
+
 mock.module("../loaders-today.js", () => ({
     ...realLoadersToday,
-    loadToday: async (_viewer: HouseholdMember, date?: string) =>
-        todayViewForDate(date ?? "2026-11-10"),
+    loadToday: async (_viewer: HouseholdMember, date?: string) => {
+        lastTodayView = todayViewForDate(date ?? "2026-11-10");
+        return lastTodayView;
+    },
 }));
 
 mock.module("../../dashboard-data.js", () => ({
@@ -141,7 +147,12 @@ mock.module("../attention.js", () => ({
     viewerChromeWithAttention: async (
         profile: { theme?: string | null } | null,
         viewer: HouseholdMember,
+        prefetched?: unknown,
     ) => {
+        chromeSeen.push({
+            prefetched,
+            todayNotices: lastTodayView?.attention.notices,
+        });
         const flags = await realAttention.viewerFlagsFor(viewer);
         return {
             theme:
@@ -186,6 +197,22 @@ function cookie(userId: string): string {
 }
 
 describe("GET /", () => {
+    test("Today on the new app loads the household's notices once: the chrome reuses what the page loaded", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        chromeSeen.length = 0;
+        lastTodayView = null;
+        const res = await hono.request("http://test/", {
+            headers: { cookie: cookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        expect(chromeSeen).toHaveLength(1);
+        const seen = chromeSeen[0]!;
+        expect(seen.prefetched).toBeDefined();
+        expect((seen.prefetched as { notices: unknown }).notices).toBe(
+            seen.todayNotices,
+        );
+    });
+
     test("flag on renders v2 today", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/", {

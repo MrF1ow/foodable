@@ -32,6 +32,8 @@ import * as actualRules from "../../db/rules.js";
 import * as actualSettings from "../../db/settings.js";
 import * as actualNutrition from "../../db/nutrition.js";
 import * as actualPlans from "../../db/plans.js";
+import * as actualWeighIns from "../../db/weigh-ins.js";
+import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
 import * as actualLoadersToday from "../loaders-today.js";
 import { buildPreviewTodayView } from "../pages/v2/today.js";
 import { createMemoryPlansStore } from "../../domain/plan.js";
@@ -61,6 +63,7 @@ const realFridgeDb = { ...actualFridgeDb };
 const realFoodsDb = { ...actualFoodsDb };
 const realAttention = { ...actualAttention };
 const realNoticeDismissals = { ...actualNoticeDismissals };
+const realWeighIns = { ...actualWeighIns };
 const realGrocery = { ...actualGrocery };
 const realStock = { ...actualStock };
 const realRules = { ...actualRules };
@@ -182,6 +185,10 @@ mock.module("../../db/nutrition.js", () => ({
                 .filter((k) => keys.includes(k)),
         ),
 }));
+mock.module("../../db/weigh-ins.js", () => ({
+    ...realWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore([]),
+}));
 mock.module("../../db/notice-dismissals.js", () => ({
     ...realNoticeDismissals,
     liveNoticeDismissalsStore: () => db.dismissalsStore,
@@ -240,6 +247,7 @@ afterAll(() => {
     mock.module("../../db/recipes.js", () => realRecipesDb);
     mock.module("../../db/grocery.js", () => realGrocery);
     mock.module("../../db/notice-dismissals.js", () => realNoticeDismissals);
+    mock.module("../../db/weigh-ins.js", () => realWeighIns);
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../../db/household.js", () => realHousehold);
     mock.module("../attention.js", () => realAttention);

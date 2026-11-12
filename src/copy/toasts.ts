@@ -162,6 +162,19 @@ export const TOASTS = {
         kind: "info",
         text: "Nothing is missing for the plan",
     },
+    "notice.added": {
+        kind: "success",
+        text: "Added {name} to the grocery list",
+    },
+    "notice.added.check": {
+        kind: "warning",
+        text: "Added {name} to the grocery list. Check what you have",
+    },
+    "notice.gone": {
+        kind: "info",
+        text: "That one is already taken care of",
+    },
+    "notice.error": { kind: "warning", text: "{message}" },
     "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
     "recipes.unresolved.cleared": {
         kind: "success",

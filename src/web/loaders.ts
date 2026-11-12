@@ -159,6 +159,7 @@ import { FoodsInputError } from "../domain/foods.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
+    loadViewerNotices,
     viewerChromeWithAttention,
     viewerFlagsFor,
 } from "./attention.js";
@@ -343,17 +344,29 @@ export async function renderDashboardPage(
             ? subjectProfile.timezone
             : "UTC";
 
+    const calendarToday = todayInTz(subjectTz);
+    const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
+
     const viewMemberId =
         requestedMember && requestedMember !== viewerUserId
             ? requestedMember
             : undefined;
 
+    // The new Today loads the household's notices itself; the chrome reuses
+    // them instead of loading them again. The flags need no query.
+    const flags = await viewerFlagsFor(access.viewer);
+    const todayView = flags.uiV2
+        ? await loadToday(access.subject, selectedDate, undefined, {
+              readOnly: access.subject.userId !== access.viewer.userId,
+          })
+        : null;
     const chrome = await viewerChromeWithAttention(
         viewerProfile,
         access.viewer,
+        todayView?.attention,
     );
 
-    if (chrome.flags.uiV2) {
+    if (todayView) {
         const weighInPrefill = await weighInPrefillForUser(
             access.viewer.userId,
         );
@@ -364,11 +377,7 @@ export async function renderDashboardPage(
                       ...v2LogSheet,
                       weighIn: v2LogSheet?.weighIn ?? weighInPrefill,
                   };
-        const calendarToday = todayInTz(subjectTz);
-        const selectedDate = parseTodayDateParam(requestedDate, calendarToday);
-        const view = await loadToday(access.subject, selectedDate, undefined, {
-            readOnly: access.subject.userId !== access.viewer.userId,
-        });
+        const view = todayView;
         const subjectLabel =
             access.subject.userId !== access.viewer.userId
                 ? members.find((m) => m.userId === access.subject.userId)
@@ -502,7 +511,7 @@ export async function renderFridgeInventoryPage(
             },
         ]),
     );
-    const noticeResult = await loadHouseholdNotices(householdId, { today });
+    const noticeResult = await loadViewerNotices(gate.viewer, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -533,6 +542,7 @@ export async function renderFridgeInventoryPage(
                     listExpiring(snapshot.items, today, 7),
                 ).uses,
                 freezeDefaultExpiry: defaultFreezeExpiry(today),
+                notices: noticeResult.notices,
                 groceryLines,
                 groceryOverview:
                     buildKitchenFridgeGroceryOverview(grocerySnapshot),
@@ -792,7 +802,7 @@ export async function renderGroceryListPage(
               opts.error,
           )
         : null;
-    const noticeResult = await loadHouseholdNotices(householdId, { today });
+    const noticeResult = await loadViewerNotices(gate.viewer, { today });
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -1123,7 +1133,7 @@ export async function renderSettingsSavedV2Route(
         const lower = q.toLowerCase();
         recipes = recipes.filter((r) => r.name.toLowerCase().includes(lower));
     }
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderSettingsSavedV2Page({
@@ -1317,7 +1327,7 @@ export async function renderSettingsFoodsPage(
         : null;
     const settings = liveSettingsStore();
     const stores = await settings.listStores(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderFoodsSettingsPage({
@@ -1367,7 +1377,7 @@ export async function renderUsualProductsListPage(
         };
     }
     const [noticeResult, groceryLines] = await Promise.all([
-        loadHouseholdNotices(householdId),
+        loadViewerNotices(gate.viewer),
         liveGroceryStore().listLines(householdId),
     ]);
     const chrome = await viewerChromeWithAttention(
@@ -1391,6 +1401,11 @@ export async function renderUsualProductsListPage(
                 { id: row.id, genericFoodId: row.genericFoodId },
             ]),
         );
+        const lowFoodIds = new Set(
+            noticeResult.notices
+                .filter((notice) => notice.code === "grocery.running_low")
+                .map((notice) => notice.subject.id),
+        );
         const rowMeta = new Map<string, KitchenUsualsRowMeta>();
         for (const row of rows) {
             rowMeta.set(
@@ -1399,6 +1414,7 @@ export async function renderUsualProductsListPage(
                     storesById,
                     groceryLines,
                     foodsById,
+                    lowFoodIds,
                 }),
             );
         }
@@ -1433,6 +1449,7 @@ export async function renderUsualProductsListPage(
                     : null,
                 addSearch,
                 openGroceriesCount: groceryOpenLineCount(groceryLines),
+                notices: noticeResult.notices,
             }),
         };
     }
@@ -1491,7 +1508,7 @@ export async function renderUsualProductsPickerPage(
         ? usualProduct.usualAmount
         : food.usualAmount;
     const stores = await liveSettingsStore().listStores(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderUsualProductsPickerHtml({
@@ -1573,7 +1590,7 @@ export async function renderHouseholdSettingsRoute(
               )}`
             : null;
 
-    const noticeResult = await loadHouseholdNotices(householdId, {
+    const noticeResult = await loadViewerNotices(gate.viewer, {
         refCounts,
     });
     const chrome = await viewerChromeWithAttention(
@@ -1657,7 +1674,7 @@ export async function renderSettingsStoresV2Route(
         stores.map((row) => settings.listSections(row.id)),
     );
     const counts = groceryLineCounts(lines);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderSettingsStoresV2Page({
@@ -1707,7 +1724,7 @@ export async function renderSettingsStoreV2Route(
         liveGroceryStore().listLines(householdId),
     ]);
     const counts = groceryLineCounts(lines);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     return {
         status: 200,
         html: renderSettingsStoreV2Page({
@@ -1767,7 +1784,7 @@ export async function renderHouseholdMemberRoute(
     if (!access.ok) {
         return { status: 403, html: forbiddenDashboardHtml() };
     }
-    const noticeResult = await loadHouseholdNotices(gate.viewer.householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -1828,7 +1845,7 @@ export async function renderRecipesListPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -1903,6 +1920,7 @@ export async function renderRecipesListPage(
                 cookableCount,
                 totalCount: recipes.length,
                 week,
+                notices: noticeResult.notices,
                 planDate:
                     opts.planDate && isPlanDate(opts.planDate)
                         ? opts.planDate
@@ -2211,7 +2229,7 @@ export async function renderRecipeDetailRoute(
         };
     });
     const importRow = await liveRecipesStore().getImport(householdId, recipeId);
-    const noticeResult = await loadHouseholdNotices(householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const foodDuplicateNotices = possibleDuplicateNoticesByFoodId(
         noticeResult.notices,
     );
@@ -2417,7 +2435,9 @@ export async function renderNeedsAttentionInventoryPage(
         }
     }
 
-    const result = await loadHouseholdNotices(householdId, { today });
+    // The same notices the Today card counts: the one-tap ones are listed for
+    // a viewer on the new app and left out for everyone else.
+    const result = await loadViewerNotices(gate.viewer, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -2425,6 +2445,7 @@ export async function renderNeedsAttentionInventoryPage(
     );
     const html = renderNeedsAttentionPage({
         chrome,
+        viewerUserId: gate.viewer.userId,
         result,
         showDismissed,
         error: pageError,
