@@ -57,7 +57,7 @@ function mergeFactors(
     };
 }
 
-function amountInUnit(
+export function amountInUnit(
     q: LinkedQuantity,
     to: string,
     rowFood: FoodQuantityFactors | undefined,

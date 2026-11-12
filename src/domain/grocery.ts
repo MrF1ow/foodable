@@ -42,6 +42,7 @@ export const GROCERY_LINE_SOURCES = [
     "recipe",
     "restock",
     "notice",
+    "plan",
 ] as const;
 export type GroceryLineSource = (typeof GROCERY_LINE_SOURCES)[number];
 
@@ -681,7 +682,7 @@ export async function resolveGroceryLineSource(
     }
 
     if (sourceFridgeItemId) {
-        if (source === "manual" || source === "recipe") {
+        if (source === "manual" || source === "recipe" || source === "plan") {
             throw new GroceryInputError(
                 "A fridge item can only be named for a restock or notice line.",
             );
