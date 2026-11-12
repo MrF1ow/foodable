@@ -81,6 +81,6 @@ test("filterRestockRunnerHouseholds skips only households with restock-runner of
     );
 });
 
-test("the live restock runner stays on the legacy source", () => {
-    expect(liveRestockCheckDeps().source).toBe("legacy");
+test("the live restock runner uses the schedules source", () => {
+    expect(liveRestockCheckDeps().source).toBe("schedules");
 });

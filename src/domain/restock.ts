@@ -1,6 +1,6 @@
 import type { RestockPreferences } from "../household.js";
 import type { EffectiveFood } from "./foods.js";
-import { familyOf, usualLowLevel } from "./foods.js";
+import { familyOf, foodDisplayName, usualLowLevel } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import {
     pickGroceryAmount,
@@ -119,7 +119,47 @@ export type DueUsual = {
     trigger: "schedule" | "low";
 };
 
+/**
+ * The `grocery.running_low` notice for a usual that has fallen below its
+ * level. The notices and the restock runner both build it here, so the
+ * dismissal key (the usual, scoped to its last restock) cannot drift between
+ * what the user dismissed and what the runner skips.
+ */
+export function runningLowNotice(food: EffectiveFood, reason: string): Notice {
+    return {
+        code: "grocery.running_low",
+        severity: NOTICE_SEVERITY["grocery.running_low"],
+        subject: { kind: "food", id: food.id },
+        related: [],
+        params: {
+            name: foodDisplayName(food),
+            foodId: food.id,
+            reason,
+            // A dismissal holds until the usual is next restocked.
+            dismissScope: food.lastRestockedOn ?? "",
+        },
+    };
+}
+
 const MS_PER_DAY = 86_400_000;
+
+/**
+ * A ticked line is bought but not yet put away, so the fridge still reads low
+ * and it covers a low usual for this many days; after that it is a stale tick
+ * and the usual may be added again.
+ */
+export const TICKED_COVERS_LOW_DAYS = 7;
+
+/**
+ * Ticking stamps the usual's `lastRestockedOn`, so a stamp older than the
+ * window means the tick is stale. No stamp means the tick's age is unknown,
+ * and it still covers: a stale line is only provable, never guessed.
+ */
+function tickIsRecent(lastRestockedOn: string | null, today: string): boolean {
+    if (lastRestockedOn == null) return true;
+    const since = daysBetween(lastRestockedOn, today);
+    return since != null && since < TICKED_COVERS_LOW_DAYS;
+}
 
 function parseDay(iso: string): number | null {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
@@ -352,6 +392,20 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         familyById.set(id, familyOf(food));
     }
 
+    // An unticked line for a family always covers it. A ticked line covers
+    // only a low or expiring family, and only while the tick is recent
+    // (`TICKED_COVERS_LOW_DAYS`), in the expiring and the usual loops alike.
+    const openFamilies = new Set<string>();
+    const tickedFamilies = new Set<string>();
+    for (const line of input.lines) {
+        if (!line.foodId) continue;
+        const family = familyById.get(line.foodId) ?? line.foodId;
+        (line.checked ? tickedFamilies : openFamilies).add(family);
+    }
+    const recentTickCovers = (family: string, food: EffectiveFood): boolean =>
+        tickedFamilies.has(family) &&
+        tickIsRecent(food.lastRestockedOn, input.today);
+
     const dueByFamily = new Map<
         string,
         { plainId: string; items: FridgeItem[] }
@@ -396,7 +450,12 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         if (!plain) continue;
 
         const sample = dueItems[0]!;
-        if (onGroceryList(sample, input.lines, input.foodsById)) {
+        if (
+            onGroceryList(sample, input.lines, input.foodsById) ||
+            // Only a stamped tick counts here: an unstamped ticked line has
+            // no provable age and must not hold back an expiring item.
+            (plain.lastRestockedOn != null && recentTickCovers(plainId, plain))
+        ) {
             counts.skippedOnList += 1;
             continue;
         }
@@ -505,12 +564,21 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
     const sortedDue = [...(input.dueUsuals ?? [])].sort((a, b) =>
         a.food.name.localeCompare(b.food.name),
     );
-    for (const { food } of sortedDue) {
+    for (const { food, reason, trigger } of sortedDue) {
+        const family = familyOf(food);
         const alreadyListed =
-            onGroceryList({ foodId: food.id }, input.lines, input.foodsById) ||
+            openFamilies.has(family) ||
+            (trigger === "low" && recentTickCovers(family, food)) ||
             lines.some((line) => line.foodId === food.id);
         if (alreadyListed) {
             counts.skippedOnList += 1;
+            continue;
+        }
+        if (
+            trigger === "low" &&
+            isDismissedIn(runningLowNotice(food, reason), input.dismissed)
+        ) {
+            counts.skippedDismissed += 1;
             continue;
         }
         const placed = placeRestockLine(input, food, familyById);

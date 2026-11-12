@@ -89,8 +89,9 @@ export function liveRestockCheckDeps() {
         settings,
         dismissals,
         restock,
-        // Stays on today's behaviour until the schedules are switched on.
-        source: "legacy" as const,
+        // Expiring food plus the usuals that are due. The `restock-runner`
+        // kill switch still gates every household (see listEnabled).
+        source: "schedules" as const,
         forHousehold: <T>(householdId: string, work: () => Promise<T>) =>
             withActor({ kind: "household", householdId }, work),
     };

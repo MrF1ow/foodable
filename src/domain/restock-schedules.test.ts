@@ -8,7 +8,11 @@ import {
 } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import { addLocation, createMemoryFridgeStore } from "./fridge.js";
-import { createMemoryGroceryStore, type GroceryLine } from "./grocery.js";
+import {
+    checkGroceryLine,
+    createMemoryGroceryStore,
+    type GroceryLine,
+} from "./grocery.js";
 import { createMemoryNoticeDismissalsStore } from "./notice-dismissals.js";
 import {
     EMPTY_HOUSEHOLD_PREFERENCES,
@@ -317,9 +321,13 @@ async function runnerWorld() {
     });
     return {
         grocery,
+        dismissals,
         deps,
         logs,
         store,
+        fridge,
+        stock,
+        loc,
         milk,
         rice,
         oats,
@@ -452,6 +460,83 @@ test("source schedules runs the low pass once a day", async () => {
     expect(w.logs.some((l) => l.includes("already ran"))).toBe(false);
 });
 
+const THU = new Date("2026-06-04T15:00:00Z");
+const FRI = new Date("2026-06-05T15:00:00Z");
+
+async function riceLines(w: Awaited<ReturnType<typeof runnerWorld>>) {
+    return (await w.grocery.listLines(HH)).filter(
+        (l) => l.displayName === "Rice",
+    );
+}
+
+test("source schedules: a ticked low-usual line awaiting put-away is not doubled the next day", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-03",
+    });
+    await runRestockCheck(w.deps("schedules"), THU);
+    await runRestockCheck(w.deps("schedules"), FRI);
+    const rice = await riceLines(w);
+    expect(rice.map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: a dismissed running-low notice keeps the low pass from re-adding the usual", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    // The notice's dismissal scope is the usual's last restock day.
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-05-01",
+        dismissedBy: "u1",
+    });
+    for (const day of [WED, THU, FRI]) {
+        await runRestockCheck(w.deps("schedules"), day);
+        expect(await riceLines(w)).toEqual([]);
+    }
+    expect(w.logs[0]).toContain("skipped_dismissed=1");
+});
+
+test("source schedules: a dismissal for an older restock does not hide a low usual", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-04-01",
+        dismissedBy: "u1",
+    });
+    await runRestockCheck(w.deps("schedules"), WED);
+    expect(await riceLines(w)).toHaveLength(1);
+});
+
+test("source schedules: a running-low dismissal does not stop a schedule-due usual", async () => {
+    const w = await runnerWorld();
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        restockWhenLow: true,
+        restockLowLevel: 1,
+    });
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-05-01",
+        dismissedBy: "u1",
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect(await riceLines(w)).toHaveLength(1);
+});
+
 test("source schedules still adds the schedule part and expiring lines on the restock day after a weekday pass", async () => {
     const w = await runnerWorld();
     await makeRiceLow(w);
@@ -472,6 +557,87 @@ test("source legacy does nothing off the restock day, low usual or not", async (
     expect(w.getPrefs().restock.lastRunOn).toBeNull();
 });
 
+// ---- the switch day: the legacy runner and the schedules runner share one marker
+
+const SWITCH_DAY = NOW; // Saturday, the restock weekday
+const NEXT_DAY = new Date("2026-06-07T15:00:00Z");
+
+function names(lines: GroceryLine[]) {
+    return lines.map((l) => l.displayName).sort();
+}
+
+test("switch day: a schedules run after the legacy run the same day adds nothing", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("legacy"), SWITCH_DAY);
+    const afterLegacy = await w.grocery.listLines(HH);
+    expect(names(afterLegacy)).toEqual(["Milk"]);
+    expect(w.getPrefs().restock.lastRunOn).toBe(SAT);
+
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    const afterSchedules = await w.grocery.listLines(HH);
+    // No duplicate expiring line, and no usual (Rice, Oats) added that day.
+    expect(afterSchedules).toEqual(afterLegacy);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+});
+
+test("switch day: a legacy and a schedules run started together insert the lines once", async () => {
+    const w = await runnerWorld();
+    // The live store commits atomically (one conditional UPDATE); the memory
+    // store awaits between its check and its write, so serialize the commits
+    // to model that.
+    let chain: Promise<unknown> = Promise.resolve();
+    const serial = (d: RestockCheckDeps): RestockCheckDeps => ({
+        ...d,
+        restock: {
+            commitRestockRun: (hh, on, lines) => {
+                const run = chain.then(() =>
+                    d.restock.commitRestockRun(hh, on, lines),
+                );
+                chain = run.catch(() => undefined);
+                return run;
+            },
+        },
+    });
+    await Promise.all([
+        runRestockCheck(serial(w.deps("legacy")), SWITCH_DAY),
+        runRestockCheck(serial(w.deps("schedules")), SWITCH_DAY),
+    ]);
+    const lines = await w.grocery.listLines(HH);
+    const milk = lines.filter((l) => l.displayName === "Milk");
+    expect(milk).toHaveLength(1);
+    // Exactly one run committed: either the legacy set or the schedules set,
+    // never the sum of both.
+    expect(
+        names(lines).join(",") === "Milk" ||
+            names(lines).join(",") === "Milk,Oats,Rice",
+    ).toBe(true);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+    expect(w.logs.filter((l) => l.includes("already ran"))).toHaveLength(1);
+});
+
+test("switch day: the schedules run the day after a legacy switch-day run proceeds normally", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("legacy"), SWITCH_DAY);
+    expect(names(await w.grocery.listLines(HH))).toEqual(["Milk"]);
+
+    // Sunday: not the restock day, but a low usual is added; the marker moves on.
+    await runRestockCheck(w.deps("schedules"), NEXT_DAY);
+    expect(names(await w.grocery.listLines(HH))).toEqual(["Milk", "Rice"]);
+    expect(w.getPrefs().restock.lastRunOn).toBe("2026-06-07");
+});
+
+test("switch day: a schedules run first adds expiring food and due usuals once, and a second tick adds nothing", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    const first = await w.grocery.listLines(HH);
+    expect(names(first)).toEqual(["Milk", "Oats", "Rice"]);
+
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    expect(await w.grocery.listLines(HH)).toEqual(first);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+});
+
 async function createMemorySettingsStoreSections(w: {
     store: { id: string };
     deps: () => RestockCheckDeps;
@@ -479,3 +645,142 @@ async function createMemorySettingsStoreSections(w: {
     const sections = await w.deps().settings.listSections(w.store.id);
     return sections[0]!.id;
 }
+
+const SAT_2 = new Date("2026-06-13T15:00:00Z");
+const SAT_3 = new Date("2026-06-20T15:00:00Z");
+
+test("source schedules: a scheduled usual whose ticked line was never cleared is added again when due", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("schedules"), NOW);
+    const [first] = await riceLines(w);
+    // Ticked in the store the next day; nobody clears the checked lines.
+    await checkGroceryLine(w.grocery, HH, first!.id, true, {
+        foods: w.foods,
+        today: "2026-06-07",
+    });
+    await runRestockCheck(w.deps("schedules"), SAT_2);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+    // Two weeks on the schedule is due again; the stale tick must not cover it.
+    await runRestockCheck(w.deps("schedules"), SAT_3);
+    expect((await riceLines(w)).map((l) => l.checked).sort()).toEqual([
+        false,
+        true,
+    ]);
+});
+
+test("source schedules: a ticked manual line from weeks ago does not block a scheduled usual", async () => {
+    const w = await runnerWorld();
+    const sectionId = await createMemorySettingsStoreSections(w);
+    await w.grocery.insertLine({
+        id: "old-ticked",
+        householdId: HH,
+        storeId: w.store.id,
+        sectionId,
+        kind: "food",
+        displayName: "Rice",
+        quantity: { amount: 1, unit: "lb" },
+        foodId: w.rice.id,
+        checked: true,
+        source: "manual",
+        sourceFridgeItemId: null,
+        note: null,
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    const rice = await riceLines(w);
+    expect(rice.filter((l) => !l.checked)).toHaveLength(1);
+    expect(w.logs[0]).toContain("skipped_on_list=0");
+});
+
+test("source schedules: a low usual ticked one or two days ago is not doubled", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-04",
+    });
+    await runRestockCheck(w.deps("schedules"), FRI);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: a low usual whose ticked line is older than the window is added again", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-03",
+    });
+    // Ticked 3 June and never put away: by 10 June the tick is stale.
+    await runRestockCheck(
+        w.deps("schedules"),
+        new Date("2026-06-10T15:00:00Z"),
+    );
+    expect((await riceLines(w)).map((l) => l.checked).sort()).toEqual([
+        false,
+        true,
+    ]);
+});
+
+// ---- the expiring pass honours a recent tick like the low pass does
+
+async function addRiceCarton(w: Awaited<ReturnType<typeof runnerWorld>>) {
+    // One pound on hand is under the raised low level, so Rice reads low too.
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        restockLowLevel: 5,
+    });
+    await addFridgeItemAdjust(w.fridge, w.stock, w.foods, {
+        householdId: HH,
+        foodId: w.rice.id,
+        amount: 1,
+        unit: "lb",
+        locationId: w.loc.id,
+        expiresOn: "2026-06-08",
+        actorUserId: "u1",
+    });
+}
+
+test("source schedules: an expiring carton does not double a low line ticked earlier in the week", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await addRiceCarton(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-04",
+    });
+    // Saturday, the restock day: the carton is expiring, the tick is two days old.
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: an expiring carton still gets its line when the family's ticked line is older than the window", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await addRiceCarton(w);
+    // A ticked line that was never put away, stamped well before the window.
+    await w.grocery.insertLine({
+        id: "old-ticked",
+        householdId: HH,
+        storeId: w.store.id,
+        sectionId: await createMemorySettingsStoreSections(w),
+        kind: "food",
+        displayName: "Rice",
+        quantity: { amount: 1, unit: "lb" },
+        foodId: w.rice.id,
+        checked: true,
+        source: "restock",
+        sourceFridgeItemId: null,
+        note: null,
+    });
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        lastRestockedOn: "2026-05-20",
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect((await riceLines(w)).filter((l) => !l.checked)).toHaveLength(1);
+});

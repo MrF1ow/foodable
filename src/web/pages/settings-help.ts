@@ -81,7 +81,7 @@ const GLOSSARY: GlossaryEntry[] = [
     {
         id: "restock",
         title: "Restock",
-        body: "Restock adds food that's about to expire to the grocery list for you, once a week. Turn it on under Settings › Household and pick the day and time; food in the fridge that expires within 7 days goes on the list at its usual amount and store. Nothing is added until it's on.",
+        body: "Restock puts things on the grocery list for you. On the restock day, it adds food that expires within 7 days and usuals whose schedule is due. On any day, it adds usuals set to “Add when it runs low” once they run low. Each goes on at its usual amount and store, and a usual already on the list is not added again. Turn it on under Settings › Household and pick the day and time; one switch controls all of it. Nothing is added until it's on.",
     },
     {
         id: "unverified-recipes",

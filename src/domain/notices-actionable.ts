@@ -17,7 +17,7 @@ import {
     type PlanRecipe,
 } from "./plan-week.js";
 import type { RecipePlan } from "./plan.js";
-import { usualsDue } from "./restock.js";
+import { runningLowNotice, usualsDue } from "./restock.js";
 import { daysUntilExpiry } from "./stock.js";
 import { dateInTz } from "./tz.js";
 
@@ -58,19 +58,7 @@ export function runningLowNotices(input: {
         if (onGroceryList({ foodId: food.id }, input.lines, input.foodsById)) {
             continue;
         }
-        out.push({
-            code: "grocery.running_low",
-            severity: NOTICE_SEVERITY["grocery.running_low"],
-            subject: { kind: "food", id: food.id },
-            related: [],
-            params: {
-                name: foodDisplayName(food),
-                foodId: food.id,
-                reason,
-                // A dismissal holds until the usual is next restocked.
-                dismissScope: food.lastRestockedOn ?? "",
-            },
-        });
+        out.push(runningLowNotice(food, reason));
     }
     return out;
 }
