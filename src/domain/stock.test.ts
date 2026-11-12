@@ -6,6 +6,7 @@ import {
     listFridge,
 } from "./fridge.js";
 import {
+    FoodsInputError,
     createMemoryFoodsStore,
     findOrCreateManualFood,
     newFood,
@@ -22,7 +23,9 @@ import {
     addRecipeManualIngredient,
     createMemoryRecipesStore,
     createRecipe,
+    RecipeInputError,
 } from "./recipes.js";
+import { RecipeUnverifiedError } from "./recipe-import.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import {
     addFridgeItemAdjust,
@@ -42,6 +45,8 @@ import {
     listExpiring,
     utcTodayFromDate,
     previewCookRecipe,
+    isCookPreviewUnavailable,
+    StockInputError,
     putAwayGroceryLines,
     updateFridgeItemQuantityAdjust,
     type StockMovement,
@@ -1676,4 +1681,16 @@ test("cookPreview flags a shortfall it could not count for want of a unit factor
             unknownFactor: true,
         },
     ]);
+});
+
+test("cook preview is unavailable for the four domain errors and nothing else", () => {
+    expect(isCookPreviewUnavailable(new StockInputError("x"))).toBe(true);
+    expect(isCookPreviewUnavailable(new RecipeInputError("x"))).toBe(true);
+    expect(
+        isCookPreviewUnavailable(new RecipeUnverifiedError("Soup", "x")),
+    ).toBe(true);
+    expect(isCookPreviewUnavailable(new FoodsInputError("x"))).toBe(true);
+    expect(isCookPreviewUnavailable(new Error("db down"))).toBe(false);
+    expect(isCookPreviewUnavailable("nope")).toBe(false);
+    expect(isCookPreviewUnavailable(null)).toBe(false);
 });

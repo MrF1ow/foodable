@@ -110,7 +110,6 @@ import {
     listRecipesFiltered,
     macrosForPerson,
     RecipeInputError,
-    RecipeUnverifiedError,
     recipeDislikeNote,
     recipeFilters,
     recipeNotices,
@@ -178,10 +177,9 @@ import { loadToday, useSoonFor } from "./loaders-today.js";
 import {
     listExpiring,
     previewCookRecipe,
-    StockInputError,
+    isCookPreviewUnavailable,
     type CookPreview,
 } from "../domain/stock.js";
-import { FoodsInputError } from "../domain/foods.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
@@ -2252,12 +2250,7 @@ export async function loadCookPreview(
         );
         return { preview };
     } catch (err) {
-        if (
-            err instanceof StockInputError ||
-            err instanceof RecipeInputError ||
-            err instanceof RecipeUnverifiedError ||
-            err instanceof FoodsInputError
-        ) {
+        if (isCookPreviewUnavailable(err)) {
             return { preview: null, error: err.message };
         }
         throw err;

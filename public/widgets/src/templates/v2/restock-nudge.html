@@ -182,14 +182,9 @@
             const busy = new Set();
             const errors = {};
 
+            // An unknown amount reads as one.
             function amountText(u) {
-                const n =
-                    u.amount == null
-                        ? 1
-                        : Math.round(Number(u.amount) * 100) / 100;
-                const num = Number.isFinite(n) ? String(n) : "";
-                const unit = u.unit && u.unit !== "each" ? u.unit : "";
-                return [num, unit].filter(Boolean).join(" ");
+                return v2Qty(u.amount == null ? 1 : u.amount, u.unit);
             }
 
             // A usual already on the grocery list is shown but never re-added:

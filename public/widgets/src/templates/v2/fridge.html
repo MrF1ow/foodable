@@ -206,13 +206,6 @@
                 ],
             };
 
-            function qtyText(item) {
-                const n = Math.round(Number(item.amount) * 100) / 100;
-                const num = Number.isFinite(n) ? String(n) : "";
-                const unit = item.unit && item.unit !== "each" ? item.unit : "";
-                return [num, unit].filter(Boolean).join(" ");
-            }
-
             // "2026-11-19" -> "Nov 19", read from the string (the date is
             // already the household's; Date would shift it by the viewer's zone).
             function dateText(iso) {
@@ -297,7 +290,7 @@
                             .slice(0, ROWS_PER_LOCATION)
                             .map((it) => ({
                                 title: it.display_name,
-                                sub: qtyText(it),
+                                sub: v2Qty(it.amount, it.unit),
                                 end: it.expires_on
                                     ? dateText(it.expires_on)
                                     : "",

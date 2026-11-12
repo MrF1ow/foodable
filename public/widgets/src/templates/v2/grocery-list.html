@@ -222,13 +222,6 @@
                 return allLines([store]);
             }
 
-            function amountText(line) {
-                const n = Math.round(Number(line.amount) * 100) / 100;
-                const num = Number.isFinite(n) ? String(n) : "";
-                const unit = line.unit && line.unit !== "each" ? line.unit : "";
-                return [num, unit].filter(Boolean).join(" ");
-            }
-
             function lineRow(line, canTick) {
                 const name = line.product_name || line.display_name;
                 const row = {
@@ -236,7 +229,7 @@
                     done: !!line.checked,
                     tag: line.usual ? T.usual : null,
                     sub: line.note || "",
-                    end: amountText(line),
+                    end: v2Qty(line.amount, line.unit),
                     attrs: {
                         "data-line-id": line.id,
                         "data-busy": busy.has(line.id) ? "true" : null,

@@ -269,7 +269,6 @@
                     "Tried to cook {name}, but no answer came back, so it may have cooked.",
             };
 
-            const FRACTIONS = { 0.25: "¼", 0.5: "½", 0.75: "¾" };
             // The web cook sheet takes the same ceiling (COOK_SERVINGS_MAX).
             const MAX_SERVINGS = 999;
             const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"];
@@ -339,20 +338,11 @@
                 result: null,
             };
 
-            function amountText(amount) {
-                const n = Number(amount);
-                if (amount == null || !Number.isFinite(n)) return "";
-                const whole = Math.floor(n);
-                const frac = FRACTIONS[Math.round((n - whole) * 100) / 100];
-                if (frac) return whole > 0 ? `${whole}${frac}` : frac;
-                return String(Math.round(n * 100) / 100);
-            }
-
             function qtyText(row) {
-                const unit = row.unit && row.unit !== "each" ? row.unit : "";
-                const amount = amountText(row.amount);
-                if (!amount) return row.note ? String(row.note) : "";
-                return [amount, unit].filter(Boolean).join(" ");
+                const qty = v2Qty(row.amount, row.unit);
+                if (!v2Amount(row.amount))
+                    return row.note ? String(row.note) : "";
+                return qty;
             }
 
             function whole(v) {

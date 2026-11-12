@@ -101,7 +101,6 @@
             // A day or less (or already past) is red, up to three amber.
             const OVER_DAYS = 1;
             const WARN_DAYS = 3;
-            const FRACTIONS = { 0.25: "¼", 0.5: "½", 0.75: "¾" };
 
             // Design sample (FigCraft Widget/Use soon): urgent, soon, later and
             // an item no recipe uses.
@@ -160,23 +159,6 @@
                 },
             };
 
-            // "1", "½", "1½"; anything else rounds to two places.
-            function amountText(amount) {
-                const n = Number(amount);
-                if (!Number.isFinite(n)) return "";
-                const whole = Math.floor(n);
-                const frac = FRACTIONS[Math.round((n - whole) * 100) / 100];
-                if (frac) return whole > 0 ? `${whole}${frac}` : frac;
-                return String(Math.round(n * 100) / 100);
-            }
-
-            function qtyText(item) {
-                const unit = item.unit && item.unit !== "each" ? item.unit : "";
-                return [amountText(item.amount), unit]
-                    .filter(Boolean)
-                    .join(" ");
-            }
-
             function whenText(days) {
                 if (days < 0) return T.expired;
                 if (days === 0) return T.today;
@@ -205,7 +187,7 @@
                 const useIn = item.recipe
                     ? `<div class="ur-use">${esc(T.useIn)}<b>${esc(item.recipe.name)}</b></div>`
                     : "";
-                const sub = qtyText(item);
+                const sub = v2Qty(item.amount, item.unit);
                 return `<div class="ur" data-item-id="${esc(item.id)}"><div class="ur-main">${v2Dot(
                     undefined,
                     tone || "dim",

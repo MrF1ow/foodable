@@ -32,9 +32,17 @@ import {
     type Quantity,
     type QuantityUnit,
 } from "./quantity.js";
-import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
+import {
+    RecipeInputError,
+    type Recipe,
+    type RecipeIngredient,
+    type RecipesStore,
+} from "./recipes.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
-import { assertRecipeVerified } from "./recipe-import.js";
+import {
+    assertRecipeVerified,
+    RecipeUnverifiedError,
+} from "./recipe-import.js";
 import { isCalendarDate } from "./insights.js";
 
 export type StockReason = "purchase" | "cook" | "eat" | "discard" | "adjust";
@@ -1549,6 +1557,21 @@ export function cookPreview(
         shortfalls,
         unmeasured,
     };
+}
+
+/**
+ * True for the domain errors that mean a recipe cannot be previewed or cooked
+ * as it stands (a bad quantity, an unverified or unlinked ingredient, a
+ * missing or archived food). Callers show those as "no preview"; anything
+ * else is a real failure and must keep propagating.
+ */
+export function isCookPreviewUnavailable(err: unknown): err is Error {
+    return (
+        err instanceof StockInputError ||
+        err instanceof RecipeInputError ||
+        err instanceof RecipeUnverifiedError ||
+        err instanceof FoodsInputError
+    );
 }
 
 /** Load what {@link cookPreview} needs for a stored recipe and run it. */

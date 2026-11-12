@@ -66,6 +66,7 @@ import {
     cookRecipe,
     previewCookRecipe,
     StockInputError,
+    isCookPreviewUnavailable,
     type CookPreview,
 } from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
@@ -86,7 +87,7 @@ import {
     uiMetaForKey,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
-import { FoodsInputError, SimilarFoodsError } from "../../domain/foods.js";
+import { SimilarFoodsError } from "../../domain/foods.js";
 import { RecipeInputError } from "../../domain/recipes.js";
 
 export const ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA = z.object({
@@ -417,12 +418,7 @@ async function recipeCookPreview(
             { householdId, recipeId, totalPortions: 1 },
         );
     } catch (err) {
-        if (
-            err instanceof StockInputError ||
-            err instanceof RecipeInputError ||
-            err instanceof RecipeUnverifiedError ||
-            err instanceof FoodsInputError
-        ) {
+        if (isCookPreviewUnavailable(err)) {
             return null;
         }
         throw err;

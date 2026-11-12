@@ -1463,6 +1463,31 @@ test("v2 first paint replaces the loading text instead of sitting beside it", as
     expect(dom.html()).not.toContain("Preparing import");
 });
 
+test("v2 amount formatter: fractions, rounding, default unit, no value", async () => {
+    const ui = await partialAsInlined("shared/v2/ui.js");
+    const fmt = new Function(
+        `${ui}\nreturn { amount: v2Amount, qty: v2Qty };`,
+    )() as {
+        amount: (a: unknown) => string;
+        qty: (a: unknown, u?: unknown) => string;
+    };
+    expect(fmt.amount(0.5)).toBe("½");
+    expect(fmt.amount(0.25)).toBe("¼");
+    expect(fmt.amount(0.75)).toBe("¾");
+    expect(fmt.amount(1.5)).toBe("1½");
+    expect(fmt.amount(2)).toBe("2");
+    expect(fmt.amount(0.333)).toBe("0.33");
+    expect(fmt.amount("0.5")).toBe("½");
+    expect(fmt.amount(null)).toBe("");
+    expect(fmt.amount(undefined)).toBe("");
+    expect(fmt.amount("")).toBe("");
+    expect(fmt.amount("lots")).toBe("");
+    expect(fmt.qty(0.5, "cup")).toBe("½ cup");
+    expect(fmt.qty(2, "each")).toBe("2");
+    expect(fmt.qty(200, "g")).toBe("200 g");
+    expect(fmt.qty(null, "g")).toBe("g");
+});
+
 test("v2 re-rendering widgets drop the loading text and keep one footer per tool result", async () => {
     const count = (h: string, needle: string) => h.split(needle).length - 1;
     for (const [key, payload] of [
