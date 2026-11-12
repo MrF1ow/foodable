@@ -1,5 +1,6 @@
 import type { ToastKey } from "../../copy/toasts.js";
 import type { PersonRuleKind } from "../../domain/rules.js";
+import { truncateToastParam } from "../truncate-toast-param.js";
 import type { ToastParams } from "./toast.js";
 
 export type ToastFlashChoice = {
@@ -29,6 +30,58 @@ export function cookRecipeToastFlash(
             key: "recipes.cooked.unmeasured",
             params: { names: unmeasuredNames.join(", ") },
         };
+    }
+    return { key: "recipes.cooked" };
+}
+
+/** The trouble toasts that also say where a logged serving went. */
+const COOKED_LOGGED_KEY = {
+    "recipes.cooked.shortfall": "recipes.cooked.shortfall.logged",
+    "recipes.cooked.shortfall.unmeasured":
+        "recipes.cooked.shortfall.unmeasured.logged",
+    "recipes.cooked.unmeasured": "recipes.cooked.unmeasured.logged",
+} as const satisfies Partial<Record<ToastKey, ToastKey>>;
+
+/**
+ * POST /recipes/:id/cook/confirm. Trouble outranks the good news: a kitchen
+ * that changed since the preview, then a shortfall, then ingredients with
+ * nothing to take; a clean cook says where the serving went, if one was logged.
+ */
+export function cookSheetToastFlash(opts: {
+    loggedSlot: string | null;
+    shortfallCount: number;
+    unmeasuredNames: string[];
+    changedNames: string[];
+}): ToastFlashChoice {
+    const slot = opts.loggedSlot;
+    if (opts.changedNames.length > 0) {
+        return {
+            key: slot
+                ? "recipes.cooked.changed.logged"
+                : "recipes.cooked.changed",
+            params: {
+                names: truncateToastParam(opts.changedNames.join(", ")),
+                ...(slot ? { slot } : {}),
+            },
+        };
+    }
+    const trouble = cookRecipeToastFlash(
+        true,
+        false,
+        opts.shortfallCount,
+        opts.unmeasuredNames,
+    );
+    if (trouble && trouble.key !== "recipes.cooked") {
+        if (!slot) return trouble;
+        return {
+            key: COOKED_LOGGED_KEY[
+                trouble.key as keyof typeof COOKED_LOGGED_KEY
+            ],
+            params: { ...trouble.params, slot },
+        };
+    }
+    if (slot) {
+        return { key: "recipes.cooked.logged", params: { slot } };
     }
     return { key: "recipes.cooked" };
 }

@@ -17,6 +17,7 @@ import {
 import {
     addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
+    cookSheetToastFlash,
     groceryLineCheckToastKey,
     householdPersonRuleRemovedKey,
 } from "./toast-flash.js";
@@ -99,6 +100,87 @@ describe("toast-flash helpers", () => {
             key: "recipes.cooked.shortfall.unmeasured",
             params: { names: "Salt" },
         });
+    });
+
+    test("cookSheetToastFlash", () => {
+        const plain = {
+            loggedSlot: null,
+            shortfallCount: 0,
+            unmeasuredNames: [],
+            changedNames: [],
+        };
+        expect(cookSheetToastFlash(plain)).toEqual({ key: "recipes.cooked" });
+        expect(cookSheetToastFlash({ ...plain, loggedSlot: "dinner" })).toEqual(
+            { key: "recipes.cooked.logged", params: { slot: "dinner" } },
+        );
+        expect(cookSheetToastFlash({ ...plain, shortfallCount: 1 })).toEqual({
+            key: "recipes.cooked.shortfall",
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "lunch",
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.unmeasured.logged",
+            params: { names: "Salt", slot: "lunch" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                shortfallCount: 1,
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.unmeasured",
+            params: { names: "Salt" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 1,
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.logged",
+            params: { slot: "dinner" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 1,
+                unmeasuredNames: ["Salt"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.shortfall.unmeasured.logged",
+            params: { names: "Salt", slot: "dinner" },
+        });
+        // The kitchen moved under the preview: that outranks everything.
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                loggedSlot: "dinner",
+                shortfallCount: 2,
+                changedNames: ["Salmon", "Rice"],
+            }),
+        ).toEqual({
+            key: "recipes.cooked.changed.logged",
+            params: { names: "Salmon, Rice", slot: "dinner" },
+        });
+        expect(
+            cookSheetToastFlash({ ...plain, changedNames: ["Salmon"] }),
+        ).toEqual({
+            key: "recipes.cooked.changed",
+            params: { names: "Salmon" },
+        });
+        expect(
+            cookSheetToastFlash({
+                ...plain,
+                changedNames: ["x".repeat(120)],
+            }).params?.names,
+        ).toHaveLength(80);
     });
 
     test("addRecipeToGroceryToastFlash", () => {

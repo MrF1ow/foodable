@@ -37,6 +37,7 @@ import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
 } from "../src/web/pages/v2/recipes-page.js";
+import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderSettingsPage } from "../src/web/pages/settings.js";
 import {
     renderFoodsSettingsPage,
@@ -1068,6 +1069,124 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         macros: MACROS,
         isOwner: true,
     };
+    // The cook sheet: a pantry that covers most of a loaf and falls short on
+    // buttermilk, so the warning row is shot too.
+    const cookSheet: CookSheetView = {
+        recipeId: "r1",
+        recipeName: "Banana bread",
+        servings: 10,
+        yieldPortions: 10,
+        preview: {
+            totalPortions: 10,
+            lines: [
+                {
+                    foodId: "f-eggs",
+                    displayName: "Eggs",
+                    fromItemId: "ri-eggs",
+                    unit: "each",
+                    before: 6,
+                    after: 3,
+                },
+                {
+                    foodId: "f2",
+                    displayName: "All-purpose flour",
+                    fromItemId: "ri-flour",
+                    unit: "g",
+                    before: 500,
+                    after: 300,
+                },
+                {
+                    foodId: "f3",
+                    displayName: "Sugar",
+                    fromItemId: "ri-sugar",
+                    unit: "g",
+                    before: 500,
+                    after: 400,
+                },
+            ],
+            movements: [],
+            shortfalls: [
+                {
+                    foodId: "f-buttermilk",
+                    displayName: "Buttermilk",
+                    amount: 200,
+                    unit: "ml",
+                    unknownFactor: false,
+                },
+            ],
+            unmeasured: [{ foodId: null, displayName: "Salt" }],
+        },
+        slot: "dinner",
+        macrosPerPortion: MACROS as never,
+        submitKey: "preview",
+    };
+    const recipeV2 = (cook: CookSheetView) =>
+        renderRecipeDetailV2Page({
+            chrome,
+            recipe: recipeView.recipe,
+            ingredients: recipeView.ingredients as never,
+            ingredientGroups: groupRecipeIngredientsByPlace(
+                recipeView.ingredients,
+                [
+                    {
+                        id: "ri-eggs",
+                        householdId: H,
+                        locationId: "l1",
+                        kind: "food",
+                        displayName: "Eggs",
+                        quantity: { amount: 6, unit: "each" },
+                        foodId: "f-eggs",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 4),
+                    },
+                    {
+                        id: "ri-flour",
+                        householdId: H,
+                        locationId: "l2",
+                        kind: "food",
+                        displayName: "All-purpose flour",
+                        quantity: { amount: 1, unit: "kg" },
+                        foodId: "f2",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 30),
+                    },
+                    {
+                        id: "ri-sugar",
+                        householdId: H,
+                        locationId: "l2",
+                        kind: "food",
+                        displayName: "Sugar",
+                        quantity: { amount: 500, unit: "g" },
+                        foodId: "f3",
+                        expiresOn: addUtcDays(utcTodayFromDate(), 90),
+                    },
+                ],
+                [
+                    {
+                        id: "l1",
+                        householdId: H,
+                        name: "Fridge",
+                        sortOrder: 0,
+                    },
+                    {
+                        id: "l2",
+                        householdId: H,
+                        name: "Pantry",
+                        sortOrder: 1,
+                    },
+                ],
+                new Map(
+                    ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
+                        id,
+                        { id, genericFoodId: null },
+                    ]),
+                ),
+            ),
+            macrosPerPortion: MACROS as never,
+            gapReasons: [],
+            members: recipeView.members,
+            viewerId: recipeView.viewerId,
+            portionCount: recipeView.portionCount,
+            cook,
+        });
     return {
         nutrition,
         ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
@@ -1343,72 +1462,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   viewerId: "u1",
               } as never),
         recipe: V2
-            ? renderRecipeDetailV2Page({
-                  chrome,
-                  recipe: recipeView.recipe,
-                  ingredients: recipeView.ingredients as never,
-                  ingredientGroups: groupRecipeIngredientsByPlace(
-                      recipeView.ingredients,
-                      [
-                          {
-                              id: "ri-eggs",
-                              householdId: H,
-                              locationId: "l1",
-                              kind: "food",
-                              displayName: "Eggs",
-                              quantity: { amount: 6, unit: "each" },
-                              foodId: "f-eggs",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 4),
-                          },
-                          {
-                              id: "ri-flour",
-                              householdId: H,
-                              locationId: "l2",
-                              kind: "food",
-                              displayName: "All-purpose flour",
-                              quantity: { amount: 1, unit: "kg" },
-                              foodId: "f2",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 30),
-                          },
-                          {
-                              id: "ri-sugar",
-                              householdId: H,
-                              locationId: "l2",
-                              kind: "food",
-                              displayName: "Sugar",
-                              quantity: { amount: 500, unit: "g" },
-                              foodId: "f3",
-                              expiresOn: addUtcDays(utcTodayFromDate(), 90),
-                          },
-                      ],
-                      [
-                          {
-                              id: "l1",
-                              householdId: H,
-                              name: "Fridge",
-                              sortOrder: 0,
-                          },
-                          {
-                              id: "l2",
-                              householdId: H,
-                              name: "Pantry",
-                              sortOrder: 1,
-                          },
-                      ],
-                      new Map(
-                          ["f-eggs", "f2", "f3", "f-buttermilk"].map((id) => [
-                              id,
-                              { id, genericFoodId: null },
-                          ]),
-                      ),
-                  ),
-                  macrosPerPortion: MACROS as never,
-                  gapReasons: [],
-                  members: recipeView.members,
-                  viewerId: recipeView.viewerId,
-                  portionCount: recipeView.portionCount,
-              })
+            ? recipeV2(cookSheet)
             : renderRecipeDetailPage(recipeView as never),
+        ...(V2
+            ? { "recipe-cook": recipeV2({ ...cookSheet, open: true }) }
+            : {}),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,
             openModalId: "recipe-add-ingredient-r1",
@@ -2178,6 +2236,7 @@ for (const theme of ["light", "dark"] as const) {
         `possible-duplicates-${theme}`,
         `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
+        ...(V2 ? [`recipe-cook-${theme}`] : []),
         `grocery-did-you-mean-${theme}`,
         ...(V2
             ? [

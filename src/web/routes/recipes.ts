@@ -1,5 +1,10 @@
 import { Hono } from "hono";
-import { renderRecipeDetailRoute, renderRecipesListPage } from "../loaders.js";
+import {
+    loadCookPreview,
+    renderRecipeDetailRoute,
+    renderRecipesListPage,
+} from "../loaders.js";
+import { gatedRoute } from "../gated.js";
 
 import {
     formAmount,
@@ -44,7 +49,22 @@ import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
 import { effectiveFoodsByIds } from "../../domain/foods.js";
-import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
+import {
+    deleteMeal,
+    insertMeal,
+    snapshotToMealItemWrite,
+} from "../../db/nutrition.js";
+import { getProfile } from "../../db/profiles.js";
+import { mealWriteFromItems } from "../../meal-write.js";
+import { validateTz } from "../../domain/tz.js";
+import {
+    COOK_SHEET_ID,
+    cookPreviewChanges,
+    parseExpectedCook,
+    renderCookPreviewRegion,
+    type CookSlot,
+} from "../pages/v2/recipes-page-cook.js";
+import { guessMealType } from "../pages/v2/log-sheet.js";
 import {
     descriptionFromItems,
     itemListDigest,
@@ -55,6 +75,7 @@ import { cookRecipe } from "../../domain/stock.js";
 import {
     addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
+    cookSheetToastFlash,
 } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import { safeReturnPath } from "../usual-products-path.js";
@@ -145,7 +166,7 @@ async function recipeFormError(
     userId: string,
     recipeId: string | null,
     err: unknown,
-    opts: { member?: string; openModalId?: string } = {},
+    opts: { member?: string; openModalId?: string; servings?: number } = {},
 ) {
     const message =
         err instanceof RecipeForbiddenError ||
@@ -160,6 +181,7 @@ async function recipeFormError(
             member: opts.member,
             error: message,
             openModalId: opts.openModalId,
+            cookServings: opts.servings,
         });
         const status =
             err instanceof RecipeForbiddenError ? 403 : (400 as const);
@@ -483,10 +505,199 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
         {
             member: c.req.query("member"),
             linkProductId: c.req.query("link_product"),
+            openCook: c.req.query("cook") === "1",
         },
     );
     return c.html(page.html, page.status);
 });
+
+/** The most servings the cook sheet takes in one go. */
+const COOK_SERVINGS_MAX = 999;
+
+const COOK_SLOTS: readonly CookSlot[] = [
+    "breakfast",
+    "lunch",
+    "dinner",
+    "snack",
+];
+
+recipesRoutes.get(
+    "/recipes/:id/cook/preview",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const servings = Number(c.req.query("servings") ?? "");
+        c.header("Cache-Control", "no-store");
+        if (!Number.isFinite(servings) || servings <= 0) {
+            return c.html(
+                renderCookPreviewRegion(
+                    null,
+                    "Enter servings greater than zero.",
+                ),
+                400,
+            );
+        }
+        if (servings > COOK_SERVINGS_MAX) {
+            return c.html(
+                renderCookPreviewRegion(
+                    null,
+                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
+                ),
+                400,
+            );
+        }
+        const { preview, error } = await loadCookPreview(
+            member.householdId,
+            c.req.param("id"),
+            servings,
+        );
+        return c.html(
+            renderCookPreviewRegion(preview, error),
+            preview ? 200 : 400,
+        );
+    },
+);
+
+/**
+ * The cook sheet's Cook button: cook the recipe for `servings` portions (the
+ * same `cookRecipe` the old form runs), then, with the switch on, log one
+ * portion of it to the viewer under the sheet's slot.
+ *
+ * With the switch on, the meal is written first and its idempotency key,
+ * `cook:<recipe>:<submit_key>`, is what claims the submit: the write is atomic,
+ * so of two requests carrying the same sheet only one inserts, and the other
+ * sees `deduplicated` and cooks nothing. Cooking comes second; if it throws,
+ * the meal just inserted is deleted again, so a failed cook leaves neither a
+ * logged serving nor a taken ingredient, and a retry from the re-rendered sheet
+ * starts clean. A meal that cannot be built (an unverified recipe, say) fails
+ * before anything is written.
+ *
+ * With the switch off there is no key to claim: stock movements carry no
+ * idempotency key, so two requests for the same sheet each cook. That is a
+ * known gap, not guarded here.
+ */
+recipesRoutes.post(
+    "/recipes/:id/cook/confirm",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        const body = await c.req.parseBody();
+        const servings = formAmount(body, "servings");
+        const logServing = formText(body, "log_serving") === "1";
+        const submitKey = formText(body, "submit_key")
+            .trim()
+            .replace(/[^A-Za-z0-9_-]/g, "")
+            .slice(0, 64);
+        // The meal this request inserted, to take back if the cook fails.
+        let insertedMealId: string | null = null;
+        try {
+            if (!Number.isFinite(servings) || servings <= 0) {
+                throw new RecipeInputError("Enter servings greater than zero.");
+            }
+            if (servings > COOK_SERVINGS_MAX) {
+                throw new RecipeInputError(
+                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
+                );
+            }
+            const profile = await getProfile(userId);
+            const slotRaw = formText(body, "meal_type").trim().toLowerCase();
+            const slot: CookSlot =
+                COOK_SLOTS.find((s) => s === slotRaw) ??
+                (guessMealType(
+                    profile?.timezone && validateTz(profile.timezone)
+                        ? profile.timezone
+                        : "UTC",
+                ) as CookSlot);
+            const meal = logServing
+                ? await mealWriteFromItems(member.householdId, [
+                      { recipeId, portions: 1 },
+                  ])
+                : null;
+            // What this cook is about to take, to compare with what the sheet
+            // showed. A recipe it cannot plan fails in cookRecipe below.
+            const { preview } = await loadCookPreview(
+                member.householdId,
+                recipeId,
+                servings,
+            );
+            const changedNames = preview
+                ? cookPreviewChanges(
+                      parseExpectedCook(formText(body, "expected")),
+                      preview,
+                  )
+                : [];
+            if (meal) {
+                const inserted = await insertMeal(userId, {
+                    description: meal.description,
+                    meal_type: slot,
+                    ...meal.totals,
+                    items: meal.items,
+                    item_digest: meal.item_digest,
+                    idempotency_key: submitKey
+                        ? `cook:${recipeId}:${submitKey}`
+                        : undefined,
+                });
+                if (inserted.deduplicated) {
+                    return redirectWithToast(
+                        c,
+                        `/recipes/${recipeId}`,
+                        "recipes.cooked.already",
+                    );
+                }
+                insertedMealId = inserted.meal.id;
+            }
+            const cooked = await cookRecipe(
+                liveRecipesStore(),
+                liveFridgeStore(),
+                liveStockStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    recipeId,
+                    totalPortions: servings,
+                    deductStock: true,
+                    actorUserId: userId,
+                },
+            );
+            const flash = cookSheetToastFlash({
+                loggedSlot: meal ? slot : null,
+                shortfallCount: cooked.shortfalls.length,
+                unmeasuredNames: cooked.unmeasured.map(
+                    (row) => row.displayName,
+                ),
+                changedNames,
+            });
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                flash.key,
+                flash.params,
+            );
+        } catch (err) {
+            if (insertedMealId) {
+                try {
+                    await deleteMeal(userId, insertedMealId);
+                } catch (undoErr) {
+                    console.error(
+                        "cook confirm: could not remove the meal after a failed cook",
+                        undoErr,
+                    );
+                }
+            }
+            const blocked = redirectIfUnverified(c, recipeId, err);
+            if (blocked) return blocked;
+            const page = await recipeFormError(userId, recipeId, err, {
+                openModalId: COOK_SHEET_ID,
+                servings: Number.isFinite(servings) ? servings : undefined,
+            });
+            return c.html(page.html, page.status);
+        }
+    },
+);
 
 recipesRoutes.post("/recipes/:id/log-portion", requireMember, async (c) => {
     const userId = c.get("userId");

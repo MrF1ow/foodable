@@ -78,6 +78,34 @@ export const TOASTS = {
         kind: "info",
         text: "Recipe cooked. Nothing deducted for: {names}.",
     },
+    "recipes.cooked.logged": {
+        kind: "success",
+        text: "Recipe cooked · 1 serving logged to {slot}",
+    },
+    "recipes.cooked.changed": {
+        kind: "warning",
+        text: "Recipe cooked, but your kitchen had changed since the preview: {names}",
+    },
+    "recipes.cooked.changed.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot}, but your kitchen had changed since the preview: {names}",
+    },
+    "recipes.cooked.shortfall.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot} — some ingredients were short",
+    },
+    "recipes.cooked.shortfall.unmeasured.logged": {
+        kind: "warning",
+        text: "Recipe cooked · 1 serving logged to {slot} — some ingredients were short. Nothing deducted for: {names}.",
+    },
+    "recipes.cooked.unmeasured.logged": {
+        kind: "info",
+        text: "Recipe cooked · 1 serving logged to {slot}. Nothing deducted for: {names}.",
+    },
+    "recipes.cooked.already": {
+        kind: "info",
+        text: "Already cooked and logged",
+    },
     "recipes.updated": { kind: "success", text: "Recipe saved" },
     "recipes.steps.saved": { kind: "success", text: "Steps saved" },
     "recipes.ingredient.removed": {

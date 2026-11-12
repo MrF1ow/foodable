@@ -40,6 +40,11 @@ import {
 import { createMemoryRulesStore } from "../../domain/rules.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
 import { Hono } from "hono";
+import {
+    decodeToastFlash,
+    readToastCookie,
+    TOAST_COOKIE,
+} from "../components/toast.js";
 
 const realHousehold = { ...actualHousehold };
 const realProfiles = { ...actualProfiles };
@@ -70,6 +75,13 @@ const db = {
     settingsStore: createMemorySettingsStore(),
     recipeId: "",
     flourId: "",
+    /** Makes the next insertMeal throw, like a db outage. */
+    failInsert: false,
+    meals: [] as {
+        id: string;
+        userId: string;
+        input: Record<string, any>;
+    }[],
     profile: {
         user_id: ALICE,
         timezone: "UTC",
@@ -114,7 +126,36 @@ mock.module("../../db/settings.js", () => ({
 }));
 mock.module("../../db/nutrition.js", () => ({
     ...realNutrition,
-    insertMeal: async () => ({ id: "meal-1" }),
+    // Keeps what was written, and dedupes on the idempotency key like the table.
+    insertMeal: async (userId: string, input: Record<string, any>) => {
+        if (db.failInsert) throw new Error("meal store down");
+        const dup = input.idempotency_key
+            ? db.meals.find(
+                  (m) =>
+                      m.userId === userId &&
+                      m.input.idempotency_key === input.idempotency_key,
+              )
+            : undefined;
+        if (dup) return { meal: { id: dup.id }, deduplicated: true };
+        const id = `meal-${db.meals.length + 1}`;
+        db.meals.push({ id, userId, input });
+        return { meal: { id }, deduplicated: false };
+    },
+    deleteMeal: async (userId: string, id: string) => {
+        const at = db.meals.findIndex(
+            (m) => m.userId === userId && m.id === id,
+        );
+        if (at < 0) return false;
+        db.meals.splice(at, 1);
+        return true;
+    },
+    existingIdempotencyKeys: async (userId: string, keys: string[]) =>
+        new Set(
+            db.meals
+                .filter((m) => m.userId === userId)
+                .map((m) => m.input.idempotency_key as string)
+                .filter((k) => keys.includes(k)),
+        ),
 }));
 mock.module("../../db/notice-dismissals.js", () => ({
     ...realNoticeDismissals,
@@ -208,6 +249,8 @@ beforeEach(async () => {
     db.stockStore = createMemoryStockStore();
     db.rulesStore = createMemoryRulesStore();
     db.settingsStore = createMemorySettingsStore();
+    db.meals = [];
+    db.failInsert = false;
     db.fridgeStore.linkDismissals(db.dismissalsStore);
     db.recipesStore.linkDismissals(db.dismissalsStore);
     db.foodsStore.linkRefs(db.stockStore);
@@ -378,6 +421,26 @@ describe("renderRecipeDetailRoute", () => {
         expect(page.html).toContain("Pantry");
     });
 
+    test("ui-v2 page carries the cook sheet with a preview of what the cook takes", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(page.html).toContain('id="fd-recipe-cook-sheet"');
+        expect(page.html).toContain("Takes from your kitchen");
+        // 2 portions of a 2-portion recipe: 100 g of the 500 g of flour.
+        expect(page.html).toContain("500 g → 400 g");
+        expect(page.html).toContain("Log 1 serving to ");
+        expect(page.html).toContain('name="servings"');
+        expect(page.html).not.toContain("data-sheet-open-on-load");
+    });
+
+    test("?cook=1 opens the sheet on load", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            openCook: true,
+        });
+        expect(page.html).toContain("data-sheet-open-on-load");
+    });
+
     test("ui-v2 off keeps legacy recipe detail markup", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
@@ -386,13 +449,65 @@ describe("renderRecipeDetailRoute", () => {
     });
 });
 
+/** The sheet's form as a browser would post it (entities decoded). */
+function cookSheetBody(html: string): URLSearchParams {
+    const form = html.match(
+        /<form\b[^>]*\bid="fd-recipe-cook-form"[^>]*>[\s\S]*?<\/form>/,
+    )?.[0];
+    if (!form) throw new Error("cook sheet form not found in page HTML");
+    const decode = (v: string) =>
+        v
+            .replaceAll("&quot;", '"')
+            .replaceAll("&#39;", "'")
+            .replaceAll("&lt;", "<")
+            .replaceAll("&gt;", ">")
+            .replaceAll("&amp;", "&");
+    const params = new URLSearchParams();
+    for (const m of form.matchAll(/<input\b([^>]*)>/gi)) {
+        const attrs = m[1] ?? "";
+        const name = /name="([^"]+)"/.exec(attrs)?.[1];
+        if (!name) continue;
+        const type = /type="([^"]+)"/.exec(attrs)?.[1] ?? "text";
+        if (type === "checkbox" && !/\bchecked\b/.test(attrs)) continue;
+        params.append(name, decode(/value="([^"]*)"/.exec(attrs)?.[1] ?? "on"));
+    }
+    return params;
+}
+
+async function postConfirm(body: URLSearchParams | string) {
+    return recipesApp().request(
+        `http://x/recipes/${db.recipeId}/cook/confirm`,
+        {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: body.toString(),
+        },
+    );
+}
+
+function toastOf(res: Response) {
+    const cookie = res.headers
+        .getSetCookie()
+        .map((h) => h.split(";")[0] ?? "")
+        .find((h) => h.startsWith(`${TOAST_COOKIE}=`));
+    if (!cookie) return null;
+    return decodeToastFlash(readToastCookie(cookie) ?? "");
+}
+
+async function flourLeft(): Promise<number> {
+    const items = await db.fridgeStore.listItems(HH);
+    return items
+        .filter((i) => i.foodId === db.flourId)
+        .reduce((sum, i) => sum + i.quantity.amount, 0);
+}
+
 describe("POST /recipes/:id/cook", () => {
-    test("v2 cook form posts the same stock movements as the v1 cook form", async () => {
+    test("the legacy cook route still cooks the same movements as the sheet's confirm", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        const v2Page = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        const v2Body = cookFormBodyFromHtml(v2Page.html);
-        const app = recipesApp();
-        const v2Res = await app.request(
+        const legacy = await recipesApp().request(
             `http://x/recipes/${db.recipeId}/cook`,
             {
                 method: "POST",
@@ -400,11 +515,15 @@ describe("POST /recipes/:id/cook", () => {
                     cookie: cookieFor(ALICE),
                     "content-type": "application/x-www-form-urlencoded",
                 },
-                body: v2Body,
+                body: new URLSearchParams({
+                    [`portion:${ALICE}`]: "2",
+                    meal_type: "dinner",
+                    deduct_stock: "1",
+                }).toString(),
             },
         );
-        expect(v2Res.status).toBe(303);
-        const viaV2 = movementFingerprint(
+        expect(legacy.status).toBe(303);
+        const viaLegacy = movementFingerprint(
             await db.stockStore.listMovements(HH),
         );
 
@@ -413,27 +532,262 @@ describe("POST /recipes/:id/cook", () => {
         db.foodsStore.linkRefs(db.stockStore);
         await restockFlour();
 
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const v1Page = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        const v1Body = cookFormBodyFromHtml(v1Page.html);
-        expect(v2Body).toBe(v1Body);
-
-        const v1Res = await app.request(
-            `http://x/recipes/${db.recipeId}/cook`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: v1Body,
-            },
+        const sheet = await postConfirm(
+            new URLSearchParams({
+                servings: "2",
+                meal_type: "dinner",
+                submit_key: "k",
+            }),
         );
-        expect(v1Res.status).toBe(303);
-        const viaV1 = movementFingerprint(
+        expect(sheet.status).toBe(303);
+        const viaSheet = movementFingerprint(
             await db.stockStore.listMovements(HH),
         );
-        expect(viaV2).toEqual(viaV1);
-        expect(viaV2.length).toBeGreaterThan(0);
+        expect(viaSheet).toEqual(viaLegacy);
+        expect(viaSheet.length).toBeGreaterThan(0);
+        expect(db.meals).toHaveLength(0);
+    });
+});
+
+describe("GET /recipes/:id/cook/preview", () => {
+    function get(servings: string, cookie = cookieFor(ALICE)) {
+        return recipesApp().request(
+            `http://x/recipes/${db.recipeId}/cook/preview?servings=${servings}`,
+            { headers: { cookie } },
+        );
+    }
+
+    test("returns the preview region for that many servings", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await get("4");
+        expect(res.status).toBe(200);
+        expect(res.headers.get("cache-control")).toContain("no-store");
+        const html = await res.text();
+        // 4 servings of a 2-portion recipe: 200 g of the 500 g.
+        expect(html).toContain("500 g → 300 g");
+        expect(html).toContain("data-fd-cook-region");
+        expect(html).not.toContain("<html");
+        expect(await flourLeft()).toBe(500);
+    });
+
+    test("names what is short when the kitchen cannot cover it", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const html = await (await get("20")).text();
+        expect(html).toContain("fd-recipe-cook-use--short");
+    });
+
+    test("rejects junk servings without a preview", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        for (const bad of ["0", "-1", "abc", ""]) {
+            const res = await get(bad);
+            expect(res.status).toBe(400);
+        }
+    });
+
+    test("is a 404 while ui-v2 is off", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        expect((await get("2")).status).toBe(404);
+    });
+});
+
+describe("POST /recipes/:id/cook/confirm", () => {
+    test("cooks and logs exactly one portion of the recipe to the chosen slot", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        body.set("servings", "4");
+        body.set("meal_type", "lunch");
+        const res = await postConfirm(body);
+        expect(res.status).toBe(303);
+        // 4 servings of a 2-portion recipe takes 200 g.
+        expect(await flourLeft()).toBe(300);
+        const cooks = (await db.stockStore.listMovements(HH)).filter(
+            (m) => m.reason === "cook",
+        );
+        expect(cooks).toHaveLength(1);
+
+        expect(db.meals).toHaveLength(1);
+        const meal = db.meals[0]!;
+        expect(meal.userId).toBe(ALICE);
+        expect(meal.input.meal_type).toBe("lunch");
+        expect(meal.input.items).toHaveLength(1);
+        expect(meal.input.items[0].recipe_id).toBe(db.recipeId);
+        expect(meal.input.items[0].portions).toBe(1);
+        expect(meal.input.description).toContain("Pancakes");
+        // One portion of the recipe: 100 g of flour over 2 portions.
+        expect(meal.input.calories).toBe(182);
+        expect(meal.input.idempotency_key).toContain(db.recipeId);
+
+        expect(toastOf(res)).toEqual({
+            key: "recipes.cooked.logged",
+            params: { slot: "lunch" },
+        });
+    });
+
+    test("a double submit cooks and logs once", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        const first = await postConfirm(body);
+        expect(first.status).toBe(303);
+        const second = await postConfirm(body);
+        expect(second.status).toBe(303);
+        expect(await flourLeft()).toBe(400);
+        expect(db.meals).toHaveLength(1);
+        expect(toastOf(second)).toEqual({ key: "recipes.cooked.already" });
+    });
+
+    test("with the switch off it cooks and logs nothing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        body.delete("log_serving");
+        const res = await postConfirm(body);
+        expect(res.status).toBe(303);
+        expect(await flourLeft()).toBe(400);
+        expect(db.meals).toHaveLength(0);
+        expect(toastOf(res)).toEqual({ key: "recipes.cooked" });
+    });
+
+    test("a shortfall is cooked anyway and the toast says so", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        body.set("servings", "20");
+        body.delete("expected");
+        const res = await postConfirm(body);
+        expect(res.status).toBe(303);
+        expect(toastOf(res)?.key).toBe("recipes.cooked.shortfall.logged");
+        expect(await flourLeft()).toBe(0);
+    });
+
+    test("lists what moved when the kitchen changed after the preview", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        // Someone cooked or discarded flour between the preview and the confirm.
+        const [item] = await db.fridgeStore.listItems(HH);
+        await db.fridgeStore.updateItem({
+            ...item!,
+            quantity: { amount: 250, unit: "g" },
+        });
+        const res = await postConfirm(body);
+        expect(res.status).toBe(303);
+        const toast = toastOf(res);
+        expect(toast?.key).toBe("recipes.cooked.changed.logged");
+        expect(toast?.params?.names).toBe("Flour");
+        expect(await flourLeft()).toBe(150);
+        // It still did what was asked, meal included.
+        expect(db.meals).toHaveLength(1);
+    });
+
+    function cookMovements() {
+        return db.stockStore
+            .listMovements(HH)
+            .then((rows) => rows.filter((m) => m.reason === "cook"));
+    }
+
+    test("two submits in flight at once cook and log once", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        const [a, b] = await Promise.all([
+            postConfirm(body),
+            postConfirm(body),
+        ]);
+        expect(a.status).toBe(303);
+        expect(b.status).toBe(303);
+        expect(await cookMovements()).toHaveLength(1);
+        expect(await flourLeft()).toBe(400);
+        expect(db.meals).toHaveLength(1);
+        const keys = [toastOf(a)?.key, toastOf(b)?.key].sort();
+        expect(keys).toContain("recipes.cooked.already");
+    });
+
+    test("a meal that cannot be saved cooks nothing and re-opens the sheet", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        db.failInsert = true;
+        const res = await postConfirm(body);
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain("meal store down");
+        expect(await cookMovements()).toHaveLength(0);
+        expect(await flourLeft()).toBe(500);
+        expect(db.meals).toHaveLength(0);
+    });
+
+    test("a cook that fails takes the just-logged meal back", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        const insertMovement = db.stockStore.insertMovement;
+        db.stockStore.insertMovement = async () => {
+            throw new Error("ledger down");
+        };
+        try {
+            const res = await postConfirm(body);
+            expect(res.status).toBe(400);
+            expect(await res.text()).toContain("ledger down");
+        } finally {
+            db.stockStore.insertMovement = insertMovement;
+        }
+        expect(db.meals).toHaveLength(0);
+        // The sheet's own retry is not mistaken for a repeat.
+        const retry = await postConfirm(body);
+        expect(retry.status).toBe(303);
+        expect(toastOf(retry)?.key).not.toBe("recipes.cooked.already");
+        expect(db.meals).toHaveLength(1);
+    });
+
+    test("bad servings re-open the sheet with the error and change nothing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postConfirm(
+            new URLSearchParams({
+                servings: "0",
+                meal_type: "dinner",
+                log_serving: "1",
+                submit_key: "k",
+            }),
+        );
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain("greater than zero");
+        expect(await flourLeft()).toBe(500);
+        expect(db.meals).toHaveLength(0);
+    });
+
+    test("an unknown slot falls back to the guess instead of failing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postConfirm(
+            new URLSearchParams({
+                servings: "2",
+                meal_type: "brunch",
+                log_serving: "1",
+                submit_key: "k2",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect(["breakfast", "lunch", "dinner", "snack"]).toContain(
+            db.meals[0]?.input.meal_type,
+        );
+    });
+
+    test("is a 404 while ui-v2 is off, and takes nothing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const res = await postConfirm(
+            new URLSearchParams({
+                servings: "2",
+                meal_type: "dinner",
+                log_serving: "1",
+                submit_key: "k",
+            }),
+        );
+        expect(res.status).toBe(404);
+        expect(await flourLeft()).toBe(500);
+        expect(db.meals).toHaveLength(0);
     });
 });
