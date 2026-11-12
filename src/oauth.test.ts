@@ -134,6 +134,18 @@ test("renderLoginPage renders the error banner only when given an error", async 
     expect(withError).toContain("Bad &lt;stuff&gt; &amp; things");
 });
 
+test("renderLoginPage keeps $-patterns in an error message verbatim", async () => {
+    const withError = await renderLoginPage(
+        "s1",
+        fakeSession(),
+        "Costs $& more, $` before, $1 and $$ after",
+    );
+    expect(withError).toContain(
+        "Costs $&amp; more, $` before, $1 and $$ after",
+    );
+    expect(withError).not.toContain("{{ERROR}}");
+});
+
 test("renderLoginPage has no language switcher or translation notice", async () => {
     const html = await renderLoginPage("s1", fakeSession());
     expect(html).not.toContain("{{LANG_SWITCHER}}");

@@ -10,7 +10,9 @@
         "scripts/lint-rules/fixtures/**",
         "src/domain/additive-risk.ts"
     ],
-    "rules": {},
+    "rules": {
+        "foodable/no-string-replacement-patterns": "error"
+    },
     "overrides": [
         {
             "files": ["**/*.test.ts"],

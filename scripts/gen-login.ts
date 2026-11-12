@@ -73,8 +73,8 @@ function renderDoc(doc: LoginDoc): string {
     // Legal HTML is gone. Keep the consent sentence, but the {terms}/
     // {privacy} tokens are the localized names as text, not anchors.
     const consent = esc(doc.consentNote)
-        .replace("{terms}", esc(doc.termsLinkText))
-        .replace("{privacy}", esc(doc.privacyLinkText));
+        .replace("{terms}", () => esc(doc.termsLinkText))
+        .replace("{privacy}", () => esc(doc.privacyLinkText));
 
     // Styled by /app.css, the household app's stylesheet, with the app's own
     // <head> (appHead). No data-theme on <html>: login always follows the OS

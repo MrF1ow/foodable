@@ -70,6 +70,7 @@ const EXPECTED_BAD: Record<string, number[]> = {
     "no-db-mock-outside-windows": [5, 6, 7, 8],
     "no-per-test-timeout": [3, 5, 6, 7, 8, 9, 11],
     "no-restore-from-live-import": [22, 24, 26, 28],
+    "no-string-replacement-patterns": [4, 5, 6, 7, 8, 9],
     "no-wall-clock-waits": [6, 7, 8, 9, 13, 16, 17],
     "skip-needs-reason": [3, 4, 5, 8],
 };
