@@ -325,6 +325,24 @@
     font: 400 15px/20px var(--font-body);
 }
 
+/* The shared-recipe form under the link form: set apart by a hairline. */
+.fd-recipes-import-shared {
+    margin-top: var(--fd-s-6);
+    padding-top: var(--fd-s-14);
+    border-top: 1px solid var(--line);
+}
+
+.fd-recipes-import-shared .fd-recipes-import-note {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-recipes-import-shared .fd-recipes-import-text {
+    min-height: 88px;
+    resize: vertical;
+}
+
 .fd-recipes-import-submit {
     align-self: flex-start;
     padding: var(--fd-s-10) var(--fd-s-14);

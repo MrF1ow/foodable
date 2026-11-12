@@ -111,6 +111,9 @@ import {
 } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
+import { looksLikeSharedRecipeLink } from "../../domain/sharing-source.js";
+import { viewerFlagsFor } from "../attention.js";
+import { answerSharedRecipeImport } from "./recipes-shared-import.js";
 import {
     parseV2RecipeListFilter,
     recipesListV2Href,
@@ -285,6 +288,17 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     }
 
     const importUrl = websiteUrl || pinOrPageUrl;
+
+    // A link to a recipe another Foodable shared is that deploy's document,
+    // not a recipe website: the household app reads it with the shared-recipe
+    // importer. The old app has no such importer and reads it as before.
+    if (
+        !pasteStep &&
+        looksLikeSharedRecipeLink(importUrl) &&
+        (await viewerFlagsFor(member)).uiV2
+    ) {
+        return answerSharedRecipeImport(c, importUrl);
+    }
 
     if (pasteStep && websiteUrl === "" && text.trim() === "") {
         const pinValidated = validateRecipeLink(pinOrPageUrl);

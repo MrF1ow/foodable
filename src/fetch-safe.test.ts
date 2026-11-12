@@ -193,6 +193,64 @@ describe("createSafeFetcher", () => {
         expect(out.reason).toBe("blocked_address");
     });
 
+    test("redirectAllowed vetoes a hop before it is requested or even resolved", async () => {
+        const requested: string[] = [];
+        const resolved: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async (host) => {
+                resolved.push(host);
+                return [PUBLIC];
+            },
+            fetch: async (url) => {
+                requested.push(String(url));
+                if (String(url).includes("start")) {
+                    return okResponse("", {
+                        status: 302,
+                        headers: { location: "https://other.example/else" },
+                    });
+                }
+                return okResponse("{}", {
+                    headers: { "content-type": "application/json" },
+                });
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["application/json"],
+            checkRobots: false,
+            redirectAllowed: (next) => next.pathname === "/start",
+        });
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("invalid_link");
+        expect(requested).toEqual(["https://example.com/start"]);
+        expect(resolved).toEqual(["example.com"]);
+    });
+
+    test("redirectAllowed lets a hop it accepts through", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: async (url) => {
+                if (String(url).includes("start")) {
+                    return okResponse("", {
+                        status: 301,
+                        headers: { location: "https://other.example/ok" },
+                    });
+                }
+                return okResponse("{}", {
+                    headers: { "content-type": "application/json" },
+                });
+            },
+        });
+        const out = await fetcher.fetchPage("https://example.com/start", {
+            accept: ["application/json"],
+            checkRobots: false,
+            redirectAllowed: (next) => next.pathname === "/ok",
+        });
+        expect(out.ok).toBe(true);
+        if (!out.ok) return;
+        expect(out.url).toBe("https://other.example/ok");
+    });
+
     test("checks robots on redirect target host", async () => {
         const fetcher = createSafeFetcher({
             resolve: async () => [PUBLIC],

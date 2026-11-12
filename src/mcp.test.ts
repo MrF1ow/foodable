@@ -12072,6 +12072,7 @@ describe("share link tools", () => {
         "create_share_link",
         "list_share_links",
         "revoke_share_link",
+        "import_shared_recipe",
     ];
 
     async function withShareLinks(
@@ -12447,7 +12448,557 @@ describe("share link tools", () => {
         });
     });
 
+    describe("import_shared_recipe", () => {
+        const TOKEN = "B".repeat(43);
+        const LINK = `https://kitchen.example/s/${TOKEN}`;
+        const NONE = {
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            saturated_fat_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            grams_per_ml: null,
+            grams_per_each: null,
+        };
+        function documentJson(over: Record<string, unknown> = {}) {
+            return JSON.stringify({
+                version: 1,
+                name: "Lentil soup",
+                portions: 4,
+                instructions: "Simmer.",
+                tags: ["soup"],
+                ingredients: [
+                    {
+                        food_name: "Red lentils",
+                        amount: 300,
+                        unit: "g",
+                        food: {
+                            ...NONE,
+                            calories: 352,
+                            protein_g: 24.6,
+                            carbs_g: 63,
+                            fat_g: 1.1,
+                        },
+                    },
+                    {
+                        food_name: "Salt",
+                        amount: null,
+                        unit: null,
+                        food: { ...NONE },
+                    },
+                ],
+                ...over,
+            });
+        }
+        function fetching(
+            outcome: (url: string) => import("./fetch-safe.js").FetchOutcome,
+        ) {
+            const calls: string[] = [];
+            db.recipeImportFetcher = {
+                async robotsAllows() {
+                    return true;
+                },
+                async fetchPage(url) {
+                    calls.push(String(url));
+                    return outcome(String(url));
+                },
+            };
+            return calls;
+        }
+        const serving = (body: string) =>
+            fetching((url) => ({
+                ok: true,
+                url,
+                status: 200,
+                contentType: "application/json",
+                body,
+            }));
+
+        test("a pasted document becomes a recipe in the household, with matched and created foods", async () => {
+            const mine = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "red lentils",
+                    calories: 340,
+                }),
+            );
+            const before = JSON.stringify(
+                await db.foodsStore.getFood("hh-1", mine.id),
+            );
+            await withShareLinks(true, asU1, async (call) => {
+                const r = await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                expect(r.isError).toBeFalsy();
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    r.structuredContent,
+                );
+                expect(out).toMatchObject({
+                    status: "imported",
+                    recipe_name: "Lentil soup",
+                    renamed_from: null,
+                    matched: 1,
+                    created: 1,
+                    error_code: null,
+                });
+                expect(out.ingredients).toEqual([
+                    {
+                        name: "red lentils",
+                        food_id: mine.id,
+                        status: "matched",
+                    },
+                    {
+                        name: "Salt",
+                        food_id: expect.any(String),
+                        status: "created",
+                    },
+                ]);
+                expect(r.content[0]!.text).toContain("Lentil soup");
+                expect(r.content[0]!.text).toContain(out.recipe_id!);
+                const recipes = await db.recipesStore.listRecipes("hh-1");
+                expect(recipes.map((x) => [x.id, x.name, x.creatorId])).toEqual(
+                    [[out.recipe_id!, "Lentil soup", "u1"]],
+                );
+                expect(
+                    JSON.stringify(
+                        await db.foodsStore.getFood("hh-1", mine.id),
+                    ),
+                ).toBe(before);
+                // Another household got nothing.
+                expect(await db.recipesStore.listRecipes("hh-2")).toEqual([]);
+                expect(await db.foodsStore.listFoods("hh-2")).toEqual([]);
+            });
+        });
+
+        test("a share link is fetched through the safe fetcher as its .json", async () => {
+            const calls = serving(documentJson({ name: "From a link" }));
+            await withShareLinks(true, asU1, async (call) => {
+                const r = await call("import_shared_recipe", { url: LINK });
+                expect(r.isError).toBeFalsy();
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    r.structuredContent,
+                );
+                expect(out.status).toBe("imported");
+                expect(out.recipe_name).toBe("From a link");
+                expect(calls).toEqual([`${LINK}.json`]);
+            });
+        });
+
+        test("importing the same recipe twice names the second apart", async () => {
+            await withShareLinks(true, asU1, async (call) => {
+                await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                const again = await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                    again.structuredContent,
+                );
+                expect(out.recipe_name).toBe("Lentil soup (2)");
+                expect(out.renamed_from).toBe("Lentil soup");
+                expect(out.created).toBe(0);
+                expect(out.matched).toBe(2);
+            });
+        });
+
+        const refusals: [
+            string,
+            Record<string, unknown>,
+            () => void,
+            string,
+            RegExp,
+        ][] = [
+            [
+                "neither url nor document",
+                {},
+                () => {},
+                "invalid_input",
+                /give a url .* or a document/i,
+            ],
+            [
+                "both url and document",
+                { url: LINK, document: documentJson() },
+                () => {},
+                "invalid_input",
+                /not both/i,
+            ],
+            [
+                "text that is not a share link",
+                { url: "pasta" },
+                () => {},
+                "not_share_link",
+                /share link/i,
+            ],
+            [
+                "an http link",
+                { url: `http://kitchen.example/s/${TOKEN}` },
+                () => {},
+                "not_share_link",
+                /https/i,
+            ],
+            [
+                "a private address",
+                { url: `https://169.254.169.254/s/${TOKEN}` },
+                () => {},
+                "not_share_link",
+                /can't import from that address/i,
+            ],
+            [
+                "an unreachable link",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "network_error",
+                        status: null,
+                        detail: "",
+                    })),
+                "unreachable",
+                /couldn't reach/i,
+            ],
+            [
+                "a revoked link",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "not_found",
+                        status: 404,
+                        detail: "",
+                    })),
+                "not_found",
+                /revoked or expired/i,
+            ],
+            [
+                "a too large recipe",
+                { url: LINK },
+                () =>
+                    fetching(() => ({
+                        ok: false,
+                        reason: "too_large",
+                        status: 200,
+                        detail: "",
+                    })),
+                "too_large",
+                /too large/i,
+            ],
+            [
+                "a document that is not a recipe",
+                { document: '{"hello":"world"}' },
+                () => {},
+                "not_recipe",
+                /isn't a Foodable recipe/i,
+            ],
+            [
+                "a version this deploy does not read",
+                { document: documentJson({ version: 3 }) },
+                () => {},
+                "unsupported_version",
+                /version 3/i,
+            ],
+        ];
+
+        for (const [name, args, setup, code, message] of refusals) {
+            test(`${name} is refused with a clear structured message and writes nothing`, async () => {
+                setup();
+                await withShareLinks(true, asU1, async (call) => {
+                    const r = await call("import_shared_recipe", args);
+                    // A refusal is a result, not a protocol error.
+                    expect(r.isError).toBeFalsy();
+                    const out = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                        r.structuredContent,
+                    );
+                    expect(out).toMatchObject({
+                        status: "failed",
+                        recipe_id: null,
+                        recipe_name: null,
+                        renamed_from: null,
+                        matched: 0,
+                        created: 0,
+                        ingredients: [],
+                        error_code: code,
+                    });
+                    expect(out.message).toMatch(message);
+                    expect(r.content[0]!.text).toBe(out.message);
+                    expect(await db.recipesStore.listRecipes("hh-1")).toEqual(
+                        [],
+                    );
+                    expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
+                });
+            });
+        }
+
+        test("a refused link never reaches the fetcher", async () => {
+            const calls = serving(documentJson());
+            await withShareLinks(true, asU1, async (call) => {
+                for (const url of [
+                    "pasta",
+                    `http://kitchen.example/s/${TOKEN}`,
+                    `https://127.0.0.1/s/${TOKEN}`,
+                    "https://kitchen.example/other",
+                ]) {
+                    const r = await call("import_shared_recipe", { url });
+                    expect(r.structuredContent?.status).toBe("failed");
+                }
+                expect(calls).toEqual([]);
+            });
+        });
+
+        test("the link reader kill switch pauses links but not a pasted document", async () => {
+            const calls = serving(documentJson());
+            const member = db.members[0]!;
+            const flags = evaluateViewerFlags(
+                buildFlagContext({
+                    auth: asU1,
+                    member: {
+                        userId: member.userId,
+                        householdId: member.householdId,
+                        role: member.role,
+                        displayName: member.displayName,
+                    },
+                }),
+                createMemoryFlags({ "mcp-share-links": true }),
+            );
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-share-links": true,
+                    "recipe-link-reader": false,
+                }),
+            );
+            try {
+                const server = new McpServer(
+                    { name: "foodable-test", version: "0.0.0" },
+                    { capabilities: { tools: {}, resources: {} } },
+                );
+                registerTools(
+                    server,
+                    asU1,
+                    true,
+                    null,
+                    undefined,
+                    "http://localhost",
+                    true,
+                    flags,
+                );
+                const [ct, st] = InMemoryTransport.createLinkedPair();
+                const client = new Client({
+                    name: "test-client",
+                    version: "0.0.0",
+                });
+                await Promise.all([server.connect(st), client.connect(ct)]);
+                try {
+                    const paused = (await client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { url: LINK },
+                    })) as ToolResult;
+                    expect(paused.structuredContent?.status).toBe("failed");
+                    expect(String(paused.structuredContent?.message)).toMatch(
+                        /paused/i,
+                    );
+                    expect(calls).toEqual([]);
+                    const pasted = (await client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { document: documentJson() },
+                    })) as ToolResult;
+                    expect(pasted.structuredContent?.status).toBe("imported");
+                } finally {
+                    await client.close();
+                    await server.close();
+                }
+            } finally {
+                resetFlagsForTests();
+            }
+        });
+
+        test("analytics records an import as a success and a refusal as a failure, never the link", async () => {
+            serving(documentJson());
+            await withShareLinks(true, asU1, async (call) => {
+                await call("import_shared_recipe", {
+                    document: documentJson(),
+                });
+                await call("import_shared_recipe", { url: "pasta" });
+                await call("import_shared_recipe", { url: LINK });
+                const rows = db.analyticsRows.filter(
+                    (r) => r.tool_name === "import_shared_recipe",
+                );
+                expect(rows.map((r) => r.success)).toEqual([true, false, true]);
+                expect(rows[1]!.error_category).toBe("not_share_link");
+                expect(JSON.stringify(db.analyticsRows)).not.toContain(TOKEN);
+            });
+        });
+
+        test("flag off: the tool is absent and a call changes nothing", async () => {
+            await withShareLinks(false, asU1, async (call, client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).not.toContain("import_shared_recipe");
+                await expect(
+                    client.callTool({
+                        name: "import_shared_recipe",
+                        arguments: { document: documentJson() },
+                    }),
+                ).rejects.toThrow(/not found/i);
+                expect(await db.recipesStore.listRecipes("hh-1")).toEqual([]);
+                void call;
+            });
+        });
+
+        test("the tool is declared as a write that reaches out", async () => {
+            await withShareLinks(true, asU1, async (_call, client) => {
+                const tool = (await client.listTools()).tools.find(
+                    (t) => t.name === "import_shared_recipe",
+                );
+                expect(tool).toBeDefined();
+                expect(tool!.annotations).toMatchObject({
+                    readOnlyHint: false,
+                    destructiveHint: false,
+                    idempotentHint: false,
+                    openWorldHint: true,
+                });
+                expect(tool!.outputSchema).toBeDefined();
+            });
+        });
+    });
+
     describe("over HTTP", () => {
+        test.each(ERAS)(
+            "import_shared_recipe works with the flag on and is absent with it off (%p)",
+            async (era) => {
+                const calls: string[] = [];
+                db.recipeImportFetcher = {
+                    async robotsAllows() {
+                        return true;
+                    },
+                    async fetchPage(url) {
+                        calls.push(String(url));
+                        return {
+                            ok: true as const,
+                            url: String(url),
+                            status: 200,
+                            contentType: "application/json",
+                            body: JSON.stringify({
+                                version: 1,
+                                name: "Soup over HTTP",
+                                portions: 2,
+                                instructions: null,
+                                tags: [],
+                                ingredients: [
+                                    {
+                                        food_name: "Leek",
+                                        amount: 2,
+                                        unit: "each",
+                                        food: {
+                                            calories: 61,
+                                            protein_g: 1.5,
+                                            carbs_g: 14,
+                                            fat_g: 0.3,
+                                            fiber_g: 1.8,
+                                            sugar_g: 3.9,
+                                            saturated_fat_g: 0.1,
+                                            alcohol_g: null,
+                                            caffeine_mg: null,
+                                            grams_per_ml: null,
+                                            grams_per_each: null,
+                                        },
+                                    },
+                                ],
+                            }),
+                        };
+                    },
+                };
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-share-links": true }),
+                );
+                try {
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        expect(names).toContain("import_shared_recipe");
+                        const byUrl = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: {
+                                url: `https://kitchen.example/s/${"C".repeat(43)}`,
+                            },
+                        })) as ToolResult;
+                        const parsed = SHARE_LINK_OUTPUT_SCHEMAS.import.parse(
+                            byUrl.structuredContent,
+                        );
+                        expect(parsed).toMatchObject({
+                            status: "imported",
+                            recipe_name: "Soup over HTTP",
+                            created: 1,
+                            matched: 0,
+                        });
+                        expect(calls).toEqual([
+                            `https://kitchen.example/s/${"C".repeat(43)}.json`,
+                        ]);
+                        expect(
+                            (await db.recipesStore.listRecipes("hh-1")).map(
+                                (r) => r.name,
+                            ),
+                        ).toEqual(["Soup over HTTP"]);
+
+                        const byDocument = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: {
+                                document: JSON.stringify({
+                                    version: 1,
+                                    name: "Pasted over HTTP",
+                                    portions: 1,
+                                    instructions: null,
+                                    tags: [],
+                                    ingredients: [],
+                                }),
+                            },
+                        })) as ToolResult;
+                        expect(byDocument.structuredContent?.status).toBe(
+                            "imported",
+                        );
+
+                        const refused = (await client.callTool({
+                            name: "import_shared_recipe",
+                            arguments: { url: "http://kitchen.example/s/x" },
+                        })) as ToolResult;
+                        expect(refused.structuredContent).toMatchObject({
+                            status: "failed",
+                            error_code: "not_share_link",
+                        });
+                    });
+                    setFlagsForTests(
+                        createMemoryFlags({ "mcp-share-links": false }),
+                    );
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        expect(names).not.toContain("import_shared_recipe");
+                        const refused = await client
+                            .callTool({
+                                name: "import_shared_recipe",
+                                arguments: {
+                                    document: '{"version":1}',
+                                },
+                            })
+                            .then(
+                                (r) => (r as ToolResult).isError === true,
+                                () => true,
+                            );
+                        expect(refused).toBe(true);
+                    });
+                } finally {
+                    resetFlagsForTests();
+                }
+            },
+        );
+
         test.each(ERAS)(
             "flag on: create, list and revoke (%p)",
             async (era) => {

@@ -2003,6 +2003,8 @@ export async function renderRecipesListPage(
         importRetryDisabled?: boolean;
         shareArrived?: import("../domain/share.js").ReadShareResult;
         shareArrivedOpen?: boolean;
+        /** v2: a recipe pasted from another Foodable that could not be imported. */
+        sharedImport?: { error?: string; input?: string };
         /** v2: picking a recipe for this day (`?plan_date=`). */
         planDate?: string;
         /** v2: a plan move that failed its checks: its edit sheet opens with this. */
@@ -2109,6 +2111,7 @@ export async function renderRecipesListPage(
                 importCredit: opts.importCredit,
                 importSourceKind: opts.importSourceKind,
                 importSourceLabel: opts.importSourceLabel,
+                sharedImport: opts.sharedImport,
             }),
         };
     }

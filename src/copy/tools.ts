@@ -429,6 +429,16 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "import_shared_recipe",
+        category: "recipes",
+        badges: ["edit"],
+        params: [
+            { name: "url", required: false },
+            { name: "document", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
         name: "update_household_config",
         category: "settings-account",
         badges: ["setting"],
@@ -895,6 +905,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "create_share_link",
     "list_share_links",
     "revoke_share_link",
+    "import_shared_recipe",
     "update_household_config",
     "get_fridge",
     "add_fridge_location",

@@ -2013,6 +2013,17 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       backHref: "/kitchen/groceries",
                       active: "grocery",
                   }),
+                  "recipes-import-open": recipesListV2({
+                      week: previewWeekPlan(),
+                      sharedImport: {},
+                  }),
+                  "recipes-import-error": recipesListV2({
+                      week: previewWeekPlan(),
+                      sharedImport: {
+                          error: "That share link doesn't work any more. It may have been revoked or expired, or it isn't a recipe link.",
+                          input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+                      },
+                  }),
                   "recipes-plan-pick": recipesListV2({
                       week: previewWeekPlan(),
                       planDate: "2026-11-14",

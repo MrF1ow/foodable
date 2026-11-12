@@ -194,6 +194,91 @@ describe("recipes list v2 page", () => {
         expect(html).toContain("Import a link");
     });
 
+    describe("importing a recipe another Foodable shared", () => {
+        const base = {
+            chrome,
+            query: "",
+            filter: "" as const,
+            cards: [],
+            totalCount: 0,
+        };
+
+        function linkPanel(html: string): string {
+            const start = html.indexOf(
+                '<details class="fd-recipes-import-link"',
+            );
+            expect(start).toBeGreaterThan(-1);
+            return html.slice(start, html.indexOf("</details>", start));
+        }
+
+        test("the link panel carries a form that posts the pasted link or JSON", () => {
+            const panel = linkPanel(renderRecipesListBody(base));
+            const form =
+                /<form[^>]*data-fd-recipes-shared[^>]*>[\s\S]*?<\/form>/.exec(
+                    panel,
+                );
+            expect(form).not.toBeNull();
+            const html = form![0];
+            expect(html).toContain('method="post"');
+            expect(html).toContain('action="/recipes/import-shared"');
+            expect(html).toContain("data-busy-form");
+            expect(html).toMatch(/<textarea[^>]*name="shared"/);
+            expect(html).toMatch(/<textarea[^>]*required/);
+            expect(html).toMatch(/<textarea[^>]*aria-label="Shared recipe/);
+            expect(html).toContain("Import recipe");
+            // Explained where it is used.
+            expect(html).toMatch(/another Foodable/i);
+        });
+
+        test("the link form still posts to the web importer", () => {
+            const panel = linkPanel(renderRecipesListBody(base));
+            expect(panel).toContain('action="/recipes/import"');
+            expect(panel).toContain("data-fd-recipes-import");
+        });
+
+        test("closed with no error, and no error text", () => {
+            const html = renderRecipesListBody(base);
+            expect(html).not.toMatch(
+                /<details class="fd-recipes-import-link"[^>]*\sopen/,
+            );
+            expect(html).not.toContain("fd-recipes-import-shared-error");
+        });
+
+        test("an error opens the panel, shows the message in place and keeps what was pasted", () => {
+            const html = renderRecipesListBody({
+                ...base,
+                sharedImport: {
+                    error: "That isn't a Foodable share link.",
+                    input: 'https://kitchen.example/s/<script>alert(1)</script>"',
+                },
+            });
+            expect(html).toMatch(
+                /<details class="fd-recipes-import-link"[^>]*\sopen/,
+            );
+            const panel = linkPanel(html);
+            expect(panel).toMatch(
+                /<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">That isn't a Foodable share link\.<\/p>/,
+            );
+            expect(panel).toContain(
+                "https://kitchen.example/s/&lt;script&gt;alert(1)&lt;/script&gt;&quot;",
+            );
+            expect(html).not.toContain("<script>alert(1)");
+            // The link form beside it is not the one that failed.
+            expect(panel).toMatch(/<input[^>]*name="url"[^>]*value=""/);
+        });
+
+        test("a pasted document is kept verbatim, escaped", () => {
+            const doc = '{"version":1,"name":"Soup & <b>stew</b>"}';
+            const html = renderRecipesListBody({
+                ...base,
+                sharedImport: { error: "Nope.", input: doc },
+            });
+            expect(linkPanel(html)).toContain(
+                "{&quot;version&quot;:1,&quot;name&quot;:&quot;Soup &amp; &lt;b&gt;stew&lt;/b&gt;&quot;}",
+            );
+        });
+    });
+
     test("empty ingredient recipe shows no stock-ok label", () => {
         const html = renderRecipesListBody({
             chrome,

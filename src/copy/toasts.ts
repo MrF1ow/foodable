@@ -196,6 +196,10 @@ export const TOASTS = {
         kind: "success",
         text: "Imported {name} from {site}.",
     },
+    "recipes.import.shared": {
+        kind: "success",
+        text: "Imported {name}. {matched} matched your foods, {created} added.",
+    },
     "recipes.import.unverified_needs_review": {
         kind: "warning",
         text: "Imported as unverified: {count} need checking.",
