@@ -563,6 +563,13 @@
 }
 
 .fd-settings-btn {
+    /* One box for <button> and <a>: an anchor would otherwise sit shorter and
+     * its text higher than the button beside it. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-decoration: none;
     padding: var(--fd-s-6) var(--fd-s-12);
     border-radius: var(--radius-pill);
     border: 1px solid var(--line);

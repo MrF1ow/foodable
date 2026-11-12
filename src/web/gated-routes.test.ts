@@ -88,9 +88,30 @@ describe("gated route harness on composed app", () => {
             "/settings/household/invites",
             "/settings/household/invites/revoke",
         ]);
+        const stores = routes.filter((r) =>
+            r.path.startsWith("/settings/household/stores"),
+        );
+        expect(stores.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
+            [
+                "GET /settings/household/stores",
+                "GET /settings/household/stores/:id",
+                "POST /settings/household/stores/add",
+                "POST /settings/household/stores/order",
+                "POST /settings/household/stores/preferences",
+                "POST /settings/household/stores/:id/rename",
+                "POST /settings/household/stores/:id/delete",
+                "POST /settings/household/stores/:id/sections",
+                "POST /settings/household/stores/:id/sections/order",
+                "POST /settings/household/stores/:id/sections/:sectionId/rename",
+                "POST /settings/household/stores/:id/sections/:sectionId/visibility",
+                "POST /settings/household/stores/:id/rules/add",
+            ].sort(),
+        );
         expect(
             routes.filter(
-                (r) => !r.path.startsWith("/settings/household/invites"),
+                (r) =>
+                    !r.path.startsWith("/settings/household/invites") &&
+                    !r.path.startsWith("/settings/household/stores"),
             ),
         ).toEqual([
             {

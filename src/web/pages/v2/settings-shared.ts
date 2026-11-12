@@ -245,9 +245,9 @@ export function settingsDesktopHomePane(opts: {
     );
 }
 
-export function settingsBackLink(): Html {
+export function settingsBackLink(href = "/settings", label = "Back"): Html {
     return raw(
-        `<a class="fd-settings-back" href="/settings" data-turbo="false">Back</a>`,
+        `<a class="fd-settings-back" href="${esc(href)}" data-turbo="false">${esc(label)}</a>`,
     );
 }
 
@@ -259,6 +259,10 @@ export type SettingsV2Layout = {
     profile?: SettingsProfile;
     /** Raw `profiles.theme` (null = Auto) for the home menu theme control. */
     storedTheme?: "light" | "dark" | null;
+    /** Where the phone back arrow and the Back link go. Default: Settings. */
+    backHref?: string;
+    /** Text of the Back link. Default "Back". */
+    backLabel?: string;
 };
 
 function roleLabelFromChrome(chrome: AppChromeBase): string | undefined {
@@ -292,10 +296,12 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
         isHome && profileSource
             ? `<div class="fd-settings-profile-phone">${String(settingsProfileCard(profileSource))}</div>`
             : "";
-    const back = isHome ? raw("") : settingsBackLink();
+    const back = isHome
+        ? raw("")
+        : settingsBackLink(layout.backHref, layout.backLabel);
     const phoneTop = settingsPhoneTopBar(
         layout.title,
-        isHome ? APP_PATHS.nutrition : APP_PATHS.settings,
+        isHome ? APP_PATHS.nutrition : (layout.backHref ?? APP_PATHS.settings),
     );
     const desktopBanner = settingsDesktopPageBanner();
     const mainInner =

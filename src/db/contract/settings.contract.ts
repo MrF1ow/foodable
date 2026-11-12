@@ -74,6 +74,36 @@ export function runSettingsStoreContract(
             expect(ours.map((s) => s.name)).toEqual(["A", "B"]);
         });
 
+        test("updateStore renames in place and is household scoped", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const row = sampleGroceryStoreRow(c, {
+                name: "Before",
+                sortOrder: 3,
+            });
+            await store.insertStore(row);
+            const updated = await store.updateStore({ ...row, name: "After" });
+            expect(updated).toEqual({ ...row, name: "After" });
+            const listed = await store.listStores(c.householdId);
+            expect(listed.find((s) => s.id === row.id)?.name).toBe("After");
+            expect(
+                await store.updateStore({
+                    ...row,
+                    householdId: c.otherHouseholdId,
+                    name: "Hijack",
+                }),
+            ).toBeNull();
+            expect(
+                await store.updateStore({
+                    ...row,
+                    id: crypto.randomUUID(),
+                }),
+            ).toBeNull();
+            const again = await store.listStores(c.householdId);
+            expect(again.find((s) => s.id === row.id)?.name).toBe("After");
+        });
+
         test("listSections, getSection, insertSection, updateSection", async () => {
             await reset();
             const c = ctx();

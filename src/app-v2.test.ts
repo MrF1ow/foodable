@@ -161,9 +161,10 @@ describe("/app-v2.js", () => {
         // +~4 KB scanner UI (ZXing stays in /app-v2-scanner.js).
         // +~1.5 KB scanner session lifecycle, desktop layout sync and navigation guards.
         // +~1 KB Recent chips that log a multi-item or free-text meal again.
+        // +~6 KB Stores drag reorder, name autosubmit and arrow focus return.
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
         // +~0.2 KB log search waits for a tap on touch screens.
-        expect(js.length).toBeLessThan(105_800);
+        expect(js.length).toBeLessThan(111_800);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
