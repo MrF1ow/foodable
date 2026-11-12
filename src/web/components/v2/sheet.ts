@@ -35,6 +35,14 @@ export function sheet(opts: {
     closeLabel?: string;
     /** When false, the sheet has no close button (grabber/backdrop/Esc still close). */
     showClose?: boolean;
+    /** Extra classes after `fd-sheet fd-sheet--<kind>`. Escaped. */
+    className?: string;
+    /**
+     * Where focus lands on open. `"panel"` parks it on the sheet panel, so a
+     * first field does not raise the keyboard or draw a ring. Default: the
+     * first field.
+     */
+    focus?: "panel";
 }): string {
     const id = escapeHtml(opts.id);
     const titleId = `${id}-title`;
@@ -42,6 +50,10 @@ export function sheet(opts: {
     const kind = opts.kind === "confirm" ? "confirm" : "edit";
     const describedBy = opts.subtitle ? ` aria-describedby="${subId}"` : "";
     const reopen = opts.openOnLoad ? " data-sheet-open-on-load" : "";
+    const classes = opts.className
+        ? `fd-sheet fd-sheet--${kind} ${escapeHtml(opts.className)}`
+        : `fd-sheet fd-sheet--${kind}`;
+    const focus = opts.focus === "panel" ? ' data-fd-sheet-focus="panel"' : "";
     const subtitle = opts.subtitle
         ? `\n<p class="fd-sheet-sub" id="${subId}">${escapeHtml(opts.subtitle)}</p>`
         : "";
@@ -53,7 +65,7 @@ export function sheet(opts: {
     const closeBtn = showClose
         ? `<button type="button" class="fd-sheet-close" command="close" commandfor="${id}" aria-label="${closeLabel}"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>`
         : "";
-    return `<dialog class="fd-sheet fd-sheet--${kind}" id="${id}" aria-labelledby="${titleId}"${describedBy}${reopen}>
+    return `<dialog class="${classes}" id="${id}"${focus} aria-labelledby="${titleId}"${describedBy}${reopen}>
 <div class="fd-sheet-panel" tabindex="-1">
 <div class="fd-sheet-handle" aria-hidden="true"></div>
 <header class="fd-sheet-head">
@@ -73,15 +85,28 @@ export function sheetTrigger(opts: {
     target: string;
     label: string;
     className?: string;
+    /**
+     * Accessible name when it should say more than the visible `label`
+     * ("Disconnect Claude" on a button that reads "Disconnect"). Escaped here.
+     * Default: none for a text button, the `label` for an icon button.
+     */
+    ariaLabel?: string;
     /** When set, used as button inner HTML (label still drives aria-label / title). */
     icon?: string;
     /** Extra `data-*` attributes. Both the key and the value are escaped. */
     data?: Record<string, string>;
 }): string {
-    const aria = escapeHtml(opts.label);
-    const inner = opts.icon ?? aria;
+    const label = escapeHtml(opts.label);
+    const inner = opts.icon ?? label;
     const cls = opts.className ? ` class="${escapeHtml(opts.className)}"` : "";
-    const title = opts.icon ? ` title="${aria}" aria-label="${aria}"` : "";
+    const name =
+        opts.ariaLabel != null
+            ? escapeHtml(opts.ariaLabel)
+            : opts.icon
+              ? label
+              : null;
+    const title = opts.icon ? ` title="${label}"` : "";
+    const aria = name != null ? ` aria-label="${name}"` : "";
     const data = opts.data
         ? Object.entries(opts.data)
               .map(
@@ -90,7 +115,7 @@ export function sheetTrigger(opts: {
               )
               .join("")
         : "";
-    return `<button type="button"${cls} commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}${data}>${inner}</button>`;
+    return `<button type="button"${cls} commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}${aria}${data}>${inner}</button>`;
 }
 
 export function confirmSheet(opts: {

@@ -290,6 +290,11 @@ export const TOASTS = {
         kind: "success",
         text: "Day back on your daily goals",
     },
+    "settings.ai.disconnected": { kind: "success", text: "App disconnected" },
+    "settings.ai.already-disconnected": {
+        kind: "info",
+        text: "That app was already disconnected",
+    },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household-settings.saved": {
         kind: "success",

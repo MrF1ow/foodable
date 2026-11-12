@@ -309,9 +309,10 @@ export function groceryLineRowMarkup(
         ? ` data-fd-grocery-row-overview tabindex="0" data-fd-grocery-line-href="${esc(`${GROCERY_V2_RETURN_TO}?line=${encodeURIComponent(line.id)}`)}"`
         : ` data-fd-grocery-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
+            () => `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
         ),
     );
 }

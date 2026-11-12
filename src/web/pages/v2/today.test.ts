@@ -9,6 +9,11 @@ import {
 import { shiftLocalDate } from "../../../domain/tz.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import { noticeHref } from "../../components/notices.js";
+import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
 import type { Notice } from "../../../domain/notices.js";
 import {
     buildPreviewTodayPageData,
@@ -217,6 +222,41 @@ describe("renderTodayV2Page", () => {
         const html = String(renderTodayBody({ ...data, view }));
         expect(html).not.toContain("<img");
         expect(html).toContain("&lt;img");
+    });
+
+    test("a meal id or description made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const view = buildPreviewTodayView(today);
+            view.meals = mealRows([
+                {
+                    id: payload,
+                    user_id: "u",
+                    logged_at: "2026-11-10T12:00:00.000Z",
+                    meal_type: "lunch",
+                    description: payload,
+                    calories: 50,
+                    protein_g: 1,
+                    carbs_g: 2,
+                    fat_g: 3,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    notes: null,
+                    idempotency_key: null,
+                    items: [],
+                },
+            ]);
+            const html = String(renderTodayBody({ ...data, view }));
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(
+                    html,
+                    "li[data-fd-meal-row]",
+                    "data-fd-meal-id",
+                ),
+            ).toEqual([payload]);
+        }
     });
 
     test("multi-item meal shows item list subtitle", () => {

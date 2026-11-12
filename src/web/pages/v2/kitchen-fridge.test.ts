@@ -4,6 +4,11 @@ import { defaultFreezeExpiry } from "../../../domain/fridge.js";
 import { listExpiring } from "../../../domain/stock.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
+import {
     buildPreviewKitchenFridgeView,
     eatPortionAmount,
     fridgeItemSheetId,
@@ -349,6 +354,34 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(body).toContain("data-swipe-left=");
         expect(body).toContain("Ate some");
         expect(body).toContain("Toss");
+    });
+
+    test("an item id or name made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const view = buildPreviewKitchenFridgeView(chrome, today, {
+                items: [item({ id: payload, displayName: payload })],
+                locations: [
+                    {
+                        id: "loc-fridge",
+                        householdId: "hh",
+                        name: "Fridge",
+                        sortOrder: 0,
+                    },
+                ],
+            });
+            const html = renderKitchenFridgeBody(view);
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "li[data-fd-fridge-row]", "id"),
+            ).toEqual([`fd-fridge-row-${payload}`]);
+            expect(
+                await attributeValues(
+                    html,
+                    "li[data-fd-fridge-row]",
+                    "data-sheet-id",
+                ),
+            ).toEqual([fridgeItemSheetId(payload)]);
+        }
     });
 
     test("empty locations shows empty state", () => {

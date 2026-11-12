@@ -350,10 +350,9 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals-quick")}
         actions,
         openOnLoad: opts.quickCaloriesOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-quick-cal"',
-        'class="fd-sheet fd-sheet--edit fd-log-quick-cal-sheet" id="fd-log-quick-cal" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-quick-cal-sheet",
+        focus: "panel",
+    });
 }
 
 function logWeighInSheet(opts: RenderLogSheetsOpts): string {
@@ -409,10 +408,9 @@ ${stepper({
         actions,
         openOnLoad: opts.weighInOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-weigh-in"',
-        'class="fd-sheet fd-sheet--edit fd-log-weigh-in-sheet" id="fd-log-weigh-in" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-weigh-in-sheet",
+        focus: "panel",
+    });
 }
 
 function recentChipsHtml(items: typeof PREVIEW_RECENTS): string {
@@ -596,12 +594,11 @@ ${filterChipsHtml(!showResults)}
         openOnLoad: opts.searchOpenOnLoad,
         closeLabel: "Close search",
         showClose: true,
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-search"',
+        className: "fd-log-search-sheet",
         // Focus goes to the panel; log-sheet.js focuses the search field only
         // with a fine pointer, so a phone's keyboard waits for a tap.
-        'class="fd-sheet fd-sheet--edit fd-log-search-sheet" id="fd-log-search" data-fd-sheet-focus="panel"',
-    );
+        focus: "panel",
+    });
 }
 
 function amountHiddenFields(prefill: LogAmountPrefill | undefined): string {
@@ -725,10 +722,9 @@ ${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
         actions,
         openOnLoad: opts.amountOpenOnLoad,
         closeLabel: "Close",
-    }).replace(
-        'class="fd-sheet fd-sheet--edit" id="fd-log-amount"',
-        'class="fd-sheet fd-sheet--edit fd-log-amount-sheet" id="fd-log-amount" data-fd-sheet-focus="panel"',
-    );
+        className: "fd-log-amount-sheet",
+        focus: "panel",
+    });
 }
 
 /** Search and amount sheets included once in the v2 shell. */

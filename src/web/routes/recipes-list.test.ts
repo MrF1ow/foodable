@@ -1351,10 +1351,19 @@ describe("moving and removing a plan", () => {
 
     test("a past day is not a move target; today and later are", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        const id = await seed();
         for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
             db.ownerTimezone = tz;
             const hhToday = dateInTz(new Date(), tz);
+            // The plan sits on the household's own today, so it is in the
+            // week whatever the UTC date is when the test runs.
+            const row = await db.plansStore.addPlan({
+                householdId: HH,
+                recipeId: db.recipeId,
+                date: hhToday,
+                slot: "dinner",
+                servings: 2,
+            });
+            const id = row!.id;
             const past = await postPlanPath(
                 `/recipes/plan/${id}/move`,
                 new URLSearchParams({

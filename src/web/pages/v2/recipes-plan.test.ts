@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { RecipePlan } from "../../../domain/plan.js";
 import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
+import {
     buildWeekPlanView,
     PLAN_MISSING_SHEET_ID,
     planEditSheetId,
@@ -203,6 +208,38 @@ describe("week renderers", () => {
         expect(html).toContain('type="date"');
         // No auto-focus on the date field (the keyboard would cover the sheet).
         expect(html).toContain('data-fd-sheet-focus="panel"');
+    });
+
+    test("a plan id or recipe name made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const view = buildWeekPlanView({
+                today: TODAY,
+                plans: [plan({ id: payload, date: TODAY })],
+                recipes: [{ ...pancakes, name: payload }],
+                stock: [],
+                foodsById: new Map(),
+            });
+            const html = renderPlanEditSheets(view, "today");
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(
+                    html,
+                    "dialog[data-fd-sheet-focus]",
+                    "id",
+                ),
+            ).toEqual([planEditSheetId(payload)]);
+            const add = renderPlanSheet({
+                recipeId: "r-1",
+                recipeName: payload,
+                yieldPortions: 4,
+                today: TODAY,
+                date: TODAY,
+                slot: "dinner",
+                servings: 2,
+            });
+            expect(await injectedAttributes(add)).toEqual([]);
+            expect(add).toContain('data-fd-sheet-focus="panel"');
+        }
     });
 
     test("a failed move opens that plan's sheet with what was typed and the reason", () => {

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import { renderSettingsHomeV2Page } from "./settings-home.js";
-import { SETTINGS_V2_MENU_LABELS } from "./settings-shared.js";
+import {
+    SETTINGS_V2_MENU_LABELS,
+    settingsField,
+    settingsMenuIcon,
+} from "./settings-shared.js";
+import {
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
 
 const settingsCss = await Bun.file(
     new URL("../../../../public/app/v2/settings.css", import.meta.url),
@@ -57,6 +65,7 @@ describe("settings home v2", () => {
         expect(html).toContain('href="/settings/goals"');
         expect(html).toContain('href="/settings/saved"');
         expect(html).toContain('href="/settings/export"');
+        expect(html).toContain('href="/settings/ai-connections"');
         for (const label of SETTINGS_V2_MENU_LABELS) {
             const needle =
                 label === "Saved foods & recipes"
@@ -86,5 +95,41 @@ describe("settings home v2", () => {
         expect(html).toContain("fd-settings-desktop-banner");
         expect(html).toContain("Household, people and preferences");
         expect(html).toContain("fd-settings-columns");
+    });
+});
+
+describe("settings shared markup", () => {
+    test("settingsField names its control by the label id, whatever the id holds", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            // An id built from a row's own id (a section, a rule) is data.
+            const html = String(
+                settingsField({
+                    id: payload,
+                    label: "Name",
+                    control: '<input class="x" name="name" />',
+                }),
+            );
+            expect(await injectedAttributes(html)).toEqual([]);
+            const control = html.slice(html.indexOf("<input"));
+            const names: string[] = [];
+            await new HTMLRewriter()
+                .on("input", {
+                    element(el) {
+                        for (const [name] of el.attributes) names.push(name);
+                    },
+                })
+                .transform(new Response(control))
+                .text();
+            expect(names).toEqual(["aria-labelledby", "class", "name"]);
+        }
+    });
+
+    test("settingsMenuIcon carries the class its caller styles it by", () => {
+        expect(settingsMenuIcon("user")).toContain(
+            'class="fd-icon fd-settings-menu__icon"',
+        );
+        const row = settingsMenuIcon("code", "fd-settings-ai__icon");
+        expect(row).toContain('class="fd-icon fd-settings-ai__icon"');
+        expect(row).not.toContain("fd-settings-menu__icon");
     });
 });

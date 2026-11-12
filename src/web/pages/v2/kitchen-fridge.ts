@@ -274,9 +274,10 @@ function fridgeItemRowMarkup(
     );
     const attrs = ` data-fd-fridge-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li id="fd-fridge-row-${esc(item.id)}"${attrs} `,
+            () => `<li id="fd-fridge-row-${esc(item.id)}"${attrs} `,
         ),
     );
 }

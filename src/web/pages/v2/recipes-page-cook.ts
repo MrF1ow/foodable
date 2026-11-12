@@ -294,10 +294,8 @@ ${renderCookPreviewRegion(view.preview, view.previewError)}
         body,
         actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${COOK_FORM_ID}">Cook</button>`,
         openOnLoad: view.open,
-    }).replace(
-        `id="${COOK_SHEET_ID}"`,
-        `id="${COOK_SHEET_ID}" data-fd-sheet-focus="panel"`,
-    );
+        focus: "panel",
+    });
 }
 
 const POT_ICON = raw(
