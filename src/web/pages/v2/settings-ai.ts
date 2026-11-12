@@ -2,6 +2,7 @@ import type { AppChromeBase } from "../../attention.js";
 import type { AiConnection } from "../../../db/tokens.js";
 import { dateInTz } from "../../../domain/tz.js";
 import { esc } from "../../components/v2/html.js";
+import { iconCopy } from "../../components/v2/icons.js";
 import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
 import {
     renderSettingsV2Page,
@@ -123,7 +124,7 @@ export function renderSettingsAiV2Body(view: SettingsAiV2View): string {
     const sheets = view.connections
         .map((c, i) => disconnectSheet(c, i, view))
         .join("");
-    return `${settingsPageHeader("AI connections")}${String(settingsErrorBanner(view.error))}<p class="fd-settings-ai__lead">Agents you connect can log meals, read your fridge and plan groceries for this household.</p>${list}<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Connect a new agent</h2><p class="fd-settings-ai__address"><code id="fd-ai-mcp-url">${esc(view.mcpUrl)}</code></p><p class="fd-settings-ai__help">Add this address as a remote MCP server in your agent, then sign in when it asks.</p>${sheets}`;
+    return `${settingsPageHeader("AI connections")}${String(settingsErrorBanner(view.error))}<p class="fd-settings-ai__lead">Agents you connect can log meals, read your fridge and plan groceries for this household.</p>${list}<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Connect a new agent</h2><div class="fd-settings-ai__address" data-fd-copy-address><code id="fd-ai-mcp-url" data-fd-copy-source>${esc(view.mcpUrl)}</code><button type="button" class="fd-settings-ai__copy" data-fd-copy-trigger aria-label="Copy address">${String(iconCopy())}</button></div><p class="fd-visually-hidden" role="status" aria-live="polite" data-fd-copy-status></p><p class="fd-settings-ai__help">Add this address as a remote MCP server in your agent, then sign in when it asks.</p>${sheets}`;
 }
 
 export function renderSettingsAiV2Page(view: SettingsAiV2View): string {

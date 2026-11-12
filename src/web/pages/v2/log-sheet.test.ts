@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import {
     FD_LOG_AMOUNT_SHEET_ID,
     FD_LOG_QUICK_CAL_SHEET_ID,
@@ -234,6 +234,79 @@ describe("renderLogSheets", () => {
         expect(html).toContain("Scan barcode");
         const tiles = html.match(/\bclass="fd-quick-tile"/g) ?? [];
         expect(tiles).toHaveLength(4);
+    });
+
+    describe("Copy yesterday tile", () => {
+        const withHints = (
+            slots: string[],
+            over: Record<string, unknown> = {},
+        ) =>
+            renderLogSheets({
+                timezone: "UTC",
+                previewSearch: "empty",
+                barcodeCamera: true,
+                copyYesterday: { slots, returnTo: "/" },
+                ...over,
+            });
+
+        test("a Quick grid with no yesterday data has no such tile", () => {
+            const html = renderLogSheets({ timezone: "UTC" });
+            expect(html).not.toContain("Copy yesterday");
+            expect(html).not.toContain("/log/copy-yesterday");
+        });
+
+        test("posts the slot to the same route as the Today prompt", () => {
+            const html = withHints(["breakfast", "dinner"]);
+            const form = html.match(
+                /<form[^>]*data-fd-copy-yesterday[^>]*>[\s\S]*?<\/form>/,
+            )![0];
+            expect(form).toContain('method="post"');
+            expect(form).toContain('action="/log/copy-yesterday"');
+            expect(form).toContain('name="return_to" value="/"');
+            expect(form).toContain('name="slot"');
+            expect(form).toContain("Copy yesterday");
+            expect(form).toContain(
+                'data-fd-copy-yesterday-slots="breakfast dinner"',
+            );
+        });
+
+        test("is the fifth tile after the four existing ones", () => {
+            const html = withHints(["breakfast"]);
+            const grid = html.match(
+                /<div class="fd-log-quick-grid">([\s\S]*?)<\/div><\/div>/,
+            )![1]!;
+            expect(grid.indexOf("Scan barcode")).toBeLessThan(
+                grid.indexOf("Copy yesterday"),
+            );
+            expect(html.match(/\bclass="fd-quick-tile"/g) ?? []).toHaveLength(
+                5,
+            );
+        });
+
+        test("starts enabled when the guessed meal has a hint, disabled when not", () => {
+            // 12:00 UTC guesses lunch.
+            setSystemTime(new Date("2026-11-12T12:00:00Z"));
+            try {
+                const enabled = withHints(["lunch"]);
+                const disabled = withHints(["breakfast"]);
+                const tile = (html: string) =>
+                    html.match(
+                        /<button[^>]*data-fd-copy-yesterday-button[^>]*>/,
+                    )![0];
+                expect(tile(enabled)).not.toContain("disabled");
+                expect(enabled).toContain('name="slot" value="lunch"');
+                expect(tile(disabled)).toContain("disabled");
+            } finally {
+                setSystemTime();
+            }
+        });
+
+        test("never adds the frame's other missing tiles", () => {
+            const html = withHints(["breakfast"]);
+            expect(html).not.toContain("Photo of meal");
+            expect(html).not.toContain("Cook a recipe");
+            expect(html).not.toContain("Add to groceries");
+        });
     });
 
     test("barcode-camera off hides Scan but keeps Enter barcode", () => {

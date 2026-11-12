@@ -2506,6 +2506,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "dev-gallery-v2": renderDevGalleryV2Page(chrome),
                   "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-log-search-no-yesterday": await logSheetPreview(
+                      theme,
+                      "empty-no-yesterday",
+                  ),
                   "nutrition-goal-name": (() => {
                       const data = buildPreviewTodayPageData(
                           chrome as never,
@@ -2805,7 +2809,13 @@ async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
 
 async function logSheetPreview(
     theme: "light" | "dark",
-    mode: "empty" | "results" | "amount" | "quick-cal" | "weigh-in",
+    mode:
+        | "empty"
+        | "empty-no-yesterday"
+        | "results"
+        | "amount"
+        | "quick-cal"
+        | "weigh-in",
 ): Promise<string> {
     const chrome = {
         ...previewChrome(theme),
@@ -2867,12 +2877,24 @@ async function logSheetPreview(
             },
         });
     }
+    // Today's own sheet carries the Copy yesterday tile: enabled for every
+    // meal, or (empty-no-yesterday) disabled because yesterday had no meals.
+    const copyYesterday =
+        mode === "empty"
+            ? {
+                  slots: ["breakfast", "lunch", "snack", "dinner"],
+                  returnTo: "/",
+              }
+            : mode === "empty-no-yesterday"
+              ? { slots: [], returnTo: "/" }
+              : undefined;
     return renderAppShell({
         ...base,
         v2LogSheet: {
             searchOpenOnLoad: true,
-            previewSearch: mode,
+            previewSearch: mode === "results" ? "results" : "empty",
             previewQuery: mode === "results" ? "chick" : "",
+            ...(copyYesterday ? { copyYesterday } : {}),
         },
     });
 }

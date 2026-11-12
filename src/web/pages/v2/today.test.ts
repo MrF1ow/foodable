@@ -523,6 +523,50 @@ describe("renderTodayV2Page", () => {
         expect(html).not.toContain("/log/copy-yesterday");
     });
 
+    test("the log sheet gets the Copy yesterday tile on the member's own today", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const html = renderTodayV2Page({ ...data, view: hinted });
+        const form = html.match(
+            /<form[^>]*data-fd-copy-yesterday[^>]*>[\s\S]*?<\/form>/,
+        );
+        expect(form).not.toBeNull();
+        // The slots are exactly the ones the Today prompt offers.
+        expect(form![0]).toContain('data-fd-copy-yesterday-slots="dinner"');
+        // Back to the same page the Today prompt returns to.
+        expect(form![0]).toContain(
+            `name="return_to" value="${todayHref({ date: hinted.date })}"`,
+        );
+    });
+
+    test("the log sheet has no tile in a peer's view or on a past day", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const peer = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+                subjectLabel: "Sam",
+            },
+            today,
+        );
+        expect(renderTodayV2Page({ ...peer, view: hinted })).not.toContain(
+            "data-fd-copy-yesterday",
+        );
+        const past = {
+            ...hinted,
+            week: {
+                ...hinted.week,
+                days: hinted.week.days.map((day) => ({
+                    ...day,
+                    isSelected: !day.isToday && day.isSelected,
+                })),
+            },
+        };
+        expect(renderTodayV2Page({ ...data, view: past })).not.toContain(
+            "data-fd-copy-yesterday",
+        );
+    });
+
     test("copy-yesterday hint hidden when slot has rows", () => {
         const html = String(renderTodayBody(data));
         expect(html).not.toContain("fd-today-yesterday");
