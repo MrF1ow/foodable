@@ -30,7 +30,7 @@ function shellPage(
 }
 
 function scriptBodies(html: string): string[] {
-    return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
         .map((m) => (m[2] ?? "").trim())
         .filter((body) => body.length > 0);
 }

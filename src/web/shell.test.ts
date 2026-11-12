@@ -76,8 +76,16 @@ test("bottom nav hrefs and tab order", () => {
         "Recipes",
         "Household",
     ]);
-    const inner = html.replace(/^<nav[^>]*>/, "").replace(/<\/nav>$/, "");
-    expect(inner.replace(/<[^>]+>/g, "").trim()).toBe("");
+    // Parsed, not stripped with a regex: every visible character is text.
+    let text = "";
+    new HTMLRewriter()
+        .on("*", {
+            text(chunk) {
+                text += chunk.text;
+            },
+        })
+        .transform(html);
+    expect(text.trim()).toBe("");
 });
 
 test("unset theme follows the system", () => {
