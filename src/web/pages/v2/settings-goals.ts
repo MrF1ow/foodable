@@ -9,6 +9,7 @@ import type { GoalDayOverride } from "../../../domain/insights.js";
 import { hasActiveTarget } from "../../../mcp/shared.js";
 import { esc } from "../../components/v2/html.js";
 import { dot } from "../../components/v2/dot.js";
+import { iconBolt, iconDrop, iconList } from "../../components/v2/icons.js";
 import {
     confirmSheet,
     sheet,
@@ -45,15 +46,13 @@ export type SettingsGoalsV2View = {
 type GoalRow = {
     label: string;
     value: string;
-    dotKey?:
-        | "calories"
-        | "protein"
-        | "carbs"
-        | "fat"
-        | "fiber"
-        | "sugar"
-        | "caffeine";
+    /** The macro dot (FigCraft 23562 protein, carbs and fat rows). */
+    dotKey?: "protein" | "carbs" | "fat";
+    /** The row icon the frame gives calories, water and the limits. */
+    icon?: "bolt" | "drop" | "list";
 };
+
+const GOAL_ICONS = { bolt: iconBolt, drop: iconDrop, list: iconList };
 
 const DRINK_NOUN: Record<DrinkUnit, [one: string, many: string]> = {
     us: ["US drink", "US drinks"],
@@ -99,7 +98,7 @@ export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
         {
             label: "Calories",
             value: floorGoal(goals.daily_calories, (n) => `${num(n)} kcal`),
-            dotKey: "calories",
+            icon: "bolt",
         },
         {
             label: "Protein",
@@ -121,21 +120,22 @@ export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
         {
             label: "Water",
             value: floorGoal(goals.daily_water_ml, formatWaterGoal),
+            icon: "drop",
         },
         {
             label: "Fiber, at least",
             value: floorGoal(goals.daily_fiber_g, (n) => `${n} g`),
-            dotKey: "fiber",
+            icon: "list",
         },
         {
             label: "Sugar, at most",
             value: ceilingGoal(goals.daily_sugar_g, (n) => `${n} g`),
-            dotKey: "sugar",
+            icon: "list",
         },
         {
             label: "Caffeine, at most",
             value: ceilingGoal(goals.daily_caffeine_mg, (n) => `${n} mg`),
-            dotKey: "caffeine",
+            icon: "bolt",
         },
     );
     if (view.alcohol) {
@@ -144,6 +144,8 @@ export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
             value: ceilingGoal(goals.daily_alcohol_g, (n) =>
                 alcoholLimitText(n, view.alcohol!),
             ),
+            // No frame shows alcohol; the drink shares water's drop.
+            icon: "drop",
         });
     }
     rows.push({
@@ -165,10 +167,13 @@ function formatWaterGoal(ml: number): string {
 }
 
 function goalRowMarkup(row: GoalRow): string {
-    const dt =
-        row.dotKey != null
-            ? `<dt>${String(dot(row.dotKey, { size: "sm" }))}${esc(row.label)}</dt>`
-            : `<dt>${esc(row.label)}</dt>`;
+    const marker =
+        row.icon != null
+            ? `<span class="fd-settings-goals-icon">${String(GOAL_ICONS[row.icon]())}</span>`
+            : row.dotKey != null
+              ? String(dot(row.dotKey))
+              : "";
+    const dt = `<dt>${marker}${esc(row.label)}</dt>`;
     return `<div class="fd-settings-member-dl__row">${dt}<dd>${esc(row.value)}</dd></div>`;
 }
 

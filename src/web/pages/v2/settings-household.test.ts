@@ -66,6 +66,14 @@ function baseView(
 }
 
 describe("settings household v2", () => {
+    test("members sit in one card, each with an initials avatar", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).toContain('class="fd-settings-members-card"');
+        expect(html).toContain(
+            '<span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">B</span>',
+        );
+    });
+
     test("owner page shows household menu and management targets", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(html).toContain(SETTINGS_HOUSEHOLD_V2_MARKER);

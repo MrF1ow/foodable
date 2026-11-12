@@ -64,3 +64,13 @@ export function iconRefresh(): Html {
 export function iconBolt(): Html {
     return icon('<path d="M13 3L6 13.5h5L10 21l7-10.5h-5L13 3Z"/>');
 }
+
+/** Water goal icon (FigCraft Icon/drop 23601): a drop, 12x17 in the 24 box. */
+export function iconDrop(): Html {
+    return icon('<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11Z"/>');
+}
+
+/** Fiber and sugar goal icon (FigCraft Icon/list 23607): a page of lines. */
+export function iconList(): Html {
+    return icon('<path d="M9 8h6M9 12h6M9 16h3M5 4h14v16H5z"/>');
+}

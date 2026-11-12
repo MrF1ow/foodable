@@ -348,6 +348,42 @@ function filteredRows(view: KitchenUsualsV2View): UsualProductRow[] {
     });
 }
 
+function partsMarkup(parts: readonly UsualPart[]): string {
+    return parts
+        .map((part) =>
+            typeof part === "object"
+                ? `<span class="fd-tone fd-tone--${part.tone}">${esc(part.text)}</span>`
+                : `<span>${esc(part)}</span>`,
+        )
+        .join(`<span class="fd-sep" aria-hidden="true"> · </span>`);
+}
+
+/**
+ * The desktop table's cells (FigCraft 48217: product, store, amount, restock).
+ * They show from 1024px, where the phone's meta and sub-line are hidden; the
+ * restock cell takes the row's status tone, "low now" or "on the list".
+ */
+export function usualTableCells(meta: KitchenUsualsRowMeta): string {
+    const product =
+        meta.productLabel === "Any brand"
+            ? `<span class="fd-usual-cell fd-usual-cell--product fd-usual-cell--muted">${esc(meta.productLabel)}</span>`
+            : `<span class="fd-usual-cell fd-usual-cell--product">${esc(meta.productLabel)}</span>`;
+    const restock: UsualPart[] = meta.restock
+        ? usualRestockParts(meta.restock)
+        : [];
+    const status = meta.lowNow
+        ? { text: "low now", tone: "warn" as const }
+        : meta.onList
+          ? { text: "on the list", tone: "accent" as const }
+          : null;
+    if (status) restock.push(status.text);
+    const tone = status ? ` fd-tone fd-tone--${status.tone}` : "";
+    return `${product}<span class="fd-usual-cell fd-usual-cell--store">${esc(meta.storeName ?? "")}</span><span class="fd-usual-cell fd-usual-cell--amount">${esc(meta.amountLabel ?? "")}</span><span class="fd-usual-cell fd-usual-cell--restock${tone}">${status ? restock.map((part) => esc(typeof part === "object" ? part.text : part)).join(" · ") : partsMarkup(restock)}</span>`;
+}
+
+/** The desktop table's column titles; the phone list has none. */
+const USUAL_TABLE_HEAD = `<div class="fd-kitchen-usual-thead" aria-hidden="true"><span>Food</span><span>Product</span><span>Store</span><span>Amount</span><span>Restock</span></div>`;
+
 function usualListRow(row: UsualProductRow, view: KitchenUsualsV2View): Html {
     const meta = view.rowMeta.get(row.food.id)!;
     const sheetId = usualSheetId(row.food.id);
@@ -358,13 +394,18 @@ function usualListRow(row: UsualProductRow, view: KitchenUsualsV2View): Html {
             parts: kitchenUsualRowParts(meta),
         }),
     );
+    // Function replacements: a string would read `$` in an id as a pattern.
     return raw(
-        // A function replacement: a string would read `$` in an id as a pattern.
-        rowHtml.replace(
-            "<li ",
-            () =>
-                `<li id="fd-usual-row-${esc(row.food.id)}" data-fd-usual-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
-        ),
+        rowHtml
+            .replace(
+                "<li ",
+                () =>
+                    `<li id="fd-usual-row-${esc(row.food.id)}" data-fd-usual-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
+            )
+            .replace(
+                '<span class="fd-row__chevron"',
+                () => `${usualTableCells(meta)}<span class="fd-row__chevron"`,
+            ),
     );
 }
 
@@ -750,7 +791,7 @@ ${pageError}
 ${String(runningLowStrip(view.notices))}
 ${view.stores.length > 0 ? storeFilterChips(view) : ""}
 ${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}
-${list}
+<div class="fd-kitchen-usual-table">${rows.length > 0 ? USUAL_TABLE_HEAD : ""}${list}</div>
 <div class="fd-kitchen-usual-add-wrap">${addTrigger}</div>
 ${sheets}
 ${addSheet}
