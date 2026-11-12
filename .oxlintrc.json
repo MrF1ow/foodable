@@ -35,6 +35,7 @@
                                 "src/db/rules",
                                 "src/db/score-settings",
                                 "src/db/settings",
+                                "src/db/share-links",
                                 "src/db/social-readers",
                                 "src/db/sql",
                                 "src/db/stock",

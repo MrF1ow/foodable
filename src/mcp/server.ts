@@ -55,6 +55,7 @@ import { registerRulesTools } from "./tools/rules.js";
 import { registerHouseholdTools } from "./tools/household.js";
 import { registerHouseholdDigestTools } from "./tools/household-digest.js";
 import { registerNoticeTools } from "./tools/notices.js";
+import { registerSharingTools } from "./tools/sharing.js";
 
 // Sent to clients in the initialize response (SDK ServerOptions.instructions).
 // Advisory — not every client surfaces it, so the enforcement rule ("interview
@@ -162,6 +163,7 @@ export function registerTools(
     registerNoticeTools(server, ctx);
     registerHouseholdTools(server, ctx);
     registerHouseholdDigestTools(server, ctx);
+    registerSharingTools(server, ctx);
     return ctx;
 }
 
