@@ -75,6 +75,7 @@ import {
     noticeCodeDismissible,
     noticeDismissLabel,
     noticeDismissPair,
+    noticeDismissScope,
     noticeDigestWire,
     noticeSentence,
 } from "../copy/notices.js";
@@ -227,6 +228,7 @@ const NOTICE_SUBJECT_KIND = z.enum([
     "recipe_ingredient",
     "fridge_item",
     "grocery_line",
+    "member",
 ]);
 
 const NOTICE_RELATED_KIND = z.enum([
@@ -297,6 +299,10 @@ function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
     if (noticeDismissPair(notice.code)) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         related_id = foodRel?.id ?? null;
+    } else {
+        // A scoped dismissal (until the next weigh-in, say) names its scope.
+        const scope = noticeDismissScope(notice);
+        related_id = scope === "" ? null : scope;
     }
     return {
         code: notice.code,

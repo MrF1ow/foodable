@@ -300,6 +300,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/notices.ts": "web",
     "src/domain/notice-dismissals.ts": "web",
     "src/domain/notices-for.ts": "web",
+    "src/domain/notices-actionable.ts": "web",
+    "src/domain/notices-actionable.test.ts": "web",
     "src/mcp/tools/notices.ts": "web",
     "src/web/attention.ts": "web",
     "src/web/pages/needs-attention.ts": "web",

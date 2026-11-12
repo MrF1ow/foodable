@@ -104,6 +104,8 @@ const realFoods = { ...actualFoods };
 const realFoodSearch = { ...actualFoodSearch };
 const realExports = { ...actualExports };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
+const realDbPlans = { ...actualDbPlans };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realDbUsers = { ...actualDbUsers };
 const exportMemoryStore = createMemoryExportArchiveStore();
 import { DELETED_ACCOUNT_ANALYTICS_ID } from "./analytics.js";
@@ -161,6 +163,13 @@ import {
 import { addAllergen, createMemoryRulesStore } from "./domain/rules.js";
 import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
+import { createMemoryPlansStore } from "./domain/plan.js";
+import {
+    createMemoryWeighInStore,
+    type LatestWeighIn,
+} from "./domain/notices-actionable.js";
+import * as actualDbPlans from "./db/plans.js";
+import * as actualDbWeighIns from "./db/weigh-ins.js";
 import { createMemorySocialReaderStatusStore } from "./domain/social-readers.js";
 import {
     TOOLS,
@@ -361,6 +370,8 @@ const db = {
     rulesStore: createMemoryRulesStore(),
     foodsStore: createMemoryFoodsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
+    plansStore: createMemoryPlansStore(),
+    weighInRows: [] as LatestWeighIn[],
     barcodeFoods: {} as Record<string, FoodResult>,
     // Off by default so no test reaches Open Food Facts or depends on
     // OFF_USER_AGENT; the kill-switch tests turn it on (with fetch stubbed or
@@ -778,6 +789,16 @@ mock.module("./db/notice-dismissals.js", () => ({
     liveNoticeDismissalsStore: () => db.dismissalsStore,
 }));
 
+mock.module("./db/plans.js", () => ({
+    ...actualDbPlans,
+    liveRecipePlansStore: () => db.plansStore,
+}));
+
+mock.module("./db/weigh-ins.js", () => ({
+    ...actualDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore(db.weighInRows),
+}));
+
 mock.module("./db/social-readers.js", () => ({
     ...actualDbSocialReaders,
     liveSocialReaderStatusStore: () => db.socialReaderStatusStore,
@@ -849,6 +870,8 @@ afterAll(() => {
     mock.module("./db/rules.js", () => realDbRules);
     mock.module("./db/foods.js", () => realDbFoods);
     mock.module("./db/notice-dismissals.js", () => realDbNoticeDismissals);
+    mock.module("./db/plans.js", () => realDbPlans);
+    mock.module("./db/weigh-ins.js", () => realDbWeighIns);
     mock.module("./db/social-readers.js", () => realDbSocialReaders);
     mock.module("./foods.js", () => realFoods);
     mock.module("./food-search.js", () => realFoodSearch);
@@ -899,6 +922,8 @@ beforeEach(() => {
         },
     ];
     db.dismissalsStore = createMemoryNoticeDismissalsStore();
+    db.plansStore = createMemoryPlansStore();
+    db.weighInRows = [];
     db.fridgeStore = createMemoryFridgeStore();
     db.stockStore = createMemoryStockStore();
     db.groceryStore = createMemoryGroceryStore();
@@ -2036,6 +2061,27 @@ describe("set_alcohol_tracking", () => {
         expect(setWidgets?.description).toContain("reconnects");
         await client.close();
         await server.close();
+    });
+});
+
+describe("the notice tool descriptions match what the tools do", () => {
+    test("dismiss_notice says to pass related_id back; list_notices does not promise the badge", async () => {
+        const server = new McpServer(
+            { name: "t", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(server, { kind: "user", userId: "u1" }, true, null);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "c", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        const { tools } = await client.listTools();
+        await client.close();
+        await server.close();
+        const dismiss = tools.find((t) => t.name === "dismiss_notice");
+        expect(dismiss?.description).toContain("related_id");
+        expect(dismiss?.description).not.toContain("info-level");
+        const list = tools.find((t) => t.name === "list_notices");
+        expect(list?.description).not.toContain("badge");
     });
 });
 
@@ -7845,9 +7891,7 @@ describe("phone-app domain MCP tools", () => {
                 subject_id: itemId,
             });
             expect(warn.isError).toBe(true);
-            expect(textOf(warn)).toContain(
-                "Only suggestions (info notices) can be dismissed",
-            );
+            expect(textOf(warn)).toContain("This notice can't be dismissed");
 
             const missing = await call("dismiss_notice", {
                 code: "fridge.expiring",
@@ -8113,6 +8157,165 @@ describe("household config plurals_same_food over HTTP", () => {
             });
         });
     });
+});
+
+describe("household notices with actions over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    const CODES = [
+        "grocery.running_low",
+        "plan.missing_ingredient",
+        "nutrition.weigh_in_due",
+    ];
+
+    // A usual with nothing in stock, a recipe planned for tomorrow that needs
+    // flour, and a member whose last weigh-in was nine days ago.
+    async function seed(call: CallTool) {
+        const today = utcTodayFromDate();
+        await db.foodsStore.insertFood(
+            newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Eggs",
+                defaultUnit: "each",
+                restockWhenLow: true,
+                usualAmount: { amount: 12, unit: "each" },
+            }),
+        );
+        const flour = await call("upsert_food", { name: "Flour" });
+        const recipe = await call("create_recipe", {
+            name: "Bread",
+            yield_portions: 1,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: flour.structuredContent?.id as string,
+            amount: 200,
+            unit: "g",
+        });
+        await db.plansStore.addPlan({
+            householdId: "hh-1",
+            recipeId,
+            date: addUtcDays(today, 1),
+            slot: "dinner",
+            servings: 1,
+        });
+        db.weighInRows.push({
+            userId: "u1",
+            displayName: "U1",
+            lastLoggedAt: `${addUtcDays(today, -9)}T12:00:00Z`,
+        });
+    }
+
+    type Wire = {
+        code: string;
+        message: string;
+        action: { label: string } | null;
+        can_dismiss: boolean;
+        dismiss: {
+            code: string;
+            subject_kind: string;
+            subject_id: string;
+            related_id: string | null;
+        } | null;
+    };
+
+    async function listed(call: CallTool, args: Record<string, unknown> = {}) {
+        const out = await call("list_notices", args);
+        expect(out.isError).toBeFalsy();
+        const sc = out.structuredContent as { count: number; notices: Wire[] };
+        for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
+        return sc;
+    }
+
+    test.each(ERAS)(
+        "with ui-v2 on, list_notices carries the three with their actions and each can be dismissed (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                const mine = sc.notices.filter((n) => CODES.includes(n.code));
+                expect(mine.map((n) => n.code).sort()).toEqual(
+                    [...CODES].sort(),
+                );
+                const byCode = Object.fromEntries(mine.map((n) => [n.code, n]));
+                expect(byCode["grocery.running_low"]).toMatchObject({
+                    message: "Running low: Eggs (0 left, below 3)",
+                    action: { label: "Add to list" },
+                });
+                expect(byCode["plan.missing_ingredient"]).toMatchObject({
+                    message: "Flour, 200 g, missing for Bread, tomorrow",
+                    action: { label: "Add" },
+                });
+                expect(byCode["nutrition.weigh_in_due"]).toMatchObject({
+                    message: "U1 hasn't weighed in for 9 days",
+                    action: { label: "Weigh in" },
+                });
+                expect(sc.count).toBeGreaterThanOrEqual(3);
+
+                const narrowed = await listed(call, {
+                    code: "plan.missing_ingredient",
+                });
+                expect(narrowed.notices).toHaveLength(1);
+
+                for (const n of mine) {
+                    expect(n.can_dismiss).toBe(true);
+                    const d = n.dismiss!;
+                    const out = await call("dismiss_notice", {
+                        code: d.code,
+                        subject_kind: d.subject_kind,
+                        subject_id: d.subject_id,
+                        ...(d.related_id ? { related_id: d.related_id } : {}),
+                    });
+                    expect(out.isError).toBeFalsy();
+                }
+                const after = await listed(call);
+                expect(
+                    after.notices.filter((n) => CODES.includes(n.code)),
+                ).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "with ui-v2 off, none of the three is listed or dismissable (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                expect(
+                    sc.notices.filter((n) => CODES.includes(n.code)),
+                ).toEqual([]);
+                const out = await call("dismiss_notice", {
+                    code: "nutrition.weigh_in_due",
+                    subject_kind: "member",
+                    subject_id: "u1",
+                    related_id: "2026-01-01",
+                });
+                expect(out.isError).toBe(true);
+            });
+        },
+    );
 });
 
 describe("usual tools keep the usual's schedule over HTTP", () => {

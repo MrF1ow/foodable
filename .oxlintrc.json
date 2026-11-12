@@ -29,6 +29,7 @@
                                 "src/db/household",
                                 "src/db/notice-dismissals",
                                 "src/db/nutrition",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",
@@ -36,7 +37,8 @@
                                 "src/db/social-readers",
                                 "src/db/sql",
                                 "src/db/stock",
-                                "src/db/users"
+                                "src/db/users",
+                                "src/db/weigh-ins"
                             ],
                             "src/middleware.test.ts": ["src/db/tokens"],
                             "src/oauth.test.ts": ["src/db/tokens"],

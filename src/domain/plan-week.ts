@@ -418,6 +418,68 @@ export function unknownMissingNotice(
     return `${line.displayName}: can't tell how much of it you already have, so ${what} is on the list.`;
 }
 
+/** What the grocery list already holds of a missing line's food. */
+export type ListCover =
+    | { covered: true; existing: GroceryLine }
+    | {
+          covered: false;
+          /** What is still to add; undefined for an unmeasured line. */
+          amount: number | undefined;
+          /** Unchecked lines of the food, which may hold part of it. */
+          open: GroceryLine[];
+      };
+
+/**
+ * Whether the list already covers `line` (a missing line, whose food is `foodId`). Lines
+ * of the food's family count, a product standing for its plain food. An
+ * unmeasured ingredient is covered by any line of the food, checked or not. A
+ * measured one has the unchecked lines whose unit converts taken off what is
+ * missing: all of it covered means covered, part of it leaves the rest, and a
+ * line in a unit that cannot be compared covers nothing. This is the one
+ * dedupe both "add to groceries" and the plan notice go through.
+ */
+export function coverOnList(
+    line: PlanMissingLine,
+    foodId: string,
+    list: readonly GroceryLine[],
+    foodsById: ReadonlyMap<
+        string,
+        FoodQuantityFactors & { genericFoodId: string | null }
+    >,
+): ListCover {
+    const family = familyIdOf(foodId, foodsById);
+    const sameFood = list.filter(
+        (row) =>
+            row.foodId != null && familyIdOf(row.foodId, foodsById) === family,
+    );
+    const open = sameFood.filter((row) => !row.checked);
+
+    let amount = line.missing?.amount;
+    if (line.missing == null) {
+        if (sameFood[0]) return { covered: true, existing: sameFood[0] };
+        return { covered: false, amount, open };
+    }
+    let covered = 0;
+    let first: GroceryLine | undefined;
+    for (const row of open) {
+        const converted = amountIn(
+            row.quantity,
+            line.missing.unit,
+            foodsById.get(row.foodId!),
+            foodsById.get(foodId),
+        );
+        if (converted == null) continue;
+        covered += converted;
+        first ??= row;
+    }
+    if (first) {
+        const rest = roundAmount(line.missing.amount - covered);
+        if (rest <= 0) return { covered: true, existing: first };
+        amount = rest;
+    }
+    return { covered: false, amount, open };
+}
+
 export type AddMissingToGroceriesResult = {
     added: GroceryLine[];
     /** Lines the list already covers (a line of the food is on it); nothing was added. */
@@ -491,43 +553,12 @@ export async function addMissingToGroceries(
             result.skipped.push({ line, reason: "no food" });
             continue;
         }
-        const family = familyIdOf(line.foodId, foodsById);
-        const sameFood = before.filter(
-            (row) =>
-                row.foodId != null &&
-                familyIdOf(row.foodId, foodsById) === family,
-        );
-        const open = sameFood.filter((row) => !row.checked);
-
-        let amount = line.missing?.amount;
-        if (line.missing == null) {
-            if (sameFood[0]) {
-                result.onList.push({ line, existing: sameFood[0] });
-                continue;
-            }
-        } else {
-            let covered = 0;
-            let first: GroceryLine | undefined;
-            for (const row of open) {
-                const converted = amountIn(
-                    row.quantity,
-                    line.missing.unit,
-                    foodsById.get(row.foodId!),
-                    foodsById.get(line.foodId),
-                );
-                if (converted == null) continue;
-                covered += converted;
-                first ??= row;
-            }
-            if (first) {
-                const rest = roundAmount(line.missing.amount - covered);
-                if (rest <= 0) {
-                    result.onList.push({ line, existing: first });
-                    continue;
-                }
-                amount = rest;
-            }
+        const cover = coverOnList(line, line.foodId, before, foodsById);
+        if (cover.covered) {
+            result.onList.push({ line, existing: cover.existing });
+            continue;
         }
+        const { open, amount } = cover;
 
         try {
             let inserted = await addGroceryFoodById(grocery, settings, foods, {

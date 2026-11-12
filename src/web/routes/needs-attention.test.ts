@@ -398,7 +398,7 @@ describe("needs-attention routes", () => {
         });
         expect(r.status).toBe(400);
         const html = await r.text();
-        expect(html.toLowerCase()).toContain("suggestion");
+        expect(html.toLowerCase()).toContain("can't be dismissed");
         const after = await noticesFor(noticeDeps(), HH, {
             today: utcTodayFromDate(),
         });
