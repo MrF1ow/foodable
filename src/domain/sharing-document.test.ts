@@ -305,8 +305,8 @@ describe("recipeShareDocument", () => {
         const doc = build(
             recipe({
                 name: wide(L.name),
-                // control characters escape to six bytes each in JSON
-                instructions: "\u0001".repeat(L.instructions),
+                // three bytes per UTF-16 unit: the widest a unit can be
+                instructions: "漢".repeat(L.instructions),
                 tags: Array.from({ length: L.tags }, (_, i) =>
                     `${i}`.padEnd(L.tagLength, "é"),
                 ),
@@ -322,9 +322,9 @@ describe("recipeShareDocument", () => {
         expect(parseShareDocument(text)).toEqual(doc!);
     });
 
-    test("every field filled to its bound with control characters is over the cap: no document, and the parser refuses the text by size", () => {
+    test("every field padded to its bound with control characters gets no document, and the parser refuses the text", () => {
         const L = SHARE_DOCUMENT_LIMITS;
-        // "\u0001" is six bytes escaped in JSON: schema-valid, but too big.
+        // "\u0001" is six bytes escaped in JSON, and refused as text anyway.
         const ctl = (n: number) => "\u0001".repeat(n);
         const big = food({
             name: ctl(L.foodName),
@@ -357,7 +357,7 @@ describe("recipeShareDocument", () => {
         });
         expect(build(source, ingredients, foodsById(big))).toBeNull();
 
-        // The same fields, built by hand: schema-valid yet over the byte cap.
+        // The same fields, built by hand: over the byte cap as well.
         const nutrition = Object.fromEntries(
             [
                 "calories",
@@ -544,5 +544,109 @@ describe("parseShareDocument", () => {
                 "ingredients.0.food.calories",
             );
         }
+    });
+});
+
+describe("control characters in a document", () => {
+    const valid = (): ShareDocument =>
+        build(recipe(), [ingredient()], foodsById(food()))!;
+    const text = (patch: (d: any) => void) => {
+        const d = structuredClone(valid()) as any;
+        patch(d);
+        return JSON.stringify(d);
+    };
+
+    // Postgres text cannot hold NUL; the rest of C0 never belongs in a recipe.
+    const fields: [string, (d: any, bad: string) => void, string][] = [
+        ["name", (d, bad) => (d.name = `So${bad}up`), "name"],
+        [
+            "instructions",
+            (d, bad) => (d.instructions = `Stir${bad} well`),
+            "instructions",
+        ],
+        ["tag", (d, bad) => (d.tags = [`so${bad}up`]), "tags.0"],
+        [
+            "ingredient name",
+            (d, bad) => (d.ingredients[0].food_name = `Len${bad}tils`),
+            "ingredients.0.food_name",
+        ],
+        [
+            "ingredient unit",
+            (d, bad) => (d.ingredients[0].unit = `g${bad}g`),
+            "ingredients.0.unit",
+        ],
+    ];
+    const bad = [
+        "\u0000",
+        "\u0001",
+        "\u0007",
+        "\u0008",
+        "\u000b",
+        "\u000c",
+        "\u001b",
+        "\u001f",
+    ];
+
+    for (const [label, patch, path] of fields) {
+        for (const char of bad) {
+            test(`the ${label} refuses U+${char.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()}`, () => {
+                const doc = text((d) => patch(d, char));
+                expect(() => parseShareDocument(doc)).toThrow(
+                    ShareDocumentError,
+                );
+                expect(() => parseShareDocument(doc)).toThrow(
+                    new RegExp(
+                        `${path.replaceAll(".", "\\.")}: .*control character`,
+                    ),
+                );
+            });
+        }
+    }
+
+    test("tab, newline and carriage return are text, and survive a round trip", () => {
+        const doc = valid();
+        doc.instructions = "1. Rinse.\r\n2.\tSimmer.\n3. Serve.";
+        doc.name = "Soup\tof the day";
+        expect(parseShareDocument(JSON.stringify(doc))).toEqual(doc);
+    });
+
+    test("accents, emoji and other non-ASCII text are not control characters", () => {
+        const doc = valid();
+        doc.name = "Crème brûlée 🍮 — 豆腐";
+        doc.tags = ["dessert", "été"];
+        expect(parseShareDocument(JSON.stringify(doc))).toEqual(doc);
+    });
+
+    test("a recipe whose text holds a control character has no document, so the builder and the parser agree", () => {
+        expect(
+            build(recipe({ name: "So\u0000up" }), [], foodsById()),
+        ).toBeNull();
+        expect(
+            build(recipe({ instructions: "a\u001bb" }), [], foodsById()),
+        ).toBeNull();
+        expect(
+            build(recipe({ tags: ["x\u0007"] }), [], foodsById()),
+        ).toBeNull();
+        expect(
+            build(
+                recipe(),
+                [ingredient({ displayName: "Len\u0000tils", foodId: null })],
+                foodsById(),
+            ),
+        ).toBeNull();
+        expect(
+            build(
+                recipe(),
+                [ingredient({ quantity: { amount: 1, unit: "g\u0000" } })],
+                foodsById(food()),
+            ),
+        ).toBeNull();
+        expect(
+            build(
+                recipe(),
+                [ingredient()],
+                foodsById(food({ name: "Red\u0000lentils" })),
+            ),
+        ).toBeNull();
     });
 });

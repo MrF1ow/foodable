@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import pkg from "../package.json" with { type: "json" };
 import {
     FOODABLE_USER_AGENT,
@@ -250,6 +252,7 @@ describe("createSafeFetcher", () => {
         const requested: string[] = [];
         const resolved: string[] = [];
         const fetcher = createSafeFetcher({
+            pinAddresses: false, // these fakes route on the hostname
             resolve: async (host) => {
                 resolved.push(host);
                 return [PUBLIC];
@@ -460,6 +463,7 @@ describe("createSafeFetcher", () => {
     test("a redirect hop's slow robots.txt shares the page deadline", async () => {
         const started = Date.now();
         const fetcher = createSafeFetcher({
+            pinAddresses: false, // these fakes route on the hostname
             resolve: async () => [PUBLIC],
             fetch: async (url) => {
                 const href = String(url);
@@ -578,6 +582,7 @@ describe("createSafeFetcher", () => {
 
     test("allowedHosts refuses redirect to a host outside the list", async () => {
         const fetcher = createSafeFetcher({
+            pinAddresses: false, // these fakes route on the hostname
             resolve: async (host) =>
                 host === "graph.example" || host === "example.com"
                     ? [PUBLIC]
@@ -717,6 +722,7 @@ describe("createSafeFetcher", () => {
 test("a robots.txt redirect to another site is never followed", async () => {
     const requested: string[] = [];
     const fetcher = createSafeFetcher({
+        pinAddresses: false, // these fakes route on the hostname
         resolve: async () => [PUBLIC],
         fetch: async (url) => {
             const href = String(url);
@@ -754,3 +760,331 @@ test("a robots.txt redirect to the www twin is followed", async () => {
     });
     expect(await fetcher.robotsAllows("https://example.com/soup")).toBe(true);
 });
+
+describe("createSafeFetcher: the connection goes to the address that was checked", () => {
+    const TOKEN_PATH = `/s/${"A".repeat(43)}.json`;
+    const JSON_PAGE = { accept: ["application/json"], checkRobots: false };
+    const json = (body = "{}") =>
+        okResponse(body, { headers: { "content-type": "application/json" } });
+
+    type Seen = { href: string; host: string | undefined; tls: unknown };
+    function recorder(answer: (href: string, n: number) => Response) {
+        const seen: Seen[] = [];
+        const fetch = async (
+            input: string | URL,
+            init?: BunFetchRequestInit,
+        ): Promise<Response> => {
+            const headers = (init?.headers ?? {}) as Record<string, string>;
+            seen.push({
+                href: String(input),
+                host: headers["Host"],
+                tls: init?.tls,
+            });
+            return answer(String(input), seen.length);
+        };
+        return { seen, fetch };
+    }
+
+    test("a host that resolves to a public address first and a private one after is connected to by the public address", async () => {
+        // What a rebinding DNS server does: the answer the check sees is not
+        // the answer a second lookup would give.
+        let lookups = 0;
+        const { seen, fetch } = recorder(() => json());
+        const fetcher = createSafeFetcher({
+            resolve: async () => (++lookups === 1 ? [PUBLIC] : ["127.0.0.1"]),
+            fetch,
+        });
+        const out = await fetcher.fetchPage(
+            `https://rebind.example.com${TOKEN_PATH}`,
+            JSON_PAGE,
+        );
+        expect(out.ok).toBe(true);
+        expect(lookups).toBe(1);
+        expect(seen).toEqual([
+            {
+                href: `https://${PUBLIC}${TOKEN_PATH}`,
+                host: "rebind.example.com",
+                tls: { serverName: "rebind.example.com" },
+            },
+        ]);
+    });
+
+    test("the outcome still names the page by its hostname", async () => {
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch: recorder(() => json()).fetch,
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            JSON_PAGE,
+        );
+        expect(out.ok && out.url).toBe(`https://example.com${TOKEN_PATH}`);
+    });
+
+    test("every redirect hop is connected to the address checked for that hop", async () => {
+        const addresses: Record<string, string> = {
+            "a.example": "93.184.216.34",
+            "b.example": "93.184.216.99",
+        };
+        const lookups: string[] = [];
+        const { seen, fetch } = recorder((href) =>
+            href.includes("93.184.216.34")
+                ? okResponse("", {
+                      status: 302,
+                      headers: { location: "https://b.example/next.json" },
+                  })
+                : json(),
+        );
+        const fetcher = createSafeFetcher({
+            resolve: async (host) => {
+                lookups.push(host);
+                // The hop host would answer 127.0.0.1 to any later lookup.
+                return lookups.filter((h) => h === host).length === 1
+                    ? [addresses[host]!]
+                    : ["127.0.0.1"];
+            },
+            fetch,
+        });
+        const out = await fetcher.fetchPage("https://a.example/start", {
+            ...JSON_PAGE,
+        });
+        expect(out.ok).toBe(true);
+        expect(
+            seen.map(({ href, host, tls }) => ({ href, host, tls })),
+        ).toEqual([
+            {
+                href: "https://93.184.216.34/start",
+                host: "a.example",
+                tls: { serverName: "a.example" },
+            },
+            {
+                href: "https://93.184.216.99/next.json",
+                host: "b.example",
+                tls: { serverName: "b.example" },
+            },
+        ]);
+    });
+
+    test("robots.txt is fetched from the checked address too", async () => {
+        const { seen, fetch } = recorder((href) =>
+            href.endsWith("/robots.txt")
+                ? okResponse("User-agent: *\nAllow: /")
+                : okResponse("<html></html>"),
+        );
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch,
+        });
+        const out = await fetcher.fetchPage("https://example.com/soup", {
+            accept: ["text/html"],
+            checkRobots: true,
+        });
+        expect(out.ok).toBe(true);
+        expect(seen.map((s) => s.href)).toEqual([
+            `https://${PUBLIC}/robots.txt`,
+            `https://${PUBLIC}/soup`,
+        ]);
+        expect(seen.every((s) => s.host === "example.com")).toBe(true);
+    });
+
+    test("an IPv6 address is bracketed in the URL", async () => {
+        const { seen, fetch } = recorder(() => json());
+        const fetcher = createSafeFetcher({
+            resolve: async () => ["2606:4700::1111"],
+            fetch,
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            JSON_PAGE,
+        );
+        expect(out.ok).toBe(true);
+        expect(seen[0]?.href).toBe(`https://[2606:4700::1111]${TOKEN_PATH}`);
+        expect(seen[0]?.host).toBe("example.com");
+    });
+
+    test("when an address does not connect, the next checked address is tried", async () => {
+        const { seen, fetch } = recorder((href, n) => {
+            if (n === 1) throw new Error("unreachable");
+            return href.includes("93.184.216.99") ? json() : json("{}");
+        });
+        const fetcher = createSafeFetcher({
+            resolve: async () => ["2606:4700::1111", "93.184.216.99"],
+            fetch,
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            JSON_PAGE,
+        );
+        expect(out.ok).toBe(true);
+        expect(seen.map((s) => s.href)).toEqual([
+            `https://[2606:4700::1111]${TOKEN_PATH}`,
+            `https://93.184.216.99${TOKEN_PATH}`,
+        ]);
+    });
+
+    test("when no checked address connects it is a network error, not a retry on the hostname", async () => {
+        const { seen, fetch } = recorder(() => {
+            throw new Error("unreachable");
+        });
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC, "93.184.216.99"],
+            fetch,
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            JSON_PAGE,
+        );
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("network_error");
+        expect(seen.map((s) => new URL(s.href).hostname)).toEqual([
+            PUBLIC,
+            "93.184.216.99",
+        ]);
+    });
+
+    test("an IP-literal link is requested as written, with no name to pin", async () => {
+        const { seen, fetch } = recorder(() => json());
+        const fetcher = createSafeFetcher({
+            resolve: async (host) => [host],
+            fetch,
+        });
+        const out = await fetcher.fetchPage(`https://${PUBLIC}${TOKEN_PATH}`, {
+            ...JSON_PAGE,
+        });
+        expect(out.ok).toBe(true);
+        expect(seen).toEqual([
+            {
+                href: `https://${PUBLIC}${TOKEN_PATH}`,
+                host: undefined,
+                tls: undefined,
+            },
+        ]);
+    });
+
+    test("pinAddresses: false hands the fetch the URL as written", async () => {
+        const { seen, fetch } = recorder(() => json());
+        const fetcher = createSafeFetcher({
+            resolve: async () => [PUBLIC],
+            fetch,
+            pinAddresses: false,
+        });
+        await fetcher.fetchPage(`https://example.com${TOKEN_PATH}`, JSON_PAGE);
+        expect(seen[0]?.href).toBe(`https://example.com${TOKEN_PATH}`);
+    });
+});
+
+// Real TLS, no fetch double for the handshake: the fetcher's request goes to
+// a local server, so what is shown is what Bun's fetch does with the
+// `serverName` the fetcher sets while connecting to an IP address.
+describe.skipIf(!Bun.which("openssl"))(
+    "createSafeFetcher: a pinned connection still verifies the certificate against the hostname",
+    () => {
+        const PAGE = `/s/${"A".repeat(43)}.json`;
+        const names = ["share.test", "other.test"] as const;
+        let dir = "";
+        const pem = {} as Record<
+            (typeof names)[number],
+            { cert: string; key: string }
+        >;
+
+        beforeAll(async () => {
+            dir = await mkdtemp(join(tmpdir(), "fetch-safe-tls-"));
+            for (const name of names) {
+                const keyPath = join(dir, `${name}.key`);
+                const certPath = join(dir, `${name}.crt`);
+                await Bun.$`openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout ${keyPath} -out ${certPath} -days 2 -subj ${`/CN=${name}`} -addext ${`subjectAltName=DNS:${name}`}`.quiet();
+                pem[name] = {
+                    cert: await Bun.file(certPath).text(),
+                    key: await Bun.file(keyPath).text(),
+                };
+            }
+        });
+        afterAll(async () => {
+            if (dir) await rm(dir, { recursive: true, force: true });
+        });
+
+        /**
+         * A TLS server whose only certificate is the one issued to
+         * `certName`, and a fetcher that resolves every name to a public
+         * address. The seam: the fetch the fetcher is given forwards the
+         * request the fetcher built (URL host aside, which it points at the
+         * local server) to the real `fetch`, trusting that one certificate.
+         * That trust is the test's alone; nothing in the fetcher can turn
+         * verification off.
+         */
+        function setup(certName: (typeof names)[number]) {
+            const hostHeaders: (string | null)[] = [];
+            const server = Bun.serve({
+                port: 0,
+                hostname: "127.0.0.1",
+                tls: pem[certName],
+                fetch(req) {
+                    hostHeaders.push(req.headers.get("host"));
+                    return Response.json({ host: req.headers.get("host") });
+                },
+            });
+            const connectedTo: string[] = [];
+            const fetcher = createSafeFetcher({
+                resolve: async () => [PUBLIC],
+                fetch: (input, init) => {
+                    const url = new URL(String(input));
+                    connectedTo.push(url.hostname);
+                    url.hostname = "127.0.0.1";
+                    url.port = String(server.port);
+                    return fetch(url, {
+                        ...init,
+                        tls: { ...init?.tls, ca: pem[certName].cert },
+                    });
+                },
+            });
+            return { server, fetcher, hostHeaders, connectedTo };
+        }
+
+        const page = (host: string) => ({
+            url: `https://${host}${PAGE}`,
+            opts: { accept: ["application/json"], checkRobots: false },
+        });
+
+        test("a certificate issued to the page's name is accepted through the pinned address", async () => {
+            const { server, fetcher, hostHeaders, connectedTo } =
+                setup("share.test");
+            try {
+                const { url, opts } = page("share.test");
+                const out = await fetcher.fetchPage(url, opts);
+                expect(out).toMatchObject({ ok: true, status: 200 });
+                expect(connectedTo).toEqual([PUBLIC]);
+                expect(hostHeaders).toEqual(["share.test"]);
+            } finally {
+                await server.stop(true);
+            }
+        });
+
+        test("a certificate issued to another name is refused, and nothing reaches the server", async () => {
+            const { server, fetcher, hostHeaders, connectedTo } =
+                setup("other.test");
+            try {
+                const { url, opts } = page("share.test");
+                const out = await fetcher.fetchPage(url, opts);
+                expect(out.ok).toBe(false);
+                if (out.ok) return;
+                expect(out.reason).toBe("network_error");
+                expect(out.detail).toMatch(/ALTNAME|certificate|altname/i);
+                expect(connectedTo).toEqual([PUBLIC]);
+                expect(hostHeaders).toEqual([]);
+
+                // Same server, same trust: the name it was issued to passes,
+                // so the refusal above is the name check and nothing else.
+                const control = page("other.test");
+                const accepted = await fetcher.fetchPage(
+                    control.url,
+                    control.opts,
+                );
+                expect(accepted).toMatchObject({ ok: true });
+                expect(hostHeaders).toEqual(["other.test"]);
+            } finally {
+                await server.stop(true);
+            }
+        });
+    },
+);

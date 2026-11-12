@@ -12705,6 +12705,70 @@ describe("share link tools", () => {
                 "unsupported_version",
                 /version 3/i,
             ],
+            // A NUL cannot be stored and no other control character belongs
+            // in a recipe: the tool refuses the document rather than fail
+            // while writing it.
+            ...(
+                [
+                    ["a NUL in the name", { name: "So\u0000up" }, /name:/],
+                    [
+                        "a NUL in the instructions",
+                        { instructions: "Stir\u0000 well" },
+                        /instructions:/,
+                    ],
+                    ["a NUL in a tag", { tags: ["so\u0000up"] }, /tags\.0:/],
+                    [
+                        "a NUL in an ingredient name",
+                        {
+                            ingredients: [
+                                {
+                                    food_name: "Len\u0000tils",
+                                    amount: 300,
+                                    unit: "g",
+                                    food: { ...NONE },
+                                },
+                            ],
+                        },
+                        /ingredients\.0\.food_name:/,
+                    ],
+                    [
+                        "a NUL in an ingredient unit",
+                        {
+                            ingredients: [
+                                {
+                                    food_name: "Lentils",
+                                    amount: 300,
+                                    unit: "g\u0000",
+                                    food: { ...NONE },
+                                },
+                            ],
+                        },
+                        /ingredients\.0\.unit:/,
+                    ],
+                    [
+                        "an escape character in the name",
+                        { name: "So\u001bup" },
+                        /name:/,
+                    ],
+                ] as [string, Record<string, unknown>, RegExp][]
+            ).map(
+                ([label, over, where]): [
+                    string,
+                    Record<string, unknown>,
+                    () => void,
+                    string,
+                    RegExp,
+                ] => [
+                    label,
+                    { document: documentJson(over) },
+                    () => {},
+                    "not_recipe",
+                    new RegExp(
+                        `isn't a Foodable recipe\\.[^]*${where.source}[^]*control character`,
+                        "i",
+                    ),
+                ],
+            ),
         ];
 
         for (const [name, args, setup, code, message] of refusals) {

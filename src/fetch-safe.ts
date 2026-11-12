@@ -326,10 +326,15 @@ function memoryFetchHost(hostname: string): string {
     return h;
 }
 
+/** Every address the host resolved to, each one checked public. */
+type CheckedAddresses = { ok: true; addresses: string[] };
+
 async function resolveHost(
     host: string,
     resolve: (host: string) => Promise<string[]>,
-): Promise<{ ok: true } | { ok: false; reason: FetchFailure; detail: string }> {
+): Promise<
+    CheckedAddresses | { ok: false; reason: FetchFailure; detail: string }
+> {
     try {
         const addresses = await resolve(host);
         if (addresses.length === 0) {
@@ -348,7 +353,7 @@ async function resolveHost(
                 };
             }
         }
-        return { ok: true };
+        return { ok: true, addresses };
     } catch (err) {
         return {
             ok: false,
@@ -491,21 +496,88 @@ function pathAllowed(policy: RobotsPolicy, pageUrl: string): boolean {
     return parser.isAllowed(pageUrl, ROBOTS_UA) !== false;
 }
 
-type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
+type FetchFn = (
+    input: string | URL,
+    init?: BunFetchRequestInit,
+) => Promise<Response>;
+
+function isIpLiteralHost(hostname: string): boolean {
+    const bare = stripIpv6Brackets(hostname);
+    return parseIpv4(bare) !== null || bare.includes(":");
+}
+
+/** `url` with its host swapped for `address`, which must be a public IP. */
+function addressedTo(url: URL, address: string): URL {
+    const bare = stripIpv6Brackets(address);
+    const pinned = new URL(url.href);
+    pinned.hostname = bare.includes(":") ? `[${bare}]` : bare;
+    // What is handed to fetch is judged again, not trusted to have parsed as
+    // the address that was checked.
+    if (!isPublicAddress(pinned.hostname)) {
+        throw new Error("Refusing to connect to a non-public address");
+    }
+    return pinned;
+}
 
 export function createSafeFetcher(deps?: {
     fetch?: FetchFn;
+    /**
+     * Connect to the address that was checked (the default). Off hands
+     * `fetch` the URL as written, so a test double can route on the hostname.
+     */
+    pinAddresses?: boolean;
     resolve?: (host: string) => Promise<string[]>;
     now?: () => number;
     robotsTtlMs?: number;
     defaultTimeoutMs?: number;
 }) {
     const doFetch: FetchFn = deps?.fetch ?? globalThis.fetch.bind(globalThis);
+    const pinAddresses = deps?.pinAddresses !== false;
     const resolve = deps?.resolve ?? defaultResolve;
     const now = deps?.now ?? (() => Date.now());
     const robotsTtlMs = deps?.robotsTtlMs ?? DEFAULT_ROBOTS_TTL_MS;
     const defaultTimeoutMs = deps?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     const robotsCache = new Map<string, RobotsCacheEntry>();
+
+    /**
+     * GET `url`, connecting to one of `addresses` (all already checked public)
+     * rather than letting the runtime resolve the hostname a second time: a
+     * DNS answer that changes between the check and the connection (rebinding)
+     * then cannot reach an address that was not checked. The `Host` header and
+     * the TLS server name stay the original hostname, so virtual hosting, SNI
+     * and certificate verification are unchanged. Addresses are tried in
+     * order, so a host with a dead IPv6 route still answers over IPv4.
+     */
+    async function fetchChecked(
+        url: URL,
+        addresses: string[],
+        init: BunFetchRequestInit & { headers: Record<string, string> },
+    ): Promise<Response> {
+        if (!pinAddresses || isIpLiteralHost(url.hostname)) {
+            return doFetch(url.href, init);
+        }
+        // SNI is a hostname, never with the root-label dot.
+        const serverName = url.hostname.replace(/\.$/, "");
+        let lastError: unknown;
+        for (const address of addresses) {
+            try {
+                return await doFetch(addressedTo(url, address).href, {
+                    ...init,
+                    headers: { ...init.headers, Host: url.host },
+                    tls: { serverName },
+                });
+            } catch (err) {
+                if (
+                    init.signal?.aborted ||
+                    (err instanceof Error && err.name === "AbortError")
+                ) {
+                    throw err;
+                }
+                lastError = err;
+            }
+        }
+        throw lastError;
+    }
 
     async function fetchBytes(
         url: URL,
@@ -538,6 +610,7 @@ export function createSafeFetcher(deps?: {
         }
 
         let current = url;
+        let addresses = resolved.addresses;
         let redirects = 0;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
@@ -546,7 +619,7 @@ export function createSafeFetcher(deps?: {
             while (true) {
                 let response: Response;
                 try {
-                    response = await doFetch(current.href, {
+                    response = await fetchChecked(current, addresses, {
                         method: "GET",
                         redirect: "manual",
                         headers: {
@@ -646,6 +719,7 @@ export function createSafeFetcher(deps?: {
                             detail: hopResolved.detail,
                         };
                     }
+                    addresses = hopResolved.addresses;
                     current = next;
                     continue;
                 }
@@ -761,9 +835,9 @@ export function createSafeFetcher(deps?: {
             redirectAllowed?: (next: URL) => boolean;
         },
     ): Promise<FetchOutcome> {
-        // Known gap: the address is checked before the connection and fetch
-        // cannot pin it (DNS rebinding). Accepted for a one-household app
-        // behind sign-in.
+        // Each hop is resolved and checked, then connected to by the address
+        // that was checked (`fetchChecked`), so a second DNS answer cannot
+        // send the request somewhere the check did not see.
         if (!urlAllowedForFetch(start)) {
             return {
                 ok: false,
@@ -796,16 +870,22 @@ export function createSafeFetcher(deps?: {
         }
 
         let current = start;
+        // The addresses a redirect hop was checked against, carried to the
+        // request for that hop so it is resolved once, not twice.
+        let carried: CheckedAddresses | null = null;
         let redirects = 0;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
         try {
             while (true) {
-                const resolved = await beforeDeadline(
-                    resolveHost(current.hostname, resolve),
-                    controller.signal,
-                );
+                const resolved =
+                    carried ??
+                    (await beforeDeadline(
+                        resolveHost(current.hostname, resolve),
+                        controller.signal,
+                    ));
+                carried = null;
                 if (resolved === "timeout")
                     return {
                         ok: false,
@@ -824,7 +904,7 @@ export function createSafeFetcher(deps?: {
 
                 let response: Response;
                 try {
-                    response = await doFetch(current.href, {
+                    response = await fetchChecked(current, resolved.addresses, {
                         method: "GET",
                         redirect: "manual",
                         headers: {
@@ -957,6 +1037,7 @@ export function createSafeFetcher(deps?: {
                             };
                         }
                     }
+                    carried = hopResolved;
                     current = next;
                     continue;
                 }

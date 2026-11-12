@@ -90,6 +90,19 @@ function documentText(over: Record<string, unknown> = {}): string {
     });
 }
 
+/** One lentil line with `over` applied, for documents that vary a line's text. */
+function lentils(over: Record<string, unknown>) {
+    return [
+        {
+            food_name: "Red lentils",
+            amount: 300,
+            unit: "g",
+            food: { ...NO_NUTRITION, calories: 352 },
+            ...over,
+        },
+    ];
+}
+
 type Stub = SharedRecipeFetcher & { calls: string[] };
 
 function stubFetcher(outcome: (url: string) => FetchOutcome): Stub {
@@ -346,11 +359,8 @@ describeDb(
             expect(await recipesOf()).toEqual([]);
         });
 
-        const refusals: [
-            string,
-            () => { fetcher: Stub | null; shared: string },
-            RegExp,
-        ][] = [
+        type PasteCase = { fetcher: Stub | null; shared: string };
+        const refusals: [string, () => PasteCase, RegExp][] = [
             [
                 "text that is not a share link",
                 () => ({ fetcher: null, shared: "pasta with garlic" }),
@@ -437,6 +447,50 @@ describeDb(
                 }),
                 /version 7.*version 1/,
             ],
+            // Postgres text cannot hold a NUL, and no other control character
+            // belongs in a recipe: every text field refuses them, and the
+            // paste is turned away like any other bad document.
+            ...(
+                [
+                    ["a NUL in the name", { name: "So\u0000up" }, /name:/],
+                    [
+                        "a NUL in the instructions",
+                        { instructions: "Stir\u0000 well" },
+                        /instructions:/,
+                    ],
+                    ["a NUL in a tag", { tags: ["so\u0000up"] }, /tags\.0:/],
+                    [
+                        "a NUL in an ingredient name",
+                        {
+                            ingredients: lentils({
+                                food_name: "Len\u0000tils",
+                            }),
+                        },
+                        /ingredients\.0\.food_name:/,
+                    ],
+                    [
+                        "a NUL in an ingredient unit",
+                        { ingredients: lentils({ unit: "g\u0000" }) },
+                        /ingredients\.0\.unit:/,
+                    ],
+                    [
+                        "an escape character in the name",
+                        { name: "So\u001bup" },
+                        /name:/,
+                    ],
+                    [
+                        "a bell character in the instructions",
+                        { instructions: "Stir\u0007" },
+                        /instructions:/,
+                    ],
+                ] as [string, Record<string, unknown>, RegExp][]
+            ).map(([label, over, where]): [string, () => PasteCase, RegExp] => [
+                label,
+                () => ({ fetcher: null, shared: documentText(over) }),
+                new RegExp(
+                    `isn't a Foodable recipe\\.[^]*${where.source}[^]*control character`,
+                ),
+            ]),
         ];
 
         for (const [name, build, message] of refusals) {
