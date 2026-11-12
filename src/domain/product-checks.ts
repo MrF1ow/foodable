@@ -49,6 +49,10 @@ export type ProductCheckMember = {
     name: string;
     allergens: readonly AllergenCode[];
     dislikes: readonly string[];
+    /** Report "may contain" trace matches. Absent means on. */
+    warnTraces?: boolean;
+    /** Compare the serving with today's goals. Absent means on. */
+    compareGoals?: boolean;
 };
 
 export type ProductCheckNutrient =
@@ -381,7 +385,10 @@ export function checkProductForMember(
         notices.push(glutenWheatNotice(product, member));
     }
 
-    const traces = namedAllergensInTags(product.tracesTags);
+    const warnTraces = member.warnTraces !== false;
+    const traces = warnTraces
+        ? namedAllergensInTags(product.tracesTags)
+        : new Set<NamedAllergen>();
     const traceHits = [...memberAllergens].filter((code) => traces.has(code));
     if (traceHits.length > 0) {
         notices.push(
@@ -390,6 +397,7 @@ export function checkProductForMember(
     }
     const glutenWarned = notices.some((n) => n.code === "food.product_gluten");
     if (
+        warnTraces &&
         memberAllergens.has("wheat") &&
         containsGlutenTag(product.tracesTags) &&
         !traceHits.includes("wheat") &&
@@ -398,7 +406,8 @@ export function checkProductForMember(
         notices.push(glutenWheatNotice(product, member));
     }
 
-    const serving = servingNutritionFor(product);
+    const serving =
+        member.compareGoals === false ? null : servingNutritionFor(product);
     if (serving != null) {
         for (const nutrient of Object.keys(
             today.remaining,

@@ -16,6 +16,7 @@ import {
     GROCERY_DEFAULT_STORE_KEY,
     GROCERY_USE_USUAL_STORE_KEY,
 } from "../domain/settings.js";
+import { SCORE_DEFAULT_KEY } from "../domain/score-settings.js";
 import { liveAuthStore } from "./users.js";
 import { getProfile, type Profile } from "./profiles.js";
 import { deleteAllUserData } from "./nutrition.js";
@@ -483,14 +484,17 @@ export async function updateHouseholdConfig(
                             ),
                             true
                         )
-                        -- The grocery keys are not part of the typed config; keep them.
+                        -- The grocery and score keys are not part of the typed config; keep them.
                         || jsonb_strip_nulls(jsonb_build_object(
                             ${GROCERY_DEFAULT_STORE_KEY}::text,
                             household_preferences ->
                                 ${GROCERY_DEFAULT_STORE_KEY}::text,
                             ${GROCERY_USE_USUAL_STORE_KEY}::text,
                             household_preferences ->
-                                ${GROCERY_USE_USUAL_STORE_KEY}::text
+                                ${GROCERY_USE_USUAL_STORE_KEY}::text,
+                            ${SCORE_DEFAULT_KEY}::text,
+                            household_preferences ->
+                                ${SCORE_DEFAULT_KEY}::text
                         ))
                     where id = ${householdId}
                     returning name, recipe_search_places, household_preferences
