@@ -615,8 +615,10 @@ export function offNutritionPatchFromHit(
         if (food.saturatedFatG == null && nutrition.saturatedFatG != null) {
             patch.saturatedFatG = nutrition.saturatedFatG;
         }
-        // Only a fresh hit: an older one has no per-100 block to fill from.
-        if (hit.per_100 != null) {
+        // Only a fresh hit (an older one has no per-100 block to fill from),
+        // and only into OFF's own numbers: once an edit made the source
+        // "manual", a blank is a value the user cleared.
+        if (hit.per_100 != null && food.nutritionSource === "openfoodfacts") {
             for (const key of OFF_FILL_KEYS) {
                 const value = nutrition[key];
                 if (food[key] == null && value != null) patch[key] = value;
@@ -1047,7 +1049,12 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             for (const key of OFF_FILL_KEYS) {
                 const value = patch[key];
-                if (value != null && value >= 0 && next[key] == null) {
+                if (
+                    value != null &&
+                    value >= 0 &&
+                    next[key] == null &&
+                    row.nutritionSource === "openfoodfacts"
+                ) {
                     next[key] = value;
                     changed = true;
                 }
@@ -3597,7 +3604,8 @@ export async function buildFoodUpdate(
     // The edit inputs are per 100 g. A changed nutrition value is therefore a
     // per-100 g value whatever the food was before, so a stored per-100 ml
     // basis would mislabel it. Resubmitting the stored values changes nothing.
-    if (NUTRITION_BLOCK_KEYS.some((key) => next[key] !== current[key])) {
+    // Caffeine is not one of OFF's per-100 values, so it does not count.
+    if (OFF_FILL_KEYS.some((key) => next[key] !== current[key])) {
         next.nutritionBasis = null;
         // The values are typed in now, so a later OFF refresh must not
         // relabel them (it adopts a basis only for OFF-sourced nutrition).

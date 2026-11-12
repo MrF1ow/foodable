@@ -366,6 +366,7 @@ describe("refresh from an OFF hit", () => {
                 kind: "food",
                 name: "Half & Half",
                 offSourceId: "0193968379117",
+                nutritionSource: "openfoodfacts",
             }),
         );
         await store.setBarcode(HH, "0193968379117", existing.id);
@@ -396,6 +397,7 @@ describe("refresh from an OFF hit", () => {
                 proteinG: 0,
                 serving: { label: "1 tbsp (15 g)", amount: 15, unit: "g" },
                 nutritionBasis: "100ml",
+                nutritionSource: "openfoodfacts",
             }),
         );
         expect(offNutritionPatchFromHit(existing, hit())).not.toHaveProperty(
@@ -484,7 +486,19 @@ describe("refresh from an OFF hit", () => {
         expect(patch?.saturatedFatG).toBeUndefined();
     });
 
-    test("a food with no nutrition at all adopts the hit's basis and fills", () => {
+    test("a food OFF made with no nutrition at all adopts the hit's basis and fills", () => {
+        const empty = newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Cream",
+            nutritionSource: "openfoodfacts",
+        });
+        const patch = offNutritionPatchFromHit(empty, hit());
+        expect(patch?.nutritionBasis).toBe("100ml");
+        expect(patch?.calories).toBe(133.3);
+    });
+
+    test("a manual food with no nutrition is not filled: the values were cleared on purpose", () => {
         const empty = newFood({
             householdId: HH,
             kind: "food",
@@ -492,8 +506,65 @@ describe("refresh from an OFF hit", () => {
             nutritionSource: "manual",
         });
         const patch = offNutritionPatchFromHit(empty, hit());
-        expect(patch?.nutritionBasis).toBe("100ml");
-        expect(patch?.calories).toBe(133.3);
+        expect(patch?.calories).toBeUndefined();
+        expect(patch?.sugarG).toBeUndefined();
+        // Saturated fat keeps filling, as it did before per-100 capture.
+        expect(patch?.saturatedFatG).toBe(6.7);
+    });
+
+    test("a nutrient the user cleared stays cleared after the next refresh", async () => {
+        // A per-100 g hit, so the cleared food's null basis (per 100 g) matches
+        // it and only the source guard stands between it and a refill.
+        const hit100g = () => hit({ nutrition_basis: "100g" });
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit100g(),
+        );
+        expect(food.sugarG).toBe(3.3);
+        const edited = await updateFood(store, HH, food.id, { sugarG: null });
+        expect(edited.sugarG).toBeNull();
+        expect(edited.nutritionSource).toBe("manual");
+        const refreshed = await refreshFoodQualityByBarcode(
+            store,
+            HH,
+            "0193968379117",
+            hit100g(),
+        );
+        expect(refreshed?.sugarG).toBeNull();
+        const again = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit100g(),
+        );
+        expect(again.food.sugarG).toBeNull();
+        expect(again.food.calories).toBe(133.3);
+    });
+
+    test("an OFF-sourced food made per serving, with null macros, still backfills", async () => {
+        const store = createMemoryFoodsStore();
+        const old = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Half & Half",
+                offSourceId: "0193968379117",
+                nutritionSource: "openfoodfacts",
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", old.id);
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit(),
+        );
+        expect(food.calories).toBe(133.3);
+        expect(food.sugarG).toBe(3.3);
+        expect(food.nutritionBasis).toBe("100ml");
     });
 });
 
@@ -535,6 +606,15 @@ describe("editing nutrition resets the basis", () => {
         });
         expect(same.nutritionBasis).toBe("100ml");
         expect(same.calories).toBe(133.3);
+    });
+
+    test("adding caffeine, which OFF never supplies, keeps the basis and the source", async () => {
+        const { store, food } = await halfAndHalfFood();
+        const edited = await updateFood(store, HH, food.id, { caffeineMg: 10 });
+        expect(edited.caffeineMg).toBe(10);
+        expect(edited.nutritionBasis).toBe("100ml");
+        expect(edited.nutritionSource).toBe("openfoodfacts");
+        expect(edited.calories).toBe(133.3);
     });
 
     test("an edit that touches no nutrition keeps the basis", async () => {
@@ -1124,6 +1204,7 @@ describe("a negative per-100 value from OFF", () => {
                 kind: "food",
                 name: "Half & Half",
                 offSourceId: "0193968379117",
+                nutritionSource: "openfoodfacts",
             }),
         );
         await store.setBarcode(HH, "0193968379117", existing.id);

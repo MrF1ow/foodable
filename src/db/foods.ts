@@ -351,13 +351,13 @@ export function liveFoodsStore(): FoodsStore {
                         tx`
                             update ${tx.unsafe(FOODS)}
                             set saturated_fat_g = coalesce(saturated_fat_g, ${sat}::numeric),
-                                calories = coalesce(calories, ${cal}::numeric),
-                                protein_g = coalesce(protein_g, ${protein}::numeric),
-                                carbs_g = coalesce(carbs_g, ${carbs}::numeric),
-                                fat_g = coalesce(fat_g, ${fat}::numeric),
-                                fiber_g = coalesce(fiber_g, ${fiber}::numeric),
-                                sugar_g = coalesce(sugar_g, ${sugar}::numeric),
-                                alcohol_g = coalesce(alcohol_g, ${alcohol}::numeric),
+                                calories = case when nutrition_source = 'openfoodfacts' then coalesce(calories, ${cal}::numeric) else calories end,
+                                protein_g = case when nutrition_source = 'openfoodfacts' then coalesce(protein_g, ${protein}::numeric) else protein_g end,
+                                carbs_g = case when nutrition_source = 'openfoodfacts' then coalesce(carbs_g, ${carbs}::numeric) else carbs_g end,
+                                fat_g = case when nutrition_source = 'openfoodfacts' then coalesce(fat_g, ${fat}::numeric) else fat_g end,
+                                fiber_g = case when nutrition_source = 'openfoodfacts' then coalesce(fiber_g, ${fiber}::numeric) else fiber_g end,
+                                sugar_g = case when nutrition_source = 'openfoodfacts' then coalesce(sugar_g, ${sugar}::numeric) else sugar_g end,
+                                alcohol_g = case when nutrition_source = 'openfoodfacts' then coalesce(alcohol_g, ${alcohol}::numeric) else alcohol_g end,
                                 nutrition_basis = case when nutrition_basis is null and ${tx.unsafe(BASIS_ADOPTABLE)} then ${basis}::text else nutrition_basis end,
                                 serving_label = case when serving_amount is null then ${servingLabel}::text else serving_label end,
                                 serving_unit = case when serving_amount is null then ${servingUnit}::text else serving_unit end,
@@ -369,13 +369,13 @@ export function liveFoodsStore(): FoodsStore {
                               and archived_at is null
                               and (
                                   (${sat}::numeric is not null and saturated_fat_g is null)
-                                  or (${cal}::numeric is not null and calories is null)
-                                  or (${protein}::numeric is not null and protein_g is null)
-                                  or (${carbs}::numeric is not null and carbs_g is null)
-                                  or (${fat}::numeric is not null and fat_g is null)
-                                  or (${fiber}::numeric is not null and fiber_g is null)
-                                  or (${sugar}::numeric is not null and sugar_g is null)
-                                  or (${alcohol}::numeric is not null and alcohol_g is null)
+                                  or (${cal}::numeric is not null and calories is null and nutrition_source = 'openfoodfacts')
+                                  or (${protein}::numeric is not null and protein_g is null and nutrition_source = 'openfoodfacts')
+                                  or (${carbs}::numeric is not null and carbs_g is null and nutrition_source = 'openfoodfacts')
+                                  or (${fat}::numeric is not null and fat_g is null and nutrition_source = 'openfoodfacts')
+                                  or (${fiber}::numeric is not null and fiber_g is null and nutrition_source = 'openfoodfacts')
+                                  or (${sugar}::numeric is not null and sugar_g is null and nutrition_source = 'openfoodfacts')
+                                  or (${alcohol}::numeric is not null and alcohol_g is null and nutrition_source = 'openfoodfacts')
                                   or (${basis}::text is not null and nutrition_basis is null and ${tx.unsafe(BASIS_ADOPTABLE)})
                                   or (${servingAmount}::numeric is not null and serving_amount is null)
                                   or ${levelsJson}::jsonb is not null

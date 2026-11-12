@@ -354,6 +354,18 @@ describe("nutrition heads lead with the pack serving", () => {
         expect(h("2 x 15 g", 30, "g")).toBe("Per serving · 30 g");
     });
 
+    test("servingHeading does not say 'Per' twice when the pack label starts with it", () => {
+        const h = (label: string, amount: number, unit: "g" | "ml") =>
+            servingHeading({ label, amount, unit });
+        expect(h("Per serving (30g)", 30, "g")).toBe("Per serving · 30 g");
+        expect(h("PER Portion (30 ml)", 30, "ml")).toBe("Per portion · 30 ml");
+        expect(h("per 100g", 100, "g")).toBe("Per serving · 100 g");
+        expect(h("Per cup (240 ml)", 240, "ml")).toBe("Per cup · 240 ml");
+        expect(h("Personal pizza (100 g)", 100, "g")).toBe(
+            "Per personal pizza · 100 g",
+        );
+    });
+
     test("the serving head is a name line and an amount line, read as one", () => {
         const html = renderProductBody(
             buildPreviewProductPageView(chrome, food(HALF_AND_HALF)),

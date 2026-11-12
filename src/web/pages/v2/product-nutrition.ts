@@ -101,7 +101,9 @@ export function servingHeadingParts(serving: FoodServing): {
         .split(/[(=]/)[0]!
         .trim()
         .replace(/^1\s+(?![\d/½¼¾⅓⅔⅛])/, "")
-        .toLowerCase();
+        .toLowerCase()
+        // The heading adds its own "Per": "Per serving (30g)" is "serving".
+        .replace(/^per\s+/, "");
     if (NAMELESS.test(name)) name = "serving";
     return {
         name: `Per ${name}`,

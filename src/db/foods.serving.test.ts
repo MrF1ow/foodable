@@ -309,6 +309,95 @@ describeDb(pgAvailable !== null, "foods serving and basis", (getCtx) => {
         expect(Number(row.calories)).toBe(120);
     });
 
+    test("a nutrient the user cleared stays cleared after the next refresh", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        const edited = await updateFood(store, householdId, food.id, {
+            sugarG: null,
+        });
+        // The refresh patch OFF would build from the food as it was before
+        // the edit, landing after it: the row guard must stop it.
+        const patch = offNutritionPatchFromHit(
+            {
+                ...edited,
+                nutritionSource: "openfoodfacts",
+                nutritionBasis: "100ml",
+            },
+            halfAndHalf(),
+        );
+        expect(patch?.sugarG).toBe(3.3);
+        await store.setFoodOffNutrition(householdId, food.id, patch!);
+        await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        const [row] = await sql`
+            select sugar_g, calories, nutrition_source
+            from public.foods where id = ${food.id}
+        `;
+        expect(row.nutrition_source).toBe("manual");
+        expect(row.sugar_g).toBeNull();
+        expect(Number(row.calories)).toBe(133.3);
+    });
+
+    test("an OFF-sourced food with null macros still backfills them", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        const old = await store.insertFood(
+            sampleFood(householdId, {
+                name: "Half & Half",
+                normalizedName: "half & half",
+                nutritionSource: "openfoodfacts",
+                offSourceId: BARCODE,
+            }),
+        );
+        await store.setBarcode(householdId, BARCODE, old.id);
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        expect(food.calories).toBe(133.3);
+        expect(food.sugarG).toBe(3.3);
+    });
+
+    test("adding caffeine to an OFF food keeps its basis and source", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        await updateFood(store, householdId, food.id, { caffeineMg: 10 });
+        const [row] = await sql`
+            select nutrition_basis, nutrition_source, caffeine_mg
+            from public.foods where id = ${food.id}
+        `;
+        expect(row.nutrition_basis).toBe("100ml");
+        expect(row.nutrition_source).toBe("openfoodfacts");
+        expect(Number(row.caffeine_mg)).toBe(10);
+    });
+
     test("a stale refresh landing after an edit does not stamp a basis on typed values", async () => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
