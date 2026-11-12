@@ -37,6 +37,7 @@ import {
     GET_FRIDGE_OUTPUT_SCHEMA,
     LIST_EXPIRING_OUTPUT_SCHEMA,
 } from "./mcp/tools/fridge.js";
+import { GET_RECIPE_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -9028,6 +9029,169 @@ describe("list_grocery_lines and get_fridge carry the Kitchen's fields over HTTP
                     expires_on: null,
                     days_left: null,
                 });
+            });
+        },
+    );
+});
+
+describe("get_recipe carries the cook preview over HTTP", () => {
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    // A recipe of 2 portions whose ingredients are one 100 g food each, so one
+    // serving takes 50 g of each.
+    async function recipeWith(
+        call: Call,
+        stocked: { name: string; inFridge: number | null }[],
+    ) {
+        const loc = await call("add_fridge_location", { name: "Pantry" });
+        const locationId = loc.structuredContent?.id as string;
+        const recipe = await call("create_recipe", {
+            name: "Rice bowl",
+            yield_portions: 2,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        const foodIds: Record<string, string> = {};
+        for (const { name, inFridge } of stocked) {
+            const food = await call("upsert_food", { name });
+            const foodId = food.structuredContent?.id as string;
+            foodIds[name] = foodId;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: foodId,
+                amount: 100,
+                unit: "g",
+            });
+            if (inFridge != null) {
+                const added = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    food_id: foodId,
+                    amount: inFridge,
+                    unit: "g",
+                });
+                expect(added.isError).toBeFalsy();
+            }
+        }
+        return { recipeId, foodIds };
+    }
+
+    test.each(ERAS)(
+        "a fully stocked recipe is cookable with no missing ingredient (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId } = await recipeWith(call, [
+                    { name: "Rice", inFridge: 500 },
+                    { name: "Spinach", inFridge: 500 },
+                ]);
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.cook_preview).not.toBeNull();
+                expect(body.cook_preview?.cookable).toBe(true);
+                expect(body.cook_preview?.total_portions).toBe(1);
+                expect(body.cook_preview?.shortfalls).toEqual([]);
+                expect(body.cook_preview?.lines.length).toBeGreaterThan(0);
+                expect(body.cook_preview?.lines[0]).toMatchObject({
+                    unit: "g",
+                    before: 500,
+                    after: 450,
+                });
+                expect(body.ingredients.map((i) => i.missing)).toEqual([
+                    false,
+                    false,
+                ]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "an ingredient the fridge cannot cover is missing and listed as a shortfall (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, foodIds } = await recipeWith(call, [
+                    { name: "Rice", inFridge: 500 },
+                    { name: "Lemon", inFridge: 20 },
+                    { name: "Salt", inFridge: null },
+                ]);
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.cook_preview?.cookable).toBe(false);
+                expect(body.cook_preview?.shortfalls).toEqual([
+                    {
+                        food_id: foodIds["Lemon"]!,
+                        display_name: "Lemon",
+                        amount: 30,
+                        unit: "g",
+                        unknown_factor: false,
+                    },
+                    {
+                        food_id: foodIds["Salt"]!,
+                        display_name: "Salt",
+                        amount: 50,
+                        unit: "g",
+                        unknown_factor: false,
+                    },
+                ]);
+                const missing = Object.fromEntries(
+                    body.ingredients.map((i) => [i.display_name, i.missing]),
+                );
+                expect(missing).toEqual({
+                    Rice: false,
+                    Lemon: true,
+                    Salt: true,
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a recipe that cannot be previewed still returns with a null cook_preview (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                // An import is unverified until checked, and the cook refuses it.
+                const imported = await call("import_recipe_from_text", {
+                    text: "x",
+                    instructions: "",
+                    name: "Blocked",
+                    ingredients: [{ name: "rice", amount: 50, unit: "g" }],
+                });
+                const recipeId = (
+                    imported.structuredContent?.recipe as { id: string }
+                ).id;
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.verification).toBe("unverified");
+                expect(body.cook_preview).toBeNull();
+                expect(body.ingredients.every((i) => i.missing === false)).toBe(
+                    true,
+                );
+                expect(textOf(got)).toContain("Blocked");
             });
         },
     );
