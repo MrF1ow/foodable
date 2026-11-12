@@ -4,8 +4,13 @@
 // household, never by id alone.
 
 import { listGrocery, type GroceryListStore } from "../../domain/grocery.js";
+import type { FoodsStore } from "../../domain/foods.js";
 import type { RecipesStore } from "../../domain/recipes.js";
 import type { SettingsStore } from "../../domain/settings.js";
+import {
+    recipeShareDocument,
+    type ShareDocument,
+} from "../../domain/sharing-document.js";
 import {
     shareView,
     type ShareableGroceryList,
@@ -94,4 +99,39 @@ export async function loadShareView(
         lines: orderGroceryLines(snapshot),
     };
     return shareView("grocery_list", list);
+}
+
+export type ShareDocumentStores = {
+    recipes: RecipesStore;
+    foods: FoodsStore;
+};
+
+/**
+ * The portable document for a recipe link, or null when there is none: a
+ * grocery-list link (only recipes travel), a recipe that cannot be loaded, or
+ * one outside the document's bounds. The route answers all of those with the
+ * one 404. The recipe, its ingredients and the foods they point at are all
+ * read scoped to `link.householdId`, so an ingredient whose `food_id` names
+ * another household's food ships as an unknown food, never that food.
+ */
+export async function loadShareDocument(
+    link: ShareLink,
+    stores: ShareDocumentStores,
+): Promise<ShareDocument | null> {
+    if (link.kind !== "recipe" || link.targetId === null) return null;
+    const recipe = await stores.recipes.getRecipe(
+        link.householdId,
+        link.targetId,
+    );
+    if (!recipe) return null;
+    const ingredients = await stores.recipes.listIngredients(
+        link.householdId,
+        recipe.id,
+    );
+    const foodIds = ingredients.flatMap((i) => (i.foodId ? [i.foodId] : []));
+    const foods =
+        foodIds.length === 0
+            ? new Map()
+            : await stores.foods.getFoodsByIds(link.householdId, foodIds);
+    return recipeShareDocument({ ...recipe, ingredients }, foods);
 }
