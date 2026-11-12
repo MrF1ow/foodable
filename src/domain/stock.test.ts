@@ -27,6 +27,7 @@ import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import {
     addFridgeItemAdjust,
     applyMovement,
+    cookPreview,
     cookRecipe,
     createMemoryStockStore,
     deleteFridgeItemAdjust,
@@ -38,8 +39,10 @@ import {
     expiryLevel,
     listExpiring,
     utcTodayFromDate,
+    previewCookRecipe,
     putAwayGroceryLines,
     updateFridgeItemQuantityAdjust,
+    type StockMovement,
 } from "./stock.js";
 import { fridgeExpiryLine } from "../copy/notices.js";
 import { householdTodayAt } from "../household.js";
@@ -1090,4 +1093,481 @@ test("a failing stamp does not abort a put-away that already saved", async () =>
     expect(results).toHaveLength(2);
     expect((await listFridge(fridge, HH)).items).toHaveLength(2);
     expect(await grocery.listLines(HH)).toHaveLength(0);
+});
+
+// --- cookPreview -----------------------------------------------------------
+
+/** Small deterministic PRNG (mulberry32): the same seed always builds the same world. */
+function seeded(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+type Cell = { rnd: () => number };
+const pick = <T>({ rnd }: Cell, list: readonly T[]): T =>
+    list[Math.floor(rnd() * list.length)]!;
+const tenths = ({ rnd }: Cell, lo: number, hi: number): number =>
+    Math.round((lo + rnd() * (hi - lo)) * 10) / 10;
+
+const PREVIEW_UNITS = ["g", "kg", "each", "ml", "cup", "oz", "tbsp"] as const;
+
+async function buildPreviewWorld(seed: number) {
+    const cell: Cell = { rnd: seeded(seed) };
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const recipes = createMemoryRecipesStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const foodIds: string[] = [];
+    const allFoodIds: string[] = [];
+    const productIds: string[] = [];
+    const plainCount = 1 + Math.floor(cell.rnd() * 3);
+    for (let i = 0; i < plainCount; i++) {
+        const plain = await foods.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: `Plain ${seed}-${i}`,
+                defaultUnit: pick(cell, ["g", "each", "ml"]),
+                gramsPerEach: pick(cell, [null, 50, 120]),
+                gramsPerMl: pick(cell, [null, 1, 0.9]),
+            }),
+        );
+        foodIds.push(plain.id);
+        allFoodIds.push(plain.id);
+        if (cell.rnd() < 0.3) {
+            const product = await foods.insertFood(
+                newFood({
+                    householdId: HH,
+                    kind: "food",
+                    name: `Product ${seed}-${i}`,
+                    defaultUnit: plain.defaultUnit,
+                    gramsPerEach: pick(cell, [null, 60]),
+                    gramsPerMl: pick(cell, [null, 1.1]),
+                    genericFoodId: plain.id,
+                }),
+            );
+            allFoodIds.push(product.id);
+            productIds.push(product.id);
+            if (cell.rnd() < 0.5) {
+                await foods.updateFoodRow({
+                    ...plain,
+                    usualProductId: product.id,
+                });
+            }
+        }
+    }
+    let itemSeq = 0;
+    for (const foodId of allFoodIds) {
+        const count = Math.floor(cell.rnd() * 4);
+        for (let i = 0; i < count; i++) {
+            await fridge.insertItem({
+                id: `item-${seed}-${itemSeq++}`,
+                householdId: HH,
+                locationId: loc.id,
+                kind: "food",
+                displayName: `Stock ${foodId.slice(0, 4)}`,
+                quantity: {
+                    amount: tenths(cell, 0.5, 400),
+                    unit: pick(cell, PREVIEW_UNITS),
+                },
+                foodId,
+                expiresOn: pick(cell, [
+                    null,
+                    "2026-12-01",
+                    "2026-12-15",
+                    "2027-01-10",
+                ]),
+            });
+        }
+    }
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: `Recipe ${seed}`,
+        yieldPortions: 1 + Math.floor(cell.rnd() * 4),
+    });
+    const ingredientCount = 1 + Math.floor(cell.rnd() * 4);
+    for (let i = 0; i < ingredientCount; i++) {
+        const linked = cell.rnd() > 0.05;
+        const measured = cell.rnd() > 0.08;
+        await recipes.insertIngredient({
+            id: `ing-${seed}-${i}`,
+            householdId: HH,
+            recipeId: recipe.id,
+            kind: "food",
+            displayName: `Ingredient ${i}`,
+            quantity: measured
+                ? {
+                      amount: tenths(cell, 0.5, 300),
+                      unit: pick(cell, PREVIEW_UNITS),
+                  }
+                : null,
+            foodId: linked
+                ? pick(
+                      cell,
+                      productIds.length > 0 && cell.rnd() < 0.3
+                          ? productIds
+                          : foodIds,
+                  )
+                : null,
+            sortOrder: i,
+            note: null,
+        });
+    }
+    // Sometimes archive a food an ingredient names, which the cook treats as unknown.
+    let archivedIngredientFood = false;
+    if (cell.rnd() < 0.15) {
+        const named = (await recipes.listIngredients(HH, recipe.id))
+            .map((ingredient) => ingredient.foodId)
+            .filter((id): id is string => Boolean(id));
+        const target = named.length > 0 ? pick(cell, named) : null;
+        const row = target ? await foods.getFood(HH, target) : null;
+        if (row) {
+            await foods.updateFoodRow({
+                ...row,
+                archivedAt: "2026-06-01T00:00:00.000Z",
+            });
+            archivedIngredientFood = true;
+        }
+    }
+    const servings = pick(cell, [0.5, 1, 2, 3, 6]);
+    return {
+        fridge,
+        stock,
+        foods,
+        recipes,
+        recipe,
+        servings,
+        archivedIngredientFood,
+    };
+}
+
+test("cookPreview plans exactly the movements cookRecipe records, and writes nothing", async () => {
+    let withShortfall = 0;
+    let withUnknownFactor = 0;
+    let withManyMovements = 0;
+    let withLines = 0;
+    let failedTogether = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+        const world = await buildPreviewWorld(seed);
+        const {
+            fridge,
+            stock,
+            foods,
+            recipes,
+            recipe,
+            servings,
+            archivedIngredientFood,
+        } = world;
+        const itemsBefore = await fridge.listItems(HH);
+        const ledgerBefore = await stock.listMovements(HH);
+
+        const failure = async (run: () => Promise<unknown>) => {
+            try {
+                await run();
+                return null;
+            } catch (err) {
+                return err instanceof Error ? err.message : String(err);
+            }
+        };
+        let preview!: Awaited<ReturnType<typeof previewCookRecipe>>;
+        const previewError = await failure(async () => {
+            preview = await previewCookRecipe(recipes, fridge, foods, {
+                householdId: HH,
+                recipeId: recipe.id,
+                totalPortions: servings,
+            });
+        });
+        expect(await fridge.listItems(HH), `seed ${seed}`).toEqual(itemsBefore);
+        expect(await stock.listMovements(HH), `seed ${seed}`).toEqual(
+            ledgerBefore,
+        );
+
+        const recorded: StockMovement[] = [];
+        const recording = {
+            ...stock,
+            async insertMovement(row: StockMovement) {
+                recorded.push(row);
+                return stock.insertMovement(row);
+            },
+        };
+        let cooked!: Awaited<ReturnType<typeof cookRecipe>>;
+        const cookError = await failure(async () => {
+            cooked = await cookRecipe(recipes, fridge, recording, foods, {
+                householdId: HH,
+                recipeId: recipe.id,
+                totalPortions: servings,
+            });
+        });
+
+        // Preview and cook either both succeed or both fail the same way, and a
+        // failed cook has written nothing.
+        expect(previewError, `seed ${seed} outcome`).toBe(cookError);
+        if (cookError) {
+            expect(cookError).toBe("Unknown food.");
+            expect(archivedIngredientFood, `seed ${seed}`).toBe(true);
+            expect(recorded, `seed ${seed}`).toEqual([]);
+            expect(await fridge.listItems(HH), `seed ${seed}`).toEqual(
+                itemsBefore,
+            );
+            expect(await stock.listMovements(HH), `seed ${seed}`).toEqual(
+                ledgerBefore,
+            );
+            failedTogether++;
+            continue;
+        }
+
+        expect(preview.movements, `seed ${seed} movements`).toEqual(
+            recorded.map((row) => ({
+                foodId: row.foodId,
+                fridgeItemId: row.fridgeItemId,
+                delta: row.delta,
+                unit: row.unit,
+            })),
+        );
+        expect(
+            preview.shortfalls.map(({ unknownFactor: _u, ...rest }) => rest),
+            `seed ${seed} shortfalls`,
+        ).toEqual(cooked.shortfalls);
+        expect(preview.unmeasured, `seed ${seed} unmeasured`).toEqual(
+            cooked.unmeasured,
+        );
+        expect(preview.totalPortions).toBe(cooked.totalPortions);
+
+        // Each line's after-amount is what the item really holds once cooked.
+        const itemsAfter = new Map(
+            (await fridge.listItems(HH)).map((item) => [item.id, item]),
+        );
+        const lastLine = new Map(
+            preview.lines.map((line) => [line.fromItemId, line]),
+        );
+        for (const [id, line] of lastLine) {
+            const actual = itemsAfter.get(id);
+            if (line.after === 0)
+                expect(actual, `seed ${seed} ${id}`).toBeUndefined();
+            else
+                expect(actual?.quantity.amount, `seed ${seed} ${id}`).toBe(
+                    line.after,
+                );
+        }
+        for (const item of itemsBefore) {
+            if (!lastLine.has(item.id)) {
+                expect(
+                    itemsAfter.get(item.id),
+                    `seed ${seed} ${item.id}`,
+                ).toEqual(item);
+            }
+        }
+
+        if (cooked.shortfalls.length > 0) withShortfall++;
+        if (preview.shortfalls.some((row) => row.unknownFactor)) {
+            withUnknownFactor++;
+        }
+        if (preview.movements.length > 1) withManyMovements++;
+        if (preview.lines.length > 0) withLines++;
+    }
+    // The generator has to reach the interesting cases, or the equality above is hollow.
+    expect(withShortfall).toBeGreaterThan(20);
+    expect(withUnknownFactor).toBeGreaterThan(5);
+    expect(withManyMovements).toBeGreaterThan(20);
+    expect(withLines).toBeGreaterThan(50);
+    expect(failedTogether).toBeGreaterThan(5);
+});
+
+test("an archived ingredient food fails the preview and the cook alike, before the cook writes anything", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const recipes = createMemoryRecipesStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const live = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Rice",
+            defaultUnit: "g",
+        }),
+    );
+    const gone = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Salt",
+            defaultUnit: "g",
+        }),
+    );
+    for (const food of [live, gone]) {
+        await fridge.insertItem({
+            id: `item-${food.name}`,
+            householdId: HH,
+            locationId: loc.id,
+            kind: "food",
+            displayName: food.name,
+            quantity: { amount: 100, unit: "g" },
+            foodId: food.id,
+        });
+    }
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: "Rice and salt",
+        yieldPortions: 1,
+    });
+    for (const [i, food] of [live, gone].entries()) {
+        await recipes.insertIngredient({
+            id: `ing-${i}`,
+            householdId: HH,
+            recipeId: recipe.id,
+            kind: "food",
+            displayName: food.name,
+            quantity: { amount: 10, unit: "g" },
+            foodId: food.id,
+            sortOrder: i,
+            note: null,
+        });
+    }
+    await foods.updateFoodRow({
+        ...gone,
+        archivedAt: "2026-06-01T00:00:00.000Z",
+    });
+    const itemsBefore = await fridge.listItems(HH);
+
+    const input = { householdId: HH, recipeId: recipe.id, totalPortions: 1 };
+    await expect(
+        previewCookRecipe(recipes, fridge, foods, input),
+    ).rejects.toThrow("Unknown food.");
+    await expect(
+        cookRecipe(recipes, fridge, stock, foods, input),
+    ).rejects.toThrow("Unknown food.");
+    // The live ingredient, listed first, was not drawn down before the failure.
+    expect(await fridge.listItems(HH)).toEqual(itemsBefore);
+    expect(await stock.listMovements(HH)).toEqual([]);
+});
+
+test("cookPreview reports what leaves each item and the shortfall by name", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Eggs",
+            defaultUnit: "each",
+            gramsPerEach: 50,
+        }),
+    );
+    const item = (id: string, amount: number, expiresOn: string) => ({
+        id,
+        householdId: HH,
+        locationId: "loc",
+        kind: "food" as const,
+        displayName: "Eggs",
+        quantity: { amount, unit: "each" },
+        foodId: eggs.id,
+        expiresOn,
+    });
+    const preview = cookPreview(
+        {
+            yieldPortions: 1,
+            ingredients: [
+                {
+                    displayName: "Eggs",
+                    foodId: eggs.id,
+                    quantity: { amount: 6, unit: "each" },
+                },
+            ],
+        },
+        2,
+        {
+            items: [
+                item("late", 4, "2026-12-01"),
+                item("early", 4, "2026-01-01"),
+            ],
+            foods: new Map([[eggs.id, eggs]]),
+            effective: new Map([[eggs.id, eggs]]),
+        },
+    );
+    expect(preview.lines).toEqual([
+        {
+            foodId: eggs.id,
+            displayName: "Eggs",
+            fromItemId: "early",
+            unit: "each",
+            before: 4,
+            after: 0,
+        },
+        {
+            foodId: eggs.id,
+            displayName: "Eggs",
+            fromItemId: "late",
+            unit: "each",
+            before: 4,
+            after: 0,
+        },
+    ]);
+    expect(preview.shortfalls).toEqual([
+        {
+            foodId: eggs.id,
+            displayName: "Eggs",
+            amount: 4,
+            unit: "each",
+            unknownFactor: false,
+        },
+    ]);
+});
+
+test("cookPreview flags a shortfall it could not count for want of a unit factor", async () => {
+    const foods = createMemoryFoodsStore();
+    const flour = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Flour",
+            defaultUnit: "g",
+        }),
+    );
+    const preview = cookPreview(
+        {
+            yieldPortions: 1,
+            ingredients: [
+                {
+                    displayName: "Flour",
+                    foodId: flour.id,
+                    quantity: { amount: 2, unit: "cup" },
+                },
+            ],
+        },
+        1,
+        {
+            items: [
+                {
+                    id: "bag",
+                    householdId: HH,
+                    locationId: "loc",
+                    kind: "food",
+                    displayName: "Flour",
+                    quantity: { amount: 500, unit: "g" },
+                    foodId: flour.id,
+                },
+            ],
+            foods: new Map([[flour.id, flour]]),
+            effective: new Map([[flour.id, flour]]),
+        },
+    );
+    expect(preview.lines).toEqual([]);
+    expect(preview.shortfalls).toEqual([
+        {
+            foodId: flour.id,
+            displayName: "Flour",
+            amount: 2,
+            unit: "cup",
+            unknownFactor: true,
+        },
+    ]);
 });
