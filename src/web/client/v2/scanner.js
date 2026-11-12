@@ -61,20 +61,29 @@ function scannerDialog() {
     return document.getElementById(SCANNER_ID);
 }
 
+/** Only a path on this origin (`/…`, never `//host`) may name a script or
+ *  wasm file to load; anything else falls back to the built-in path. */
+function sameOriginPath(value, fallback) {
+    return typeof value === "string" && /^\/(?!\/)[\w\-./?=&%]*$/.test(value)
+        ? value
+        : fallback;
+}
+
 function decoderScriptHref(dialog) {
-    return (
+    return sameOriginPath(
         dialog?.getAttribute("data-fd-scanner-zxing") ||
-        document.querySelector('meta[name="foodable-scanner-zxing"]')
-            ?.content ||
-        "/app-v2-scanner.js"
+            document.querySelector('meta[name="foodable-scanner-zxing"]')
+                ?.content,
+        "/app-v2-scanner.js",
     );
 }
 
 function decoderWasmHref(dialog) {
-    return (
+    return sameOriginPath(
         dialog?.getAttribute("data-fd-scanner-wasm") ||
-        document.querySelector('meta[name="foodable-scanner-wasm"]')?.content ||
-        "/app-v2-scanner.wasm"
+            document.querySelector('meta[name="foodable-scanner-wasm"]')
+                ?.content,
+        "/app-v2-scanner.wasm",
     );
 }
 

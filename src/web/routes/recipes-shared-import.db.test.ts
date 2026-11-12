@@ -320,7 +320,11 @@ describeDb(
             expect(toastOf(res)).toBe(
                 "Imported Lentil soup. 1 matched your foods, 1 added.",
             );
-            expect(await foodNamesOf()).toEqual(["egg", "Red lentils"]);
+            // Sorted here: the list order follows the database collation.
+            expect((await foodNamesOf()).sort()).toEqual([
+                "Red lentils",
+                "egg",
+            ]);
         });
 
         test("the household is the session's, whatever the form says", async () => {

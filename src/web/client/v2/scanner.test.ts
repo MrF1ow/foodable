@@ -390,3 +390,39 @@ describe("scanner camera lifecycle", () => {
         expect(decodeTicks).toBeGreaterThan(0);
     });
 });
+
+describe("decoder file paths", () => {
+    // The page names the decoder's script and wasm in data attributes; only a
+    // path on this origin may be loaded from them.
+    const src = readFileSync(join(import.meta.dir, "scanner.js"), "utf8");
+    const body = src.match(
+        /function sameOriginPath\([^)]*\) \{[\s\S]*?\n\}/,
+    )?.[0];
+    const sameOriginPath = new Function(
+        `${body}; return sameOriginPath;`,
+    )() as (value: unknown, fallback: string) => string;
+
+    test("keeps a same-origin path, with or without a version query", () => {
+        expect(sameOriginPath("/app-v2-scanner.js", "/f")).toBe(
+            "/app-v2-scanner.js",
+        );
+        expect(sameOriginPath("/app-v2-scanner.js?v=ab12", "/f")).toBe(
+            "/app-v2-scanner.js?v=ab12",
+        );
+    });
+
+    test("falls back for another origin, a scheme or markup", () => {
+        for (const bad of [
+            "//evil.example/x.js",
+            "https://evil.example/x.js",
+            "javascript:alert(1)",
+            "data:text/javascript,alert(1)",
+            '/x.js"><script>',
+            "",
+            null,
+            undefined,
+        ]) {
+            expect(sameOriginPath(bad, "/fallback.js")).toBe("/fallback.js");
+        }
+    });
+});

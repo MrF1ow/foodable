@@ -6,7 +6,7 @@ import {
     type PlansStore,
     type RecipePlan,
 } from "../domain/plan.js";
-import { maybeOne, pgCode, pgError, rows, run } from "./sql.js";
+import { maybeOne, pgCode, pgError, rows, run, type Tx } from "./sql.js";
 
 const RECIPE_PLANS = "recipe_plans";
 const RECIPES = "recipes";
@@ -53,10 +53,13 @@ export function liveRecipePlansStore(): PlansStore {
                 try {
                     // Selecting from recipes keeps a recipe id from another
                     // household from being planned: no row, no insert.
-                    const inserted = await maybeOne<Record<string, unknown>>(
-                        tx,
-                        tx`
-                            insert into ${tx.unsafe(RECIPE_PLANS)} (
+                    // In a savepoint: a refused insert aborts only the
+                    // savepoint, so the transaction can still commit.
+                    const inserted = await tx.savepoint((sp) =>
+                        maybeOne<Record<string, unknown>>(
+                            sp as Tx,
+                            sp`
+                            insert into ${sp.unsafe(RECIPE_PLANS)} (
                                 id, household_id, recipe_id, date, slot,
                                 servings, created_by
                             )
@@ -68,12 +71,13 @@ export function liveRecipePlansStore(): PlansStore {
                                 ${slot}::text,
                                 ${servings}::numeric,
                                 ${plan.createdBy ?? null}::uuid
-                            from ${tx.unsafe(RECIPES)} r
+                            from ${sp.unsafe(RECIPES)} r
                             where r.id = ${plan.recipeId}::uuid
                               and r.household_id = ${plan.householdId}::uuid
-                            returning ${tx.unsafe(PLAN_COLS)}
+                            returning ${sp.unsafe(PLAN_COLS)}
                         `,
-                        "plan recipe",
+                            "plan recipe",
+                        ),
                     );
                     return inserted ? recipePlanFromRow(inserted) : null;
                 } catch (err) {
