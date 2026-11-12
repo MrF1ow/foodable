@@ -268,6 +268,34 @@ const OFF_FILL_KEYS = [
     "alcoholG",
 ] as const;
 
+/** When the pack serving and per-100 basis started to be stored (ms). */
+const SERVING_CAPTURE_SHIPPED_AT = Date.parse("2026-11-12T19:00:00.000Z");
+
+/**
+ * Whether a food's nutrition basis may still be set from an OFF hit: its
+ * per-100 values are OFF's own or it holds none, never typed-in numbers.
+ */
+export function basisAdoptable(
+    food: Pick<
+        Food,
+        | "nutritionSource"
+        | "saturatedFatG"
+        | "calories"
+        | "proteinG"
+        | "carbsG"
+        | "fatG"
+        | "fiberG"
+        | "sugarG"
+        | "alcoholG"
+    >,
+): boolean {
+    return (
+        food.nutritionSource === "openfoodfacts" ||
+        (food.saturatedFatG == null &&
+            OFF_FILL_KEYS.every((key) => food[key] == null))
+    );
+}
+
 export class FoodsInputError extends Error {
     readonly code = "foods_input" as const;
 
@@ -580,9 +608,7 @@ export function offNutritionPatchFromHit(
     const adoptBasis =
         food.nutritionBasis == null &&
         hit.per_100 != null &&
-        (food.nutritionSource === "openfoodfacts" ||
-            (food.saturatedFatG == null &&
-                OFF_FILL_KEYS.every((key) => food[key] == null)));
+        basisAdoptable(food);
     const basisMatches =
         food.nutritionBasis != null
             ? food.nutritionBasis === hitBasis
@@ -1014,7 +1040,11 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
                 next.serving = { ...patch.serving };
                 changed = true;
             }
-            if (patch.nutritionBasis != null && next.nutritionBasis == null) {
+            if (
+                patch.nutritionBasis != null &&
+                next.nutritionBasis == null &&
+                basisAdoptable(row)
+            ) {
                 next.nutritionBasis = patch.nutritionBasis;
                 changed = true;
             }
@@ -1637,6 +1667,26 @@ export async function findOrCreateFoodByBarcodeFromHit(
     return { food: created, created: true };
 }
 
+/**
+ * One lookup is all the serving and basis fill gets: if the quality stamp
+ * still predates the capture (the hit carried no newer one), move it up so
+ * the next scan does not ask again.
+ */
+async function closeServingFill(store: FoodsStore, food: Food): Promise<Food> {
+    const quality = food.offQuality;
+    if (
+        quality == null ||
+        new Date(quality.fetchedAt).getTime() >= SERVING_CAPTURE_SHIPPED_AT
+    ) {
+        return food;
+    }
+    const stamped = await store.setFoodQuality(food.householdId, food.id, {
+        ...quality,
+        fetchedAt: nowIso(),
+    });
+    return stamped ?? food;
+}
+
 export async function findOrCreateFoodByBarcodeResult(
     store: FoodsStore,
     householdId: string,
@@ -1653,12 +1703,20 @@ export async function findOrCreateFoodByBarcodeResult(
             // the lookup is cache-first, so asking again costs a network call
             // only once the cached record is past its TTL. A basis is asked
             // for only where a refresh could adopt one (OFF-sourced values).
+            // OFF may never give a g/ml serving, so the serving and basis ask
+            // only while the last lookup predates their capture; the refresh
+            // it triggers bumps the quality timestamp past that line.
+            const servingFillOpen =
+                existing.offQuality != null &&
+                new Date(existing.offQuality.fetchedAt).getTime() <
+                    SERVING_CAPTURE_SHIPPED_AT;
             const needsNutritionFill =
                 existing.offNutrientLevels == null ||
                 existing.saturatedFatG == null ||
-                existing.serving == null ||
-                (existing.nutritionBasis == null &&
-                    existing.nutritionSource === "openfoodfacts");
+                (servingFillOpen &&
+                    (existing.serving == null ||
+                        (existing.nutritionBasis == null &&
+                            existing.nutritionSource === "openfoodfacts")));
             const needsOffLookup =
                 existing.offQuality == null ||
                 (needsNutritionFill &&
@@ -1673,7 +1731,10 @@ export async function findOrCreateFoodByBarcodeResult(
                             existing,
                             hit,
                         );
-                        return { food, created: false };
+                        return {
+                            food: await closeServingFill(store, food),
+                            created: false,
+                        };
                     }
                     if (existing.offQuality == null) {
                         const stamped = await store.setFoodQuality(
@@ -1688,7 +1749,10 @@ export async function findOrCreateFoodByBarcodeResult(
                             existing;
                         return { food, created: false };
                     }
-                    return { food: existing, created: false };
+                    return {
+                        food: await closeServingFill(store, existing),
+                        created: false,
+                    };
                 } catch {
                     const food =
                         (await store.getFood(householdId, existing.id)) ??
@@ -3575,7 +3639,10 @@ export async function buildFoodUpdate(
         next.nutritionBasis = null;
         // The values are typed in now, so a later OFF refresh must not
         // relabel them (it adopts a basis only for OFF-sourced nutrition).
-        if (patch.nutritionSource === undefined)
+        if (
+            patch.nutritionSource === undefined &&
+            current.nutritionSource === "openfoodfacts"
+        )
             next.nutritionSource = "manual";
     }
     return next;

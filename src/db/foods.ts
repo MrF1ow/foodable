@@ -23,6 +23,11 @@ import {
 } from "./sql.js";
 
 const FOODS = "foods";
+/** Mirrors `basisAdoptable` in the domain: the row's per-100 values are OFF's or absent. */
+const BASIS_ADOPTABLE = `(nutrition_source = 'openfoodfacts' or (
+    saturated_fat_g is null and calories is null and protein_g is null
+    and carbs_g is null and fat_g is null and fiber_g is null
+    and sugar_g is null and alcohol_g is null))`;
 const HOUSEHOLDS = "households";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
@@ -353,7 +358,7 @@ export function liveFoodsStore(): FoodsStore {
                                 fiber_g = coalesce(fiber_g, ${fiber}::numeric),
                                 sugar_g = coalesce(sugar_g, ${sugar}::numeric),
                                 alcohol_g = coalesce(alcohol_g, ${alcohol}::numeric),
-                                nutrition_basis = coalesce(nutrition_basis, ${basis}::text),
+                                nutrition_basis = case when nutrition_basis is null and ${tx.unsafe(BASIS_ADOPTABLE)} then ${basis}::text else nutrition_basis end,
                                 serving_label = case when serving_amount is null then ${servingLabel}::text else serving_label end,
                                 serving_unit = case when serving_amount is null then ${servingUnit}::text else serving_unit end,
                                 serving_amount = coalesce(serving_amount, ${servingAmount}::numeric),
@@ -371,7 +376,7 @@ export function liveFoodsStore(): FoodsStore {
                                   or (${fiber}::numeric is not null and fiber_g is null)
                                   or (${sugar}::numeric is not null and sugar_g is null)
                                   or (${alcohol}::numeric is not null and alcohol_g is null)
-                                  or (${basis}::text is not null and nutrition_basis is null)
+                                  or (${basis}::text is not null and nutrition_basis is null and ${tx.unsafe(BASIS_ADOPTABLE)})
                                   or (${servingAmount}::numeric is not null and serving_amount is null)
                                   or ${levelsJson}::jsonb is not null
                               )

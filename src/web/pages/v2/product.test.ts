@@ -346,6 +346,14 @@ describe("nutrition heads lead with the pack serving", () => {
         expect(h("1 Portion (30 ml)", 30, "ml")).toBe("Per portion · 30 ml");
     });
 
+    test("servingHeading cuts at '=' and reads a count form as a serving", () => {
+        const h = (label: string, amount: number, unit: "g" | "ml") =>
+            servingHeading({ label, amount, unit });
+        expect(h("1 bottle = 500 ml", 500, "ml")).toBe("Per bottle · 500 ml");
+        expect(h("1 x 25 g", 25, "g")).toBe("Per serving · 25 g");
+        expect(h("2 x 15 g", 30, "g")).toBe("Per serving · 30 g");
+    });
+
     test("the serving head is a name line and an amount line, read as one", () => {
         const html = renderProductBody(
             buildPreviewProductPageView(chrome, food(HALF_AND_HALF)),

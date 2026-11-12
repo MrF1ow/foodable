@@ -77,8 +77,14 @@ export function servingBasisLabel(food: Food): string | null {
 }
 
 const UNIT_WORDS = "g|kg|mg|ml|l|cl|dl|oz|fl\\s*oz|lb";
-/** Digits, separators and fraction glyphs, then at most a unit word. */
-const NAMELESS = new RegExp(`^[\\d.,\\s/½¼¾⅓⅔⅛]*(${UNIT_WORDS})?$`, "i");
+/**
+ * Digits, separators and fraction glyphs, then at most a unit word; or a
+ * count form like "2 x 15 g" (its leading "1 " is already gone: "x 25 g").
+ */
+const NAMELESS = new RegExp(
+    `^[\\d.,\\s/½¼¾⅓⅔⅛]*(${UNIT_WORDS})?$|^(\\d+\\s*)?[x×]\\s*[\\d.,\\s/½¼¾⅓⅔⅛]*(${UNIT_WORDS})?$`,
+    "i",
+);
 
 /** One amount, one decimal at most, no trailing ".0": 29.5735 → "29.6". */
 function formatServingAmount(amount: number): string {
@@ -92,7 +98,7 @@ export function servingHeadingParts(serving: FoodServing): {
 } {
     // A leading "1 " is dropped, but not the whole part of "1 1/2" or "1 ½".
     let name = serving.label
-        .split("(")[0]!
+        .split(/[(=]/)[0]!
         .trim()
         .replace(/^1\s+(?![\d/½¼¾⅓⅔⅛])/, "")
         .toLowerCase();

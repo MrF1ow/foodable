@@ -735,6 +735,122 @@ describe("re-scanning a barcode food made before the serving and basis columns",
     });
 });
 
+describe("a barcode food OFF gives no millilitre or gram serving", () => {
+    const NO_SERVING = () =>
+        hit({
+            serving: "1 cup",
+            serving_size: "1 cup",
+            serving_quantity: null,
+            serving_quantity_unit: null,
+            quality: {
+                nutriscore_grade: "d",
+                nova_group: 1,
+                ecoscore_grade: null,
+                additives_tags: [],
+                allergens_tags: [],
+                traces_tags: [],
+                ingredients_analysis_tags: [],
+                labels_tags: [],
+                fetched_at: new Date().toISOString(),
+            },
+        });
+
+    test("is looked up at most once over repeated scans", async () => {
+        const store = createMemoryFoodsStore();
+        const old = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Oats",
+                calories: 380,
+                saturatedFatG: 1.2,
+                offNutrientLevels: { fat: "low" },
+                offQuality: { ...FULL_QUALITY },
+                nutritionSource: "openfoodfacts",
+                offSourceId: "0193968379117",
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", old.id);
+        let lookups = 0;
+        for (let i = 0; i < 5; i++) {
+            await findOrCreateFoodByBarcodeResult(
+                store,
+                HH,
+                "0193968379117",
+                async () => {
+                    lookups++;
+                    return NO_SERVING();
+                },
+            );
+        }
+        expect(lookups).toBeLessThanOrEqual(1);
+    });
+
+    test("a hit with no quality block still closes the fill after one lookup", async () => {
+        const store = createMemoryFoodsStore();
+        const old = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Oats",
+                calories: 380,
+                saturatedFatG: 1.2,
+                offNutrientLevels: { fat: "low" },
+                offQuality: { ...FULL_QUALITY },
+                nutritionSource: "openfoodfacts",
+                offSourceId: "0193968379117",
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", old.id);
+        let lookups = 0;
+        for (let i = 0; i < 5; i++) {
+            await findOrCreateFoodByBarcodeResult(
+                store,
+                HH,
+                "0193968379117",
+                async () => {
+                    lookups++;
+                    const { quality: _quality, ...bare } = NO_SERVING();
+                    return bare;
+                },
+            );
+        }
+        expect(lookups).toBe(1);
+    });
+
+    test("a food looked up after the serving capture shipped is not asked again", async () => {
+        const store = createMemoryFoodsStore();
+        const fresh = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Oats",
+                calories: 380,
+                saturatedFatG: 1.2,
+                offNutrientLevels: { fat: "low" },
+                offQuality: {
+                    ...FULL_QUALITY,
+                    fetchedAt: new Date().toISOString(),
+                },
+                nutritionSource: "openfoodfacts",
+                offSourceId: "0193968379117",
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", fresh.id);
+        let lookups = 0;
+        await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            async () => {
+                lookups++;
+                return NO_SERVING();
+            },
+        );
+        expect(lookups).toBe(0);
+    });
+});
+
 describe("nutrition_data_per serving with a millilitre serving", () => {
     const MILK = (over: Record<string, unknown> = {}) => ({
         status: 1,
@@ -858,6 +974,62 @@ describe("a typed-in edit is not relabelled by the next OFF refresh", () => {
             nutritionSource: "estimate",
         });
         expect(edited.nutritionSource).toBe("estimate");
+    });
+});
+
+describe("an edit only relabels OFF nutrition as manual", () => {
+    test("an estimate stays an estimate and a null source stays null", async () => {
+        const store = createMemoryFoodsStore();
+        const est = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Soup",
+                calories: 80,
+                nutritionSource: "estimate",
+            }),
+        );
+        const plain = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Oat milk" }),
+        );
+        const estEdited = await updateFood(store, HH, est.id, {
+            calories: 90,
+        });
+        const added = await updateFood(store, HH, plain.id, { calories: 45 });
+        expect(estEdited.nutritionSource).toBe("estimate");
+        expect(added.nutritionSource).toBeNull();
+    });
+});
+
+describe("OFF nutrition patch basis", () => {
+    test("the memory store sets no basis on a row that is no longer OFF-sourced", async () => {
+        const store = createMemoryFoodsStore();
+        const food = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Milk",
+                calories: 120,
+                nutritionSource: "manual",
+            }),
+        );
+        const patched = await store.setFoodOffNutrition(HH, food.id, {
+            nutritionBasis: "100ml",
+            serving: { label: "30 ml", amount: 30, unit: "ml" },
+        });
+        expect(patched?.serving?.amount).toBe(30);
+        expect(patched?.nutritionBasis).toBeNull();
+    });
+
+    test("it still adopts a basis on a food with no per-100 nutrition", async () => {
+        const store = createMemoryFoodsStore();
+        const food = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const patched = await store.setFoodOffNutrition(HH, food.id, {
+            nutritionBasis: "100ml",
+        });
+        expect(patched?.nutritionBasis).toBe("100ml");
     });
 });
 

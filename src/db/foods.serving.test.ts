@@ -9,6 +9,7 @@ import {
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateManualFood,
     mergeFoods,
+    offNutritionPatchFromHit,
     perServingFromFood,
     updateFood,
 } from "../domain/foods.js";
@@ -298,6 +299,33 @@ describeDb(pgAvailable !== null, "foods serving and basis", (getCtx) => {
             BARCODE,
             halfAndHalf(),
         );
+        const [row] = await sql`
+            select nutrition_basis, nutrition_source, calories
+            from public.foods where id = ${food.id}
+        `;
+        expect(row.nutrition_source).toBe("manual");
+        expect(row.nutrition_basis).toBeNull();
+        expect(Number(row.calories)).toBe(120);
+    });
+
+    test("a stale refresh landing after an edit does not stamp a basis on typed values", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        // Made before per-100 capture: OFF-sourced, no basis yet.
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf({ per_100: undefined, nutrition_basis: undefined }),
+        );
+        expect(food.nutritionBasis).toBeNull();
+        const stale = offNutritionPatchFromHit(food, halfAndHalf());
+        expect(stale?.nutritionBasis).toBe("100ml");
+        await updateFood(store, householdId, food.id, { calories: 120 });
+        await store.setFoodOffNutrition(householdId, food.id, stale!);
         const [row] = await sql`
             select nutrition_basis, nutrition_source, calories
             from public.foods where id = ${food.id}

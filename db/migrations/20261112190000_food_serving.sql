@@ -6,7 +6,7 @@
 -- 100 g, so a liquid's per-100 ml figures are read as per 100 g, as before.
 -- Null reads as per 100 g, today's meaning. All null = unknown.
 -- Additive only: no backfill here and no Open Food Facts call. Existing barcode
--- foods fill in the next time their product is opened or refreshed.
+-- foods fill in on the next barcode scan or Open Food Facts lookup.
 alter table public.foods
     add column serving_label text,
     add column serving_amount numeric,
