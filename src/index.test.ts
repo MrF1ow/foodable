@@ -293,3 +293,24 @@ describe("export download access log", () => {
         }
     });
 });
+
+describe("the public share page", () => {
+    test("is mounted ahead of sign-in: no cookie needed, no redirect, no session Set-Cookie", async () => {
+        // A malformed token is refused before the database is asked, so this
+        // drives the real chain without one. The cookie is a toast flash and
+        // a stale site session: neither may be read, cleared or redirected.
+        const r = await app.request("http://x/s/not-a-token", {
+            headers: {
+                cookie: "foodable_site=v1.nobody.9999999999.sig; foodable_toast=x",
+            },
+            redirect: "manual",
+        });
+        expect(r.status).toBe(404);
+        expect(await r.text()).toBe("Not found");
+        expect(r.headers.get("set-cookie")).toBeNull();
+        expect(r.headers.get("x-robots-tag")).toBe("noindex");
+        expect(r.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(r.headers.get("cache-control")).toBe("no-store");
+        expect(r.headers.get("x-frame-options")).toBe("DENY");
+    });
+});
