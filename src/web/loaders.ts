@@ -80,6 +80,7 @@ import {
 } from "./pages/settings-household.js";
 import {
     effectiveFoodsByIds,
+    isUsualGroceryLine,
     matchFoodsByWords,
     suggestFoodFor,
     usualProductRows,
@@ -637,10 +638,12 @@ function kitchenGroceryLineMeta(
         ? ctx.allFoods.find((row) => row.id === foodRow.genericFoodId)
         : foodRow;
     const usualProductId = genericFood?.usualProductId ?? null;
-    const isUsual = !!(
-        usualProductId &&
-        (line.foodId === usualProductId || eff?.product?.id === usualProductId)
-    );
+    const isUsual = isUsualGroceryLine({
+        lineFoodId: line.foodId,
+        effectiveProductId: eff?.product?.id,
+        food: foodRow,
+        genericOf: (id) => ctx.allFoods.find((row) => row.id === id),
+    });
     let plainFoodName: string | null = null;
     if (genericFood && foodRow?.genericFoodId) {
         plainFoodName = genericFood.name;

@@ -11,7 +11,11 @@ import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import { alreadyHaveTag } from "../../domain/linking.js";
 import { listFridge } from "../../domain/fridge.js";
-import { effectiveFoodsByIds } from "../../domain/foods.js";
+import {
+    effectiveFoodsByIds,
+    foodsByIds,
+    isUsualGroceryLine,
+} from "../../domain/foods.js";
 import {
     addGroceryFoodByBarcode,
     addGroceryFoodById,
@@ -79,6 +83,12 @@ const groceryLineSchema = z.object({
     source_fridge_item_id: z.string().nullable(),
     note: z.string().nullable(),
     already_have: z.string().nullable(),
+    /** The name of the store the line is filed under. */
+    store: z.string(),
+    /** The usual product's display name when the line's food has one, else null. */
+    product_name: z.string().nullable(),
+    /** Whether the line is the household's usual product for its food. */
+    usual: z.boolean(),
     product: z
         .object({
             food_id: z.string(),
@@ -144,6 +154,21 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             ...fridge.items.map((item) => item.foodId),
                         ],
                     );
+                    // A usual line can be the product itself, whose usual is
+                    // recorded on its generic food (shared with the Kitchen).
+                    const generics = await foodsByIds(
+                        liveFoodsStore(),
+                        householdId,
+                        snapshot.lines.map(
+                            (line) =>
+                                (line.foodId
+                                    ? foods.get(line.foodId)?.genericFoodId
+                                    : null) ?? null,
+                        ),
+                    );
+                    const storeNames = new Map(
+                        snapshot.stores.map((store) => [store.id, store.name]),
+                    );
                     const allergenMembers =
                         await householdAllergenMembers(householdId);
                     const today = await householdToday(householdId);
@@ -205,6 +230,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                     : tag.cover === "full"
                                       ? "already have"
                                       : `already have: have ${tag.have.amount} ${tag.have.unit}, need ${tag.need.amount} ${tag.need.unit}`,
+                            store: storeNames.get(line.storeId) ?? "",
+                            product_name: eff?.product?.name ?? null,
+                            usual: isUsualGroceryLine({
+                                lineFoodId: line.foodId,
+                                effectiveProductId: eff?.product?.id,
+                                food: eff,
+                                genericOf: (id) => generics.get(id),
+                            }),
                             product: eff?.product
                                 ? {
                                       food_id: eff.product.id,

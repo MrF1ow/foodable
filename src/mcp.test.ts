@@ -32,7 +32,10 @@ import {
 import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
-import { ADD_FRIDGE_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/fridge.js";
+import {
+    ADD_FRIDGE_ITEM_OUTPUT_SCHEMA,
+    GET_FRIDGE_OUTPUT_SCHEMA,
+} from "./mcp/tools/fridge.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -8740,6 +8743,292 @@ describe("usual tools keep the usual's schedule over HTTP", () => {
             expect(row?.usualAmount).toEqual({ amount: 24, unit: "each" });
         });
     });
+});
+
+describe("list_grocery_lines and get_fridge carry the Kitchen's fields over HTTP", () => {
+    test.each(ERAS)(
+        "list_grocery_lines adds store, product_name and usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const costco = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Costco",
+                );
+                const eggs = await call("upsert_food", { name: "Eggs" });
+                const eggsId = eggs.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: eggsId,
+                    name: "Kirkland Eggs",
+                });
+                const productId = product.structuredContent?.id as string;
+                const flour = await call("upsert_food", { name: "Flour" });
+                const flourId = flour.structuredContent?.id as string;
+                const set = await call("set_usual_product", {
+                    food_id: eggsId,
+                    product_food_id: productId,
+                    store_id: costco.id,
+                    amount: 12,
+                    unit: "each",
+                });
+                expect(set.isError).toBeFalsy();
+                for (const food_id of [eggsId, flourId]) {
+                    const added = await call("add_grocery_line", {
+                        kind: "food",
+                        food_id,
+                        store_id: costco.id,
+                    });
+                    expect(added.isError).toBeFalsy();
+                }
+
+                const listed = await call("list_grocery_lines");
+                expect(listed.isError).toBeFalsy();
+                const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                    listed.structuredContent,
+                );
+                const lines = body.stores.flatMap((s) =>
+                    s.sections.flatMap((sec) => sec.lines),
+                );
+                const usualLine = lines.find((l) =>
+                    /eggs/i.test(l.display_name),
+                )!;
+                const plainLine = lines.find((l) =>
+                    /flour/i.test(l.display_name),
+                )!;
+                expect(usualLine).toMatchObject({
+                    store: "Costco",
+                    product_name: "Kirkland Eggs",
+                    usual: true,
+                });
+                expect(plainLine).toMatchObject({
+                    store: "Costco",
+                    product_name: null,
+                    usual: false,
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a line on the usual product itself is usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const store = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Safeway",
+                );
+                const oats = await call("upsert_food", { name: "Oats" });
+                const oatsId = oats.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: oatsId,
+                    name: "Quaker Oats",
+                });
+                const productId = product.structuredContent?.id as string;
+                const other = await call("upsert_food", {
+                    generic_food_id: oatsId,
+                    name: "Store Oats",
+                });
+                const otherId = other.structuredContent?.id as string;
+                await call("set_usual_product", {
+                    food_id: oatsId,
+                    product_food_id: productId,
+                    store_id: store.id,
+                    amount: 500,
+                    unit: "g",
+                });
+                for (const food_id of [productId, otherId]) {
+                    const added = await call("add_grocery_line", {
+                        kind: "food",
+                        food_id,
+                        store_id: store.id,
+                    });
+                    expect(added.isError).toBeFalsy();
+                }
+                const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                    (await call("list_grocery_lines")).structuredContent,
+                );
+                const lines = body.stores.flatMap((s) =>
+                    s.sections.flatMap((sec) => sec.lines),
+                );
+                const usualLine = lines.find((l) =>
+                    /quaker/i.test(l.display_name),
+                )!;
+                const otherLine = lines.find((l) =>
+                    /store oats/i.test(l.display_name),
+                )!;
+                expect(usualLine.usual).toBe(true);
+                expect(usualLine.product_name).toBeNull();
+                expect(otherLine.usual).toBe(false);
+                expect(otherLine.product_name).toBeNull();
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a line on a product whose generic is archived is not usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const store = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Aldi",
+                );
+                const rice = await call("upsert_food", { name: "Rice" });
+                const riceId = rice.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: riceId,
+                    name: "Basmati Rice",
+                });
+                const productId = product.structuredContent?.id as string;
+                await call("set_usual_product", {
+                    food_id: riceId,
+                    product_food_id: productId,
+                    store_id: store.id,
+                    amount: 1,
+                    unit: "g",
+                });
+                await call("add_grocery_line", {
+                    kind: "food",
+                    food_id: productId,
+                    store_id: store.id,
+                });
+                const usualOf = async () => {
+                    const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                        (await call("list_grocery_lines")).structuredContent,
+                    );
+                    return body.stores
+                        .flatMap((s) => s.sections.flatMap((sec) => sec.lines))
+                        .find((l) => /basmati/i.test(l.display_name))!.usual;
+                };
+                expect(await usualOf()).toBe(true);
+                const generic = (
+                    await db.foodsStore.getFoodsByIds("hh-1", [riceId])
+                ).get(riceId)!;
+                await db.foodsStore.updateFoodRow({
+                    ...generic,
+                    archivedAt: "2026-11-09T12:00:00.000Z",
+                });
+                expect(await usualOf()).toBe(false);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "get_fridge adds the location name and days left (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const loc = await call("add_fridge_location", {
+                    name: "Pantry",
+                });
+                const locationId = loc.structuredContent?.id as string;
+                const today = utcTodayFromDate();
+                const [y, m, d] = today.split("-").map(Number);
+                const shifted = (days: number) =>
+                    new Date(Date.UTC(y!, m! - 1, d! + days))
+                        .toISOString()
+                        .slice(0, 10);
+                const inThree = shifted(3);
+                const dated = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    name: "Yogurt",
+                    amount: 1,
+                    unit: "g",
+                });
+                await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    name: "Rice",
+                    amount: 1,
+                    unit: "g",
+                });
+                const row = (await db.fridgeStore.listItems("hh-1")).find(
+                    (r) => r.id === dated.structuredContent?.id,
+                )!;
+                await db.fridgeStore.updateItem({ ...row, expiresOn: inThree });
+                const dayEdges: [string, number][] = [
+                    ["Milk", -1],
+                    ["Butter", 0],
+                ];
+                for (const [name, days] of dayEdges) {
+                    const added = await call("add_fridge_item", {
+                        location_id: locationId,
+                        kind: "food",
+                        name,
+                        amount: 1,
+                        unit: "g",
+                    });
+                    const edgeRow = (
+                        await db.fridgeStore.listItems("hh-1")
+                    ).find((r) => r.id === added.structuredContent?.id)!;
+                    await db.fridgeStore.updateItem({
+                        ...edgeRow,
+                        expiresOn: shifted(days),
+                    });
+                }
+
+                const listed = await call("get_fridge");
+                expect(listed.isError).toBeFalsy();
+                const body = GET_FRIDGE_OUTPUT_SCHEMA.parse(
+                    listed.structuredContent,
+                );
+                const items = body.locations.flatMap((l) => l.items);
+                expect(
+                    items.find((i) => i.display_name === "Yogurt"),
+                ).toMatchObject({
+                    location: "Pantry",
+                    expires_on: inThree,
+                    days_left: 3,
+                });
+                expect(
+                    items.find((i) => i.display_name === "Milk")?.days_left,
+                ).toBe(-1);
+                expect(
+                    items.find((i) => i.display_name === "Butter")?.days_left,
+                ).toBe(0);
+                expect(
+                    items.find((i) => i.display_name === "Rice"),
+                ).toMatchObject({
+                    location: "Pantry",
+                    expires_on: null,
+                    days_left: null,
+                });
+            });
+        },
+    );
 });
 
 describe("set_nutrition_goals over HTTP", () => {

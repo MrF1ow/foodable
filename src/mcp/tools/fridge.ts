@@ -20,6 +20,7 @@ import {
 } from "../../domain/fridge.js";
 import {
     addFridgeItemAdjust,
+    daysUntilExpiry,
     deleteFridgeItemAdjust,
     discardFridgeItem,
     eatFridgeItem,
@@ -65,6 +66,33 @@ export const ADD_FRIDGE_ITEM_OUTPUT_SCHEMA = z.object({
     unit: z.string().nullable(),
 });
 
+const fridgeItemSchema = z.object({
+    id: z.string(),
+    location_id: z.string(),
+    /** The name of the location the item is filed in. */
+    location: z.string(),
+    kind: z.enum(["food", "supply"]),
+    display_name: z.string(),
+    amount: z.number(),
+    unit: z.string(),
+    expires_on: z.string().nullable(),
+    /** Whole days from the household's today to `expires_on` (negative once past), null when undated. */
+    days_left: z.number().nullable(),
+    notices: z.array(NOTICE_SCHEMA),
+});
+
+export const GET_FRIDGE_OUTPUT_SCHEMA = z.object({
+    locale: z.string(),
+    locations: z.array(
+        z.object({
+            id: z.string(),
+            name: z.string(),
+            sort_order: z.number(),
+            items: z.array(fridgeItemSchema),
+        }),
+    ),
+});
+
 function shortfallText(
     rows: { displayName: string; amount: number; unit: string }[],
 ): string {
@@ -86,16 +114,6 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         requireHouseholdMemberId,
         uiMeta,
     } = ctx;
-    const fridgeItemSchema = z.object({
-        id: z.string(),
-        location_id: z.string(),
-        kind: z.enum(["food", "supply"]),
-        display_name: z.string(),
-        amount: z.number(),
-        unit: z.string(),
-        expires_on: z.string().nullable(),
-        notices: z.array(NOTICE_SCHEMA),
-    });
     server.registerTool(
         "get_fridge",
         {
@@ -108,17 +126,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 idempotentHint: true,
                 openWorldHint: false,
             },
-            outputSchema: z.object({
-                locale: z.string(),
-                locations: z.array(
-                    z.object({
-                        id: z.string(),
-                        name: z.string(),
-                        sort_order: z.number(),
-                        items: z.array(fridgeItemSchema),
-                    }),
-                ),
-            }),
+            outputSchema: GET_FRIDGE_OUTPUT_SCHEMA,
             ...uiMeta("fridge"),
         },
         async () =>
@@ -155,11 +163,15 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 .map((item) => ({
                                     id: item.id,
                                     location_id: item.locationId,
+                                    location: row.name,
                                     kind: item.kind,
                                     display_name: item.displayName,
                                     amount: item.quantity.amount,
                                     unit: item.quantity.unit,
                                     expires_on: item.expiresOn ?? null,
+                                    days_left: item.expiresOn
+                                        ? daysUntilExpiry(today, item.expiresOn)
+                                        : null,
                                     notices: sortNotices(
                                         fridgeNotices(
                                             [item],

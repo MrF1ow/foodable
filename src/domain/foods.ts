@@ -2074,6 +2074,38 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
     };
 }
 
+type UsualRow = Pick<Food, "genericFoodId" | "usualProductId" | "archivedAt">;
+
+/**
+ * Whether a grocery line is the household's usual product for its food: the
+ * line's food is the usual product itself, or a generic whose effective
+ * product is. The usual lives on the generic food. An archived row (the line's
+ * food or its generic) records no usual, so an archived generic never makes a
+ * line usual.
+ */
+export function isUsualGroceryLine(input: {
+    lineFoodId: string | null;
+    /** The effective product of the line's food (`EffectiveFood.product`). */
+    effectiveProductId: string | null | undefined;
+    /** The row of the line's food. */
+    food: UsualRow | null | undefined;
+    /** Looks up the generic food of a product row. */
+    genericOf: (id: string) => UsualRow | null | undefined;
+}): boolean {
+    const live = (row: UsualRow | null | undefined) =>
+        row && !row.archivedAt ? row : null;
+    const food = live(input.food);
+    const generic = food?.genericFoodId
+        ? live(input.genericOf(food.genericFoodId))
+        : food;
+    const usualProductId = generic?.usualProductId ?? null;
+    return (
+        usualProductId != null &&
+        (input.lineFoodId === usualProductId ||
+            input.effectiveProductId === usualProductId)
+    );
+}
+
 export function effectiveFood(
     food: Food,
     catalog: ReadonlyMap<string, Food>,
