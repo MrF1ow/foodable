@@ -1,6 +1,7 @@
 import { beforeAll, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { GROCERY_LINE_COLS } from "./grocery.js";
+import { PLAN_COLS, PLAN_ORDER } from "./plans.js";
 import { describeDb } from "./testing/pg.js";
 import { seedFood, seedHousehold } from "./testing/fixtures.js";
 import {
@@ -61,6 +62,10 @@ const EXPECTED: Record<string, string> = {
         "ON public.recipe_favourites USING btree (household_id, user_id)",
     recipe_favourites_recipe_id_idx:
         "ON public.recipe_favourites USING btree (recipe_id)",
+    recipe_plans_household_date_idx:
+        "ON public.recipe_plans USING btree (household_id, date)",
+    recipe_plans_recipe_id_idx:
+        "ON public.recipe_plans USING btree (recipe_id)",
     nutrition_goal_days_user_id_idx:
         "ON public.nutrition_goal_days USING btree (user_id, date)",
 };
@@ -427,6 +432,40 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
             plan,
             "nutrition_goal_days_user_id_idx",
             "public.nutrition_goal_days",
+        );
+    });
+
+    test("a week of plans reads the household and date index", async () => {
+        const { sql } = ctx();
+        const plan = await planOf(
+            sql,
+            `select ${PLAN_COLS}
+             from public.recipe_plans
+             where household_id = '${bench.householdId}'
+               and date between '2026-11-09'::date and '2026-11-15'::date
+             order by ${PLAN_ORDER}`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "recipe_plans_household_date_idx",
+            "public.recipe_plans",
+        );
+    });
+
+    test("deleting a recipe finds its plans through the recipe index", async () => {
+        const { sql } = ctx();
+        // The same lookup the foreign-key check runs when the recipe goes.
+        const plan = await planOf(
+            sql,
+            `select 1 from public.recipe_plans
+             where recipe_id = '00000000-0000-0000-0000-000000000000'`,
+            ["set enable_seqscan = off"],
+        );
+        expectIndexOnTable(
+            plan,
+            "recipe_plans_recipe_id_idx",
+            "public.recipe_plans",
         );
     });
 });

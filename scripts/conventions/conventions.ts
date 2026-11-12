@@ -193,6 +193,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/grocery.ts": "grocery",
     "public/widgets/src/templates/grocery-list.html": "grocery",
     "src/domain/recipes.ts": "recipes",
+    "src/domain/plan.ts": "recipes",
     "src/domain/suggestions.ts": "recipes",
     "src/domain/recipe-import.ts": "recipes",
     "src/domain/recipe-text.ts": "recipes",
