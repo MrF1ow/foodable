@@ -4785,6 +4785,47 @@ test("restock-nudge v2: the first failure stops the run, says which usual, keeps
     expect((w.html().match(/>Added</g) ?? []).length).toBe(3);
 });
 
+test("restock-nudge v2: an Add whose answer is lost is marked unsure, never re-sent, stops the run and tells the model", async () => {
+    let lines = 0;
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        reply: (call) => {
+            if (call.name === "add_grocery_line") {
+                lines++;
+                // The server took the line, the answer never came back (a
+                // transport error, not a refusal).
+                if (call.args.food_id === "food-milk") {
+                    throw new Error("timeout");
+                }
+            }
+            return addReply(call);
+        },
+    });
+    w.tap("add:st-costco");
+    await w.settle();
+    // Eggs went through, Milk's answer was lost, Chicken was never tried.
+    expect(w.calls.map((c) => c.args.food_id)).toEqual([
+        "food-eggs",
+        "food-milk",
+    ]);
+    const body = w.html();
+    expect(body).toContain("May have been added");
+    expect(body).not.toContain("Could not add");
+    expect(w.contexts.join("\n")).toContain("Milk");
+    expect(w.contexts.join("\n")).toContain("may or may not be on the list");
+    // The next tap adds only what was never tried: Milk is not sent again.
+    expect(body).toContain("Add 1 to the Costco list");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.food_id)).toEqual([
+        "food-eggs",
+        "food-milk",
+        "food-chicken",
+    ]);
+    expect(lines).toBe(3);
+    expect(w.html()).toContain("May have been added");
+});
+
 test("restock-nudge v2: without canCallTools there is no Add and a tap does nothing", async () => {
     const w = await mountRecipe(await v2Widget("restock-nudge"), {
         data: COSTCO_THREE(),

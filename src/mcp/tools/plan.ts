@@ -4,7 +4,7 @@ import { withAnalytics } from "../../analytics.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { loadWeekPlanInputs, type WeekPlanInputs } from "../../db/plan-week.js";
 import { liveGroceryStore } from "../../db/grocery.js";
-import { liveRecipePlansStore } from "../../db/plans.js";
+import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { householdToday } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
@@ -33,6 +33,9 @@ import {
     type ToolContext,
 } from "../shared.js";
 import { isViewerFlagOn } from "../../viewer-flags.js";
+
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const PLAN_ENTRY_SCHEMA = z.object({
     plan_id: z.string(),
@@ -349,22 +352,36 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const actor = await callerActor();
                     const { householdId } = actor;
+                    // A malformed id names no recipe; the uuid column would
+                    // refuse it with a database error instead.
+                    if (!UUID_RE.test(args.recipe_id)) {
+                        throw new Error("Recipe not found.");
+                    }
                     const recipe = await liveRecipesStore().getRecipe(
                         householdId,
                         args.recipe_id,
                     );
                     if (!recipe) throw new Error("Recipe not found.");
                     // The web app's Add to plan runs the same function.
-                    const outcome = await planRecipe(liveRecipePlansStore(), {
-                        householdId,
-                        recipeId: recipe.id,
-                        recipeYield: recipe.yieldPortions,
-                        date: args.date.trim(),
-                        slot: args.slot,
-                        servings: args.servings,
-                        today: await householdToday(householdId),
-                        createdBy: actor.userId,
-                    });
+                    const outcome = await planRecipe(
+                        liveRecipePlansStore(),
+                        {
+                            householdId,
+                            recipeId: recipe.id,
+                            recipeYield: recipe.yieldPortions,
+                            date: args.date.trim(),
+                            slot: args.slot,
+                            servings: args.servings,
+                            today: await householdToday(householdId),
+                            createdBy: actor.userId,
+                        },
+                        {
+                            transaction: planTransaction(
+                                "plan-recipe",
+                                householdId,
+                            ),
+                        },
+                    );
                     if (!outcome) throw new Error("Recipe not found.");
                     const { plan, alreadyPlanned } = outcome;
                     const wire = planWire(plan, recipe.name);
@@ -513,6 +530,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             liveSettingsStore(),
                             liveFoodsStore(),
                             { householdId, lines },
+                            {
+                                transaction: planTransaction(
+                                    "plan-missing",
+                                    householdId,
+                                ),
+                            },
                         );
                     } catch (err) {
                         // The caller reads the message ("Add a store first.").

@@ -22,6 +22,7 @@ import {
     checkPlanDate,
     planSlotRank,
     type PlanSlot,
+    type PlanTransaction,
     type RecipePlan,
 } from "./plan.js";
 import { dimensionOf, isQuantityUnit } from "./quantity.js";
@@ -544,8 +545,25 @@ export type AddMissingToGroceriesResult = {
  * each other. Ingredients are always plain foods: a recipe has no supplies.
  * An added line whose stock could not be counted carries the "check what you
  * have" note. The store comes from the usual pick unless `storeId` names one.
+ * The list is read and the lines added inside `opts.transaction`, so a second
+ * call at the same time waits and then finds the first one's lines.
  */
 export async function addMissingToGroceries(
+    grocery: GroceryListStore,
+    settings: SettingsStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        lines: readonly PlanMissingLine[];
+        storeId?: string;
+    },
+    opts: { transaction?: PlanTransaction } = {},
+): Promise<AddMissingToGroceriesResult> {
+    const runTx: PlanTransaction = opts.transaction ?? ((fn) => fn());
+    return runTx(() => addMissingLocked(grocery, settings, foods, input));
+}
+
+async function addMissingLocked(
     grocery: GroceryListStore,
     settings: SettingsStore,
     foods: FoodsStore,

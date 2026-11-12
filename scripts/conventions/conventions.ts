@@ -217,6 +217,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/fetch-safe.ts": "platform",
     "src/mcp/tools/recipes.ts": "recipes",
     "src/mcp/tools/plan.ts": "recipes",
+    "src/mcp/tools/plan.db.test.ts": "recipes",
     "src/web/routes/recipes.ts": "recipes",
     "src/web/truncate-toast-param.ts": "recipes",
     "src/web/pages/recipes.ts": "recipes",

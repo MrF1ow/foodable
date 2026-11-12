@@ -139,7 +139,7 @@ import {
 } from "../../domain/plan-week.js";
 import { householdToday } from "../../db/restock.js";
 import { GroceryInputError } from "../../domain/grocery.js";
-import { liveRecipePlansStore } from "../../db/plans.js";
+import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { loadWeekPlanInputs } from "../loaders-plan.js";
 
 export const recipesRoutes = new Hono();
@@ -854,16 +854,25 @@ recipesRoutes.post(
         const slot = formText(body, "slot");
         const servingsInput = formOptionalNumber(body, "servings");
         try {
-            const outcome = await planRecipe(liveRecipePlansStore(), {
-                householdId: member.householdId,
-                recipeId,
-                recipeYield: recipe.yieldPortions,
-                date,
-                slot,
-                servings: servingsInput,
-                today: await householdToday(member.householdId),
-                createdBy: userId,
-            });
+            const outcome = await planRecipe(
+                liveRecipePlansStore(),
+                {
+                    householdId: member.householdId,
+                    recipeId,
+                    recipeYield: recipe.yieldPortions,
+                    date,
+                    slot,
+                    servings: servingsInput,
+                    today: await householdToday(member.householdId),
+                    createdBy: userId,
+                },
+                {
+                    transaction: planTransaction(
+                        "plan-recipe",
+                        member.householdId,
+                    ),
+                },
+            );
             if (!outcome) return c.text("Not found", 404);
             const checkedSlot = outcome.plan.slot;
             if (outcome.alreadyPlanned) {
@@ -1040,6 +1049,12 @@ recipesRoutes.post(
                 liveSettingsStore(),
                 liveFoodsStore(),
                 { householdId: member.householdId, lines },
+                {
+                    transaction: planTransaction(
+                        "plan-missing",
+                        member.householdId,
+                    ),
+                },
             );
             if (result.added.length === 0) {
                 return redirectWithToast(c, back, "plan.missing.on-list");

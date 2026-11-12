@@ -136,10 +136,18 @@ export function checkPlanServingsCapped(value: unknown): number {
 }
 
 /**
+ * Runs `fn` as one serialized step. The live callers pass one that holds a
+ * per-household lock for the duration, so two parallel calls cannot both find
+ * nothing and both insert; the default runs `fn` directly (the memory store).
+ */
+export type PlanTransaction = <T>(fn: () => Promise<T>) => Promise<T>;
+
+/**
  * Plans a recipe on a day and slot. The day is checked against `today`, then
  * the slot, then the servings (default: `recipeYield`). Planning the same
  * recipe on the same day and slot twice is one plan: the existing one comes
  * back with `alreadyPlanned`. Null when the store does not know the recipe.
+ * The check and the insert run inside `opts.transaction`.
  */
 export async function planRecipe(
     store: PlansStore,
@@ -153,25 +161,29 @@ export async function planRecipe(
         today: string;
         createdBy: string | null;
     },
+    opts: { transaction?: PlanTransaction } = {},
 ): Promise<{ plan: RecipePlan; alreadyPlanned: boolean } | null> {
     const date = checkPlanDay(input.date, input.today);
     const slot = checkPlanSlot(input.slot);
     const servings = checkPlanServingsCapped(
         input.servings ?? input.recipeYield,
     );
-    const existing = (
-        await store.listPlans(input.householdId, date, date)
-    ).find((p) => p.recipeId === input.recipeId && p.slot === slot);
-    if (existing) return { plan: existing, alreadyPlanned: true };
-    const plan = await store.addPlan({
-        householdId: input.householdId,
-        recipeId: input.recipeId,
-        date,
-        slot,
-        servings,
-        createdBy: input.createdBy,
+    const runTx: PlanTransaction = opts.transaction ?? ((fn) => fn());
+    return runTx(async () => {
+        const existing = (
+            await store.listPlans(input.householdId, date, date)
+        ).find((p) => p.recipeId === input.recipeId && p.slot === slot);
+        if (existing) return { plan: existing, alreadyPlanned: true };
+        const plan = await store.addPlan({
+            householdId: input.householdId,
+            recipeId: input.recipeId,
+            date,
+            slot,
+            servings,
+            createdBy: input.createdBy,
+        });
+        return plan ? { plan, alreadyPlanned: false } : null;
     });
-    return plan ? { plan, alreadyPlanned: false } : null;
 }
 
 /** Position of a slot within the day, for ordering. */

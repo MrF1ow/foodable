@@ -8,7 +8,9 @@
   product and the reason the server gave, the amount at the right), and one
   "Add N to the <store> list" button. The button calls add_grocery_line once
   per row, in order, with the usual's food, store and amount, and stops at the
-  first failure. Usuals that are not due are not shown. When the due usuals
+  first failure. A refusal is a failure to retry; an answer that never came
+  back is not (the line may exist, add_grocery_line always inserts): that row
+  reads "may have been added", is never re-sent, and the run stops there. Usuals that are not due are not shown. When the due usuals
   sit at several stores they are grouped by store, one button each. The
   button is not drawn when the host cannot call tools.
 -->
@@ -100,6 +102,9 @@
                 added: "Added",
                 onList: "On the list",
                 failed: "Could not add {name}. Nothing after it was added.",
+                unsure: "May have been added \u2014 check the list",
+                noteUnsure:
+                    "Adding {name} to the grocery list got no answer, so it may or may not be on the list. Check the list before adding it again. Nothing after it was added.",
             };
 
             // Design sample (FigCraft Widget/Restock): one low, two on a
@@ -181,6 +186,8 @@
             const added = new Set();
             const busy = new Set();
             const errors = {};
+            // food ids whose add never got an answer: not re-sent.
+            const unsure = new Set();
 
             // An unknown amount reads as one.
             function amountText(u) {
@@ -190,7 +197,11 @@
             // A usual already on the grocery list is shown but never re-added:
             // add_grocery_line always inserts a line.
             function needsAdd(u) {
-                return !u.on_list && !added.has(u.food_id);
+                return (
+                    !u.on_list &&
+                    !added.has(u.food_id) &&
+                    !unsure.has(u.food_id)
+                );
             }
 
             // The rows the card shows: due usuals only, in the server's order.
@@ -225,14 +236,15 @@
                     .filter(Boolean)
                     .join(" · ");
                 const done = added.has(u.food_id);
-                const listed = !done && !!u.on_list;
+                const maybe = !done && unsure.has(u.food_id);
+                const listed = !done && !maybe && !!u.on_list;
                 return `<div class="ur" data-food-id="${esc(u.food_id)}">${v2Dot(
                     undefined,
                     low ? "warn" : "dim",
                     true,
                 )}<div class="ur-main"><span class="ur-t">${esc(u.name)}</span><span class="ur-s${
-                    low ? " is-warn" : ""
-                }">${esc(sub)}</span></div><span class="row-end${
+                    low || maybe ? " is-warn" : ""
+                }">${esc(maybe ? T.unsure : sub)}</span></div><span class="row-end${
                     done ? " is-ok" : listed ? " is-dim" : ""
                 }">${esc(
                     done ? T.added : listed ? T.onList : amountText(u),
@@ -322,6 +334,9 @@
                 for (const id of [...added]) {
                     if (!present.has(id)) added.delete(id);
                 }
+                for (const id of [...unsure]) {
+                    if (!present.has(id)) unsure.delete(id);
+                }
                 for (const key of Object.keys(errors)) delete errors[key];
                 MODEL = data;
                 paint();
@@ -366,7 +381,19 @@
                             added.add(u.food_id);
                             paint();
                         } catch (e) {
-                            errors[key] = tpl(T.failed, { name: u.name });
+                            if (e && e.toolResult) {
+                                // A definite refusal: nothing was added, and
+                                // Add can be tried again.
+                                errors[key] = tpl(T.failed, { name: u.name });
+                            } else {
+                                // A timeout or transport error says nothing
+                                // about the server, which may have inserted the
+                                // line: this row is not sent again.
+                                unsure.add(u.food_id);
+                                API.updateModelContext(
+                                    tpl(T.noteUnsure, { name: u.name }),
+                                );
+                            }
                             break;
                         }
                     }
