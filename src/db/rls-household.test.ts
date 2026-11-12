@@ -103,6 +103,8 @@ insert into public.recipe_favourites (household_id, user_id, recipe_id)
     values ('${HH_B}', '${USER_B}', '${RECIPE_B}');
 insert into public.member_score_settings (user_id, household_id, preset)
     values ('${USER_B}', '${HH_B}', 'planet');
+insert into public.share_links (household_id, kind, target_id, token_hash, created_by)
+    values ('${HH_B}', 'recipe', '${RECIPE_B}', 'hash-b', '${USER_B}');
 insert into public.recipe_plans (household_id, recipe_id, date, slot, created_by)
     values ('${HH_B}', '${RECIPE_B}', '2026-11-12', 'dinner', '${USER_B}');
 insert into public.stock_movements (household_id, food_id, delta, unit, reason)
