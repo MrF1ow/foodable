@@ -31,7 +31,7 @@ import {
     type Quantity,
     type QuantityUnit,
 } from "./quantity.js";
-import type { RecipesStore } from "./recipes.js";
+import type { Recipe, RecipeIngredient, RecipesStore } from "./recipes.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
 import { assertRecipeVerified } from "./recipe-import.js";
 import { isCalendarDate } from "./insights.js";
@@ -307,7 +307,7 @@ function expirySortKey(item: FridgeItem): number {
 
 export type FamilyFoodRow = Pick<Food, "id" | "genericFoodId">;
 
-/** Same family match {@link decrementFrom} uses when choosing fridge rows to deduct. */
+/** Same family match {@link planDecrement} uses when choosing fridge rows to deduct. */
 export function fridgeItemMatchesFood(
     itemFoodId: string | null | undefined,
     needFoodId: string,
@@ -445,32 +445,57 @@ async function incrementInto(
     return { item, applied: amount, unit: input.unit };
 }
 
-async function decrementFrom(
-    fridge: FridgeStore,
-    foods: FoodsStore,
-    needFood: Food,
-    effectiveNeed: FoodQuantityFactors,
-    input: ApplyMovementInput,
-): Promise<{
-    item: FridgeItem | null;
+/** One fridge item a decrement draws from, with what it holds before and after. */
+export type DecrementStep = {
+    item: FridgeItem;
+    /** Amounts in the item's own unit; `amountAfter` is 0 when the item goes. */
+    amountBefore: number;
+    amountAfter: number;
+    remove: boolean;
+    /**
+     * False when rounding the leftover back into the item's unit landed on the
+     * amount it already had: nothing left the shelf, so nothing counts as taken.
+     */
+    counted: boolean;
+    /** The ledger line this step writes; null when it writes none. */
+    ledger: DecrementLedgerLine | null;
+};
+
+/** Where a decrement draws from. Pure: nothing is written to build it. */
+export type DecrementPlan = {
+    steps: DecrementStep[];
     applied: number;
     unit: string;
     shortfall: number;
-    ledgerLines: DecrementLedgerLine[];
+    /** An item held stock but its unit has no known conversion to the need's. */
+    skippedForUnits: boolean;
+    /** Id of the item left behind by the last step, null when it was removed. */
+    lastItemId: string | null;
     useSingleMovementForm: boolean;
-}> {
+};
+
+/**
+ * Decide which items a negative movement draws from, oldest expiry first and
+ * never below zero. Reads only what it is handed, so a caller can plan against
+ * a snapshot (or a copy it keeps updating) without touching the fridge.
+ */
+export function planDecrement(
+    items: readonly FridgeItem[],
+    familyFoodMap: ReadonlyMap<string, Food>,
+    needFood: Food,
+    effectiveNeed: FoodQuantityFactors,
+    input: {
+        foodId: string;
+        delta: number;
+        unit: string;
+        fridgeItemId?: string | null;
+    },
+): DecrementPlan {
     const need = roundAmount(Math.abs(input.delta));
     if (!(need > 0)) {
         throw new StockInputError("Enter an amount greater than zero.");
     }
     const unit = input.unit.trim();
-    const items = await fridge.listItems(input.householdId);
-    const familyFoodMap = await loadFamilyFoodMap(
-        foods,
-        input.householdId,
-        items.map((item) => item.foodId).filter(Boolean) as string[],
-        input.foodId,
-    );
     const rawNeedFactors: FoodQuantityFactors = {
         gramsPerEach: needFood.gramsPerEach ?? null,
         gramsPerMl: needFood.gramsPerMl ?? null,
@@ -501,8 +526,9 @@ async function decrementFrom(
     });
 
     let remaining = need;
-    let lastItem: FridgeItem | null = null;
-    const ledgerLines: DecrementLedgerLine[] = [];
+    let lastItemId: string | null = null;
+    let skippedForUnits = false;
+    const steps: DecrementStep[] = [];
     for (const item of pool) {
         if (remaining <= 0) break;
         const rowFood = item.foodId
@@ -521,43 +547,29 @@ async function decrementFrom(
             unit,
             factors,
         );
+        if (haveInNeed == null) skippedForUnits = true;
         if (haveInNeed == null || haveInNeed <= 0) continue;
         const take = Math.min(haveInNeed, remaining);
         const leaveInNeed = roundAmount(haveInNeed - take);
         const amountBefore = item.quantity.amount;
         let amountAfter = 0;
-        let itemAfter: FridgeItem | null = null;
-        if (leaveInNeed <= 0) {
-            await fridge.deleteItem(input.householdId, item.id);
-            lastItem = null;
-        } else {
+        let remove = true;
+        if (leaveInNeed > 0) {
             const leaveInItem = convertStockAmount(
                 leaveInNeed,
                 unit,
                 item.quantity.unit,
                 factors,
             );
-            if (leaveInItem == null || leaveInItem <= 0) {
-                await fridge.deleteItem(input.householdId, item.id);
-                lastItem = null;
-            } else {
+            if (leaveInItem != null && leaveInItem > 0) {
                 amountAfter = leaveInItem;
-                itemAfter = await fridge.updateItem({
-                    ...item,
-                    ...datesOf(item),
-                    quantity: {
-                        amount: leaveInItem,
-                        unit: item.quantity.unit,
-                    },
-                });
-                lastItem = itemAfter;
+                remove = false;
             }
         }
-        // Rounding the leftover back into the item's unit can land on the
-        // amount it already had. Nothing left the shelf, so nothing counts as
-        // taken: the remainder stays a shortfall.
-        if (itemAfter && amountAfter === amountBefore) continue;
-        if (item.foodId) {
+        lastItemId = remove ? null : item.id;
+        const counted = remove || amountAfter !== amountBefore;
+        let ledger: DecrementLedgerLine | null = null;
+        if (counted && item.foodId) {
             const line = ledgerLineFor(
                 item,
                 rowFood,
@@ -565,23 +577,119 @@ async function decrementFrom(
                 amountAfter,
             );
             if (line.delta !== 0) {
-                ledgerLines.push({
+                ledger = {
                     ...line,
                     foodId: item.foodId,
-                    fridgeItemId: itemAfter?.id ?? null,
-                });
+                    fridgeItemId: remove ? null : item.id,
+                };
             }
         }
-        remaining = roundAmount(remaining - take);
+        steps.push({
+            item,
+            amountBefore,
+            amountAfter,
+            remove,
+            counted,
+            ledger,
+        });
+        if (counted) remaining = roundAmount(remaining - take);
     }
-    const applied = roundAmount(need - Math.max(remaining, 0));
     return {
-        item: lastItem,
-        applied,
+        steps,
+        applied: roundAmount(need - Math.max(remaining, 0)),
         unit,
         shortfall: remaining > 0 ? remaining : 0,
-        ledgerLines,
+        skippedForUnits,
+        lastItemId,
         useSingleMovementForm,
+    };
+}
+
+/** The ledger rows a decrement plan writes, in order: one per touched item,
+ * or a single row in the food's own terms when every item matched it exactly. */
+export type PlannedMovement = {
+    foodId: string;
+    fridgeItemId: string | null;
+    delta: number;
+    unit: string;
+};
+
+export function plannedDecrementMovements(
+    plan: DecrementPlan,
+    food: Pick<Food, "id">,
+    fridgeItemId: string | null | undefined,
+): PlannedMovement[] {
+    if (plan.applied === 0) {
+        return [
+            {
+                foodId: food.id,
+                fridgeItemId: fridgeItemId ?? null,
+                delta: 0,
+                unit: plan.unit,
+            },
+        ];
+    }
+    if (plan.useSingleMovementForm) {
+        return [
+            {
+                foodId: food.id,
+                fridgeItemId: plan.lastItemId,
+                delta: -plan.applied,
+                unit: plan.unit,
+            },
+        ];
+    }
+    return plan.steps.flatMap((step) =>
+        step.ledger
+            ? [
+                  {
+                      foodId: step.ledger.foodId,
+                      fridgeItemId: step.ledger.fridgeItemId,
+                      delta: step.ledger.delta,
+                      unit: step.ledger.unit,
+                  },
+              ]
+            : [],
+    );
+}
+
+/**
+ * Write a plan to the fridge. A store can answer that an item vanished under
+ * it; the returned plan then records no item id for that step, so the ledger
+ * never names an item that is not there.
+ */
+async function applyDecrementPlan(
+    fridge: FridgeStore,
+    householdId: string,
+    plan: DecrementPlan,
+): Promise<{ plan: DecrementPlan; lastItem: FridgeItem | null }> {
+    let lastItem: FridgeItem | null = null;
+    const steps: DecrementStep[] = [];
+    for (const step of plan.steps) {
+        if (step.remove) {
+            await fridge.deleteItem(householdId, step.item.id);
+            lastItem = null;
+            steps.push(step);
+            continue;
+        }
+        const updated = await fridge.updateItem({
+            ...step.item,
+            ...datesOf(step.item),
+            quantity: {
+                amount: step.amountAfter,
+                unit: step.item.quantity.unit,
+            },
+        });
+        lastItem = updated;
+        steps.push(
+            updated || !step.ledger
+                ? step
+                : { ...step, ledger: { ...step.ledger, fridgeItemId: null } },
+        );
+    }
+    return {
+        plan: { ...plan, steps, lastItemId: lastItem?.id ?? null },
+        lastItem,
     };
 }
 
@@ -648,18 +756,27 @@ export async function applyMovement(
         input.foodId,
     ]);
     const effectiveNeed = effectiveMap.get(input.foodId) ?? food;
-    const changed = await decrementFrom(fridge, foods, food, effectiveNeed, {
+    const items = await fridge.listItems(input.householdId);
+    const familyFoodMap = await loadFamilyFoodMap(
+        foods,
+        input.householdId,
+        items.map((item) => item.foodId).filter(Boolean) as string[],
+        input.foodId,
+    );
+    const planned = planDecrement(items, familyFoodMap, food, effectiveNeed, {
         ...input,
         unit,
     });
-    const appliedSigned = -changed.applied;
-    if (appliedSigned === 0) {
+    const { plan, lastItem } = await applyDecrementPlan(
+        fridge,
+        input.householdId,
+        planned,
+    );
+    const rows = plannedDecrementMovements(plan, food, input.fridgeItemId);
+    if (plan.applied === 0) {
         const movement = await stock.insertMovement({
             id: crypto.randomUUID(),
-            foodId: food.id,
-            fridgeItemId: input.fridgeItemId ?? null,
-            delta: 0,
-            unit,
+            ...rows[0]!,
             ...movementBase,
         });
         return {
@@ -676,33 +793,17 @@ export async function applyMovement(
     }
 
     const movements: StockMovement[] = [];
-    if (changed.useSingleMovementForm) {
+    for (const row of rows) {
         movements.push(
             await stock.insertMovement({
                 id: crypto.randomUUID(),
-                foodId: food.id,
-                fridgeItemId: changed.item?.id ?? null,
-                delta: appliedSigned,
-                unit: changed.unit,
+                ...row,
                 ...movementBase,
             }),
         );
-    } else {
-        for (const line of changed.ledgerLines) {
-            movements.push(
-                await stock.insertMovement({
-                    id: crypto.randomUUID(),
-                    foodId: line.foodId,
-                    fridgeItemId: line.fridgeItemId,
-                    delta: line.delta,
-                    unit: line.unit,
-                    ...movementBase,
-                }),
-            );
-        }
     }
     const movement = movements[movements.length - 1]!;
-    const shortfallAmount = changed.shortfall;
+    const shortfallAmount = plan.shortfall;
     return {
         movement,
         movements,
@@ -715,7 +816,7 @@ export async function applyMovement(
                       unit,
                   }
                 : null,
-        item: changed.item,
+        item: lastItem,
     };
 }
 
@@ -1114,6 +1215,88 @@ export type CookRecipeResult = {
     unmeasured: { foodId: string | null; displayName: string }[];
 };
 
+/** What one ingredient asks of the fridge when a recipe is cooked. */
+export type CookStep =
+    | { kind: "unlinked"; shortfall: StockShortfall }
+    | {
+          kind: "draw";
+          displayName: string;
+          foodId: string;
+          need: number;
+          unit: string;
+      };
+
+/**
+ * Turn a recipe's ingredients into what cooking it asks of the fridge, scaled
+ * to `totalPortions`. The one place that decides which ingredients draw stock,
+ * which are unmeasured and which have no food to draw from, so the real cook
+ * and its preview cannot disagree about them.
+ */
+export function planCookSteps(
+    ingredients: readonly Pick<
+        RecipeIngredient,
+        "displayName" | "foodId" | "quantity"
+    >[],
+    yieldPortions: number,
+    totalPortions: number,
+    deductStock = true,
+): { steps: CookStep[]; unmeasured: CookRecipeResult["unmeasured"] } {
+    const steps: CookStep[] = [];
+    const unmeasured: CookRecipeResult["unmeasured"] = [];
+    const scale = totalPortions / yieldPortions;
+    for (const ingredient of ingredients) {
+        if (ingredient.quantity == null) {
+            unmeasured.push({
+                foodId: ingredient.foodId,
+                displayName: ingredient.displayName,
+            });
+            continue;
+        }
+        if (!deductStock) continue;
+        const need = roundAmount(ingredient.quantity.amount * scale);
+        if (!ingredient.foodId) {
+            steps.push({
+                kind: "unlinked",
+                shortfall: {
+                    foodId: "",
+                    displayName: ingredient.displayName,
+                    amount: need,
+                    unit: ingredient.quantity.unit,
+                },
+            });
+            continue;
+        }
+        if (!(need > 0)) continue;
+        steps.push({
+            kind: "draw",
+            displayName: ingredient.displayName,
+            foodId: ingredient.foodId,
+            need,
+            unit: ingredient.quantity.unit,
+        });
+    }
+    return { steps, unmeasured };
+}
+
+async function loadCookableRecipe(
+    recipes: RecipesStore,
+    input: { householdId: string; recipeId: string; totalPortions: number },
+): Promise<{ recipe: Recipe; ingredients: RecipeIngredient[] }> {
+    const recipe = await recipes.getRecipe(input.householdId, input.recipeId);
+    if (!recipe) throw new StockInputError("Unknown recipe.");
+    if (recipe.verification === "unverified") {
+        await assertRecipeVerified(recipes, input.householdId, input.recipeId);
+    }
+    if (!Number.isFinite(input.totalPortions) || input.totalPortions <= 0) {
+        throw new StockInputError("Enter portions greater than zero.");
+    }
+    const ingredients = await recipes.listIngredients(
+        input.householdId,
+        recipe.id,
+    );
+    return { recipe, ingredients };
+}
+
 export async function cookRecipe(
     recipes: RecipesStore,
     fridge: FridgeStore,
@@ -1127,49 +1310,35 @@ export async function cookRecipe(
         actorUserId?: string | null;
     },
 ): Promise<CookRecipeResult> {
-    const recipe = await recipes.getRecipe(input.householdId, input.recipeId);
-    if (!recipe) throw new StockInputError("Unknown recipe.");
-    if (recipe.verification === "unverified") {
-        await assertRecipeVerified(recipes, input.householdId, input.recipeId);
-    }
+    const { recipe, ingredients } = await loadCookableRecipe(recipes, input);
     const totalPortions = input.totalPortions;
-    if (!Number.isFinite(totalPortions) || totalPortions <= 0) {
-        throw new StockInputError("Enter portions greater than zero.");
-    }
-    const ingredients = await recipes.listIngredients(
-        input.householdId,
-        recipe.id,
+    const { steps, unmeasured } = planCookSteps(
+        ingredients,
+        recipe.yieldPortions,
+        totalPortions,
+        input.deductStock !== false,
     );
+    // Every drawn food must resolve before the first write, so a cook with an
+    // unknown or archived ingredient fails whole instead of half-applying.
+    for (const step of steps) {
+        if (step.kind !== "draw") continue;
+        try {
+            await findFoodById(foods, input.householdId, step.foodId);
+        } catch (err) {
+            wrapFoodsError(err);
+        }
+    }
     const shortfalls: StockShortfall[] = [];
-    const unmeasured: CookRecipeResult["unmeasured"] = [];
-    const scale = totalPortions / recipe.yieldPortions;
-    for (const ingredient of ingredients) {
-        if (ingredient.quantity == null) {
-            unmeasured.push({
-                foodId: ingredient.foodId,
-                displayName: ingredient.displayName,
-            });
+    for (const step of steps) {
+        if (step.kind === "unlinked") {
+            shortfalls.push(step.shortfall);
             continue;
         }
-        if (input.deductStock === false) {
-            continue;
-        }
-        if (!ingredient.foodId) {
-            shortfalls.push({
-                foodId: "",
-                displayName: ingredient.displayName,
-                amount: roundAmount(ingredient.quantity.amount * scale),
-                unit: ingredient.quantity.unit,
-            });
-            continue;
-        }
-        const need = roundAmount(ingredient.quantity.amount * scale);
-        if (!(need > 0)) continue;
         const applied = await applyMovement(fridge, stock, foods, {
             householdId: input.householdId,
-            foodId: ingredient.foodId,
-            delta: -need,
-            unit: ingredient.quantity.unit,
+            foodId: step.foodId,
+            delta: -step.need,
+            unit: step.unit,
             reason: "cook",
             recipeId: recipe.id,
             actorUserId: input.actorUserId,
@@ -1177,6 +1346,157 @@ export async function cookRecipe(
         if (applied.shortfall) shortfalls.push(applied.shortfall);
     }
     return { totalPortions, shortfalls, unmeasured };
+}
+
+/** The fridge and food data a cook preview plans against. */
+export type CookStock = {
+    items: readonly FridgeItem[];
+    /** Every food an item or an ingredient names, by id. */
+    foods: ReadonlyMap<string, Food>;
+    /** Quantity factors with a usual product's overrides applied, by food id. */
+    effective: ReadonlyMap<string, FoodQuantityFactors>;
+};
+
+export type CookPreviewLine = {
+    /** The food of the fridge item the amount leaves. */
+    foodId: string;
+    displayName: string;
+    fromItemId: string;
+    unit: string;
+    before: number;
+    /** 0 when the item is used up. */
+    after: number;
+};
+
+export type CookPreviewShortfall = StockShortfall & {
+    /** Some stock of this food could not be counted: its unit has no known
+     * conversion to the recipe's, so the real shortfall may be smaller. */
+    unknownFactor: boolean;
+};
+
+export type CookPreview = {
+    totalPortions: number;
+    lines: CookPreviewLine[];
+    /** The ledger rows a real cook records, in order. */
+    movements: PlannedMovement[];
+    shortfalls: CookPreviewShortfall[];
+    unmeasured: CookRecipeResult["unmeasured"];
+};
+
+/**
+ * Dry run of {@link cookRecipe}: what leaves the fridge for `servings` portions,
+ * item by item, without writing. Plans each ingredient with the same
+ * {@link planCookSteps} and {@link planDecrement} the real cook runs, against a
+ * copy of the stock that earlier ingredients have already drawn down. Plain
+ * data in and out, so a widget can render it as is.
+ */
+export function cookPreview(
+    recipe: {
+        yieldPortions: number;
+        ingredients: readonly Pick<
+            RecipeIngredient,
+            "displayName" | "foodId" | "quantity"
+        >[];
+    },
+    servings: number,
+    stock: CookStock,
+): CookPreview {
+    if (!Number.isFinite(servings) || servings <= 0) {
+        throw new StockInputError("Enter portions greater than zero.");
+    }
+    const { steps, unmeasured } = planCookSteps(
+        recipe.ingredients,
+        recipe.yieldPortions,
+        servings,
+    );
+    let items = stock.items.slice();
+    const lines: CookPreviewLine[] = [];
+    const movements: PlannedMovement[] = [];
+    const shortfalls: CookPreviewShortfall[] = [];
+    for (const step of steps) {
+        if (step.kind === "unlinked") {
+            shortfalls.push({ ...step.shortfall, unknownFactor: false });
+            continue;
+        }
+        const food = stock.foods.get(step.foodId);
+        if (!food || food.archivedAt) {
+            throw new StockInputError("Unknown food.");
+        }
+        const plan = planDecrement(
+            items,
+            stock.foods,
+            food,
+            stock.effective.get(step.foodId) ?? food,
+            { foodId: step.foodId, delta: -step.need, unit: step.unit },
+        );
+        movements.push(...plannedDecrementMovements(plan, food, null));
+        const byId = new Map(plan.steps.map((entry) => [entry.item.id, entry]));
+        for (const entry of plan.steps) {
+            if (!entry.counted) continue;
+            lines.push({
+                foodId: entry.item.foodId ?? step.foodId,
+                displayName: entry.item.displayName,
+                fromItemId: entry.item.id,
+                unit: entry.item.quantity.unit,
+                before: entry.amountBefore,
+                after: entry.amountAfter,
+            });
+        }
+        items = items.flatMap((item) => {
+            const entry = byId.get(item.id);
+            if (!entry) return [item];
+            if (entry.remove) return [];
+            return [
+                {
+                    ...item,
+                    quantity: {
+                        amount: entry.amountAfter,
+                        unit: item.quantity.unit,
+                    },
+                },
+            ];
+        });
+        if (plan.shortfall > 0) {
+            shortfalls.push({
+                foodId: food.id,
+                displayName: food.name,
+                amount: plan.shortfall,
+                unit: plan.unit,
+                unknownFactor: plan.skippedForUnits,
+            });
+        }
+    }
+    return {
+        totalPortions: servings,
+        lines,
+        movements,
+        shortfalls,
+        unmeasured,
+    };
+}
+
+/** Load what {@link cookPreview} needs for a stored recipe and run it. */
+export async function previewCookRecipe(
+    recipes: RecipesStore,
+    fridge: FridgeStore,
+    foods: FoodsStore,
+    input: { householdId: string; recipeId: string; totalPortions: number },
+): Promise<CookPreview> {
+    const { recipe, ingredients } = await loadCookableRecipe(recipes, input);
+    const items = await fridge.listItems(input.householdId);
+    const ids = [
+        ...items.map((item) => item.foodId),
+        ...ingredients.map((ingredient) => ingredient.foodId),
+    ];
+    const [catalog, effective] = await Promise.all([
+        foodsByIds(foods, input.householdId, ids),
+        effectiveFoodsByIds(foods, input.householdId, ids),
+    ]);
+    return cookPreview(
+        { yieldPortions: recipe.yieldPortions, ingredients },
+        input.totalPortions,
+        { items, foods: catalog, effective },
+    );
 }
 
 /** Meal logging after an eat movement applies only to catalog foods, not supplies. */
