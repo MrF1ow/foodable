@@ -57,10 +57,16 @@ function parseMealType(raw: string): MealInput["meal_type"] {
     throw new Error("Choose a meal type.");
 }
 
+const MEAL_ID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function requireOwnedMeal(
     userId: string,
     id: string,
 ): Promise<Meal | Response> {
+    // A non-uuid id would fail the uuid cast in the query (a 500); it names
+    // no meal, so it is the same 404 as a meal that is not yours.
+    if (!MEAL_ID_RE.test(id)) return new Response("Not found", { status: 404 });
     const meal = await getMealById(userId, id);
     if (!meal) return new Response("Not found", { status: 404 });
     return meal;

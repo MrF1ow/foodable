@@ -108,5 +108,5 @@ test("withWidgetData keeps $-patterns in the data literal", () => {
     expect(out).toContain(
         '<script>window.__WIDGET_DATA__={"name":"a $` b $\' c $& d"};initWidget({})</script>',
     );
-    expect(out.match(/<script>/g)).toHaveLength(1);
+    expect(out.match(/<script\b/gi)).toHaveLength(1);
 });

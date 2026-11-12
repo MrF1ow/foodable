@@ -277,6 +277,17 @@ describe("renderTrendsV2Page", () => {
         expect(html).toContain('href="/trends?month=2026-07');
     });
 
+    test("a year outside 1970-2999 falls back to the current month", () => {
+        expect(parseTrendsMonthParam("0100-01", "2026-08-15")).toEqual({
+            year: 2026,
+            month: 8,
+        });
+        expect(parseTrendsMonthParam("2025-03", "2026-08-15")).toEqual({
+            year: 2025,
+            month: 3,
+        });
+    });
+
     test("invalid month query falls back to the current month", () => {
         expect(parseTrendsMonthParam(undefined, "2026-08-15")).toEqual({
             year: 2026,

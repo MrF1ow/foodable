@@ -101,6 +101,9 @@ export function parseTodayDateParam(
     const s = raw?.trim();
     if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return today;
     const [y, m, d] = s.split("-").map(Number);
+    // Dates far outside any real log (year 9999's last day steps into year
+    // 10000) break the day arithmetic downstream; treat them as no date.
+    if (y! < 1970 || y! > 2999) return today;
     const dt = new Date(Date.UTC(y!, m! - 1, d!));
     if (
         dt.getUTCFullYear() !== y ||

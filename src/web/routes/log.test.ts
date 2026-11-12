@@ -594,6 +594,13 @@ describe("GET /api/log/search", () => {
         expect(res.status).toBe(404);
     });
 
+    test("a NUL byte in the query is dropped, not a Postgres 500", async () => {
+        const res = await app.request(`${searchUrl}?q=a%00b`, {
+            headers: { cookie: sessionCookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+    });
+
     test("signed out serves the login page like other member JSON routes", async () => {
         const res = await app.request(`${searchUrl}?q=egg`);
         expect(res.status).toBe(200);
