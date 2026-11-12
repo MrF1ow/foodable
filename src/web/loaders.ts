@@ -26,7 +26,7 @@ import {
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
-import { authUserCount } from "../db/users.js";
+import { authUserCount, listMembersLastSeen } from "../db/users.js";
 import {
     canSignUp,
     getSignupPolicy,
@@ -1643,11 +1643,16 @@ export async function renderHouseholdSettingsRoute(
     );
     if (chrome.flags.uiV2) {
         const pluralsSameFood = await getPluralsSameFood(householdId);
+        // The Last active column is a nicety: if the read fails the page still renders.
+        const lastSeen = await listMembersLastSeen(householdId).catch(
+            () => undefined,
+        );
         return {
             status: 200,
             html: renderSettingsHouseholdV2Page({
                 chrome,
                 householdName: config.name,
+                lastSeen,
                 members,
                 stores: storeViews.map((row) => ({
                     id: row.id,

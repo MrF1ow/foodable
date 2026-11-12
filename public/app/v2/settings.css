@@ -1116,6 +1116,12 @@
     color: var(--text-secondary);
 }
 
+/* Last active reads on desktop only (FigCraft 49584); the phone list is name and role. */
+.fd-row__last-active,
+.fd-settings-members-head {
+    display: none;
+}
+
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -1271,5 +1277,47 @@
     .fd-settings[data-fd-settings-page="goals"] .fd-settings-main,
     .fd-settings[data-fd-settings-page="ai"] .fd-settings-main {
         max-width: 680px;
+    }
+
+    /* Members table: Member | Role | Last active (FigCraft 49584). The row's
+     * name, role and last-active share fixed columns with the header; the
+     * chevron or Manage button sits in a fixed slot on the right. */
+    .fd-settings-members-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 8rem 9rem 5rem;
+        gap: var(--fd-s-6);
+        padding: var(--fd-s-6) 0 var(--fd-s-4);
+        font: 600 11px/14px var(--font-body);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+    }
+
+    .fd-row--settings-member .fd-row__main,
+    .fd-row--settings-member .fd-row__line {
+        display: contents;
+    }
+
+    .fd-row--settings-member .fd-row__title {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .fd-row--settings-member .fd-row__meta--lg {
+        flex: 0 0 8rem;
+    }
+
+    .fd-row--settings-member .fd-row__last-active {
+        display: block;
+        flex: 0 0 9rem;
+        font: 400 13px/17px var(--font-body);
+        color: var(--text-secondary);
+    }
+
+    .fd-row--settings-member .fd-row__chevron,
+    .fd-row--settings-member .fd-row__trailing {
+        flex: 0 0 5rem;
+        display: flex;
+        justify-content: flex-end;
     }
 }

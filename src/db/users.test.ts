@@ -11,8 +11,10 @@ import { findPgBin } from "./testing/pg-temp.js";
 import {
     authUserCount,
     deleteAuthUser,
+    listMembersLastSeen,
     signInUser,
     signUpUser,
+    touchUserSeen,
 } from "./users.js";
 import { setSqlForTests } from "./sql.js";
 
@@ -590,5 +592,44 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             select id from public.users where email = ${"ghost99@household.invalid"}
         `;
         expect(row).toBeUndefined();
+    });
+    test("touchUserSeen writes once per interval, for that user only", async () => {
+        const { sql } = getCtx();
+        const { userId, householdId } = await seedHousehold(sql);
+        const other = await addHouseholdMemberForHousehold(householdId, {
+            displayName: "Other",
+            login: { kind: "username", username: "seenother" },
+            password: "long-enough-password",
+        });
+        if (!other.ok) throw new Error("seed failed");
+        const hour = 60 * 60 * 1000;
+        const t0 = new Date("2026-11-12T10:00:00.000Z");
+        expect(await touchUserSeen(userId, t0, hour)).toBe(true);
+        // Inside the window nothing is written.
+        const t1 = new Date(t0.getTime() + 59 * 60 * 1000);
+        expect(await touchUserSeen(userId, t1, hour)).toBe(false);
+        // Due again an hour after the first write.
+        const t2 = new Date(t0.getTime() + hour);
+        expect(await touchUserSeen(userId, t2, hour)).toBe(true);
+        const seen = await listMembersLastSeen(householdId);
+        expect(seen.get(userId)).toEqual(t2);
+        expect(seen.get(other.userId)).toBeNull();
+    });
+
+    test("touchUserSeen on an unknown user writes nothing", async () => {
+        expect(
+            await touchUserSeen(crypto.randomUUID(), new Date(), 3_600_000),
+        ).toBe(false);
+    });
+
+    test("listMembersLastSeen lists only the household's own members", async () => {
+        const { sql } = getCtx();
+        const mine = await seedHousehold(sql);
+        const theirs = await seedHousehold(sql);
+        await touchUserSeen(mine.userId, new Date("2026-11-10T08:00:00Z"), 1);
+        await touchUserSeen(theirs.userId, new Date("2026-11-11T08:00:00Z"), 1);
+        const seen = await listMembersLastSeen(mine.householdId);
+        expect([...seen.keys()]).toEqual([mine.userId]);
+        expect(seen.get(mine.userId)).toEqual(new Date("2026-11-10T08:00:00Z"));
     });
 });

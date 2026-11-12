@@ -18,6 +18,11 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     // disconnecting a member's AI apps: registered clients carry no
     // per-member policy, and every query is scoped by the member's user id.
     "src/db/tokens.ts",
+    // Stamping a member's last activity from the site middleware, and listing
+    // when a household's members were last active: a user's row is visible
+    // only to that user, and both statements are scoped by user id or by the
+    // household's own membership.
+    "src/db/users.ts",
     // Invite code peek and single-use redeem during sign-up.
     "src/db/invites.ts",
     // Reading an archive by its signed link, which has no session.
