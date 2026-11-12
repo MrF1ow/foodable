@@ -283,4 +283,86 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
         expect(lines).toHaveLength(1);
         expect(lines[0]!.source).toBe("restock");
     });
+
+    test("switch day: a legacy run then a schedules run the same day leaves the grocery lines unchanged", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const storeId = await seedGroceryStore(sql, householdId, "Costco");
+        await seedGrocerySection(sql, householdId, storeId, "Dairy");
+        await sql`
+            insert into public.grocery_sections (
+                id, household_id, store_id, name, sort_order, hidden, is_other
+            )
+            values (
+                ${crypto.randomUUID()}, ${householdId}, ${storeId},
+                ${"Other"}, ${99}, ${false}, ${true}
+            )
+        `;
+        const milkId = await seedFood(sql, householdId, { name: "Milk" });
+        const riceId = await seedFood(sql, householdId, { name: "Rice" });
+        // A weekly usual that never was restocked: due on the restock day, so
+        // a schedules run that got past the shared marker would add it.
+        await sql`
+            update public.foods
+            set restock_schedule = 'weekly'
+            where id = ${riceId}::uuid
+        `;
+        const locationId = await seedFridgeLocation(sql, householdId);
+        const itemId = await seedFridgeItem(
+            sql,
+            householdId,
+            locationId,
+            milkId,
+            { displayName: "Milk pint", amount: 1, unit: "l" },
+        );
+        await sql`
+            update public.fridge_items
+            set expires_on = ${"2026-06-09"}
+            where id = ${itemId}::uuid
+        `;
+        const base = await getHouseholdConfig(householdId);
+        await updateHouseholdConfig(householdId, {
+            ...base,
+            preferences: {
+                ...base.preferences,
+                timezone: "UTC",
+                restock: {
+                    enabled: true,
+                    weekday: 6,
+                    time: "00:00",
+                    lastRunOn: null,
+                },
+            },
+        });
+        const now = new Date("2026-06-06T12:00:00.000Z");
+        const lineKeys = async () =>
+            await sql`
+                select id, food_id, source
+                from grocery_lines
+                where household_id = ${householdId}
+                order by id
+            `;
+        setFallbackActorForTests(null);
+        try {
+            await runRestockCheck(
+                { ...liveRestockCheckDeps(), source: "legacy" },
+                now,
+            );
+            const afterLegacy = await lineKeys();
+            expect(afterLegacy).toHaveLength(1);
+            expect(afterLegacy[0]!.food_id).toBe(milkId);
+
+            await runRestockCheck(
+                { ...liveRestockCheckDeps(), source: "schedules" },
+                now,
+            );
+            expect(await lineKeys()).toEqual(afterLegacy);
+        } finally {
+            setFallbackActorForTests(householdOwnerActor);
+        }
+        const config = await getHouseholdConfig(householdId);
+        expect(config.preferences.restock.lastRunOn).toBe("2026-06-06");
+    });
 });

@@ -472,6 +472,87 @@ test("source legacy does nothing off the restock day, low usual or not", async (
     expect(w.getPrefs().restock.lastRunOn).toBeNull();
 });
 
+// ---- the switch day: the legacy runner and the schedules runner share one marker
+
+const SWITCH_DAY = NOW; // Saturday, the restock weekday
+const NEXT_DAY = new Date("2026-06-07T15:00:00Z");
+
+function names(lines: GroceryLine[]) {
+    return lines.map((l) => l.displayName).sort();
+}
+
+test("switch day: a schedules run after the legacy run the same day adds nothing", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("legacy"), SWITCH_DAY);
+    const afterLegacy = await w.grocery.listLines(HH);
+    expect(names(afterLegacy)).toEqual(["Milk"]);
+    expect(w.getPrefs().restock.lastRunOn).toBe(SAT);
+
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    const afterSchedules = await w.grocery.listLines(HH);
+    // No duplicate expiring line, and no usual (Rice, Oats) added that day.
+    expect(afterSchedules).toEqual(afterLegacy);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+});
+
+test("switch day: a legacy and a schedules run started together insert the lines once", async () => {
+    const w = await runnerWorld();
+    // The live store commits atomically (one conditional UPDATE); the memory
+    // store awaits between its check and its write, so serialize the commits
+    // to model that.
+    let chain: Promise<unknown> = Promise.resolve();
+    const serial = (d: RestockCheckDeps): RestockCheckDeps => ({
+        ...d,
+        restock: {
+            commitRestockRun: (hh, on, lines) => {
+                const run = chain.then(() =>
+                    d.restock.commitRestockRun(hh, on, lines),
+                );
+                chain = run.catch(() => undefined);
+                return run;
+            },
+        },
+    });
+    await Promise.all([
+        runRestockCheck(serial(w.deps("legacy")), SWITCH_DAY),
+        runRestockCheck(serial(w.deps("schedules")), SWITCH_DAY),
+    ]);
+    const lines = await w.grocery.listLines(HH);
+    const milk = lines.filter((l) => l.displayName === "Milk");
+    expect(milk).toHaveLength(1);
+    // Exactly one run committed: either the legacy set or the schedules set,
+    // never the sum of both.
+    expect(
+        names(lines).join(",") === "Milk" ||
+            names(lines).join(",") === "Milk,Oats,Rice",
+    ).toBe(true);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+    expect(w.logs.filter((l) => l.includes("already ran"))).toHaveLength(1);
+});
+
+test("switch day: the schedules run the day after a legacy switch-day run proceeds normally", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("legacy"), SWITCH_DAY);
+    expect(names(await w.grocery.listLines(HH))).toEqual(["Milk"]);
+
+    // Sunday: not the restock day, but a low usual is added; the marker moves on.
+    await runRestockCheck(w.deps("schedules"), NEXT_DAY);
+    expect(names(await w.grocery.listLines(HH))).toEqual(["Milk", "Rice"]);
+    expect(w.getPrefs().restock.lastRunOn).toBe("2026-06-07");
+});
+
+test("switch day: a schedules run first adds expiring food and due usuals once, and a second tick adds nothing", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    const first = await w.grocery.listLines(HH);
+    expect(names(first)).toEqual(["Milk", "Oats", "Rice"]);
+
+    await runRestockCheck(w.deps("schedules"), SWITCH_DAY);
+    expect(await w.grocery.listLines(HH)).toEqual(first);
+    expect(w.logs.filter((l) => l.includes("added="))).toHaveLength(1);
+});
+
 async function createMemorySettingsStoreSections(w: {
     store: { id: string };
     deps: () => RestockCheckDeps;
