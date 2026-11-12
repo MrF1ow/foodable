@@ -129,6 +129,65 @@ describe("toast-flash helpers", () => {
     });
 });
 
+// String.replace reads `$&`, `$\``, `$'` and `$$` in a replacement string
+// even after HTML escaping. A recipe title scraped from a web page reaches a
+// toast, so those must stay literal text everywhere a toast is spliced in.
+const DOLLAR_NAMES = [
+    "$&",
+    "$`",
+    "$'",
+    "$$",
+    "Mac $& Cheese $1",
+    'a$`b" onmouseover=x',
+];
+
+// HTMLRewriter returns attributes as written; decode what escapeHtml emits.
+function decodeEntities(value: string): string {
+    return value
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&");
+}
+
+// Parse the page as a browser would: the seed's text attribute, and any
+// on* attribute anywhere (one would mean the toast text escaped into markup).
+async function parseSeed(html: string) {
+    const seedTexts: string[] = [];
+    const handlerAttributes: string[] = [];
+    await new HTMLRewriter()
+        .on("#toast-seed", {
+            element(el) {
+                seedTexts.push(
+                    decodeEntities(el.getAttribute("data-toast-text") ?? ""),
+                );
+            },
+        })
+        .on("*", {
+            element(el) {
+                for (const [attr] of el.attributes) {
+                    if (/^on/i.test(attr)) handlerAttributes.push(attr);
+                }
+            },
+        })
+        .transform(new Response(html))
+        .text();
+    return { seedTexts, handlerAttributes };
+}
+
+describe("toast text with $-patterns", () => {
+    test("formatToastText keeps $-patterns in a param literal", () => {
+        for (const name of DOLLAR_NAMES) {
+            expect(
+                formatToastText("recipes.import.imported", {
+                    name,
+                    site: "example.com",
+                }),
+            ).toBe(`Imported ${name} from example.com.`);
+        }
+    });
+});
+
 describe("flashToastMiddleware", () => {
     const appHtml = renderBarePage("T", "<p>hi</p>", "light");
 
@@ -152,6 +211,24 @@ describe("flashToastMiddleware", () => {
                 },
             });
     }
+
+    test("a toast param made of $-patterns stays text in the seed", async () => {
+        for (const name of DOLLAR_NAMES) {
+            const flash = encodeToastFlash({
+                key: "recipes.import.imported",
+                params: { name, site: "example.com" },
+            })!;
+            const html = await (await appWithFlash(flash)("/page")).text();
+            // The page arrives once, whole: nothing pasted into the seed.
+            expect(html.match(/<\/body>/g)).toHaveLength(1);
+            expect(html.match(/<p>hi<\/p>/g)).toHaveLength(1);
+            const parsed = await parseSeed(html);
+            expect(parsed.seedTexts).toEqual([
+                `Imported ${name} from example.com.`,
+            ]);
+            expect(parsed.handlerAttributes).toEqual([]);
+        }
+    });
 
     test("injects seed and clears cookie on 200 HTML GET", async () => {
         const flash = encodeToastFlash({ key: "nutrition.water.logged" })!;
