@@ -141,6 +141,12 @@ import {
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
 import { LIST_USUALS_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
+import {
+    ADD_PLAN_MISSING_OUTPUT_SCHEMA,
+    PLAN_RECIPE_OUTPUT_SCHEMA,
+    UNPLAN_RECIPE_OUTPUT_SCHEMA,
+    WEEK_PLAN_OUTPUT_SCHEMA,
+} from "./mcp/tools/plan.js";
 import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
 import {
     FOOD_OUTPUT,
@@ -161,6 +167,8 @@ import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { LIST_NOTICES_OUTPUT_SCHEMA } from "./mcp/tools/notices.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
+import { WEEKDAY_NAMES } from "./domain/weekdays.js";
+import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
 import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
@@ -9912,6 +9920,583 @@ describe("list_usuals over HTTP", () => {
                 await expect(
                     client.callTool({ name: "list_usuals", arguments: {} }),
                 ).rejects.toThrow(/not found/i);
+            });
+        },
+    );
+});
+
+describe("plan tools over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    const PLAN_TOOLS = [
+        "get_week_plan",
+        "plan_recipe",
+        "unplan_recipe",
+        "add_plan_missing_to_groceries",
+    ];
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    function callerOf(client: Client): CallTool {
+        return async (name, args = {}) =>
+            (await client.callTool({ name, arguments: args })) as ToolResult;
+    }
+
+    // A schema rejection and a handler error both mean "refused"; the text is
+    // what the caller reads either way.
+    async function refusal(
+        call: CallTool,
+        name: string,
+        args: Record<string, unknown>,
+    ): Promise<string> {
+        try {
+            const r = await call(name, args);
+            expect(r.isError).toBe(true);
+            return String(r.content[0]?.text ?? "");
+        } catch (err) {
+            return err instanceof Error ? err.message : String(err);
+        }
+    }
+
+    // Bread (1 portion) needs 200 g of Flour; the kitchen holds none.
+    async function seedBread(call: CallTool) {
+        const flour = await call("upsert_food", { name: "Flour" });
+        const recipe = await call("create_recipe", {
+            name: "Bread",
+            yield_portions: 1,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: flour.structuredContent?.id as string,
+            amount: 200,
+            unit: "g",
+        });
+        return { recipeId, flourId: flour.structuredContent?.id as string };
+    }
+
+    async function addStore() {
+        await db.settingsStore.insertStore({
+            id: "store-1",
+            householdId: "hh-1",
+            name: "Corner",
+            sortOrder: 0,
+        });
+        await db.settingsStore.insertSection({
+            id: "section-1",
+            householdId: "hh-1",
+            storeId: "store-1",
+            name: "Other",
+            sortOrder: 0,
+            hidden: false,
+            isOther: true,
+        });
+    }
+
+    test.each(ERAS)(
+        "flag off: none of the plan tools is listed and calls are refused (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                for (const name of PLAN_TOOLS) {
+                    expect(names).not.toContain(name);
+                    await expect(
+                        client.callTool({ name, arguments: {} }),
+                    ).rejects.toThrow(/not found/i);
+                }
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "flag on: plan_recipe then get_week_plan shows it, unplan_recipe then removes it (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                for (const name of PLAN_TOOLS) expect(names).toContain(name);
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const day = addUtcDays(today, 2);
+
+                const empty = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(empty.from).toBe(today);
+                expect(empty.planned_count).toBe(0);
+                expect(empty.days).toHaveLength(7);
+                expect(empty.missing).toEqual([]);
+
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: day,
+                    slot: "dinner",
+                    servings: 2,
+                });
+                expect(planned.isError).toBeFalsy();
+                const created = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    planned.structuredContent,
+                );
+                expect(created.already_planned).toBe(false);
+                expect(created.plan).toMatchObject({
+                    recipe_id: recipeId,
+                    recipe_name: "Bread",
+                    date: day,
+                    slot: "dinner",
+                    servings: 2,
+                });
+
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(week.planned_count).toBe(1);
+                const onDay = week.days.find((d) => d.date === day)!;
+                expect(onDay.weekday).toBe(
+                    WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]!,
+                );
+                expect(onDay.plans).toEqual([
+                    {
+                        plan_id: created.plan.plan_id,
+                        recipe_id: recipeId,
+                        recipe_name: "Bread",
+                        slot: "dinner",
+                        servings: 2,
+                        // Flour has no nutrition: the figure is unknown, not 0.
+                        kcal_per_portion: null,
+                    },
+                ]);
+                // Nothing in stock: the 2-serving plan needs 400 g of flour.
+                expect(week.missing).toHaveLength(1);
+                expect(week.missing[0]).toMatchObject({
+                    display_name: "Flour",
+                    amount: 400,
+                    unit: "g",
+                    unknown: false,
+                    unmeasured: false,
+                    needed_by: [
+                        {
+                            plan_id: created.plan.plan_id,
+                            recipe_id: recipeId,
+                            recipe_name: "Bread",
+                            date: day,
+                            slot: "dinner",
+                        },
+                    ],
+                });
+                expect(week.missing[0]!.food_id).toBeTruthy();
+
+                const removed = await call("unplan_recipe", {
+                    plan_id: created.plan.plan_id,
+                });
+                expect(removed.isError).toBeFalsy();
+                expect(
+                    UNPLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                        removed.structuredContent,
+                    ),
+                ).toEqual({ removed: true, plan_id: created.plan.plan_id });
+                const after = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(after.planned_count).toBe(0);
+                expect(after.missing).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "get_week_plan starts at from and a recipe with nutrition shows kcal per portion (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const oats = await call("upsert_food", {
+                    name: "Oats",
+                    calories: 400,
+                    protein_g: 10,
+                    carbs_g: 60,
+                    fat_g: 8,
+                });
+                expect(oats.isError).toBeFalsy();
+                const recipe = await call("create_recipe", {
+                    name: "Porridge",
+                    yield_portions: 2,
+                });
+                const recipeId = recipe.structuredContent?.id as string;
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: oats.structuredContent?.id as string,
+                    amount: 100,
+                    unit: "g",
+                });
+                const day = addUtcDays(utcTodayFromDate(), 3);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: day,
+                    slot: "breakfast",
+                });
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan", { from: day }))
+                        .structuredContent,
+                );
+                expect(week.from).toBe(day);
+                expect(week.days[0]!.date).toBe(day);
+                expect(week.days[6]!.date).toBe(addUtcDays(day, 6));
+                const entry = week.days[0]!.plans[0]!;
+                // Servings default to the recipe's yield; 100 g of 400 kcal/100 g over 2 portions.
+                expect(entry.servings).toBe(2);
+                expect(entry.kcal_per_portion).toBe(200);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "plan_recipe refuses a bad slot, a bad or past date, bad servings and an unknown recipe (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const ok = { recipe_id: recipeId, date: today, slot: "lunch" };
+
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        slot: "brunch",
+                    }),
+                ).toMatch(/breakfast|slot/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: "2026-13-45",
+                    }),
+                ).toMatch(/date|day/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: "next tuesday",
+                    }),
+                ).toMatch(/date|day/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: addUtcDays(today, -1),
+                    }),
+                ).toMatch(/today or a later day/i);
+                expect(
+                    await refusal(call, "plan_recipe", { ...ok, servings: 0 }),
+                ).toMatch(/servings/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        servings: 1000,
+                    }),
+                ).toMatch(/999/);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        recipe_id: "00000000-0000-4000-8000-000000000000",
+                    }),
+                ).toMatch(/recipe.*not found|not found/i);
+                expect(
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).planned_count,
+                ).toBe(0);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "planning the same recipe on the same day and slot twice is one plan (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const args = {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "snack",
+                };
+                const first = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (await call("plan_recipe", args)).structuredContent,
+                );
+                const second = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (await call("plan_recipe", args)).structuredContent,
+                );
+                expect(first.already_planned).toBe(false);
+                expect(second.already_planned).toBe(true);
+                expect(second.plan.plan_id).toBe(first.plan.plan_id);
+                expect(
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).planned_count,
+                ).toBe(1);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "unplan_recipe with an unknown plan id is a clear error (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                expect(
+                    await refusal(call, "unplan_recipe", {
+                        plan_id: "00000000-0000-4000-8000-000000000000",
+                    }),
+                ).toMatch(/plan not found/i);
+                expect(
+                    await refusal(call, "unplan_recipe", {
+                        plan_id: "not-a-uuid",
+                    }),
+                ).toMatch(/plan not found/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries puts the missing lines on the list with source plan and a second call adds nothing (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const first = await call("add_plan_missing_to_groceries");
+                expect(first.isError).toBeFalsy();
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    first.structuredContent,
+                );
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                    amount: 200,
+                    unit: "g",
+                });
+                expect(out.on_list).toEqual([]);
+                expect(out.unknown).toEqual([]);
+                expect(out.skipped).toEqual([]);
+                const lines = await db.groceryStore.listLines("hh-1");
+                expect(lines).toHaveLength(1);
+                expect(lines[0]).toMatchObject({
+                    foodId: flourId,
+                    source: "plan",
+                });
+
+                const again = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(again.added).toEqual([]);
+                expect(again.on_list).toHaveLength(1);
+                expect(again.on_list[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                    existing_line_id: out.added[0]!.line_id,
+                });
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries notes an unmeasured ingredient and a line whose stock cannot be counted (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                const pepper = await call("upsert_food", { name: "Pepper" });
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: pepper.structuredContent?.id as string,
+                    amount: null,
+                });
+                // Flour is stocked in "each", which cannot be turned into grams.
+                const loc = await call("add_fridge_location", {
+                    name: "Pantry",
+                });
+                const stocked = await call("add_fridge_item", {
+                    location_id: loc.structuredContent?.id as string,
+                    kind: "food",
+                    food_id: flourId,
+                    amount: 1,
+                    unit: "each",
+                });
+                expect(stocked.isError).toBeFalsy();
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                const byName = new Map(
+                    week.missing.map((m) => [m.display_name, m]),
+                );
+                expect(byName.get("Flour")).toMatchObject({
+                    unknown: true,
+                    amount: 200,
+                    unit: "g",
+                });
+                expect(byName.get("Pepper")).toMatchObject({
+                    unmeasured: true,
+                    amount: null,
+                });
+
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(out.added.map((a) => a.display_name).sort()).toEqual([
+                    "Flour",
+                    "Pepper",
+                ]);
+                expect(out.unknown.map((u) => u.display_name)).toEqual([
+                    "Flour",
+                ]);
+                expect(out.unknown[0]!.notice.length).toBeGreaterThan(0);
+                const noteOf = (name: string) =>
+                    out.added.find((a) => a.display_name === name)!.note;
+                expect(noteOf("Flour")).toBe(PLAN_UNKNOWN_LINE_NOTE);
+                expect(noteOf("Pepper")).toBe("to taste");
+                const stored = await db.groceryStore.listLines("hh-1");
+                expect(stored.map((l) => l.note).sort()).toEqual(
+                    [PLAN_UNKNOWN_LINE_NOTE, "to taste"].sort(),
+                );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries with nothing planned adds nothing, and with no store says to add one (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const none = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(none).toEqual({
+                    added: [],
+                    on_list: [],
+                    unknown: [],
+                    skipped: [],
+                });
+                const { recipeId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {}),
+                ).toMatch(/add a store/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a household far from UTC plans by its own calendar: from, yesterday refused, today accepted (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            const now = new Date();
+            // UTC+14 and UTC-11: at every instant at least one of them is on a
+            // different calendar day from UTC.
+            const timezone = ["Pacific/Kiritimati", "Pacific/Pago_Pago"].find(
+                (zone) => dateInTz(now, zone) !== dateInTz(now, "UTC"),
+            )!;
+            const householdToday = dateInTz(now, timezone);
+            expect(householdToday).not.toBe(utcTodayFromDate());
+            db.profile = { ...PROFILE_BASE, timezone };
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const call = callerOf(client);
+                    const { recipeId } = await seedBread(call);
+                    expect(
+                        WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                            (await call("get_week_plan")).structuredContent,
+                        ).from,
+                    ).toBe(householdToday);
+                    expect(
+                        await refusal(call, "plan_recipe", {
+                            recipe_id: recipeId,
+                            date: addUtcDays(householdToday, -1),
+                            slot: "dinner",
+                        }),
+                    ).toMatch(/today or a later day/i);
+                    const planned = await call("plan_recipe", {
+                        recipe_id: recipeId,
+                        date: householdToday,
+                        slot: "dinner",
+                    });
+                    expect(planned.isError).toBeFalsy();
+                    const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    );
+                    expect(week.days[0]!.date).toBe(householdToday);
+                    expect(week.days[0]!.plans).toHaveLength(1);
+                });
+            } finally {
+                db.profile = null;
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries takes no `from` and never lists a past plan's needs (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const listed = (await client.listTools()).tools.find(
+                    (t) => t.name === "add_plan_missing_to_groceries",
+                )!;
+                expect(
+                    Object.keys(listed.inputSchema.properties ?? {}),
+                ).toEqual([]);
+                const { recipeId } = await seedBread(call);
+                const yesterday = addUtcDays(utcTodayFromDate(), -1);
+                // A plan the web would never show: stored for a past day.
+                await db.plansStore.addPlan({
+                    householdId: "hh-1",
+                    recipeId,
+                    date: yesterday,
+                    slot: "dinner",
+                });
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("add_plan_missing_to_groceries", {
+                            from: yesterday,
+                        })
+                    ).structuredContent,
+                );
+                expect(out.added).toEqual([]);
+                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
             });
         },
     );

@@ -135,6 +135,15 @@ export const FLAGS = {
         removeWhen:
             "list_usuals has been on for everyone for a release with no rollback.",
     },
+    "mcp-plan-tools": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The get_week_plan, plan_recipe, unplan_recipe and add_plan_missing_to_groceries MCP tools.",
+        removeWhen:
+            "The plan tools have been on for everyone for a release with no rollback.",
+    },
     "mcp-household-digest": {
         type: "bool",
         kind: "temporary",

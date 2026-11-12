@@ -6,7 +6,6 @@ import {
     renderRecipesListPage,
 } from "../loaders.js";
 import { gatedRoute } from "../gated.js";
-import { PLAN_UNKNOWN_LINE_NOTE } from "../../copy/toasts.js";
 
 import {
     formAmount,
@@ -126,9 +125,10 @@ import {
     type PlanEditDraft,
 } from "../pages/v2/recipes-plan.js";
 import {
-    checkPlanDate,
-    checkPlanServings,
+    checkPlanDay,
+    checkPlanServingsCapped,
     checkPlanSlot,
+    planRecipe,
     PlanInputError,
 } from "../../domain/plan.js";
 import {
@@ -825,21 +825,6 @@ recipesRoutes.post(
     },
 );
 
-/**
- * A plan day must be a real day and not already past, in the household's
- * calendar: a plan for yesterday would never show, so it is refused up front.
- */
-async function checkPlanDay(
-    householdId: string,
-    value: string,
-): Promise<string> {
-    const date = checkPlanDate(value);
-    if (date < (await householdToday(householdId))) {
-        throw new PlanInputError("Pick today or a later day.");
-    }
-    return date;
-}
-
 /** "Sat 14 Nov · dinner", the toast's words for where a plan landed. */
 function planWhen(date: string, slot: keyof typeof PLAN_SLOT_LABEL): string {
     return `${planDayLabel(date)} · ${PLAN_SLOT_LABEL[slot].toLowerCase()}`;
@@ -869,21 +854,19 @@ recipesRoutes.post(
         const slot = formText(body, "slot");
         const servingsInput = formOptionalNumber(body, "servings");
         try {
-            await checkPlanDay(member.householdId, date);
-            const checkedSlot = checkPlanSlot(slot);
-            const servings = checkPlanServings(
-                servingsInput ?? recipe.yieldPortions,
-            );
-            if (servings > COOK_SERVINGS_MAX) {
-                throw new PlanInputError(
-                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
-                );
-            }
-            const plans = liveRecipePlansStore();
-            const planned = (
-                await plans.listPlans(member.householdId, date, date)
-            ).find((p) => p.recipeId === recipeId && p.slot === checkedSlot);
-            if (planned) {
+            const outcome = await planRecipe(liveRecipePlansStore(), {
+                householdId: member.householdId,
+                recipeId,
+                recipeYield: recipe.yieldPortions,
+                date,
+                slot,
+                servings: servingsInput,
+                today: await householdToday(member.householdId),
+                createdBy: userId,
+            });
+            if (!outcome) return c.text("Not found", 404);
+            const checkedSlot = outcome.plan.slot;
+            if (outcome.alreadyPlanned) {
                 return redirectWithToast(
                     c,
                     `/recipes/${recipeId}`,
@@ -891,15 +874,6 @@ recipesRoutes.post(
                     { when: planWhen(date, checkedSlot) },
                 );
             }
-            const added = await plans.addPlan({
-                householdId: member.householdId,
-                recipeId,
-                date,
-                slot: checkedSlot,
-                servings,
-                createdBy: userId,
-            });
-            if (!added) return c.text("Not found", 404);
             return redirectWithToast(c, `/recipes/${recipeId}`, "plan.added", {
                 when: planWhen(date, checkedSlot),
             });
@@ -945,17 +919,14 @@ recipesRoutes.post(
         const slotInput = formText(body, "slot");
         const servingsInput = formOptionalNumber(body, "servings");
         try {
-            const date = await checkPlanDay(member.householdId, dateInput);
+            const date = checkPlanDay(
+                dateInput,
+                await householdToday(member.householdId),
+            );
             const slot = checkPlanSlot(slotInput);
-            const servings =
-                servingsInput == null
-                    ? existing.servings
-                    : checkPlanServings(servingsInput);
-            if (servings > COOK_SERVINGS_MAX) {
-                throw new PlanInputError(
-                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
-                );
-            }
+            const servings = checkPlanServingsCapped(
+                servingsInput ?? existing.servings,
+            );
             let moved = await plans.movePlan(
                 member.householdId,
                 existing.id,
@@ -1070,17 +1041,6 @@ recipesRoutes.post(
                 liveFoodsStore(),
                 { householdId: member.householdId, lines },
             );
-            for (const entry of result.unknown) {
-                const added = result.added.find(
-                    (line) => line.foodId === entry.line.foodId,
-                );
-                if (added && added.note == null) {
-                    await grocery.updateLine({
-                        ...added,
-                        note: PLAN_UNKNOWN_LINE_NOTE,
-                    });
-                }
-            }
             if (result.added.length === 0) {
                 return redirectWithToast(c, back, "plan.missing.on-list");
             }
