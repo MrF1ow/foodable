@@ -1,3 +1,4 @@
+import { PRODUCT_DEFAULT_BACK } from "../pages/v2/product.js";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { legacyRedirects } from "../legacy-redirects.js";
@@ -2313,6 +2314,37 @@ describe("product routes (v2 foods)", () => {
             headers: { cookie: cookieFor(ALICE) },
         });
         expect(res.status).toBe(404);
+        resetFlagsForTests();
+    });
+
+    test("GET /foods/:id back link uses only a same-origin page, never a script", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Yogurt" }),
+        );
+        const backFor = async (referer: string) => {
+            const res = await productApp().request(
+                `http://x/foods/${food.id}`,
+                {
+                    headers: { cookie: cookieFor(ALICE), referer },
+                },
+            );
+            expect(res.status).toBe(200);
+            const html = await res.text();
+            return /fd-product-top__back" href="([^"]*)"/.exec(html)?.[1];
+        };
+        // iOS Safari: the service worker's script URL as the referrer.
+        expect(await backFor("http://x/sw.js")).toBe(PRODUCT_DEFAULT_BACK);
+        expect(await backFor("http://x/app-v2.js?v=1")).toBe(
+            PRODUCT_DEFAULT_BACK,
+        );
+        expect(await backFor("http://x/api/log/search?q=a")).toBe(
+            PRODUCT_DEFAULT_BACK,
+        );
+        expect(await backFor("https://evil.example/recipes")).toBe(
+            PRODUCT_DEFAULT_BACK,
+        );
+        expect(await backFor("http://x/recipes")).toBe("/recipes");
         resetFlagsForTests();
     });
 
