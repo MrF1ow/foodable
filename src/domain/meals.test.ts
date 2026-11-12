@@ -15,8 +15,12 @@ import {
     descriptionFromItems,
     itemListDigest,
     MealItemsError,
+    recentLogDistinctKey,
+    relogMeal,
+    relogSlotMeals,
     resolveAndBuildMeal,
     sumItemNutrients,
+    type RelogStoredItem,
 } from "./meals.js";
 import type { FoodResult } from "../foods.js";
 
@@ -275,6 +279,546 @@ test("recipe portion with unmeasured ingredient marks nutrition unknown", async 
     expect(result.built.totals.protein_g).toBe(10);
     expect(result.built.totals.carbs_g).toBe(76);
     expect(result.built.totals.fat_g).toBe(1);
+});
+
+test("relogMeal re-snapshots when catalog nutrition changed", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const built = buildMealFromItems(
+        [{ foodId: eggs.id, amount: 2, unit: "each" }],
+        new Map([[eggs.id, eggs]]),
+    );
+    const snap = built.items[0]!;
+    const row: RelogStoredItem = {
+        food_id: eggs.id,
+        recipe_id: null,
+        label: snap.label,
+        amount: 2,
+        unit: "each",
+        grams: snap.grams,
+        portions: null,
+        calories: snap.calories,
+        protein_g: snap.protein_g,
+        carbs_g: snap.carbs_g,
+        fat_g: snap.fat_g,
+        fiber_g: snap.fiber_g,
+        sugar_g: snap.sugar_g,
+        alcohol_g: snap.alcohol_g,
+        caffeine_mg: snap.caffeine_mg,
+    };
+    const edited = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 100,
+        proteinG: 8,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const again = relogMeal(
+        {
+            meal_type: "breakfast",
+            description: built.items.map((i) => i.label).join(""),
+            calories: built.totals.calories,
+            protein_g: built.totals.protein_g,
+            carbs_g: built.totals.carbs_g,
+            fat_g: built.totals.fat_g,
+            fiber_g: built.totals.fiber_g,
+            sugar_g: built.totals.sugar_g,
+            alcohol_g: built.totals.alcohol_g,
+            caffeine_mg: built.totals.caffeine_mg,
+        },
+        [row],
+        new Map([[edited.id, edited]]),
+        "2026-03-02T12:00:00.000Z",
+    );
+    expect(again.calories).toBe(100);
+    expect(again.protein_g).toBe(8);
+});
+
+test("relogMeal keeps snapshot when the food was deleted", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const built = buildMealFromItems(
+        [{ foodId: eggs.id, amount: 1, unit: "each" }],
+        new Map([[eggs.id, eggs]]),
+    );
+    const snap = built.items[0]!;
+    const row: RelogStoredItem = {
+        food_id: eggs.id,
+        recipe_id: null,
+        label: snap.label,
+        amount: 1,
+        unit: "each",
+        grams: snap.grams,
+        portions: null,
+        calories: snap.calories,
+        protein_g: snap.protein_g,
+        carbs_g: snap.carbs_g,
+        fat_g: snap.fat_g,
+        fiber_g: snap.fiber_g,
+        sugar_g: snap.sugar_g,
+        alcohol_g: snap.alcohol_g,
+        caffeine_mg: snap.caffeine_mg,
+    };
+    const again = relogMeal(
+        {
+            meal_type: "lunch",
+            description: snap.label,
+            calories: snap.calories,
+            protein_g: snap.protein_g,
+            carbs_g: snap.carbs_g,
+            fat_g: snap.fat_g,
+            fiber_g: snap.fiber_g,
+            sugar_g: snap.sugar_g,
+            alcohol_g: snap.alcohol_g,
+            caffeine_mg: snap.caffeine_mg,
+        },
+        [row],
+        new Map(),
+        "2026-03-02T12:00:00.000Z",
+    );
+    expect(again.items).toHaveLength(1);
+    expect(again.items![0]!.unknown).toBe(true);
+    expect(again.items![0]!.calories).toBe(snap.calories ?? null);
+    expect(again.calories).toBe(snap.calories ?? undefined);
+});
+
+test("relogMeal keeps snapshot when the food was archived", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const built = buildMealFromItems(
+        [{ foodId: eggs.id, amount: 1, unit: "each" }],
+        new Map([[eggs.id, eggs]]),
+    );
+    const snap = built.items[0]!;
+    const row: RelogStoredItem = {
+        food_id: eggs.id,
+        recipe_id: null,
+        label: snap.label,
+        amount: 1,
+        unit: "each",
+        grams: snap.grams,
+        portions: null,
+        calories: snap.calories,
+        protein_g: snap.protein_g,
+        carbs_g: snap.carbs_g,
+        fat_g: snap.fat_g,
+        fiber_g: snap.fiber_g,
+        sugar_g: snap.sugar_g,
+        alcohol_g: snap.alcohol_g,
+        caffeine_mg: snap.caffeine_mg,
+    };
+    const archived = await updateFood(foods, HH, eggs.id, { archived: true });
+    const again = relogMeal(
+        {
+            meal_type: "lunch",
+            description: snap.label,
+            calories: snap.calories,
+            protein_g: snap.protein_g,
+            carbs_g: snap.carbs_g,
+            fat_g: snap.fat_g,
+            fiber_g: snap.fiber_g,
+            sugar_g: snap.sugar_g,
+            alcohol_g: snap.alcohol_g,
+            caffeine_mg: snap.caffeine_mg,
+        },
+        [row],
+        new Map([[archived.id, archived]]),
+        "2026-03-02T12:00:00.000Z",
+    );
+    expect(again.items![0]!.unknown).toBe(true);
+    expect(again.items![0]!.calories).toBe(snap.calories ?? null);
+});
+
+test("relogMeal copies free-text totals unchanged", () => {
+    const again = relogMeal(
+        {
+            meal_type: "dinner",
+            description: "Pizza night",
+            calories: 800,
+            protein_g: 30,
+            carbs_g: 90,
+            fat_g: 40,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            notes: "shared",
+        },
+        [],
+        new Map(),
+        "2026-03-02T18:00:00.000Z",
+    );
+    expect(again.description).toBe("Pizza night");
+    expect(again.calories).toBe(800);
+    expect(again.notes).toBe("shared");
+    expect(again.items).toBeUndefined();
+});
+
+test("relogSlotMeals merges yesterday slot items into one meal", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const toast = await catalogFood(foods, "Toast", {
+        defaultUnit: "each",
+        gramsPerEach: 30,
+        calories: 100,
+        proteinG: 3,
+        carbsG: 18,
+        fatG: 2,
+        fiberG: 1,
+        sugarG: 2,
+    });
+    const catalog = new Map([
+        [eggs.id, eggs],
+        [toast.id, toast],
+    ]);
+    const line = (foodId: string, amount: number): RelogStoredItem => {
+        const built = buildMealFromItems(
+            [{ foodId, amount, unit: "each" }],
+            catalog,
+        );
+        const snap = built.items[0]!;
+        return {
+            food_id: foodId,
+            recipe_id: null,
+            label: snap.label,
+            amount,
+            unit: "each",
+            grams: snap.grams,
+            portions: null,
+            calories: snap.calories,
+            protein_g: snap.protein_g,
+            carbs_g: snap.carbs_g,
+            fat_g: snap.fat_g,
+            fiber_g: snap.fiber_g,
+            sugar_g: snap.sugar_g,
+            alcohol_g: snap.alcohol_g,
+            caffeine_mg: snap.caffeine_mg,
+        };
+    };
+    const merged = relogSlotMeals(
+        [
+            {
+                meal_type: "breakfast",
+                description: "Eggs",
+                calories: 80,
+                protein_g: 6,
+                carbs_g: 0,
+                fat_g: 5,
+                fiber_g: 0,
+                sugar_g: 0,
+                alcohol_g: null,
+                caffeine_mg: null,
+                items: [line(eggs.id, 1)],
+            },
+            {
+                meal_type: "breakfast",
+                description: "Toast",
+                calories: 100,
+                protein_g: 3,
+                carbs_g: 18,
+                fat_g: 2,
+                fiber_g: 1,
+                sugar_g: 2,
+                alcohol_g: null,
+                caffeine_mg: null,
+                items: [line(toast.id, 1)],
+            },
+        ],
+        "breakfast",
+        catalog,
+        "2026-03-02T08:00:00.000Z",
+    );
+    expect(merged?.items).toHaveLength(2);
+    expect(merged?.calories).toBe(70);
+});
+
+test("relogSlotMeals includes free-text meals when the slot has item logs", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const catalog = new Map([[eggs.id, eggs]]);
+    const built = buildMealFromItems(
+        [{ foodId: eggs.id, amount: 1, unit: "each" }],
+        catalog,
+    );
+    const snap = built.items[0]!;
+    const row: RelogStoredItem = {
+        food_id: eggs.id,
+        recipe_id: null,
+        label: snap.label,
+        amount: 1,
+        unit: "each",
+        grams: snap.grams,
+        portions: null,
+        calories: snap.calories,
+        protein_g: snap.protein_g,
+        carbs_g: snap.carbs_g,
+        fat_g: snap.fat_g,
+        fiber_g: snap.fiber_g,
+        sugar_g: snap.sugar_g,
+        alcohol_g: snap.alcohol_g,
+        caffeine_mg: snap.caffeine_mg,
+    };
+    const merged = relogSlotMeals(
+        [
+            {
+                meal_type: "breakfast",
+                description: "Coffee",
+                calories: 5,
+                protein_g: 0,
+                carbs_g: 1,
+                fat_g: 0,
+                fiber_g: 0,
+                sugar_g: 0,
+                alcohol_g: null,
+                caffeine_mg: 95,
+            },
+            {
+                meal_type: "breakfast",
+                description: "Eggs",
+                calories: snap.calories,
+                protein_g: snap.protein_g,
+                carbs_g: snap.carbs_g,
+                fat_g: snap.fat_g,
+                fiber_g: snap.fiber_g,
+                sugar_g: snap.sugar_g,
+                alcohol_g: snap.alcohol_g,
+                caffeine_mg: snap.caffeine_mg,
+                items: [row],
+            },
+        ],
+        "breakfast",
+        catalog,
+        "2026-03-02T08:00:00.000Z",
+    );
+    expect(merged?.description).toContain("Coffee");
+    expect(merged?.description).toContain("Eggs");
+    expect(merged?.calories).toBe((snap.calories ?? 0) + 5);
+    expect(merged?.caffeine_mg).toBe((snap.caffeine_mg ?? 0) + 95);
+    // The free-text log rides along as a label-only item, so the meal's
+    // totals stay the sum of its items (an amount edit re-sums them).
+    expect(merged?.items?.map((item) => item.label)).toContain("Coffee");
+    expect(sumItemNutrients(merged?.items ?? []).calories).toBe(
+        merged?.calories ?? null,
+    );
+});
+
+test("relogMeal keeps a recipe line's logged name and counts archived ingredients", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const beans = await catalogFood(foods, "Beans", {
+        calories: 100,
+        proteinG: 7,
+        carbsG: 15,
+        fatG: 1,
+        fiberG: 6,
+        sugarG: 1,
+    });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "alice",
+        name: "Chili",
+        yieldPortions: 1,
+    });
+    await recipes.insertIngredient({
+        id: "i-beans",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Beans",
+        quantity: { amount: 100, unit: "g" },
+        foodId: beans.id,
+        sortOrder: 0,
+        note: null,
+    });
+    const ingredients = await recipes.listIngredients(HH, recipe.id);
+    const source = new Map([[recipe.id, { recipe, ingredients }]]);
+    const archived = { ...beans, archivedAt: "2026-03-01T00:00:00.000Z" };
+    const again = relogMeal(
+        {
+            meal_type: "dinner",
+            description: "1 portion Chili night",
+            calories: 100,
+            protein_g: 7,
+            carbs_g: 15,
+            fat_g: 1,
+            fiber_g: 6,
+            sugar_g: 1,
+            alcohol_g: null,
+            caffeine_mg: null,
+        },
+        [
+            {
+                food_id: null,
+                recipe_id: recipe.id,
+                label: "Chili night",
+                amount: null,
+                unit: null,
+                grams: null,
+                portions: 1,
+                calories: 100,
+                protein_g: 7,
+                carbs_g: 15,
+                fat_g: 1,
+                fiber_g: 6,
+                sugar_g: 1,
+                alcohol_g: null,
+                caffeine_mg: null,
+            },
+        ],
+        new Map([[beans.id, archived]]),
+        "2026-03-02T19:00:00.000Z",
+        source,
+    );
+    expect(again.calories).toBe(100);
+    expect(again.items?.[0]?.label).toBe("Chili night");
+});
+
+test("recentLogDistinctKey treats identical food sets as one", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const spec = { foodId: eggs.id, amount: 2, unit: "each" as const };
+    const items = buildMealFromItems([spec], new Map([[eggs.id, eggs]])).items;
+    const row: RelogStoredItem = {
+        food_id: eggs.id,
+        recipe_id: null,
+        label: items[0]!.label,
+        amount: 2,
+        unit: "each",
+        grams: items[0]!.grams,
+        portions: null,
+        calories: items[0]!.calories,
+        protein_g: items[0]!.protein_g,
+        carbs_g: items[0]!.carbs_g,
+        fat_g: items[0]!.fat_g,
+        fiber_g: items[0]!.fiber_g,
+        sugar_g: items[0]!.sugar_g,
+        alcohol_g: items[0]!.alcohol_g,
+        caffeine_mg: items[0]!.caffeine_mg,
+    };
+    const keyA = recentLogDistinctKey({
+        description: "A",
+        items: [row],
+    });
+    const keyB = recentLogDistinctKey({
+        description: "B",
+        items: [row],
+    });
+    expect(keyA).toBe(keyB);
+    const keyText = recentLogDistinctKey({ description: "  Pizza  Night " });
+    expect(keyText).toBe("text:pizza night");
+});
+
+test("recentLogDistinctKey is order-insensitive for items", async () => {
+    const foods = createMemoryFoodsStore();
+    const eggs = await catalogFood(foods, "Eggs", {
+        defaultUnit: "each",
+        gramsPerEach: 50,
+        calories: 80,
+        proteinG: 6,
+        carbsG: 0,
+        fatG: 5,
+        fiberG: 0,
+        sugarG: 0,
+    });
+    const toast = await catalogFood(foods, "Toast", {
+        defaultUnit: "each",
+        gramsPerEach: 30,
+        calories: 100,
+        proteinG: 3,
+        carbsG: 18,
+        fatG: 2,
+        fiberG: 1,
+        sugarG: 2,
+    });
+    const catalog = new Map([
+        [eggs.id, eggs],
+        [toast.id, toast],
+    ]);
+    const storedLine = (foodId: string, amount: number): RelogStoredItem => {
+        const snap = buildMealFromItems(
+            [{ foodId, amount, unit: "each" }],
+            catalog,
+        ).items[0]!;
+        return {
+            food_id: foodId,
+            recipe_id: null,
+            label: snap.label,
+            amount,
+            unit: "each",
+            grams: snap.grams,
+            portions: null,
+            calories: snap.calories,
+            protein_g: snap.protein_g,
+            carbs_g: snap.carbs_g,
+            fat_g: snap.fat_g,
+            fiber_g: snap.fiber_g,
+            sugar_g: snap.sugar_g,
+            alcohol_g: snap.alcohol_g,
+            caffeine_mg: snap.caffeine_mg,
+        };
+    };
+    const a = storedLine(eggs.id, 1);
+    const b = storedLine(toast.id, 1);
+    expect(recentLogDistinctKey({ description: "A", items: [a, b] })).toBe(
+        recentLogDistinctKey({ description: "B", items: [b, a] }),
+    );
 });
 
 test("unknown food or recipe ids fail closed", () => {

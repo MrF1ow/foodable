@@ -3,6 +3,7 @@ import {
     findFoodById,
     findOrCreateManualFood,
     FoodsInputError,
+    normalizeFoodName,
     similarFoodsForNames,
     SimilarFoodsError,
     type OnSimilar,
@@ -482,3 +483,291 @@ export function callerSentTotals(fields: {
 
 export const COMPUTED_TOTALS_WARNING =
     "Item nutrition was computed from the food list; the calories and macros you sent were ignored.";
+
+export type RelogStoredItem = MealNutrients & {
+    food_id: string | null;
+    recipe_id: string | null;
+    label: string;
+    amount: number | null;
+    unit: string | null;
+    grams: number | null;
+    portions: number | null;
+};
+
+export type RelogMealSource = MealNutrients & {
+    meal_type: string | null;
+    description: string;
+    notes?: string | null;
+    items?: readonly RelogStoredItem[];
+};
+
+export type RelogMealOutput = {
+    meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+    description: string;
+    logged_at: string;
+    notes?: string;
+    calories?: number;
+    protein_g?: number;
+    carbs_g?: number;
+    fat_g?: number;
+    fiber_g?: number;
+    sugar_g?: number;
+    alcohol_g?: number;
+    caffeine_mg?: number;
+    items?: MealItemSnapshot[];
+    item_digest?: string;
+};
+
+function relogMealType(raw: string | null): RelogMealOutput["meal_type"] {
+    switch (raw) {
+        case "breakfast":
+        case "lunch":
+        case "dinner":
+        case "snack":
+            return raw;
+        default:
+            return "snack";
+    }
+}
+
+type OptionalMealNutrients = {
+    [K in NutrientKey]?: number;
+};
+
+function optionalNutrients(n: MealNutrients): OptionalMealNutrients {
+    const out: OptionalMealNutrients = {};
+    for (const key of NUTRIENT_KEYS) {
+        const value = n[key];
+        if (value != null) out[key] = value;
+    }
+    return out;
+}
+
+function storedItemToSnapshot(
+    item: RelogStoredItem,
+    sortOrder: number,
+): MealItemSnapshot {
+    return {
+        foodId: item.food_id,
+        recipeId: item.recipe_id,
+        label: item.label,
+        amount: item.amount,
+        unit: item.unit,
+        grams: item.grams,
+        portions: item.portions,
+        calories: item.calories,
+        protein_g: item.protein_g,
+        carbs_g: item.carbs_g,
+        fat_g: item.fat_g,
+        fiber_g: item.fiber_g,
+        sugar_g: item.sugar_g,
+        alcohol_g: item.alcohol_g,
+        caffeine_mg: item.caffeine_mg,
+        sortOrder,
+        unknown: true,
+    };
+}
+
+function specFromStoredItem(item: RelogStoredItem): MealItemSpec {
+    if (item.recipe_id) {
+        return {
+            recipeId: item.recipe_id,
+            name: item.label,
+            portions: item.portions ?? 1,
+        };
+    }
+    if (item.food_id) {
+        return {
+            foodId: item.food_id,
+            name: item.label,
+            amount: item.amount ?? 1,
+            unit: item.unit?.trim() || "g",
+        };
+    }
+    return {
+        name: item.label,
+        amount: item.amount ?? 1,
+        unit: item.unit?.trim() || "g",
+    };
+}
+
+function itemCanRelive(
+    item: RelogStoredItem,
+    foods: ReadonlyMap<string, Food>,
+    recipes: ReadonlyMap<string, RecipeMealSource>,
+): boolean {
+    if (item.recipe_id) return recipes.has(item.recipe_id);
+    if (item.food_id) {
+        const food = foods.get(item.food_id);
+        return food != null && food.archivedAt == null;
+    }
+    return false;
+}
+
+/**
+ * Build a new meal write from a prior log: food-backed lines re-snapshot from
+ * current effective catalog rows; missing, archived, or deleted foods and
+ * missing recipes keep the logged snapshot (`unknown` marks those lines).
+ * Free-text meals copy totals unchanged.
+ */
+export function relogMeal(
+    meal: RelogMealSource,
+    items: readonly RelogStoredItem[],
+    foods: ReadonlyMap<string, Food>,
+    now: string,
+    recipes: ReadonlyMap<string, RecipeMealSource> = new Map(),
+): RelogMealOutput {
+    const meal_type = relogMealType(meal.meal_type);
+    if (items.length === 0) {
+        return {
+            meal_type,
+            description: meal.description,
+            logged_at: now,
+            ...(meal.notes ? { notes: meal.notes } : {}),
+            ...optionalNutrients({
+                calories: meal.calories,
+                protein_g: meal.protein_g,
+                carbs_g: meal.carbs_g,
+                fat_g: meal.fat_g,
+                fiber_g: meal.fiber_g,
+                sugar_g: meal.sugar_g,
+                alcohol_g: meal.alcohol_g,
+                caffeine_mg: meal.caffeine_mg,
+            }),
+        };
+    }
+
+    const reliveMask = items.map((item) => itemCanRelive(item, foods, recipes));
+    const reliveSpecs = items
+        .filter((_, index) => reliveMask[index])
+        .map(specFromStoredItem);
+    const builtItems =
+        reliveSpecs.length > 0
+            ? buildMealFromItems(reliveSpecs, foods, recipes).items
+            : [];
+    let builtPtr = 0;
+    const merged: MealItemSnapshot[] = items.map((item, index) => {
+        if (reliveMask[index]) {
+            const snap = builtItems[builtPtr]!;
+            builtPtr += 1;
+            return { ...snap, sortOrder: index };
+        }
+        return storedItemToSnapshot(item, index);
+    });
+    const totals = sumItemNutrients(merged);
+    const digestSpecs = items.map(specFromStoredItem);
+    return {
+        meal_type,
+        description: descriptionFromItems(merged),
+        logged_at: now,
+        ...(meal.notes ? { notes: meal.notes } : {}),
+        ...optionalNutrients(totals),
+        items: merged,
+        item_digest: itemListDigest(digestSpecs),
+    };
+}
+
+/** Merge every log from a meal slot into one new log input (copy yesterday). */
+export function relogSlotMeals(
+    meals: readonly RelogMealSource[],
+    slot: RelogMealOutput["meal_type"],
+    foods: ReadonlyMap<string, Food>,
+    now: string,
+    recipes: ReadonlyMap<string, RecipeMealSource> = new Map(),
+): RelogMealOutput | null {
+    if (meals.length === 0) return null;
+    const flatItems = meals.flatMap((row) => [...(row.items ?? [])]);
+    const freeTextRows = meals.filter((row) => (row.items ?? []).length === 0);
+    if (flatItems.length === 0) {
+        const totals = sumItemNutrients(
+            meals.map((row) => ({
+                calories: row.calories,
+                protein_g: row.protein_g,
+                carbs_g: row.carbs_g,
+                fat_g: row.fat_g,
+                fiber_g: row.fiber_g,
+                sugar_g: row.sugar_g,
+                alcohol_g: row.alcohol_g,
+                caffeine_mg: row.caffeine_mg,
+            })),
+        );
+        return {
+            meal_type: slot,
+            description: meals.map((row) => row.description).join(" + "),
+            logged_at: now,
+            ...optionalNutrients(totals),
+        };
+    }
+    // A free-text log in a slot that also has item logs becomes a label-only
+    // item that keeps its logged totals, so the copied meal's totals stay the
+    // sum of its items (an amount edit later re-sums them).
+    const textItems: RelogStoredItem[] = freeTextRows.map((row) => ({
+        food_id: null,
+        recipe_id: null,
+        label: row.description,
+        amount: null,
+        unit: null,
+        grams: null,
+        portions: null,
+        calories: row.calories,
+        protein_g: row.protein_g,
+        carbs_g: row.carbs_g,
+        fat_g: row.fat_g,
+        fiber_g: row.fiber_g,
+        sugar_g: row.sugar_g,
+        alcohol_g: row.alcohol_g,
+        caffeine_mg: row.caffeine_mg,
+    }));
+    const fromItems = relogMeal(
+        {
+            meal_type: slot,
+            description: "",
+            calories: null,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: null,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+        },
+        [...flatItems, ...textItems],
+        foods,
+        now,
+        recipes,
+    );
+    return { ...fromItems, meal_type: slot };
+}
+
+export function copyYesterdayIdempotencyKey(
+    userId: string,
+    todayLocal: string,
+    slot: string,
+): string {
+    return `copy:${userId}:${todayLocal}:${slot}`;
+}
+
+/** Distinctness key for recent meal history (food set or normalized text). */
+export function recentLogDistinctKey(meal: {
+    description: string;
+    items?: readonly RelogStoredItem[];
+}): string {
+    const items = meal.items ?? [];
+    if (items.length === 0) {
+        return `text:${normalizeFoodName(meal.description)}`;
+    }
+    const specs = items.map(specFromStoredItem);
+    specs.sort((a, b) => {
+        const key = (s: MealItemSpec) =>
+            [
+                s.foodId ?? "",
+                s.recipeId ?? "",
+                (s.name ?? "").toLowerCase(),
+                String(s.amount ?? ""),
+                (s.unit ?? "").toLowerCase(),
+                String(s.portions ?? ""),
+            ].join("\0");
+        return key(a).localeCompare(key(b));
+    });
+    return `items:${itemListDigest(specs)}`;
+}

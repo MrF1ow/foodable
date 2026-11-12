@@ -18,8 +18,10 @@ import * as actualProfiles from "../../db/profiles.js";
 import * as actualFoodsDb from "../../db/foods.js";
 import * as actualFridgeDb from "../../db/fridge.js";
 import * as actualRecipesDb from "../../db/recipes.js";
+import * as actualMealsDb from "../../db/meals.js";
 import * as actualNutritionDb from "../../db/nutrition.js";
 import * as actualFoodSearch from "../../food-search.js";
+import { TOASTS } from "../../copy/toasts.js";
 import type { FoodResult } from "../../foods.js";
 import * as actualFoods from "../../foods.js";
 import {
@@ -51,6 +53,7 @@ const realProfiles = { ...actualProfiles };
 const realFoodsDb = { ...actualFoodsDb };
 const realFridgeDb = { ...actualFridgeDb };
 const realRecipesDb = { ...actualRecipesDb };
+const realMealsDb = { ...actualMealsDb };
 const realNutritionDb = { ...actualNutritionDb };
 const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
@@ -86,6 +89,7 @@ const rangeCalls: Array<{
     end: string;
     tz: string;
 }> = [];
+const recentLogsCalls: Array<{ userId: string; limit: number }> = [];
 let listFoodsCalls = 0;
 let listRecipesCalls = 0;
 let listFridgeItemsCalls = 0;
@@ -93,6 +97,58 @@ const mealsInserted: Array<Record<string, unknown>> = [];
 let rangeMealsOverride: Awaited<
     ReturnType<typeof realNutritionDb.getMealsInRange>
 > | null = null;
+let recentLogsOverride: Awaited<
+    ReturnType<typeof realMealsDb.recentLogs>
+> | null = null;
+
+function defaultRecentHistoryMeals(): Awaited<
+    ReturnType<typeof realMealsDb.recentLogs>
+> {
+    return [
+        {
+            id: "meal-recipe",
+            user_id: ALICE,
+            logged_at: "2026-11-01T19:00:00.000Z",
+            meal_type: "dinner",
+            description: "Chili night",
+            calories: 400,
+            protein_g: 20,
+            carbs_g: 30,
+            fat_g: 10,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            notes: null,
+            idempotency_key: null,
+            items: [
+                {
+                    id: "item-1",
+                    meal_id: "meal-recipe",
+                    user_id: ALICE,
+                    household_id: HH,
+                    food_id: null,
+                    recipe_id: "recipe-chili",
+                    label: "Chili",
+                    amount: 1,
+                    unit: "portion",
+                    grams: null,
+                    portions: 1,
+                    calories: 400,
+                    protein_g: 20,
+                    carbs_g: 30,
+                    fat_g: 10,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    sort_order: 0,
+                    created_at: "2026-11-01T19:00:00.000Z",
+                },
+            ],
+        },
+    ];
+}
 const waterInserted: Array<Record<string, unknown>> = [];
 const weightsInserted: Array<Record<string, unknown>> = [];
 
@@ -187,6 +243,15 @@ mock.module("../../db/fridge.js", () => ({
 mock.module("../../db/recipes.js", () => ({
     ...realRecipesDb,
     liveRecipesStore: () => db.recipesStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/meals.js", () => ({
+    ...realMealsDb,
+    recentLogs: async (userId: string, limit: number) => {
+        recentLogsCalls.push({ userId, limit });
+        if (recentLogsOverride != null) return recentLogsOverride;
+        return defaultRecentHistoryMeals().slice(0, limit);
+    },
 }));
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
 mock.module("../../db/nutrition.js", () => ({
@@ -376,6 +441,8 @@ afterAll(() => {
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/recipes.js", () => realRecipesDb);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/meals.js", () => realMealsDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/nutrition.js", () => realNutritionDb);
     mock.module("../../food-search.js", () => realFoodSearch);
 });
@@ -420,6 +487,7 @@ afterEach(async () => {
 
 beforeEach(async () => {
     rangeMealsOverride = null;
+    recentLogsOverride = null;
     mealsInserted.length = 0;
     waterInserted.length = 0;
     weightsInserted.length = 0;
@@ -427,6 +495,7 @@ beforeEach(async () => {
     offServing = "30 g";
     offCalls = 0;
     rangeCalls.length = 0;
+    recentLogsCalls.length = 0;
     listFoodsCalls = 0;
     listRecipesCalls = 0;
     listFridgeItemsCalls = 0;
@@ -648,7 +717,7 @@ describe("GET /api/log/search", () => {
             ?.items.find((i) => i.food_id === scored.id);
         expect(foodRow?.product_score).toBe(expected);
 
-        rangeMealsOverride = [
+        recentLogsOverride = [
             {
                 id: "meal-yogurt",
                 user_id: ALICE,
@@ -706,9 +775,9 @@ describe("GET /api/log/search", () => {
         const empty = await search("");
         expect(offCalls).toBe(0);
         expect(empty.groups.map((g) => g.kind)).toEqual(["history"]);
-        expect(rangeCalls[0]).toMatchObject({
+        expect(recentLogsCalls[0]).toMatchObject({
             userId: ALICE,
-            tz: "America/Los_Angeles",
+            limit: 20,
         });
         const item = empty.groups[0]!.items[0]!;
         expect(item.id).toBe("meal-recipe");
@@ -1218,6 +1287,15 @@ describe("POST /log/weight", () => {
         expect(res.status).toBe(400);
         expect(html).toMatch(/Last: 183\.0 lb/);
     });
+});
+
+test("copy-yesterday noop toast differs from undo noop", () => {
+    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).toBe(
+        "Already copied from yesterday",
+    );
+    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).not.toBe(
+        TOASTS["nutrition.meal.undo.noop"].text,
+    );
 });
 
 describe("weighInPrefillForUser", () => {
