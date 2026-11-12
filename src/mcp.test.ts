@@ -40,6 +40,7 @@ import * as actualHousehold from "./db/household.js";
 import * as actualDbFridge from "./db/fridge.js";
 import * as actualDbGrocery from "./db/grocery.js";
 import * as actualDbRecipes from "./db/recipes.js";
+import * as actualDbShareLinks from "./db/share-links.js";
 import * as actualDbSettings from "./db/settings.js";
 import * as actualDbRules from "./db/rules.js";
 import * as actualDbScoreSettings from "./db/score-settings.js";
@@ -92,6 +93,7 @@ const realHousehold = { ...actualHousehold };
 const realDbFridge = { ...actualDbFridge };
 const realDbGrocery = { ...actualDbGrocery };
 const realDbRecipes = { ...actualDbRecipes };
+const realDbShareLinks = { ...actualDbShareLinks };
 const realDbSettings = { ...actualDbSettings };
 const realDbRules = { ...actualDbRules };
 const realDbScoreSettings = { ...actualDbScoreSettings };
@@ -156,8 +158,14 @@ import { utcTodayFromDate } from "./domain/stock.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
+    createRecipe,
     importRecipeFromText,
 } from "./domain/recipes.js";
+import {
+    createMemoryShareLinkStore,
+    resolveShareToken,
+} from "./domain/sharing.js";
+import { SHARE_LINK_OUTPUT_SCHEMAS } from "./mcp/tools/sharing.js";
 import {
     createGroceryStore,
     createMemorySettingsStore,
@@ -381,6 +389,7 @@ const db = {
     stockStore: createMemoryStockStore(),
     groceryStore: createMemoryGroceryStore(),
     recipesStore: createMemoryRecipesStore(),
+    shareLinksStore: createMemoryShareLinkStore(),
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
     scoreSettingsStore: createMemoryScoreSettingsStore(),
@@ -788,6 +797,11 @@ mock.module("./db/recipes.js", () => ({
     liveRecipesStore: () => db.recipesStore,
 }));
 
+mock.module("./db/share-links.js", () => ({
+    ...actualDbShareLinks,
+    liveShareLinkStore: () => db.shareLinksStore,
+}));
+
 mock.module("./db/settings.js", () => ({
     ...actualDbSettings,
     liveSettingsStore: () => db.settingsStore,
@@ -896,6 +910,7 @@ afterAll(() => {
     mock.module("./db/stock.js", () => realDbStock);
     mock.module("./db/grocery.js", () => realDbGrocery);
     mock.module("./db/recipes.js", () => realDbRecipes);
+    mock.module("./db/share-links.js", () => realDbShareLinks);
     mock.module("./db/settings.js", () => realDbSettings);
     mock.module("./db/rules.js", () => realDbRules);
     mock.module("./db/score-settings.js", () => realDbScoreSettings);
@@ -959,6 +974,7 @@ beforeEach(() => {
     db.stockStore = createMemoryStockStore();
     db.groceryStore = createMemoryGroceryStore();
     db.recipesStore = createMemoryRecipesStore();
+    db.shareLinksStore = createMemoryShareLinkStore();
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
     db.scoreSettingsStore = createMemoryScoreSettingsStore();
@@ -12044,5 +12060,488 @@ describe("authenticated dashboard HTTP", () => {
                 displayName: "Alice",
             },
         ]);
+    });
+});
+
+// ---------- share links: create_share_link / list_share_links / revoke_share_link ----------
+
+describe("share link tools", () => {
+    const TOKEN_URL = /^http:\/\/localhost\/s\/([A-Za-z0-9_-]{43})$/;
+    const OTHER_HOUSEHOLD = "hh-2";
+    const SHARE_TOOLS = [
+        "create_share_link",
+        "list_share_links",
+        "revoke_share_link",
+    ];
+
+    async function withShareLinks(
+        on: boolean,
+        auth:
+            | { kind: "user"; userId: string }
+            | {
+                  kind: "household";
+                  householdId: string;
+              },
+        run: (call: CallTool, client: Client) => Promise<void>,
+    ) {
+        const member = db.members[0];
+        const flags = evaluateViewerFlags(
+            buildFlagContext({
+                auth,
+                member:
+                    auth.kind === "user" && member
+                        ? {
+                              userId: member.userId,
+                              householdId: member.householdId,
+                              role: member.role,
+                              displayName: member.displayName,
+                          }
+                        : undefined,
+            }),
+            createMemoryFlags({ "mcp-share-links": on }),
+        );
+        const server = new McpServer(
+            { name: "foodable-test", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(
+            server,
+            auth,
+            true,
+            null,
+            undefined,
+            "http://localhost",
+            true,
+            flags,
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test-client", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        try {
+            await run(
+                async (name, args) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args ?? {},
+                    })) as ToolResult,
+                client,
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    }
+
+    const asU1 = { kind: "user", userId: "u1" } as const;
+
+    async function seedRecipe(householdId: string, name = "Lentil soup") {
+        return createRecipe(db.recipesStore, {
+            householdId,
+            creatorId: "u1",
+            name,
+            yieldPortions: 4,
+        });
+    }
+
+    function tokenOf(r: ToolResult): string {
+        const url = String(r.structuredContent?.url);
+        const m = TOKEN_URL.exec(url);
+        if (!m) throw new Error(`unexpected share url: ${url}`);
+        return m[1]!;
+    }
+
+    test("flag on lists the three tools; flag off hides them and refuses a call", async () => {
+        await withShareLinks(true, asU1, async (_call, client) => {
+            const names = (await client.listTools()).tools.map((t) => t.name);
+            for (const name of SHARE_TOOLS) expect(names).toContain(name);
+        });
+        await withShareLinks(false, asU1, async (call, client) => {
+            const names = (await client.listTools()).tools.map((t) => t.name);
+            for (const name of SHARE_TOOLS) expect(names).not.toContain(name);
+            await expect(
+                client.callTool({
+                    name: "create_share_link",
+                    arguments: { kind: "grocery_list" },
+                }),
+            ).rejects.toThrow(/not found/i);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+            void call;
+        });
+    });
+
+    test("create_share_link for a recipe returns the url once and the link resolves", async () => {
+        const recipe = await seedRecipe("hh-1");
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", {
+                kind: "recipe",
+                target_id: recipe.id,
+                expires_in_days: 7,
+            });
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                r.structuredContent,
+            );
+            expect(parsed.kind).toBe("recipe");
+            expect(parsed.target_id).toBe(recipe.id);
+            expect(parsed.url).toMatch(TOKEN_URL);
+            expect(r.content[0]!.text).toContain(parsed.url);
+            const expiresMs = Date.parse(parsed.expires_at!);
+            expect(expiresMs - Date.now()).toBeGreaterThan(6.9 * 86_400_000);
+            expect(expiresMs - Date.now()).toBeLessThan(7.1 * 86_400_000);
+
+            const link = await resolveShareToken(
+                db.shareLinksStore,
+                tokenOf(r),
+                new Date(),
+            );
+            expect(link).toMatchObject({
+                id: parsed.id,
+                householdId: "hh-1",
+                kind: "recipe",
+                targetId: recipe.id,
+                createdBy: "u1",
+            });
+        });
+    });
+
+    test("create_share_link for the grocery list needs no target and may never expire", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", { kind: "grocery_list" });
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                r.structuredContent,
+            );
+            expect(parsed).toMatchObject({
+                kind: "grocery_list",
+                target_id: null,
+                expires_at: null,
+            });
+            const link = await resolveShareToken(
+                db.shareLinksStore,
+                tokenOf(r),
+                new Date(),
+            );
+            expect(link?.kind).toBe("grocery_list");
+            const withTarget = await call("create_share_link", {
+                kind: "grocery_list",
+                target_id: crypto.randomUUID(),
+            });
+            expect(withTarget.isError).toBe(true);
+        });
+    });
+
+    test("a household token creates a link with no member behind it", async () => {
+        await withShareLinks(
+            true,
+            { kind: "household", householdId: "hh-1" },
+            async (call) => {
+                const r = await call("create_share_link", {
+                    kind: "grocery_list",
+                });
+                expect(r.isError).toBeFalsy();
+                const link = await resolveShareToken(
+                    db.shareLinksStore,
+                    tokenOf(r),
+                    new Date(),
+                );
+                expect(link).toMatchObject({
+                    householdId: "hh-1",
+                    createdBy: null,
+                });
+                const listed = await call("list_share_links");
+                const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                    listed.structuredContent,
+                );
+                expect(parsed.links[0]).toMatchObject({
+                    created_by: null,
+                    created_by_name: null,
+                });
+            },
+        );
+    });
+
+    test("refuses a recipe from another household, a missing one, and a non-uuid target", async () => {
+        const foreign = await seedRecipe(OTHER_HOUSEHOLD, "Secret stew");
+        await withShareLinks(true, asU1, async (call) => {
+            const crossHousehold = await call("create_share_link", {
+                kind: "recipe",
+                target_id: foreign.id,
+            });
+            expect(crossHousehold.isError).toBe(true);
+            expect(crossHousehold.content[0]!.text).toMatch(
+                /not in your household/i,
+            );
+            const missing = await call("create_share_link", {
+                kind: "recipe",
+                target_id: crypto.randomUUID(),
+            });
+            expect(missing.isError).toBe(true);
+            const garbage = await call("create_share_link", {
+                kind: "recipe",
+                target_id: "not-a-uuid",
+            });
+            expect(garbage.isError).toBe(true);
+            expect(garbage.content[0]!.text).toMatch(/uuid|recipe id/i);
+            const noTarget = await call("create_share_link", {
+                kind: "recipe",
+            });
+            expect(noTarget.isError).toBe(true);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+            expect(
+                await db.shareLinksStore.listForHousehold(OTHER_HOUSEHOLD),
+            ).toEqual([]);
+        });
+    });
+
+    test.each([0, 366, 1.5, -3])("refuses expires_in_days %p", async (days) => {
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("create_share_link", {
+                kind: "grocery_list",
+                expires_in_days: days,
+            });
+            expect(r.isError).toBe(true);
+            expect(r.content[0]!.text).toMatch(/expires_in_days/);
+            expect(await db.shareLinksStore.listForHousehold("hh-1")).toEqual(
+                [],
+            );
+        });
+    });
+
+    test("list_share_links shows active links with the recipe name and sharer, never a token", async () => {
+        const soup = await seedRecipe("hh-1", "Lentil soup");
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "recipe",
+                target_id: soup.id,
+            });
+            const groceries = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            const revoked = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            await call("revoke_share_link", {
+                id: String(revoked.structuredContent?.id),
+            });
+
+            const r = await call("list_share_links");
+            expect(r.isError).toBeFalsy();
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                r.structuredContent,
+            );
+            expect(parsed.links.map((l) => l.id).sort()).toEqual(
+                [made.structuredContent?.id, groceries.structuredContent?.id]
+                    .map(String)
+                    .sort(),
+            );
+            const recipeLink = parsed.links.find((l) => l.kind === "recipe")!;
+            expect(recipeLink).toMatchObject({
+                target_id: soup.id,
+                recipe_name: "Lentil soup",
+                created_by: "u1",
+                created_by_name: "U1",
+            });
+            expect(
+                parsed.links.find((l) => l.kind === "grocery_list"),
+            ).toMatchObject({ target_id: null, recipe_name: null });
+            // Neither the token nor a hash of it can be read back.
+            const wire = JSON.stringify(r);
+            expect(wire).not.toContain(tokenOf(made));
+            expect(wire).not.toContain(tokenOf(groceries));
+            expect(wire).not.toMatch(/token|hash|\/s\//i);
+        });
+    });
+
+    test("list_share_links leaves out expired links and other households' links", async () => {
+        await db.shareLinksStore.create({
+            householdId: "hh-1",
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u1",
+            tokenHash: "a".repeat(64),
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+        });
+        await db.shareLinksStore.create({
+            householdId: OTHER_HOUSEHOLD,
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u9",
+            tokenHash: "b".repeat(64),
+            expiresAt: null,
+        });
+        await withShareLinks(true, asU1, async (call) => {
+            const r = await call("list_share_links");
+            const parsed = SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                r.structuredContent,
+            );
+            expect(parsed.links).toEqual([]);
+            expect(r.content[0]!.text).toMatch(/no active share links/i);
+        });
+    });
+
+    test("revoke_share_link stops the link resolving, and is idempotent", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            const token = tokenOf(made);
+            const id = String(made.structuredContent?.id);
+            expect(
+                await resolveShareToken(db.shareLinksStore, token, new Date()),
+            ).not.toBeNull();
+
+            const first = await call("revoke_share_link", { id });
+            expect(first.isError).toBeFalsy();
+            const parsedFirst = SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(
+                first.structuredContent,
+            );
+            expect(parsedFirst).toMatchObject({ id, kind: "grocery_list" });
+            expect(
+                await resolveShareToken(db.shareLinksStore, token, new Date()),
+            ).toBeNull();
+
+            const second = await call("revoke_share_link", { id });
+            expect(second.isError).toBeFalsy();
+            expect(
+                SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(second.structuredContent)
+                    .revoked_at,
+            ).toBe(parsedFirst.revoked_at);
+        });
+    });
+
+    test("revoke_share_link answers not found for another household's link, an unknown id and a non-uuid", async () => {
+        const foreign = await db.shareLinksStore.create({
+            householdId: OTHER_HOUSEHOLD,
+            kind: "grocery_list",
+            targetId: null,
+            createdBy: "u9",
+            tokenHash: "c".repeat(64),
+            expiresAt: null,
+        });
+        await withShareLinks(true, asU1, async (call) => {
+            for (const id of [foreign.id, crypto.randomUUID(), "nope"]) {
+                const r = await call("revoke_share_link", { id });
+                expect(r.isError).toBe(true);
+                expect(r.content[0]!.text).toMatch(/share link not found/i);
+            }
+            const still =
+                await db.shareLinksStore.listForHousehold(OTHER_HOUSEHOLD);
+            expect(still).toHaveLength(1);
+        });
+    });
+
+    test("the raw token appears only in the tool result, never in analytics", async () => {
+        await withShareLinks(true, asU1, async (call) => {
+            const made = await call("create_share_link", {
+                kind: "grocery_list",
+            });
+            await call("list_share_links");
+            expect(db.analyticsRows.length).toBeGreaterThanOrEqual(2);
+            const rows = JSON.stringify(db.analyticsRows);
+            expect(rows).toContain("create_share_link");
+            expect(rows).not.toContain(tokenOf(made));
+        });
+    });
+
+    describe("over HTTP", () => {
+        test.each(ERAS)(
+            "flag on: create, list and revoke (%p)",
+            async (era) => {
+                const recipe = await seedRecipe("hh-1");
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-share-links": true }),
+                );
+                try {
+                    await withHttpClient("u1", era, async (client) => {
+                        const names = (await client.listTools()).tools.map(
+                            (t) => t.name,
+                        );
+                        for (const name of SHARE_TOOLS)
+                            expect(names).toContain(name);
+
+                        const made = (await client.callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "recipe", target_id: recipe.id },
+                        })) as ToolResult;
+                        const parsed = SHARE_LINK_OUTPUT_SCHEMAS.create.parse(
+                            made.structuredContent,
+                        );
+                        expect(parsed.url).toMatch(
+                            /^http:\/\/test\.local\/s\/[A-Za-z0-9_-]{43}$/,
+                        );
+                        const token = parsed.url.split("/s/")[1]!;
+                        expect(
+                            await resolveShareToken(
+                                db.shareLinksStore,
+                                token,
+                                new Date(),
+                            ),
+                        ).not.toBeNull();
+
+                        const listed = (await client.callTool({
+                            name: "list_share_links",
+                            arguments: {},
+                        })) as ToolResult;
+                        expect(
+                            SHARE_LINK_OUTPUT_SCHEMAS.list.parse(
+                                listed.structuredContent,
+                            ).links,
+                        ).toHaveLength(1);
+
+                        const revoked = (await client.callTool({
+                            name: "revoke_share_link",
+                            arguments: { id: parsed.id },
+                        })) as ToolResult;
+                        SHARE_LINK_OUTPUT_SCHEMAS.revoke.parse(
+                            revoked.structuredContent,
+                        );
+                        expect(
+                            await resolveShareToken(
+                                db.shareLinksStore,
+                                token,
+                                new Date(),
+                            ),
+                        ).toBeNull();
+
+                        const bad = (await client.callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "recipe", target_id: "nope" },
+                        })) as ToolResult;
+                        expect(bad.isError).toBe(true);
+                    });
+                } finally {
+                    resetFlagsForTests();
+                }
+            },
+        );
+
+        test.each(ERAS)("flag off: the tools are absent (%p)", async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    for (const name of SHARE_TOOLS)
+                        expect(names).not.toContain(name);
+                    const refused = await client
+                        .callTool({
+                            name: "create_share_link",
+                            arguments: { kind: "grocery_list" },
+                        })
+                        .then(
+                            (r) => (r as ToolResult).isError === true,
+                            () => true,
+                        );
+                    expect(refused).toBe(true);
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        });
     });
 });

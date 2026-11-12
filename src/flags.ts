@@ -99,6 +99,15 @@ export const FLAGS = {
         removeWhen:
             "get_household_digest has been on for everyone for a release with no rollback.",
     },
+    "mcp-share-links": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The create_share_link, list_share_links and revoke_share_link MCP tools.",
+        removeWhen:
+            "The share link tools have been on for everyone for a release with no rollback.",
+    },
 } as const satisfies Record<string, FlagDef>;
 
 export type FlagName = keyof typeof FLAGS;
