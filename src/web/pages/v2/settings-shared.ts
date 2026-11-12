@@ -13,6 +13,7 @@ export type SettingsV2Section =
     | "help"
     | "household"
     | "goals"
+    | "score"
     | "saved"
     | "ai"
     | "export";
@@ -21,6 +22,7 @@ type MenuIcon =
     | "user"
     | "users"
     | "target"
+    | "gauge"
     | "bookmark"
     | "sun"
     | "download"
@@ -38,6 +40,7 @@ const MENU_ICON_PATHS: Record<MenuIcon, string> = {
     user: '<path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"/><path d="M6 19v-1a6 6 0 0 1 12 0v1"/>',
     users: '<path d="M8 13a3 3 0 1 0-3-3"/><path d="M16 12a3 3 0 1 0-3-3"/><path d="M4 19v-1.2a4 4 0 0 1 4-4"/><path d="M12 19v-1.2a4 4 0 0 1 4-4"/><path d="M20 19v-1.2a4 4 0 0 0-3.15-3.88"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/>',
+    gauge: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>',
     bookmark: '<path d="M8 5h8v14l-4-3-4 3V5Z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
     download:
@@ -69,6 +72,12 @@ const SETTINGS_MENU_MAIN: readonly MenuRow[] = [
         icon: "users",
     },
     { id: "goals", label: "Goals", href: "/settings/goals", icon: "target" },
+    {
+        id: "score",
+        label: "Product score",
+        href: "/settings/product-score",
+        icon: "gauge",
+    },
     {
         id: "saved",
         label: "Saved foods & recipes",

@@ -165,7 +165,8 @@ describe("/app-v2.js", () => {
         // +~3.3 KB Recipe cook sheet: preview refresh on servings change.
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
         // +~0.2 KB log search waits for a tap on touch screens.
-        expect(js.length).toBeLessThan(115_800);
+        // +~2.9 KB Product score: presets move the sliders, sliders pick Custom.
+        expect(js.length).toBeLessThan(119_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

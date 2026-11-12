@@ -270,6 +270,30 @@ describe("gated route harness on composed app", () => {
             },
             {
                 method: "GET",
+                path: "/settings/product-score",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/product-score",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
+                path: "/settings/product-score/household",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/product-score/household",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
                 path: "/settings/ai-connections",
                 flag: "ui-v2",
                 notFound: true,

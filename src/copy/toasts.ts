@@ -290,6 +290,19 @@ export const TOASTS = {
         kind: "success",
         text: "Day back on your daily goals",
     },
+    "settings.score.saved": { kind: "success", text: "Score weights saved" },
+    "settings.score.household": {
+        kind: "success",
+        text: "Using the household default",
+    },
+    "settings.score.household-saved": {
+        kind: "success",
+        text: "Household default saved",
+    },
+    "settings.score.household-cleared": {
+        kind: "success",
+        text: "Household default cleared",
+    },
     "settings.ai.disconnected": { kind: "success", text: "App disconnected" },
     "settings.ai.already-disconnected": {
         kind: "info",

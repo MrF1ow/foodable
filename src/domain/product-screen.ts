@@ -17,6 +17,7 @@ import {
     scoreProduct,
     type ProductScore,
     type ScoreQuality,
+    type ScoreWeights,
 } from "./product-score.js";
 
 export function scoreQualityFromFoodQuality(
@@ -35,29 +36,48 @@ export function scoreQualityFromOffHit(hit: FoodResult): ScoreQuality | null {
     return q == null ? null : scoreQualityFromFoodQuality(q);
 }
 
-export function scoredProduct(quality: ScoreQuality): ProductScore | null {
-    const scored = scoreProduct(quality, SCORE_PRESETS[DEFAULT_SCORE_PRESET]);
+/**
+ * Scores a product with the viewer's weights (Balanced when none are given).
+ * Null when there is not enough data to say anything.
+ */
+export function scoredProduct(
+    quality: ScoreQuality,
+    weights: ScoreWeights = SCORE_PRESETS[DEFAULT_SCORE_PRESET],
+): ProductScore | null {
+    const scored = scoreProduct(quality, weights);
     if (scored.label === "not_enough_data") return null;
     return scored;
 }
 
-export function scoredFoodProduct(food: Food): ProductScore | null {
+export function scoredFoodProduct(
+    food: Food,
+    weights?: ScoreWeights,
+): ProductScore | null {
     if (food.offQuality == null) return null;
-    return scoredProduct(scoreQualityFromFoodQuality(food.offQuality));
+    return scoredProduct(scoreQualityFromFoodQuality(food.offQuality), weights);
 }
 
-export function scoredOffHit(hit: FoodResult): ProductScore | null {
+export function scoredOffHit(
+    hit: FoodResult,
+    weights?: ScoreWeights,
+): ProductScore | null {
     const quality = scoreQualityFromOffHit(hit);
     if (quality == null) return null;
-    return scoredProduct(quality);
+    return scoredProduct(quality, weights);
 }
 
-export function foodDisplayScore(food: Food): number | null {
-    return scoredFoodProduct(food)?.score ?? null;
+export function foodDisplayScore(
+    food: Food,
+    weights?: ScoreWeights,
+): number | null {
+    return scoredFoodProduct(food, weights)?.score ?? null;
 }
 
-export function offHitDisplayScore(hit: FoodResult): number | null {
-    return scoredOffHit(hit)?.score ?? null;
+export function offHitDisplayScore(
+    hit: FoodResult,
+    weights?: ScoreWeights,
+): number | null {
+    return scoredOffHit(hit, weights)?.score ?? null;
 }
 
 const OFF_TAG_FOR_NAMED: Partial<Record<NamedAllergen, string>> = (() => {

@@ -19,6 +19,7 @@ import * as actualFoodsDb from "../../db/foods.js";
 import * as actualFridgeDb from "../../db/fridge.js";
 import * as actualRecipesDb from "../../db/recipes.js";
 import * as actualMealsDb from "../../db/meals.js";
+import * as actualScoreSettingsDb from "../../db/score-settings.js";
 import * as actualNutritionDb from "../../db/nutrition.js";
 import * as actualFoodSearch from "../../food-search.js";
 import { TOASTS } from "../../copy/toasts.js";
@@ -34,6 +35,10 @@ import {
 } from "../../domain/foods.js";
 import { foodDisplayScore } from "../../domain/product-screen.js";
 import { createMemoryFridgeStore } from "../../domain/fridge.js";
+import {
+    createMemoryScoreSettingsStore,
+    updateMemberScoreSettings,
+} from "../../domain/score-settings.js";
 import {
     createMemoryRecipesStore,
     createRecipe,
@@ -56,6 +61,7 @@ const realFoodsDb = { ...actualFoodsDb };
 const realFridgeDb = { ...actualFridgeDb };
 const realRecipesDb = { ...actualRecipesDb };
 const realMealsDb = { ...actualMealsDb };
+const realScoreSettingsDb = { ...actualScoreSettingsDb };
 const realNutritionDb = { ...actualNutritionDb };
 const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
@@ -81,6 +87,7 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     fridgeStore: createMemoryFridgeStore(),
     recipesStore: createMemoryRecipesStore(),
+    scoreSettingsStore: createMemoryScoreSettingsStore(),
 };
 
 let offThrows = false;
@@ -246,6 +253,11 @@ mock.module("../../db/fridge.js", () => ({
 mock.module("../../db/recipes.js", () => ({
     ...realRecipesDb,
     liveRecipesStore: () => db.recipesStore,
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
+mock.module("../../db/score-settings.js", () => ({
+    ...realScoreSettingsDb,
+    liveScoreSettingsStore: () => db.scoreSettingsStore,
 }));
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns stubs in this file
 mock.module("../../db/meals.js", () => ({
@@ -458,6 +470,8 @@ afterAll(() => {
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/recipes.js", () => realRecipesDb);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
+    mock.module("../../db/score-settings.js", () => realScoreSettingsDb);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/meals.js", () => realMealsDb);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/nutrition.js", () => realNutritionDb);
@@ -517,6 +531,7 @@ beforeEach(async () => {
     listRecipesCalls = 0;
     listFridgeItemsCalls = 0;
     db.foodsStore = createMemoryFoodsStore();
+    db.scoreSettingsStore = createMemoryScoreSettingsStore();
     db.fridgeStore = createMemoryFridgeStore();
     db.recipesStore = createMemoryRecipesStore();
     const foodsList = db.foodsStore.listFoods.bind(db.foodsStore);
@@ -793,6 +808,55 @@ describe("GET /api/log/search", () => {
             timezone: "America/Los_Angeles",
         });
         expect(empty.sources.history?.[0]?.product_score).toBe(expected);
+    });
+
+    test("score badges use the viewer's weights, in the results and in the source builder", async () => {
+        const scored = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Greek yogurt",
+                gramsPerEach: 170,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "b",
+                    additives: [],
+                    allergensTags: [],
+                    tracesTags: null,
+                    ingredientsAnalysisTags: [],
+                    labelsTags: [],
+                    fetchedAt: "2026-01-01T00:00:00.000Z",
+                },
+            }),
+        );
+        const scoreOf = async () =>
+            (await search("greek")).groups
+                .find((g) => g.kind === "food")
+                ?.items.find((i) => i.food_id === scored.id)?.product_score;
+        const byDefault = await scoreOf();
+        expect(byDefault).toBe(foodDisplayScore(scored));
+        await updateMemberScoreSettings(db.scoreSettingsStore, HH, ALICE, {
+            choice: {
+                preset: "custom",
+                weights: {
+                    nutrition: 0,
+                    processing: 100,
+                    additives: 0,
+                    environment: 0,
+                },
+            },
+        });
+        const custom = await scoreOf();
+        expect(custom).not.toBe(byDefault);
+        expect(custom).toBe(
+            foodDisplayScore(scored, {
+                nutrition: 0,
+                processing: 100,
+                additives: 0,
+                environment: 0,
+            }),
+        );
     });
 
     test("empty q returns history without OFF and recipe meals carry re-log fields", async () => {

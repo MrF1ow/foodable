@@ -33,15 +33,18 @@ import type {
 } from "../../domain/rules.js";
 import { filterOffNutrientLevels } from "../../domain/off-nutrient-levels.js";
 import {
-    DEFAULT_SCORE_PRESET,
     productInfoRows,
     SCORE_PARTS,
-    SCORE_PRESETS,
     scoreProduct,
     type NutrientLevel,
     type ScoreQuality,
-    type ScorePresetId,
+    type ScoreWeights,
 } from "../../domain/product-score.js";
+import {
+    scoreSettingsForHousehold,
+    scoreSettingsForViewer,
+} from "../../domain/score-settings.js";
+import { liveScoreSettingsStore } from "../../db/score-settings.js";
 import { todayInTz } from "../../domain/tz.js";
 import type { NutritionGoals } from "../../db/nutrition.js";
 import { gatedTool } from "../gated.js";
@@ -392,9 +395,11 @@ async function buildOutputAsync(args: {
     checkProduct: ProductCheckInput;
     members: ProductCheckMember[];
     memberToday: (userId: string) => Promise<ProductCheckToday>;
-    preset: ScorePresetId;
+    /** The preset the weights come from, and the weights themselves. */
+    preset: string;
+    weights: ScoreWeights;
 }): Promise<RateProductOutput> {
-    const weights = SCORE_PRESETS[args.preset];
+    const weights = args.weights;
     const scored =
         args.quality != null ? scoreProduct(args.quality, weights) : null;
     const breakdown = scored?.breakdown ?? emptyBreakdown();
@@ -499,9 +504,9 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                     }
 
                     const householdId = await callerHouseholdId();
-                    const preset: ScorePresetId = DEFAULT_SCORE_PRESET;
                     const rules = liveRulesStore();
                     const foods = liveFoodsStore();
+                    const scoreSettings = liveScoreSettingsStore();
 
                     let memberRows = await listHouseholdMembers(householdId);
                     if (user_id != null) {
@@ -511,13 +516,45 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                         );
                     }
 
+                    // Whose weights score the product: the member asked about,
+                    // else the caller. A household token without a member has
+                    // no choice of its own, so the household default applies.
+                    const scoreFor =
+                        user_id ??
+                        (ctx.auth.kind === "user" ? ctx.auth.userId : null);
+                    const { weights, preset } =
+                        scoreFor != null
+                            ? await scoreSettingsForViewer(
+                                  scoreSettings,
+                                  householdId,
+                                  scoreFor,
+                              )
+                            : await scoreSettingsForHousehold(
+                                  scoreSettings,
+                                  householdId,
+                              );
+
                     const members: ProductCheckMember[] = await Promise.all(
                         memberRows.map(async (member) => {
-                            const [allergens, dislikes] = await Promise.all([
-                                rules.listAllergens(householdId, member.userId),
-                                rules.listDislikes(householdId, member.userId),
-                            ]);
+                            // Each member's own switches decide their notices.
+                            const [allergens, dislikes, switches] =
+                                await Promise.all([
+                                    rules.listAllergens(
+                                        householdId,
+                                        member.userId,
+                                    ),
+                                    rules.listDislikes(
+                                        householdId,
+                                        member.userId,
+                                    ),
+                                    scoreSettings.getMember(
+                                        householdId,
+                                        member.userId,
+                                    ),
+                                ]);
                             return {
+                                warnTraces: switches?.warnTraces ?? true,
+                                compareGoals: switches?.compareGoals ?? true,
                                 id: member.userId,
                                 name: member.displayName,
                                 allergens: allergenCodes(allergens),
@@ -620,6 +657,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             members,
                             memberToday,
                             preset,
+                            weights,
                         });
 
                         return {
@@ -680,6 +718,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 members,
                                 memberToday,
                                 preset,
+                                weights,
                             });
                             return {
                                 content: [
@@ -749,6 +788,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                         members,
                         memberToday,
                         preset,
+                        weights,
                     });
                     return {
                         content: [

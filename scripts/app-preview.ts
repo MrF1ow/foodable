@@ -129,6 +129,12 @@ import {
 } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
 import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
+import {
+    renderSettingsScoreHouseholdV2Page,
+    renderSettingsScoreV2Page,
+    type SettingsScoreV2View,
+} from "../src/web/pages/v2/settings-score.js";
+import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -261,6 +267,26 @@ const PREVIEW_NAMED_GOALS: NutritionGoals = {
 
 // The apps the AI connections page lists: a named one used today, a named one
 // last used days ago, one that was never used, and the tokens with no app.
+/** The Product score page: an owner who picked Balanced, as in the design. */
+function previewScoreView(
+    chrome: SettingsScoreV2View["chrome"],
+    over: Partial<SettingsScoreV2View> = {},
+): SettingsScoreV2View {
+    return {
+        chrome,
+        preset: "balanced",
+        weights: SCORE_PRESETS.balanced,
+        followsHousehold: false,
+        householdPresetLabel: "Balanced",
+        canEditHousehold: true,
+        warnTraces: true,
+        compareGoals: true,
+        allergensText: "Milk",
+        allergensHref: "/settings/household/members/u-ethan",
+        ...over,
+    };
+}
+
 const PREVIEW_AI_CONNECTIONS = [
     {
         clientId: "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
@@ -337,6 +363,71 @@ function previewTrendsDays(today: string) {
         });
     }
     return days;
+}
+
+/** The full product screen; `viewer` is how its reader weights the score. */
+function previewProductFull(
+    chrome: ReturnType<typeof previewChrome>,
+    viewer?: Parameters<typeof buildProductScoreSection>[2],
+) {
+    const previewMembers = [
+        {
+            id: "u-ethan",
+            name: "Ethan",
+            allergens: [] as const,
+            dislikes: [],
+        },
+        {
+            id: "u-sam",
+            name: "Sam",
+            allergens: ["milk"] as const,
+            dislikes: [],
+        },
+        {
+            id: "u-jordan",
+            name: "Jordan",
+            allergens: ["tree_nut"] as const,
+            dislikes: [],
+        },
+    ];
+    const fullFood = food("f-product-full", "Greek yogurt, plain 2%", 59, {
+        brand: "Fage",
+        proteinG: 10,
+        carbsG: 4,
+        fatG: 0.4,
+        fiberG: 0,
+        sugarG: 4,
+        saturatedFatG: 2,
+        gramsPerEach: 170,
+        offQuality: {
+            nutriscoreGrade: "a",
+            novaGroup: 1,
+            ecoscoreGrade: "b",
+            additives: [],
+            allergensTags: ["en:milk"],
+            tracesTags: ["en:nuts"],
+            ingredientsAnalysisTags: [],
+            labelsTags: [],
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+    });
+    const score = buildProductScoreSection(
+        fullFood,
+        previewMemberCards(fullFood, previewMembers),
+        viewer,
+    );
+    return renderProductV2Page(
+        buildPreviewProductPageView(chrome, fullFood, {
+            barcodes: ["5201054017463"],
+            stock: [
+                {
+                    locationName: "Fridge",
+                    quantityLabel: "2",
+                },
+            ],
+            score,
+        }),
+    );
 }
 
 function previewTrendsPage(chrome: ReturnType<typeof previewChrome>) {
@@ -2027,6 +2118,53 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       mcpUrl: "https://food.flow.home/mcp",
                       openClient: PREVIEW_AI_CONNECTIONS[0]!.clientId!,
                   }),
+                  // The viewer is an owner who picked Balanced: the design's frame.
+                  "settings-score": renderSettingsScoreV2Page(
+                      previewScoreView(chrome),
+                  ),
+                  // A member with no choice of their own: the household row is plain.
+                  "settings-score-member": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          preset: "planet",
+                          weights: SCORE_PRESETS.planet,
+                          followsHousehold: true,
+                          householdPresetLabel: "Planet",
+                          canEditHousehold: false,
+                      }),
+                  ),
+                  "settings-score-custom": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          preset: "custom",
+                          weights: {
+                              nutrition: 10,
+                              processing: 70,
+                              additives: 20,
+                              environment: 0,
+                          },
+                          warnTraces: false,
+                      }),
+                  ),
+                  "settings-score-error": renderSettingsScoreV2Page(
+                      previewScoreView(chrome, {
+                          error: "Give at least one part a weight above 0.",
+                          draft: {
+                              preset: "custom",
+                              weights: {
+                                  nutrition: "0",
+                                  processing: "0",
+                                  additives: "0",
+                                  environment: "0",
+                              },
+                          },
+                      }),
+                  ),
+                  "settings-score-household":
+                      renderSettingsScoreHouseholdV2Page({
+                          chrome,
+                          preset: "planet",
+                          weights: SCORE_PRESETS.planet,
+                          isSet: true,
+                      }),
                   "settings-stores": renderSettingsStoresV2Page({
                       chrome,
                       stores: PREVIEW_STORE_SUMMARIES,
@@ -2402,70 +2540,16 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   ),
                   "nutrition-log-scanner": await logScannerPreview(theme),
                   "trends-v2": previewTrendsPage(chrome),
-                  "product-full": (() => {
-                      const previewMembers = [
-                          {
-                              id: "u-ethan",
-                              name: "Ethan",
-                              allergens: [] as const,
-                              dislikes: [],
-                          },
-                          {
-                              id: "u-sam",
-                              name: "Sam",
-                              allergens: ["milk"] as const,
-                              dislikes: [],
-                          },
-                          {
-                              id: "u-jordan",
-                              name: "Jordan",
-                              allergens: ["tree_nut"] as const,
-                              dislikes: [],
-                          },
-                      ];
-                      const fullFood = food(
-                          "f-product-full",
-                          "Greek yogurt, plain 2%",
-                          59,
-                          {
-                              brand: "Fage",
-                              proteinG: 10,
-                              carbsG: 4,
-                              fatG: 0.4,
-                              fiberG: 0,
-                              sugarG: 4,
-                              saturatedFatG: 2,
-                              gramsPerEach: 170,
-                              offQuality: {
-                                  nutriscoreGrade: "a",
-                                  novaGroup: 1,
-                                  ecoscoreGrade: "b",
-                                  additives: [],
-                                  allergensTags: ["en:milk"],
-                                  tracesTags: ["en:nuts"],
-                                  ingredientsAnalysisTags: [],
-                                  labelsTags: [],
-                                  fetchedAt: "2026-01-01T00:00:00.000Z",
-                              },
-                          },
-                      );
-                      const score = buildProductScoreSection(
-                          fullFood,
-                          previewMemberCards(fullFood, previewMembers),
-                      );
-                      return renderProductV2Page(
-                          buildPreviewProductPageView(chrome, fullFood, {
-                              barcodes: ["5201054017463"],
-                              stock: [
-                                  {
-                                      locationName: "Fridge",
-                                      quantityLabel: "2",
-                                  },
-                              ],
-                              score,
-                          }),
-                      );
-                  })(),
+                  "product-full": previewProductFull(chrome),
+                  "product-full-custom": previewProductFull(chrome, {
+                      weights: {
+                          nutrition: 0,
+                          processing: 100,
+                          additives: 0,
+                          environment: 0,
+                      },
+                      preset: "custom",
+                  }),
                   "product-partial": (() => {
                       const partialFood = food(
                           "f-product-partial",
@@ -2835,6 +2919,7 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings-saved" ||
                 shotBase === "settings-export" ||
                 shotBase.startsWith("settings-ai") ||
+                shotBase.startsWith("settings-score") ||
                 shotBase === "help" ||
                 shotBase === "recipes" ||
                 shotBase === "recipe";

@@ -178,3 +178,56 @@ describe("renderProductV2Page score integration", () => {
         expect(nutritionAt).toBeGreaterThan(scoreAt);
     });
 });
+
+describe("the viewer's weights and switches on the product screen", () => {
+    const processingOnly = {
+        nutrition: 0,
+        processing: 100,
+        additives: 0,
+        environment: 0,
+    };
+
+    function sectionFor(view?: Parameters<typeof buildProductScoreSection>[2]) {
+        const food = scoredFood({ nutriscoreGrade: "a", novaGroup: 4 });
+        return buildProductScoreSection(
+            food,
+            previewMemberCards(food, [members[0]!]),
+            view,
+        )!;
+    }
+
+    test("custom weights give a different score than the default, named Custom", () => {
+        const byDefault = sectionFor();
+        const custom = sectionFor({
+            weights: processingOnly,
+            preset: "custom",
+        });
+        expect(custom.score.score).not.toBe(byDefault.score.score);
+        expect(byDefault.presetLabel).toBe("Balanced");
+        expect(custom.presetLabel).toBe("Custom");
+        const food = scoredFood({ nutriscoreGrade: "a", novaGroup: 4 });
+        expect(renderProductScoreSection(food, custom)).toContain(
+            "Your weights: Custom",
+        );
+    });
+
+    test("a household default preset is named for the viewer", () => {
+        expect(sectionFor({ preset: "planet" }).presetLabel).toBe("Planet");
+    });
+
+    test("warn on may contain off drops the trace line, on keeps it", () => {
+        const food = scoredFood({ tracesTags: ["en:peanuts"] });
+        const allergic = {
+            id: "u2",
+            name: "Sam",
+            allergens: ["peanut"] as const,
+            dislikes: [],
+        };
+        const on = previewMemberCards(food, [allergic])[0]!;
+        const off = previewMemberCards(food, [
+            { ...allergic, warnTraces: false },
+        ])[0]!;
+        expect(on.reason).toContain("May contain traces of peanut");
+        expect(off.reason).toBe("No issues found for this product.");
+    });
+});

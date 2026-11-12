@@ -1,4 +1,5 @@
 import {
+    DEFAULT_SCORE_PRESET,
     parseScoreChoice,
     resolveWeights,
     validateScoreChoice,
@@ -110,9 +111,40 @@ export type ViewerScoreSettings = {
     member: ScoreChoice | null;
     householdDefault: ScoreChoice | null;
     weights: ScoreWeights;
+    /** Which preset the weights come from: the one a viewer would call theirs. */
+    preset: ScoreChoicePreset;
     warnTraces: boolean;
     compareGoals: boolean;
 };
+
+/** A choice that yields weights: a preset, or custom with usable weights. */
+export function isUsableChoice(
+    choice: ScoreChoice | null,
+): choice is ScoreChoice {
+    return (
+        choice != null && (choice.preset !== "custom" || choice.weights != null)
+    );
+}
+
+function viewerSettingsFrom(
+    row: MemberScoreSettings | null,
+    householdDefault: ScoreChoice | null,
+): ViewerScoreSettings {
+    const member = choiceOfMember(row);
+    return {
+        member,
+        householdDefault,
+        weights: resolveWeights(member, householdDefault),
+        preset: isUsableChoice(member)
+            ? member.preset
+            : isUsableChoice(householdDefault)
+              ? householdDefault.preset
+              : DEFAULT_SCORE_PRESET,
+        warnTraces: row?.warnTraces ?? DEFAULT_MEMBER_SCORE_SETTINGS.warnTraces,
+        compareGoals:
+            row?.compareGoals ?? DEFAULT_MEMBER_SCORE_SETTINGS.compareGoals,
+    };
+}
 
 /** Everything a score or check for this viewer needs, in one read. */
 export async function scoreSettingsForViewer(
@@ -124,15 +156,18 @@ export async function scoreSettingsForViewer(
         store.getMember(householdId, userId),
         store.getHouseholdDefault(householdId),
     ]);
-    const member = choiceOfMember(row);
-    return {
-        member,
-        householdDefault,
-        weights: resolveWeights(member, householdDefault),
-        warnTraces: row?.warnTraces ?? DEFAULT_MEMBER_SCORE_SETTINGS.warnTraces,
-        compareGoals:
-            row?.compareGoals ?? DEFAULT_MEMBER_SCORE_SETTINGS.compareGoals,
-    };
+    return viewerSettingsFrom(row, householdDefault);
+}
+
+/** For a caller with no member of their own (a household token): the household's default. */
+export async function scoreSettingsForHousehold(
+    store: ScoreSettingsStore,
+    householdId: string,
+): Promise<ViewerScoreSettings> {
+    return viewerSettingsFrom(
+        null,
+        await store.getHouseholdDefault(householdId),
+    );
 }
 
 export type MemberScoreSettingsPatch = {
