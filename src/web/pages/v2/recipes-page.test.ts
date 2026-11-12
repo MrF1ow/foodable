@@ -234,6 +234,32 @@ describe("renderRecipeDetailBody", () => {
         expect(html).not.toContain("fd-recipe-cook-btn");
     });
 
+    test("the star sits in the back row, outside the heading, and posts back to the recipe", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('action="/recipes/r1/favourite"');
+        expect(form).toContain('name="on" value="1"');
+        expect(form).toContain('name="back" value="recipe"');
+        expect(form).toContain('aria-label="Add Pancakes to favourites"');
+        expect(form).not.toContain("fd-star--on");
+        const back = html.match(/<p class="fd-recipe-back">[\s\S]*?<\/p>/);
+        expect(back?.[0] ?? "").not.toContain("<form");
+        expect(html.indexOf("fd-recipe-back")).toBeLessThan(
+            html.indexOf("fd-star-form"),
+        );
+        expect(html.indexOf("fd-star-form")).toBeLessThan(
+            html.indexOf("fd-recipe-title"),
+        );
+    });
+
+    test("a starred recipe shows a filled star that removes itself", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, favourite: true });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('name="on" value="0"');
+        expect(form).toContain('aria-label="Remove Pancakes from favourites"');
+        expect(form).toContain("fd-star--on");
+    });
+
     test("incomplete macros show missing-factor copy", () => {
         const macros: RecipeMacros = {
             calories: null,

@@ -109,6 +109,10 @@ import {
 } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
 import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
+import {
+    parseV2RecipeListFilter,
+    recipesListV2Href,
+} from "../pages/v2/recipes-list.js";
 
 export const recipesRoutes = new Hono();
 
@@ -696,6 +700,45 @@ recipesRoutes.post(
             });
             return c.html(page.html, page.status);
         }
+    },
+);
+
+const UUID_SHAPE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The star on a recipe card or page. The form says which state to move to
+ * (`on`), so a double submit cannot flip it back; the viewer's own favourites
+ * are all it ever touches. The way back is built here from the search and
+ * filter the list was showing, never from an address in the form.
+ */
+recipesRoutes.post(
+    "/recipes/:id/favourite",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+        const body = await c.req.parseBody();
+        const found = await liveRecipesStore().setFavourite(
+            member.householdId,
+            userId,
+            recipeId,
+            formText(body, "on") === "1",
+        );
+        if (!found) return c.text("Not found", 404);
+        if (formText(body, "back") === "list") {
+            const list = recipesListV2Href({
+                q: formText(body, "q"),
+                filter: parseV2RecipeListFilter(formText(body, "filter")),
+            });
+            // toast: none (the star shows the new state)
+            return c.redirect(`${list}#recipe-${recipeId}`, 303);
+        }
+        // toast: none (the star shows the new state)
+        return c.redirect(`/recipes/${recipeId}`, 303);
     },
 );
 

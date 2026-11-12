@@ -122,8 +122,28 @@
     display: none;
 }
 
+/* One row that scrolls sideways, the way the design's Filters row runs off the
+   screen edge (FigCraft 22732), now that there are four chips. */
 .fd-recipes-chips {
-    margin: 0;
+    flex-wrap: nowrap;
+    margin: 0 calc(-1 * var(--space-gutter)) 0 0;
+    padding: 0 var(--space-gutter) 0 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.fd-recipes-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.fd-recipes-chips .fd-chip {
+    flex: none;
+}
+
+/* The chip that is on leads the row, so it is never scrolled out of sight (the
+   design's selected chip leads too). Desktop shows all four and keeps the order. */
+.fd-recipes-chips .fd-chip--selected {
+    order: -1;
 }
 
 .fd-recipes-section-head {
@@ -738,6 +758,87 @@
     font: 400 14px/20px var(--font-body);
 }
 
+/* Favourites: the star on a recipe card and on the recipe page. It is a button
+   in a form of its own, so it sits beside a card's link, not inside it. The
+   design has the Favourites chip but no star yet; this follows its 36px round
+   icon buttons (FigCraft 22849). */
+
+.fd-star-form {
+    margin: 0;
+}
+
+.fd-star {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-star .fd-icon {
+    width: 22px;
+    height: 22px;
+}
+
+.fd-star--on {
+    color: var(--accent-text);
+}
+
+.fd-star:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .fd-star:not(.fd-star--on):hover {
+        color: var(--text-primary);
+    }
+}
+
+.fd-row--recipe {
+    position: relative;
+}
+
+/* Centred on the 22px title line: the row's 11px padding plus half the line,
+   less half the button. The icon, not the button, lines up with the right edge. */
+.fd-recipes-card__star {
+    position: absolute;
+    top: 4px;
+    right: -7px;
+}
+
+.fd-recipes-card__title {
+    padding-right: 34px;
+}
+
+/* On the recipe page it takes the top bar's right-hand slot (FigCraft 22849's
+   place), so the account chip steps aside for it, as on the product screen. */
+.fd-recipe-detail {
+    position: relative;
+}
+
+.fd-recipe-star {
+    position: absolute;
+    top: 4px;
+    right: 0;
+}
+
+.fd-recipe-star .fd-star {
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-main:has(.fd-recipe-detail) .fd-account-chip {
+    display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .fd-recipe-back__link {
         transition: none;
@@ -791,6 +892,13 @@
 
     .fd-recipes-toolbar .fd-recipes-chips {
         flex: none;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+    }
+
+    .fd-recipes-toolbar .fd-recipes-chips .fd-chip--selected {
+        order: 0;
     }
 
     .fd-recipes-search-input--phone {
@@ -897,11 +1005,11 @@
     /* FigCraft 48815: the title on the left, Cook on the right of its row. */
     .fd-recipe-detail {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         grid-template-areas:
-            "back back"
-            "head act"
-            "body body";
+            "back back back"
+            "head star act"
+            "body body body";
         align-items: end;
     }
 
@@ -927,6 +1035,24 @@
         padding: 0 18px;
         font-size: 14px;
         line-height: 18px;
+    }
+
+    /* The star moves into the card's corner, inside its 14px padding. */
+    .fd-recipes-card__star {
+        top: 8px;
+        right: 8px;
+    }
+
+    .fd-recipes-card__title {
+        padding-right: 40px;
+    }
+
+    /* The star sits left of Cook on the title row. */
+    .fd-recipe-star {
+        position: static;
+        grid-area: star;
+        align-self: end;
+        margin-bottom: 3px;
     }
 
     /* FigCraft 48994: a 560px centred dialog. */

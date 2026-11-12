@@ -3,6 +3,7 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js"
 import type { Recipe } from "../../../domain/recipes.js";
 import {
     applyV2RecipeListFilters,
+    parseV2RecipeListFilter,
     renderRecipesListBody,
     renderRecipesListV2Page,
     recipesListV2Href,
@@ -300,5 +301,141 @@ describe("recipes list v2 page", () => {
                 (c) => c.recipe.id,
             ),
         ).toEqual(["r1"]);
+    });
+});
+
+describe("recipes list v2 favourites", () => {
+    const FLAGS = {
+        cookable: true,
+        highProtein: false,
+        quick: true,
+        missingCount: 0,
+        hasIngredients: true,
+    };
+    const card = (id: string, name: string, favourite?: boolean) => ({
+        recipe: { ...RECIPE, id, name },
+        flags: FLAGS,
+        macrosPerPortion: MACROS,
+        missingNames: [],
+        favourite,
+    });
+
+    test("the Favourites chip follows Under 30 min and links to the filter", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "egg",
+            filter: "",
+            cards: [],
+            totalCount: 0,
+        });
+        expect(html).toContain('href="/recipes?q=egg&amp;filter=favourites"');
+        expect(html.indexOf("Under 30 min")).toBeLessThan(
+            html.indexOf("Favourites"),
+        );
+        expect(html).not.toMatch(
+            /aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+        );
+    });
+
+    test("the chip is current when the filter is on", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "favourites",
+            cards: [],
+            totalCount: 3,
+        });
+        expect(html).toMatch(
+            /<a class="fd-chip fd-chip--selected"[^>]*aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+        );
+    });
+
+    test("parseV2RecipeListFilter accepts favourites", () => {
+        expect(parseV2RecipeListFilter("favourites")).toBe("favourites");
+        expect(parseV2RecipeListFilter("favorites")).toBe("");
+    });
+
+    test("applyV2RecipeListFilters keeps only starred cards", () => {
+        const cards = [
+            card("r1", "Shakshuka", true),
+            card("r2", "Oatmeal", false),
+            card("r3", "Stew"),
+        ];
+        expect(
+            applyV2RecipeListFilters(cards, "", "favourites").map(
+                (c) => c.recipe.id,
+            ),
+        ).toEqual(["r1"]);
+        // Search narrows within the favourites.
+        expect(applyV2RecipeListFilters(cards, "oat", "favourites")).toEqual(
+            [],
+        );
+    });
+
+    test("an empty favourites filter says so", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "favourites",
+            cards: [],
+            totalCount: 4,
+        });
+        expect(html).toContain("No favourites yet");
+        expect(html).not.toContain("No recipes match");
+    });
+
+    test("each card carries a star form beside its link, not inside it", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "egg",
+            filter: "cookable",
+            totalCount: 2,
+            cards: [card("r1", "Shakshuka", false)],
+        });
+        const li = html.match(
+            /<li class="fd-row fd-row--recipe"[^>]*>[\s\S]*?<\/li>/,
+        )![0];
+        expect(li).toContain('id="recipe-r1"');
+        const link = li.match(/<a class="fd-recipes-card"[\s\S]*?<\/a>/)![0];
+        expect(link).not.toContain("<form");
+        expect(link).not.toContain("<button");
+        const form = li.match(/<form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('method="post"');
+        expect(form).toContain('action="/recipes/r1/favourite"');
+        expect(form).toContain('name="on" value="1"');
+        expect(form).toContain('name="back" value="list"');
+        expect(form).toContain('name="q" value="egg"');
+        expect(form).toContain('name="filter" value="cookable"');
+        expect(form).toContain('aria-label="Add Shakshuka to favourites"');
+        expect(form).not.toContain("fd-star--on");
+    });
+
+    test("a starred card offers to remove the star and is filled", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 1,
+            cards: [card("r1", "Shakshuka", true)],
+        });
+        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
+        expect(form).toContain('name="on" value="0"');
+        expect(form).toContain('aria-label="Remove Shakshuka from favourites"');
+        expect(form).toContain("fd-star--on");
+        expect(form).not.toContain('name="q"');
+        expect(form).not.toContain('name="filter"');
+    });
+
+    test("the recipe name is escaped in the star label", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 1,
+            cards: [card("r1", 'Mac "n" <cheese>', false)],
+        });
+        expect(html).toContain(
+            'aria-label="Add Mac &quot;n&quot; &lt;cheese&gt; to favourites"',
+        );
     });
 });

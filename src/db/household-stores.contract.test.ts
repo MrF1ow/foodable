@@ -26,6 +26,7 @@ import { liveSettingsStore } from "./settings.js";
 import { liveStockStore } from "./stock.js";
 import { describeDb } from "./testing/pg.js";
 import {
+    asUser,
     seedFood,
     seedFridgeItem,
     seedFridgeLocation,
@@ -179,6 +180,22 @@ describeDb(
                         foodId,
                     ),
                 sql,
+                ensureMember: async () => {
+                    const memberId = crypto.randomUUID();
+                    await sql`
+                        insert into public.users (id, email)
+                        values (${memberId}, ${`member-${memberId}@foodable.test`})
+                    `;
+                    await sql`
+                        insert into public.household_members (
+                            household_id, user_id, role, display_name
+                        )
+                        values (${primary.householdId}, ${memberId}, ${"member"}, ${"Member"})
+                    `;
+                    return memberId;
+                },
+                asMember: (memberId, fn) =>
+                    asUser(memberId, fn, primary.householdId),
                 setLineCreatedAt: async (lineId, createdAt) => {
                     await sql`
                         update public.grocery_lines

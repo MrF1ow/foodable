@@ -57,6 +57,10 @@ const EXPECTED: Record<string, string> = {
         "ON public.household_members USING btree (user_id)",
     household_invites_household_id_idx:
         "ON public.household_invites USING btree (household_id)",
+    recipe_favourites_household_user_idx:
+        "ON public.recipe_favourites USING btree (household_id, user_id)",
+    recipe_favourites_recipe_id_idx:
+        "ON public.recipe_favourites USING btree (recipe_id)",
     nutrition_goal_days_user_id_idx:
         "ON public.nutrition_goal_days USING btree (user_id, date)",
 };

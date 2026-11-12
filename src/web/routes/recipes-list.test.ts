@@ -60,6 +60,7 @@ const realSettings = { ...actualSettings };
 const realNutrition = { ...actualNutrition };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
+const BOB = "22222222-2222-4222-8222-222222222222";
 const HH = "hh-1";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
@@ -176,13 +177,26 @@ mock.module("../../db/household.js", () => ({
                   role: "owner" as const,
                   displayName: "Alice",
               }
-            : null,
+            : userId === BOB
+              ? {
+                    userId: BOB,
+                    householdId: HH,
+                    role: "member" as const,
+                    displayName: "Bob",
+                }
+              : null,
     listHouseholdMembers: async () => [
         {
             userId: ALICE,
             householdId: HH,
             role: "owner" as const,
             displayName: "Alice",
+        },
+        {
+            userId: BOB,
+            householdId: HH,
+            role: "member" as const,
+            displayName: "Bob",
         },
     ],
     getHouseholdConfig: async () => ({
@@ -789,5 +803,195 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(res.status).toBe(404);
         expect(await flourLeft()).toBe(500);
         expect(db.meals).toHaveLength(0);
+    });
+});
+
+async function postFavourite(
+    body: URLSearchParams,
+    opts: { as?: string; recipeId?: string } = {},
+) {
+    return recipesApp().request(
+        `http://x/recipes/${opts.recipeId ?? db.recipeId}/favourite`,
+        {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(opts.as ?? ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: body.toString(),
+        },
+    );
+}
+
+async function favouriteIds(userId: string): Promise<string[]> {
+    return db.recipesStore.listFavourites(HH, userId);
+}
+
+describe("POST /recipes/:id/favourite", () => {
+    test("stars for the viewer and goes back to the list with its search and filter", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postFavourite(
+            new URLSearchParams({
+                on: "1",
+                back: "list",
+                q: "pan",
+                filter: "quick",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/recipes?q=pan&filter=quick#recipe-${db.recipeId}`,
+        );
+        expect(await favouriteIds(ALICE)).toEqual([db.recipeId]);
+    });
+
+    test("goes back to the recipe page from the recipe page", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postFavourite(
+            new URLSearchParams({ on: "1", back: "recipe" }),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+    });
+
+    test("an unknown filter or back value falls back instead of being followed", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postFavourite(
+            new URLSearchParams({
+                on: "1",
+                back: "https://evil.example/",
+                q: "",
+                filter: "//evil.example",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        const list = await postFavourite(
+            new URLSearchParams({
+                on: "1",
+                back: "list",
+                filter: "//evil.example",
+            }),
+        );
+        expect(list.headers.get("location")).toBe(
+            `/recipes#recipe-${db.recipeId}`,
+        );
+    });
+
+    test("on=0 unstars, and starring or unstarring twice changes nothing more", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        await postFavourite(new URLSearchParams({ on: "1" }));
+        await postFavourite(new URLSearchParams({ on: "1" }));
+        expect(await favouriteIds(ALICE)).toEqual([db.recipeId]);
+        await postFavourite(new URLSearchParams({ on: "0" }));
+        await postFavourite(new URLSearchParams({ on: "0" }));
+        expect(await favouriteIds(ALICE)).toEqual([]);
+    });
+
+    test("another member's stars are untouched", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        await postFavourite(new URLSearchParams({ on: "1" }), { as: BOB });
+        await postFavourite(new URLSearchParams({ on: "1" }));
+        await postFavourite(new URLSearchParams({ on: "0" }));
+        expect(await favouriteIds(ALICE)).toEqual([]);
+        expect(await favouriteIds(BOB)).toEqual([db.recipeId]);
+    });
+
+    test("a recipe that is not in the household is a 404 and stars nothing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const res = await postFavourite(new URLSearchParams({ on: "1" }), {
+            recipeId: "11111111-1111-4111-8111-1111111111ff",
+        });
+        expect(res.status).toBe(404);
+        expect(await favouriteIds(ALICE)).toEqual([]);
+    });
+
+    test("is a 404 while ui-v2 is off, and stars nothing", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const res = await postFavourite(new URLSearchParams({ on: "1" }));
+        expect(res.status).toBe(404);
+        expect(await favouriteIds(ALICE)).toEqual([]);
+    });
+});
+
+describe("favourites on the pages", () => {
+    async function second(): Promise<string> {
+        const other = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Porridge",
+            yieldPortions: 1,
+        });
+        return other.id;
+    }
+
+    test("the Favourites filter lists only the viewer's starred recipes", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const porridge = await second();
+        await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
+        await db.recipesStore.setFavourite(HH, BOB, porridge, true);
+
+        const mine = await renderRecipesListPage(ALICE, {
+            filter: "favourites",
+        });
+        expect(mine.html).toContain("Pancakes");
+        expect(mine.html).not.toContain("Porridge");
+        expect(mine.html).toMatch(
+            /fd-chip--selected[^>]*aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+        );
+
+        const bobs = await renderRecipesListPage(BOB, {
+            filter: "favourites",
+        });
+        expect(bobs.html).toContain("Porridge");
+        expect(bobs.html).not.toContain("Pancakes");
+
+        const all = await renderRecipesListPage(ALICE, {});
+        expect(all.html).toContain("Pancakes");
+        expect(all.html).toContain("Porridge");
+    });
+
+    test("cards show the viewer's own star state", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const porridge = await second();
+        await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
+        await db.recipesStore.setFavourite(HH, BOB, porridge, true);
+        const page = await renderRecipesListPage(ALICE, {});
+        const card = (id: string) =>
+            page.html.match(
+                new RegExp(
+                    `<li class="fd-row fd-row--recipe" id="recipe-${id}">[\\s\\S]*?</li>`,
+                ),
+            )![0];
+        expect(card(db.recipeId)).toContain("fd-star--on");
+        expect(card(porridge)).not.toContain("fd-star--on");
+    });
+
+    test("with nothing starred the filter says so", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipesListPage(ALICE, {
+            filter: "favourites",
+        });
+        expect(page.html).toContain("No favourites yet");
+    });
+
+    test("the recipe page star reflects the viewer's own state", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        await db.recipesStore.setFavourite(HH, BOB, db.recipeId, true);
+        const unstarred = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(unstarred.html).toContain("fd-star-form");
+        expect(unstarred.html).not.toContain("fd-star--on");
+        await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
+        const starred = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(starred.html).toContain("fd-star--on");
+        expect(starred.html).toContain("Remove Pancakes from favourites");
+    });
+
+    test("ui-v2 off shows no star on the old pages", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const list = await renderRecipesListPage(ALICE, {});
+        expect(list.html).not.toContain("fd-star");
+        const detail = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(detail.html).not.toContain("fd-star");
     });
 });

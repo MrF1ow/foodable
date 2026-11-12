@@ -125,6 +125,118 @@ export function runRecipesStoreContract(
             ).toBe(3);
         });
 
+        test("setFavourite and listFavourites: star, unstar, idempotent, per member", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const asMember =
+                c.asMember ?? (<T>(_: string, fn: () => Promise<T>) => fn());
+            const other = c.ensureMember
+                ? await c.ensureMember()
+                : crypto.randomUUID();
+            const alpha = sampleRecipe(c, { name: "Alpha" });
+            const beta = sampleRecipe(c, { name: "Beta" });
+            await store.insertRecipe(alpha);
+            await store.insertRecipe(beta);
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [],
+            );
+
+            expect(
+                await store.setFavourite(
+                    c.householdId,
+                    c.userId,
+                    alpha.id,
+                    true,
+                ),
+            ).toBe(true);
+            // Starring twice is the same as starring once.
+            expect(
+                await store.setFavourite(
+                    c.householdId,
+                    c.userId,
+                    alpha.id,
+                    true,
+                ),
+            ).toBe(true);
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [alpha.id],
+            );
+
+            // Another member's stars are theirs alone.
+            await asMember(other, () =>
+                store.setFavourite(c.householdId, other, beta.id, true),
+            );
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [alpha.id],
+            );
+            expect(
+                await asMember(other, () =>
+                    store.listFavourites(c.householdId, other),
+                ),
+            ).toEqual([beta.id]);
+
+            // Unstarring is idempotent too, and leaves the other member's star.
+            expect(
+                await store.setFavourite(
+                    c.householdId,
+                    c.userId,
+                    alpha.id,
+                    false,
+                ),
+            ).toBe(true);
+            expect(
+                await store.setFavourite(
+                    c.householdId,
+                    c.userId,
+                    alpha.id,
+                    false,
+                ),
+            ).toBe(true);
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [],
+            );
+            expect(
+                await asMember(other, () =>
+                    store.listFavourites(c.householdId, other),
+                ),
+            ).toEqual([beta.id]);
+        });
+
+        test("setFavourite: a recipe that is not in the household cannot be starred", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const stray = crypto.randomUUID();
+            expect(
+                await store.setFavourite(c.householdId, c.userId, stray, true),
+            ).toBe(false);
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [],
+            );
+            // Un-starring what was never starred is a no-op, but the recipe is
+            // still not there.
+            expect(
+                await store.setFavourite(c.householdId, c.userId, stray, false),
+            ).toBe(false);
+        });
+
+        test("deleteRecipe takes its favourites with it", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const gone = sampleRecipe(c, { name: "Gone" });
+            const kept = sampleRecipe(c, { name: "Kept" });
+            await store.insertRecipe(gone);
+            await store.insertRecipe(kept);
+            await store.setFavourite(c.householdId, c.userId, gone.id, true);
+            await store.setFavourite(c.householdId, c.userId, kept.id, true);
+            expect(await store.deleteRecipe(c.householdId, gone.id)).toBe(true);
+            expect(await store.listFavourites(c.householdId, c.userId)).toEqual(
+                [kept.id],
+            );
+        });
+
         test("household scoping on listRecipes", async () => {
             await reset();
             const c = ctx();

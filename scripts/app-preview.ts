@@ -1185,6 +1185,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             members: recipeView.members,
             viewerId: recipeView.viewerId,
             portionCount: recipeView.portionCount,
+            favourite: true,
             cook,
         });
     return {
@@ -1440,6 +1441,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                           },
                           macrosPerPortion: RECIPE_LIST_MACROS,
                           missingNames: [],
+                          favourite: true,
                       },
                       {
                           recipe: RECIPE_TWO,
@@ -1461,6 +1463,52 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   members: [ME, SAM],
                   viewerId: "u1",
               } as never),
+        ...(V2
+            ? {
+                  "recipes-favourites": renderRecipesListV2Page({
+                      chrome,
+                      query: "",
+                      filter: "favourites",
+                      totalCount: 3,
+                      cookableCount: 1,
+                      cards: [
+                          {
+                              recipe: RECIPE,
+                              flags: {
+                                  cookable: true,
+                                  highProtein: false,
+                                  quick: true,
+                                  missingCount: 0,
+                                  hasIngredients: true,
+                              },
+                              macrosPerPortion: RECIPE_LIST_MACROS,
+                              missingNames: [],
+                              favourite: true,
+                          },
+                          {
+                              recipe: {
+                                  ...RECIPE_TWO,
+                                  id: "r3",
+                                  name: "Overnight oats",
+                                  yieldPortions: 1,
+                                  prepMinutes: 5,
+                                  cookMinutes: 0,
+                              },
+                              flags: {
+                                  cookable: false,
+                                  highProtein: false,
+                                  quick: true,
+                                  missingCount: 1,
+                                  hasIngredients: true,
+                              },
+                              macrosPerPortion: RECIPE_LIST_MACROS,
+                              missingNames: ["Rolled oats"],
+                              favourite: true,
+                          },
+                      ],
+                  }),
+              }
+            : {}),
         recipe: V2
             ? recipeV2(cookSheet)
             : renderRecipeDetailPage(recipeView as never),
