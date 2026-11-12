@@ -236,6 +236,48 @@ describe("nutrition heads lead with the pack serving", () => {
         ]);
     });
 
+    test("per-100 ml values scale by a usual amount in ml, with no density", () => {
+        const f = food({
+            name: "Milk",
+            calories: 60,
+            usualAmount: { amount: 250, unit: "ml" },
+            nutritionBasis: "100ml",
+        });
+        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
+        expect(spans(html, "fd-product-nutrition__head")).toEqual([
+            "",
+            "Per serving",
+            "Per 100 ml",
+        ]);
+        expect(spans(html, "fd-product-nutrition__row")).toEqual([
+            "Calories",
+            "150",
+            "60",
+        ]);
+    });
+
+    test("per-100 ml values are not scaled by a usual amount in grams or each", () => {
+        for (const usualAmount of [
+            { amount: 250, unit: "g" },
+            { amount: 2, unit: "each" },
+        ] as const) {
+            const f = food({
+                name: "Milk",
+                calories: 60,
+                usualAmount,
+                gramsPerMl: 1,
+                nutritionBasis: "100ml",
+            });
+            const html = renderProductBody(
+                buildPreviewProductPageView(chrome, f),
+            );
+            expect(spans(html, "fd-product-nutrition__head")).toEqual([
+                "",
+                "Per 100 ml",
+            ]);
+        }
+    });
+
     test("no serving at all: one per 100 g column", () => {
         const f = food({ name: "Salt", calories: 0.5 });
         const html = renderProductBody(buildPreviewProductPageView(chrome, f));

@@ -429,14 +429,14 @@ export function catalogNutritionFromOff(food: FoodResult): {
     const per100 = food.per_100;
     if (per100 != null) {
         return {
-            calories: per100.calories,
-            proteinG: per100.protein_g,
-            carbsG: per100.carbs_g,
-            fatG: per100.fat_g,
-            fiberG: per100.fiber_g,
-            sugarG: per100.sugar_g,
+            calories: nonNegative(per100.calories),
+            proteinG: nonNegative(per100.protein_g),
+            carbsG: nonNegative(per100.carbs_g),
+            fatG: nonNegative(per100.fat_g),
+            fiberG: nonNegative(per100.fiber_g),
+            sugarG: nonNegative(per100.sugar_g),
             saturatedFatG: nonNegative(per100.saturated_fat_g),
-            alcoholG: per100.alcohol_g,
+            alcoholG: nonNegative(per100.alcohol_g),
         };
     }
     const serving = (food.serving ?? "")
@@ -467,7 +467,8 @@ export function catalogNutritionFromOff(food: FoodResult): {
     };
 }
 
-// OFF occasionally carries a negative saturated fat; that is bad data.
+// OFF occasionally carries a negative value; that is bad data, and the
+// columns refuse it.
 function nonNegative(value: number | null): number | null {
     return value != null && value < 0 ? null : value;
 }
@@ -1019,7 +1020,7 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             }
             for (const key of OFF_FILL_KEYS) {
                 const value = patch[key];
-                if (value != null && next[key] == null) {
+                if (value != null && value >= 0 && next[key] == null) {
                     next[key] = value;
                     changed = true;
                 }
@@ -1648,9 +1649,16 @@ export async function findOrCreateFoodByBarcodeResult(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
+            // A food made before the serving and basis columns has neither;
+            // the lookup is cache-first, so asking again costs a network call
+            // only once the cached record is past its TTL. A basis is asked
+            // for only where a refresh could adopt one (OFF-sourced values).
             const needsNutritionFill =
                 existing.offNutrientLevels == null ||
-                existing.saturatedFatG == null;
+                existing.saturatedFatG == null ||
+                existing.serving == null ||
+                (existing.nutritionBasis == null &&
+                    existing.nutritionSource === "openfoodfacts");
             const needsOffLookup =
                 existing.offQuality == null ||
                 (needsNutritionFill &&
@@ -1991,11 +1999,9 @@ export type MergedFoodFieldPick = Pick<
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
-    const nutritionBlock = usualHasAnyNutrient(keep)
-        ? nutritionBlockFrom(keep)
-        : usualHasAnyNutrient(drop)
-          ? nutritionBlockFrom(drop)
-          : nutritionBlockFrom(keep);
+    const blockFood =
+        !usualHasAnyNutrient(keep) && usualHasAnyNutrient(drop) ? drop : keep;
+    const nutritionBlock = nutritionBlockFrom(blockFood);
 
     // The nutrition block moves together with its basis. Saturated fat is
     // filled from either side only where it is per the block's own basis.
@@ -2004,7 +2010,13 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
         (basisOf(keep) === blockBasis ? keep.saturatedFatG : null) ??
         (basisOf(drop) === blockBasis ? drop.saturatedFatG : null) ??
         null;
-    const serving = keep.serving ?? drop.serving;
+    // The serving goes with the nutrition it was printed beside, and only
+    // where its unit is what the block is per: a gram serving on a per-100 ml
+    // block would derive nothing and mislead.
+    const blockUnit = blockBasis === "100ml" ? "ml" : "g";
+    const serving = [blockFood.serving, keep.serving, drop.serving].find(
+        (candidate) => candidate != null && candidate.unit === blockUnit,
+    );
 
     return {
         ...nutritionBlock,
@@ -3561,6 +3573,10 @@ export async function buildFoodUpdate(
     // basis would mislabel it. Resubmitting the stored values changes nothing.
     if (NUTRITION_BLOCK_KEYS.some((key) => next[key] !== current[key])) {
         next.nutritionBasis = null;
+        // The values are typed in now, so a later OFF refresh must not
+        // relabel them (it adopts a basis only for OFF-sourced nutrition).
+        if (patch.nutritionSource === undefined)
+            next.nutritionSource = "manual";
     }
     return next;
 }
@@ -4606,10 +4622,14 @@ export async function mergeFoodPair(
         actualKeep.id,
         patch,
     );
-    // buildFoodUpdate reads a changed value as typed per 100 g. Here the
-    // values were picked from a food that has its own basis, so the basis
-    // follows the picks instead.
+    // buildFoodUpdate reads a changed value as typed per 100 g, by hand. Here
+    // the values were picked from a food that has its own basis and source, so
+    // both follow the picks instead.
     next.nutritionBasis = basisAfterPicks(actualKeep, actualDrop, picks);
+    next.nutritionSource =
+        patch.nutritionSource !== undefined
+            ? patch.nutritionSource
+            : actualKeep.nutritionSource;
     // Saturated fat is no pick field, so it stays the kept food's unless the
     // basis moved to the dropped food's: then it comes from that same food
     // (null if it has none), as it is per the same amount as the picks.

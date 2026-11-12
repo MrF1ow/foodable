@@ -8,12 +8,17 @@ import {
     findOrCreateFoodByBarcodeFromHit,
     findOrCreateFoodByBarcodeResult,
     gramsPerEachFromOff,
+    type FoodQuality,
+    mergeFoods,
     newFood,
     offNutritionPatchFromHit,
+    offQualityMissStamp,
     perServingFromFood,
+    refreshFoodQualityByBarcode,
     servingFromOff,
     updateFood,
 } from "./foods.js";
+import { productNutrition } from "../web/pages/v2/product-nutrition.js";
 
 // The Open Food Facts record for Members Mark Half & Half (barcode
 // 0193968379117), trimmed to the keys the mapper reads.
@@ -616,5 +621,373 @@ describe("the basis labels the per-100 columns and does not change logging", () 
             new Map([[f.id, f]]),
         );
         expect(meal.totals.calories).toBe(190);
+    });
+});
+
+const FULL_QUALITY: FoodQuality = {
+    nutriscoreGrade: "d",
+    novaGroup: 1,
+    ecoscoreGrade: null,
+    additives: [],
+    allergensTags: [],
+    tracesTags: [],
+    ingredientsAnalysisTags: [],
+    labelsTags: [],
+    fetchedAt: "2026-11-01T00:00:00.000Z",
+};
+
+describe("re-scanning a barcode food made before the serving and basis columns", () => {
+    // Quality, nutrient levels and saturated fat are all set, so the old
+    // refresh condition saw nothing left to fetch.
+    async function filledOldFood(
+        over: Partial<Parameters<typeof newFood>[0]> = {},
+    ) {
+        const store = createMemoryFoodsStore();
+        const old = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Half & Half",
+                calories: 133.3,
+                proteinG: 3.3,
+                fatG: 10,
+                saturatedFatG: 6.7,
+                offNutrientLevels: { fat: "high" },
+                offQuality: { ...FULL_QUALITY },
+                nutritionSource: "openfoodfacts",
+                offSourceId: "0193968379117",
+                ...over,
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", old.id);
+        return store;
+    }
+
+    test("looks the barcode up again and fills the serving and basis", async () => {
+        const store = await filledOldFood();
+        let lookups = 0;
+        const { food } = await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            async () => {
+                lookups++;
+                return hit();
+            },
+        );
+        expect(lookups).toBe(1);
+        expect(food.serving?.amount).toBe(30);
+        expect(food.nutritionBasis).toBe("100ml");
+        expect(productNutrition(food).head.per100).toBe("Per 100 ml");
+    });
+
+    test("a food that already has serving and basis is not looked up", async () => {
+        const store = await filledOldFood({
+            serving: { label: "1 portion (30 ml)", amount: 30, unit: "ml" },
+            nutritionBasis: "100ml",
+        });
+        let lookups = 0;
+        await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            async () => {
+                lookups++;
+                return hit();
+            },
+        );
+        expect(lookups).toBe(0);
+    });
+
+    test("typed-in nutrition with a serving never asks for a basis", async () => {
+        const store = await filledOldFood({
+            nutritionSource: "manual",
+            serving: { label: "30 g", amount: 30, unit: "g" },
+        });
+        let lookups = 0;
+        await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            async () => {
+                lookups++;
+                return hit();
+            },
+        );
+        expect(lookups).toBe(0);
+    });
+
+    test("an OFF empty miss is not looked up for a serving it will never have", async () => {
+        const store = await filledOldFood({
+            offQuality: offQualityMissStamp("2026-11-01T00:00:00.000Z"),
+        });
+        let lookups = 0;
+        await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            async () => {
+                lookups++;
+                return hit();
+            },
+        );
+        expect(lookups).toBe(0);
+    });
+});
+
+describe("nutrition_data_per serving with a millilitre serving", () => {
+    const MILK = (over: Record<string, unknown> = {}) => ({
+        status: 1,
+        product: {
+            product_name: "Whole Milk",
+            serving_size: "1 cup (240 ml)",
+            serving_quantity: 240,
+            serving_quantity_unit: "ml",
+            nutrition_data_per: "serving",
+            nutriments: {
+                "energy-kcal_100g": 62.5,
+                "energy-kcal_serving": 150,
+                proteins_100g: 3.3,
+                proteins_serving: 8,
+                fat_100g: 3.3,
+                fat_serving: 8,
+                carbohydrates_100g: 5,
+                carbohydrates_serving: 12,
+            },
+            ...over,
+        },
+    });
+
+    test("is per 100 ml, and the screen leads with the cup", async () => {
+        mockFetch(MILK());
+        const off = (await fetchProductFromOFF("0041900076641"))!;
+        expect(off.nutrition_basis).toBe("100ml");
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0041900076641",
+            off,
+        );
+        const nutrition = productNutrition(food);
+        expect(nutrition.head.serving).toEqual({
+            name: "Per cup",
+            amount: "240 ml",
+        });
+        expect(nutrition.head.per100).toBe("Per 100 ml");
+        expect(nutrition.table.calories.perServing).toBe("150");
+        expect(nutrition.table.calories.per100g).toBe("63");
+    });
+
+    test("no nutrition_data_per and an ml serving is per 100 ml", async () => {
+        mockFetch(MILK({ nutrition_data_per: undefined }));
+        expect(
+            (await fetchProductFromOFF("0041900076641"))?.nutrition_basis,
+        ).toBe("100ml");
+    });
+
+    test("a gram serving stays per 100 g", async () => {
+        mockFetch(
+            MILK({
+                serving_size: "2 cookies (30 g)",
+                serving_quantity: 30,
+                serving_quantity_unit: "g",
+            }),
+        );
+        expect(
+            (await fetchProductFromOFF("0041900076641"))?.nutrition_basis,
+        ).toBe("100g");
+    });
+
+    test("an explicit 100g stays per 100 g whatever the serving unit", async () => {
+        mockFetch(MILK({ nutrition_data_per: "100g" }));
+        expect(
+            (await fetchProductFromOFF("0041900076641"))?.nutrition_basis,
+        ).toBe("100g");
+    });
+});
+
+describe("a typed-in edit is not relabelled by the next OFF refresh", () => {
+    test("create from OFF, edit calories, refresh: the basis stays null", async () => {
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit(),
+        );
+        expect(food.nutritionSource).toBe("openfoodfacts");
+        const edited = await updateFood(store, HH, food.id, { calories: 120 });
+        expect(edited.nutritionBasis).toBeNull();
+        expect(edited.nutritionSource).toBe("manual");
+        const refreshed = await refreshFoodQualityByBarcode(
+            store,
+            HH,
+            "0193968379117",
+            hit(),
+        );
+        expect(refreshed?.nutritionBasis).toBeNull();
+        expect(refreshed?.calories).toBe(120);
+        expect(productNutrition(refreshed!).head.per100).toBe("Per 100 g");
+    });
+
+    test("an edit that changes no nutrition keeps the source", async () => {
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit(),
+        );
+        const renamed = await updateFood(store, HH, food.id, {
+            name: "Half & Half 2",
+        });
+        expect(renamed.nutritionSource).toBe("openfoodfacts");
+    });
+
+    test("an explicit nutrition_source in the same patch wins", async () => {
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            hit(),
+        );
+        const edited = await updateFood(store, HH, food.id, {
+            calories: 120,
+            nutritionSource: "estimate",
+        });
+        expect(edited.nutritionSource).toBe("estimate");
+    });
+});
+
+describe("a negative per-100 value from OFF", () => {
+    function negative(): FoodResult {
+        const h = hit();
+        h.per_100 = { ...h.per_100!, protein_g: -0.1, calories: -5 };
+        return h;
+    }
+
+    test("catalogNutritionFromOff drops every negative per-100 value", () => {
+        const n = catalogNutritionFromOff(negative());
+        expect(n.proteinG).toBeNull();
+        expect(n.calories).toBeNull();
+        expect(n.fatG).toBe(10);
+    });
+
+    test("a food created from it holds null there", async () => {
+        const store = createMemoryFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            HH,
+            "0193968379117",
+            negative(),
+        );
+        expect(food.proteinG).toBeNull();
+        expect(food.calories).toBeNull();
+        expect(food.fatG).toBe(10);
+    });
+
+    test("a refresh of an existing food does not store it either", async () => {
+        const store = createMemoryFoodsStore();
+        const existing = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Half & Half",
+                offSourceId: "0193968379117",
+            }),
+        );
+        await store.setBarcode(HH, "0193968379117", existing.id);
+        const refreshed = await refreshFoodQualityByBarcode(
+            store,
+            HH,
+            "0193968379117",
+            negative(),
+        );
+        expect(refreshed?.proteinG).toBeNull();
+        expect(refreshed?.calories).toBeNull();
+        expect(refreshed?.fatG).toBe(10);
+    });
+});
+
+describe("a merge pairs the serving with the nutrition it carries", () => {
+    test("a gram serving does not land on a per-100 ml block", async () => {
+        const store = createMemoryFoodsStore();
+        const keep = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Milk",
+                serving: { label: "1 cup (240 g)", amount: 240, unit: "g" },
+            }),
+        );
+        const drop = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Whole milk",
+                calories: 133.3,
+                nutritionBasis: "100ml",
+                serving: { label: "1 portion (30 ml)", amount: 30, unit: "ml" },
+            }),
+        );
+        const merged = await mergeFoods(store, HH, keep.id, drop.id);
+        expect(merged.nutritionBasis).toBe("100ml");
+        expect(merged.serving).toEqual({
+            label: "1 portion (30 ml)",
+            amount: 30,
+            unit: "ml",
+        });
+        expect(perServingFromFood(merged)?.calories).toBeCloseTo(40, 1);
+    });
+
+    test("a serving that matches no block basis is dropped", async () => {
+        const store = createMemoryFoodsStore();
+        const keep = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Milk",
+                serving: { label: "1 cup (240 g)", amount: 240, unit: "g" },
+            }),
+        );
+        const drop = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Whole milk",
+                calories: 133.3,
+                nutritionBasis: "100ml",
+            }),
+        );
+        const merged = await mergeFoods(store, HH, keep.id, drop.id);
+        expect(merged.nutritionBasis).toBe("100ml");
+        expect(merged.serving).toBeNull();
+    });
+
+    test("the serving of the food the nutrition came from wins", async () => {
+        const store = createMemoryFoodsStore();
+        const keep = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Milk",
+                serving: { label: "1 shot (30 ml)", amount: 30, unit: "ml" },
+            }),
+        );
+        const drop = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Whole milk",
+                calories: 133.3,
+                nutritionBasis: "100ml",
+                serving: { label: "1 cup (240 ml)", amount: 240, unit: "ml" },
+            }),
+        );
+        const merged = await mergeFoods(store, HH, keep.id, drop.id);
+        // The nutrition comes from drop, so its serving goes with it.
+        expect(merged.serving?.amount).toBe(240);
     });
 });

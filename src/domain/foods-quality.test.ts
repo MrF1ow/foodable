@@ -114,6 +114,7 @@ test("existing with offQuality and OFF nutrition filled does not call lookup", a
             offQuality: q,
             saturatedFatG: 1.0,
             offNutrientLevels: { sugars: "low" },
+            serving: { label: "15 g", amount: 15, unit: "g" },
         }),
     );
     await store.setBarcode(HH, BARCODE, base.id);

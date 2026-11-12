@@ -545,8 +545,8 @@ test("mergedFoodFields: keep's own basis stays and drop's saturated fat per anot
     expect(merged.calories).toBe(120);
     expect(merged.nutritionBasis).toBeNull();
     expect(merged.saturatedFatG).toBeNull();
-    // The serving does not depend on the basis.
-    expect(merged.serving).toEqual(HALF_AND_HALF_SERVING);
+    // Keep's per-100 g block cannot carry drop's ml serving.
+    expect(merged.serving).toBeNull();
 });
 
 test("mergedFoodFields: same basis still fills saturated fat; null and 100g count as the same", () => {
@@ -567,9 +567,15 @@ test("mergedFoodFields: same basis still fills saturated fat; null and 100g coun
 
 test("mergedFoodFields: keep's serving wins over drop's", () => {
     const keep = sampleRow({
+        calories: 120,
+        nutritionBasis: "100ml",
         serving: { label: "1 cup", amount: 240, unit: "ml" },
     });
-    const drop = sampleRow({ serving: { ...HALF_AND_HALF_SERVING } });
+    const drop = sampleRow({
+        calories: 133.33,
+        nutritionBasis: "100ml",
+        serving: { ...HALF_AND_HALF_SERVING },
+    });
     expect(mergedFoodFields(keep, drop).serving).toEqual({
         label: "1 cup",
         amount: 240,

@@ -35,9 +35,9 @@ export type ProductNutritionTable = Record<
     ProductNutritionColumn
 >;
 
-function scalePer100g(value: number | null, grams: number): number | null {
+function scalePer100g(value: number | null, amount: number): number | null {
     if (value == null) return null;
-    return Math.round((value * grams) / 10) / 10;
+    return Math.round((value * amount) / 10) / 10;
 }
 
 function formatMacroValue(value: number | null, unit: "kcal" | "g"): string {
@@ -116,19 +116,24 @@ export function servingHeading(serving: FoodServing): string {
 /** Where the serving column comes from, decided once per food. */
 type ServingSource =
     | { kind: "pack"; serving: FoodServing; values: FoodServingNutrition }
-    | { kind: "derived"; grams: number };
+    | { kind: "derived"; amount: number };
 
 function servingSource(food: Food): ServingSource | null {
     const values = perServingFromFood(food);
     if (food.serving != null && values != null) {
         return { kind: "pack", serving: food.serving, values };
     }
-    // Scaling per-100 ml values by grams would be a density guess.
-    if (food.nutritionBasis !== "100ml") {
-        const grams = servingGramsForFood(food);
-        if (grams != null) return { kind: "derived", grams };
+    if (food.nutritionBasis === "100ml") {
+        // Scaling per-100 ml values by grams would be a density guess; a
+        // usual amount in ml needs none.
+        const usual = food.usualAmount;
+        if (usual != null && usual.unit === "ml" && usual.amount > 0) {
+            return { kind: "derived", amount: usual.amount };
+        }
+        return null;
     }
-    return null;
+    const grams = servingGramsForFood(food);
+    return grams != null ? { kind: "derived", amount: grams } : null;
 }
 
 /** The serving bit of the subtitle: none when the nutrition head names it. */
@@ -179,7 +184,7 @@ export function productNutrition(food: Food): ProductNutrition {
             perServing = formatMacroValue(source.values[row.key], row.unit);
         } else if (source?.kind === "derived") {
             perServing = formatMacroValue(
-                scalePer100g(raw, source.grams),
+                scalePer100g(raw, source.amount),
                 row.unit,
             );
         }

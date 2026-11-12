@@ -242,12 +242,15 @@ function resolveAlcoholGrams(
     return num(gramsFromDrink(ml, abv));
 }
 
+// What OFF's `*_100g` figures are per. A liquid whose label is per serving still
+// reports them per 100 ml, so a serving parsed in ml means 100 ml too.
 function nutritionBasisOf(product: OFFProduct): NutritionBasis {
-    return String(product.nutrition_data_per ?? "")
+    const per = String(product.nutrition_data_per ?? "")
         .trim()
-        .toLowerCase() === "100ml"
-        ? "100ml"
-        : "100g";
+        .toLowerCase();
+    if (per === "100ml") return "100ml";
+    if (per === "100g") return "100g";
+    return servingVolumeMl(product) != null ? "100ml" : "100g";
 }
 
 // Normalize an OFF product into our shape. Prefer per-serving values when the

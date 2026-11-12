@@ -279,6 +279,59 @@ describeDb(pgAvailable !== null, "foods serving and basis", (getCtx) => {
         expect(edited.serving_unit).toBe("ml");
     });
 
+    test("an edit marks the nutrition manual, so the next refresh keeps the basis null", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        const { food } = await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        await updateFood(store, householdId, food.id, { calories: 120 });
+        await findOrCreateFoodByBarcodeFromHit(
+            store,
+            householdId,
+            BARCODE,
+            halfAndHalf(),
+        );
+        const [row] = await sql`
+            select nutrition_basis, nutrition_source, calories
+            from public.foods where id = ${food.id}
+        `;
+        expect(row.nutrition_source).toBe("manual");
+        expect(row.nutrition_basis).toBeNull();
+        expect(Number(row.calories)).toBe(120);
+    });
+
+    test("a hit with a negative per-100 value creates the food with that value null", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const base = halfAndHalf();
+        const { food, created } = await findOrCreateFoodByBarcodeFromHit(
+            liveFoodsStore(),
+            householdId,
+            BARCODE,
+            {
+                ...base,
+                per_100: { ...base.per_100!, protein_g: -0.1, fat_g: -2 },
+            },
+        );
+        expect(created).toBe(true);
+        const [row] = await sql`
+            select protein_g, fat_g, calories from public.foods
+            where id = ${food.id}
+        `;
+        expect(row.protein_g).toBeNull();
+        expect(row.fat_g).toBeNull();
+        expect(Number(row.calories)).toBe(133.3);
+    });
+
     test("a merge carries the dropped food's basis and serving with its nutrition", async () => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
