@@ -170,6 +170,11 @@ const ME = {
     displayName: "Ethan",
 };
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+const JORDAN = { ...SAM, userId: "u3", displayName: "Jordan" };
+const RILEY = { ...SAM, userId: "u4", displayName: "Riley" };
+const ALEX = { ...SAM, userId: "u5", displayName: "Alex" };
+/** The clock the Last active column reads, so the shots do not drift by day. */
+const PREVIEW_NOW = new Date("2026-11-12T18:00:00Z");
 
 // The Stores screens of the design: Costco with six sections and five lines on
 // the list, Trader Joe's, and a market with no sections yet.
@@ -1905,7 +1910,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       return renderSettingsHouseholdV2Page({
                           chrome,
                           householdName: "The Flow household",
-                          members: [ME, SAM] as never,
+                          members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
+                          now: PREVIEW_NOW,
+                          lastSeen: new Map<string, Date | null>([
+                              [ME.userId, new Date("2026-11-12T16:20:00Z")],
+                              [SAM.userId, new Date("2026-11-11T20:05:00Z")],
+                              [JORDAN.userId, new Date("2026-11-09T17:40:00Z")],
+                              [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
+                              [ALEX.userId, null],
+                          ]),
                           stores: PREVIEW_STORES,
                           isOwner: true,
                           canManage: true,

@@ -47,6 +47,7 @@ import {
 } from "../../../copy/social-readers.js";
 import { STORES_PATH } from "./settings-stores.js";
 import { sourceIcon } from "../../components/source-icon.js";
+import { lastActiveLabel } from "../../../domain/last-active.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
 
 export type SettingsHouseholdV2View = {
@@ -63,6 +64,10 @@ export type SettingsHouseholdV2View = {
     socialReaders?: SocialReadersPreferences;
     socialReaderStatus?: SocialReaderStatusRow[];
     timezone?: string;
+    /** When each member was last active, by user id; null = never. Without it the column is left out. */
+    lastSeen?: ReadonlyMap<string, Date | null>;
+    /** The clock the last-active labels read; defaults to the real one. */
+    now?: Date;
     noticeResult: NoticesForResult;
     duplicatePairs: PossibleDuplicatePair[];
     refCounts: ReadonlyMap<string, number>;
@@ -152,8 +157,26 @@ function memberRow(
     const trailing = manage
         ? `<div class="fd-row__trailing">${manage}</div>`
         : "";
+    // Desktop only (CSS): the phone list stays name and role.
+    const lastActive = view.lastSeen
+        ? `<span class="fd-row__last-active">${esc(
+              lastActiveLabel(
+                  view.lastSeen.get(member.userId) ?? null,
+                  view.now ?? new Date(),
+                  view.timezone ?? "UTC",
+              ),
+          )}</span>`
+        : "";
     return raw(
-        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${chevron}</a>${trailing}</div></li>`,
+        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
+    );
+}
+
+/** The desktop column titles above the members; hidden on the phone. */
+function membersHead(view: SettingsHouseholdV2View): Html {
+    if (!view.lastSeen) return raw("");
+    return raw(
+        `<div class="fd-settings-members-head" aria-hidden="true"><span>Member</span><span>Role</span><span>Last active</span></div>`,
     );
 }
 
@@ -296,7 +319,7 @@ export function renderSettingsHouseholdV2Body(
               )
             : pluralsBlock,
         raw(
-            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(rowList(memberRows(view), { label: "Members" }))}`,
+            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}`,
         ),
         raw(
             `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,

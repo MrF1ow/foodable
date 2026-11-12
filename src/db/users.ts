@@ -6,7 +6,8 @@ import {
     signUp as domainSignUp,
     type SignInOptions,
 } from "../domain/auth.js";
-import { maybeOne, one, pgCode, run, type Tx } from "./sql.js";
+import { runAsSystem } from "./actor.js";
+import { maybeOne, one, pgCode, rows, run, type Tx } from "./sql.js";
 
 export function liveAuthStore(): AuthStore {
     return {
@@ -128,4 +129,63 @@ export async function authAccountExists(email: string): Promise<boolean> {
 
 export async function authUserCount(): Promise<number> {
     return countAuthUsersInDb();
+}
+
+/**
+ * Stamps `last_seen_at` when it is empty or at least `minIntervalMs` old, so
+ * callers that race on one user write once between them. Returns whether a row
+ * was written. Runs as the system: the caller has already read the session.
+ */
+export async function touchUserSeen(
+    userId: string,
+    at: Date,
+    minIntervalMs: number,
+): Promise<boolean> {
+    const staleBefore = new Date(at.getTime() - minIntervalMs);
+    return runAsSystem("record user activity", () =>
+        run(async (tx) => {
+            const touched = await rows<{ id: string }>(
+                tx,
+                tx`
+                    update public.users
+                    set last_seen_at = ${at.toISOString()}
+                    where id = ${userId}
+                      and (last_seen_at is null or last_seen_at <= ${staleBefore.toISOString()})
+                    returning id
+                `,
+            );
+            return touched.length > 0;
+        }),
+    );
+}
+
+/**
+ * When each member of a household was last active, by user id; null means
+ * never. Runs as the system because a user's row is only visible to that user,
+ * and is scoped to the household's own members.
+ */
+export async function listMembersLastSeen(
+    householdId: string,
+): Promise<Map<string, Date | null>> {
+    return runAsSystem("list household members last active", () =>
+        run(async (tx) => {
+            const found = await rows<{ id: string; last_seen_at: Date | null }>(
+                tx,
+                tx`
+                    select u.id, u.last_seen_at
+                    from public.users u
+                    join public.household_members m on m.user_id = u.id
+                    where m.household_id = ${householdId}
+                `,
+            );
+            return new Map(
+                found.map((row) => [
+                    row.id,
+                    row.last_seen_at == null
+                        ? null
+                        : new Date(row.last_seen_at),
+                ]),
+            );
+        }),
+    );
 }
