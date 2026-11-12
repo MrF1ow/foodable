@@ -117,6 +117,7 @@ import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
+import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
 import {
     renderSettingsStoresV2Page,
@@ -241,6 +242,47 @@ const PREVIEW_TRENDS_GOALS: NutritionGoals = {
     target_weight_g: null,
     updated_at: "2026-01-01T00:00:00Z",
 };
+
+// The goals the Settings › Goals and Today previews show with a name, and the
+// days that carry their own goals.
+const PREVIEW_NAMED_GOALS: NutritionGoals = {
+    ...PREVIEW_TRENDS_GOALS,
+    daily_alcohol_g: 28,
+    goal_name: "Recomp",
+    goal_note: "maintenance minus 5%",
+    goals_set_on: "2026-10-02",
+};
+
+const PREVIEW_GOAL_DAYS = [
+    {
+        user_id: "u1",
+        date: "2026-11-14",
+        daily_calories: 1800,
+        daily_protein_g: 170,
+        daily_carbs_g: null,
+        daily_fat_g: null,
+        daily_fiber_g: null,
+        daily_sugar_g: null,
+        daily_alcohol_g: null,
+        daily_caffeine_mg: null,
+        daily_water_ml: null,
+        updated_at: "2026-11-01T00:00:00Z",
+    },
+    {
+        user_id: "u1",
+        date: "2026-11-21",
+        daily_calories: 2600,
+        daily_protein_g: null,
+        daily_carbs_g: null,
+        daily_fat_g: null,
+        daily_fiber_g: null,
+        daily_sugar_g: null,
+        daily_alcohol_g: null,
+        daily_caffeine_mg: null,
+        daily_water_ml: 3000,
+        updated_at: "2026-11-01T00:00:00Z",
+    },
+];
 
 function previewTrendsDays(today: string) {
     const days = [];
@@ -1871,10 +1913,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   }),
                   "settings-goals": renderSettingsGoalsV2Page({
                       chrome,
-                      goals: PREVIEW_TRENDS_GOALS,
-                      goalDate: "2026-11-09",
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
                       weightUnit: "kg",
                       alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                  }),
+                  "settings-goals-edit": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                      // A draft opens the sheet on load.
+                      draft: goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
+                  }),
+                  "settings-goals-empty": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: null,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: null,
+                      days: [],
+                  }),
+                  "settings-goals-error": renderSettingsGoalsV2Page({
+                      chrome,
+                      goals: PREVIEW_NAMED_GOALS,
+                      today: "2026-11-10",
+                      weightUnit: "kg",
+                      alcohol: "us",
+                      days: PREVIEW_GOAL_DAYS,
+                      draft: {
+                          ...goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
+                          goal_name: "Recomp until the spring wedding photos",
+                          daily_calories: "30000",
+                      },
+                      error: "Goal name must be at most 40 characters. Calories must be at most 20000.",
+                      invalid: ["goal_name", "daily_calories"],
                   }),
                   "settings-saved": renderSettingsSavedV2Page({
                       chrome,
@@ -2158,6 +2234,23 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "dev-gallery-v2": renderDevGalleryV2Page(chrome),
                   "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-goal-name": (() => {
+                      const data = buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      );
+                      return renderTodayV2Page({
+                          ...data,
+                          view: {
+                              ...data.view,
+                              goals: {
+                                  ...data.view.goals!,
+                                  goal_name: "Recomp",
+                                  goals_set_on: "2026-10-02",
+                              },
+                          },
+                      });
+                  })(),
                   "nutrition-today-yesterday": renderTodayV2Page({
                       ...buildPreviewTodayPageData(
                           chrome as never,
@@ -2673,7 +2766,7 @@ if (process.argv.includes("--shots")) {
                 shotBase === "settings-display" ||
                 shotBase === "settings-household-v2" ||
                 shotBase === "settings-household-v2-member" ||
-                shotBase === "settings-goals" ||
+                shotBase.startsWith("settings-goals") ||
                 shotBase === "settings-saved" ||
                 shotBase === "settings-export" ||
                 shotBase === "help" ||

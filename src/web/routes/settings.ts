@@ -9,6 +9,7 @@ import {
     renderSettingsAccountV2Route,
     renderSettingsDisplayV2Route,
     renderSettingsExportV2Route,
+    alcoholOf,
     renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
     renderSettingsHomeRoute,
@@ -49,8 +50,23 @@ import {
     getSignupPolicy,
     signupPolicyForRoutes,
 } from "../../domain/signup.js";
-import { upsertProfile } from "../../db/profiles.js";
-import { validateTz } from "../../domain/tz.js";
+import {
+    getProfile,
+    timezoneFromProfile,
+    upsertProfile,
+} from "../../db/profiles.js";
+import {
+    clearGoalDays,
+    getNutritionGoals,
+    upsertNutritionGoals,
+} from "../../db/nutrition.js";
+import { isCalendarDate } from "../../domain/insights.js";
+import { todayInTz, validateTz } from "../../domain/tz.js";
+import {
+    GOALS_FORM_FIELDS,
+    parseGoalsForm,
+    type GoalsFormDraft,
+} from "../pages/v2/settings-goals-form.js";
 import { redirectWithToast } from "../components/toast.js";
 import { getBaseUrl } from "../../url.js";
 import {
@@ -112,6 +128,72 @@ settingsRoutes.get(
     async (c) => {
         const page = await renderSettingsGoalsV2Route(c.get("userId"));
         return c.html(page.html, page.status);
+    },
+);
+
+settingsRoutes.post(
+    "/settings/goals",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const body = await c.req.parseBody();
+        const values = Object.fromEntries(
+            GOALS_FORM_FIELDS.map((f) => [f, formText(body, f)]),
+        ) as GoalsFormDraft;
+        const profile = await getProfile(userId);
+        const stored = await getNutritionGoals(userId);
+        const parsed = parseGoalsForm(values, {
+            alcohol: alcoholOf(profile),
+            stored,
+        });
+        if (!parsed.ok) {
+            const page = await renderSettingsGoalsV2Route(userId, {
+                error: parsed.errors.join(" "),
+                draft: values,
+                invalid: parsed.invalid,
+            });
+            // A non-member gets the membership page with its own status.
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // A save that changes a target is the day those goals were set; a
+        // rename alone is not, the same rule set_nutrition_goals follows.
+        const input = parsed.changesTargets
+            ? {
+                  ...parsed.input,
+                  goals_set_on: todayInTz(
+                      timezoneFromProfile(profile) ?? "UTC",
+                  ),
+              }
+            : parsed.input;
+        await upsertNutritionGoals(userId, input);
+        return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
+    },
+);
+
+settingsRoutes.post(
+    "/settings/goals/days/clear",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const date = formText(body, "date").trim();
+        if (!isCalendarDate(date)) {
+            const page = await renderSettingsGoalsV2Route(userId, {
+                error: "Choose a valid day.",
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // Always the caller's own rows: the id comes from the session, never
+        // the form.
+        await clearGoalDays(userId, member.householdId, [date]);
+        return redirectWithToast(
+            c,
+            "/settings/goals",
+            "settings.goals.day-cleared",
+        );
     },
 );
 
