@@ -24,6 +24,7 @@ import {
     type RecipePlan,
 } from "./plan.js";
 import { dimensionOf, isQuantityUnit } from "./quantity.js";
+import type { Recipe, RecipeIngredient } from "./recipes.js";
 import type { SettingsStore } from "./settings.js";
 
 /** Days the week view covers. */
@@ -84,6 +85,36 @@ export type PlanRecipe = {
     yieldPortions: number;
     ingredients: RecipeGroceryIngredient[];
 };
+
+/**
+ * The recipes the given plans name, with their ingredients, in the shape
+ * `missingForPlan` reads. One assembly for the week view, the plan notices and
+ * the notice action, so they cannot disagree about what a recipe needs.
+ */
+export function planRecipesOf(
+    plans: readonly Pick<RecipePlan, "recipeId">[],
+    recipes: readonly Pick<Recipe, "id" | "name" | "yieldPortions">[],
+    ingredients: readonly Pick<
+        RecipeIngredient,
+        "recipeId" | "displayName" | "quantity" | "foodId"
+    >[],
+): PlanRecipe[] {
+    const planned = new Set(plans.map((plan) => plan.recipeId));
+    return recipes
+        .filter((recipe) => planned.has(recipe.id))
+        .map((recipe): PlanRecipe => ({
+            id: recipe.id,
+            name: recipe.name,
+            yieldPortions: recipe.yieldPortions,
+            ingredients: ingredients
+                .filter((row) => row.recipeId === recipe.id)
+                .map((row) => ({
+                    displayName: row.displayName,
+                    quantity: row.quantity,
+                    foodId: row.foodId,
+                })),
+        }));
+}
 
 /** One planned recipe that needs a missing food. */
 export type PlanNeed = {

@@ -612,6 +612,55 @@ function previewMoveError() {
     );
 }
 
+const PREVIEW_VIEWER_ID = "preview-viewer";
+
+/** The three one-tap notices as the preview household has them. */
+function previewOneTapNotices(): import("../src/domain/notices.js").Notice[] {
+    return [
+        {
+            code: "grocery.running_low",
+            severity: "warn",
+            subject: { kind: "food", id: "u-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                foodId: "u-eggs",
+                reason: "2 left, below 6",
+                dismissScope: "2026-11-02",
+            },
+        },
+        {
+            code: "plan.missing_ingredient",
+            severity: "warn",
+            subject: { kind: "food", id: "f-lemon" },
+            related: [{ kind: "recipe", id: "r1", name: "Lemon chicken" }],
+            params: {
+                name: "Lemon",
+                foodId: "f-lemon",
+                unknown: "no",
+                recipeName: "Lemon chicken",
+                recipeCount: 1,
+                plannedOn: "2026-11-11",
+                daysLeft: 1,
+                amounts: "2 each",
+                dismissScope: "plan-1",
+            },
+        },
+        {
+            code: "nutrition.weigh_in_due",
+            severity: "info",
+            subject: { kind: "member", id: PREVIEW_VIEWER_ID },
+            related: [{ kind: "member", id: PREVIEW_VIEWER_ID, name: "Ethan" }],
+            params: {
+                name: "Ethan",
+                days: 9,
+                lastWeighedOn: "2026-11-01",
+                dismissScope: "2026-11-01",
+            },
+        },
+    ];
+}
+
 function previewWeekPlan(openSheet?: "missing" | "plan") {
     const today = "2026-11-10";
     const plan = (
@@ -971,6 +1020,7 @@ function previewKitchenUsualsView(
                 storesById,
                 groceryLines: [{ foodId: "u-yogurt", checked: false }],
                 foodsById,
+                lowFoodIds: new Set(["u-eggs"]),
             }),
         ]),
     );
@@ -1368,41 +1418,38 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ],
             ...extra,
         });
+    const fridgePage = (
+        extra: Partial<
+            Parameters<typeof buildPreviewKitchenFridgeView>[2]
+        > = {},
+    ) => {
+        const snap = fridgeView(chrome);
+        return V2
+            ? renderKitchenFridgeV2Page(
+                  buildPreviewKitchenFridgeView(chrome as never, snap.today, {
+                      locations: snap.locations,
+                      items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
+                      foodsById: new Map(
+                          [...snap.foodsById.entries()].map(([id, row]) => [
+                              id,
+                              { ...row, usualAmount: null },
+                          ]),
+                      ),
+                      freezeDefaultExpiry: defaultFreezeExpiry(snap.today),
+                      ...extra,
+                      groceryLines: previewGroceryLines(),
+                      groceryOverview: buildKitchenFridgeGroceryOverview(
+                          previewGrocerySnapshot(),
+                      ),
+                  }),
+              )
+            : renderFridgePage(snap as never);
+    };
     return {
         nutrition,
         ...(V2 ? { "nutrition-edit-sheet": nutritionEditSheet } : {}),
         "nutrition-peer": nutritionPeer,
-        fridge: (() => {
-            const snap = fridgeView(chrome);
-            return V2
-                ? renderKitchenFridgeV2Page(
-                      buildPreviewKitchenFridgeView(
-                          chrome as never,
-                          snap.today,
-                          {
-                              locations: snap.locations,
-                              items: snap.items as import("../src/domain/fridge.js").FridgeItem[],
-                              foodsById: new Map(
-                                  [...snap.foodsById.entries()].map(
-                                      ([id, row]) => [
-                                          id,
-                                          { ...row, usualAmount: null },
-                                      ],
-                                  ),
-                              ),
-                              freezeDefaultExpiry: defaultFreezeExpiry(
-                                  snap.today,
-                              ),
-                              groceryLines: previewGroceryLines(),
-                              groceryOverview:
-                                  buildKitchenFridgeGroceryOverview(
-                                      previewGrocerySnapshot(),
-                                  ),
-                          },
-                      ),
-                  )
-                : renderFridgePage(snap as never);
-        })(),
+        fridge: fridgePage(),
         ...(V2
             ? {
                   "kitchen-fridge-item": renderKitchenFridgeV2Page(
@@ -1548,6 +1595,36 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   "kitchen-usuals": renderKitchenUsualsV2Page(
                       previewKitchenUsualsView(chrome as never),
                   ),
+                  "kitchen-usuals-low": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          notices: previewOneTapNotices(),
+                      }),
+                  ),
+                  "kitchen-fridge-low": fridgePage({
+                      notices: previewOneTapNotices(),
+                  }),
+                  "recipes-plan-notices": recipesListV2({
+                      week: previewWeekPlan(),
+                      notices: previewOneTapNotices(),
+                  }),
+                  "nutrition-notices": (() => {
+                      const view = buildPreviewTodayViewWithRail("2026-11-10");
+                      const notices = previewOneTapNotices();
+                      view.attention = {
+                          viewerUserId: PREVIEW_VIEWER_ID,
+                          count: notices.length,
+                          notices,
+                          noticeFoods: new Map(),
+                      };
+                      return renderTodayV2Page({
+                          ...buildPreviewTodayPageData(
+                              chrome as never,
+                              "2026-11-10",
+                          ),
+                          view,
+                          plan: previewWeekPlan(),
+                      });
+                  })(),
                   "kitchen-usual-edit": renderKitchenUsualsV2Page(
                       previewKitchenUsualsView(chrome as never, {
                           openFoodId: "u-milk",
@@ -2003,6 +2080,25 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
+        ...(V2
+            ? {
+                  // The one-tap notices on the page behind "View all".
+                  "needs-attention-notices": (() => {
+                      const notices = previewOneTapNotices();
+                      return renderNeedsAttentionPage({
+                          chrome,
+                          viewerUserId: PREVIEW_VIEWER_ID,
+                          result: {
+                              notices,
+                              dismissals: [],
+                              subjectNames: new Map(),
+                              subjectTimes: new Map(),
+                              noticeFoods: new Map(),
+                          },
+                      } as never);
+                  })(),
+              }
+            : {}),
         "settings-household": renderHouseholdSettingsPrefsPage({
             chrome,
             flags: PREVIEW_FLAGS,

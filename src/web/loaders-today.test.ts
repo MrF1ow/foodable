@@ -112,7 +112,7 @@ function fakeDeps(over: Partial<LoadTodayDeps>): LoadTodayDeps {
         getLatestWeight: async () => null,
         getWeightInRange: async () => [],
         loadHouseholdNotices: async () => emptyNotices(),
-        householdToday: async () => "2026-03-03",
+        householdClock: async () => ({ today: "2026-03-03", timezone: "UTC" }),
         todayInTz: () => "2026-03-03",
         listFridgeLocations: async () => [],
         ...over,
@@ -225,7 +225,10 @@ describe("loadToday", () => {
                 "2026-03-02",
                 "2026-03-03",
             ],
-            householdToday: async () => "2026-03-03",
+            householdClock: async () => ({
+                today: "2026-03-03",
+                timezone: "UTC",
+            }),
         });
         const view = await loadToday(viewer, "2026-03-03", deps);
         expect(view.streak).toBe(3);
@@ -550,6 +553,40 @@ describe("loadToday slot suggestions", () => {
         const many = await callsFor(40);
         expect(many).toEqual(one);
         expect(one.filter((c) => c === "loadHouseholdNotices")).toHaveLength(1);
+    });
+});
+
+describe("loadToday notices", () => {
+    test("loads the household's notices once, handing them the clock it already read", async () => {
+        const seen: {
+            today?: string;
+            clock?: unknown;
+            actionable?: boolean;
+        }[] = [];
+        let clockReads = 0;
+        const deps = fakeDeps({
+            householdClock: async () => {
+                clockReads += 1;
+                return { today: "2026-03-03", timezone: "Europe/Kyiv" };
+            },
+            loadHouseholdNotices: async (_householdId, opts) => {
+                seen.push({
+                    today: opts?.today,
+                    clock: opts?.clock,
+                    actionable: opts?.actionable,
+                });
+                return emptyNotices();
+            },
+        });
+        await loadToday(viewer, "2026-03-03", deps);
+        expect(clockReads).toBe(1);
+        expect(seen).toEqual([
+            {
+                today: "2026-03-03",
+                clock: { today: "2026-03-03", timezone: "Europe/Kyiv" },
+                actionable: true,
+            },
+        ]);
     });
 });
 

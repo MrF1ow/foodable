@@ -27,6 +27,13 @@ import { sparklineSvg } from "../../components/v2/sparkline.js";
 import type { TodayView, TodayWeightPoint } from "../../loaders-today.js";
 import { FD_LOG_HREF } from "../../shell-v2.js";
 import { FD_LOG_WEIGH_IN_SHEET_ID } from "./log-sheet.js";
+import {
+    isOneTapNotice,
+    noticeActionControl,
+    noticeDismissControl,
+    todayNoticeBack,
+    type NoticeBack,
+} from "./notice-strip.js";
 import { renderWeekMissingLine, renderWeekRows } from "./recipes-plan.js";
 import type { TodayPageData } from "./today.js";
 
@@ -104,13 +111,25 @@ function noticeDotClass(notice: Notice): string {
 
 function noticeActionLink(
     notice: Notice,
-    foods: TodayView["attention"]["noticeFoods"],
+    attention: TodayView["attention"],
+    back: NoticeBack,
 ): string {
-    const ctx: NoticeRouteContext = { from: "/", foods };
+    const ctx: NoticeRouteContext = {
+        from: back,
+        foods: attention.noticeFoods,
+        v2: { viewerUserId: attention.viewerUserId },
+    };
     const action = noticeActionFor(notice);
     if (!action) return "";
     const href = noticeHref(notice, ctx);
     if (href == null) return "";
+    // The one-tap and weigh-in notices share the strip's control.
+    if (action.to === "actOnNotice" || action.to === "weighInSheet") {
+        return noticeActionControl(notice, ctx, back, {
+            button: "fd-today-rail-row__action",
+            form: "fd-today-rail-row__action-form",
+        });
+    }
     if (action.method === "post") {
         return `<form class="fd-today-rail-row__action-form" method="post" action="${esc(href)}"><input type="hidden" name="from" value="/" /><button type="submit" class="fd-today-rail-row__action">${esc(action.label)}</button></form>`;
     }
@@ -215,8 +234,9 @@ function useSoonMarkup(view: TodayView): string {
 }
 
 function attentionMarkup(view: TodayView): string {
-    const { count, notices, noticeFoods } = view.attention;
+    const { count, notices } = view.attention;
     const listed = railNoticesListed(notices);
+    const back = todayNoticeBack(view);
     if (listed.length === 0) {
         return railCard(
             "Needs attention",
@@ -225,11 +245,20 @@ function attentionMarkup(view: TodayView): string {
     }
     const rows = listed
         .map((notice) => {
-            const trail = noticeActionLink(notice, noticeFoods);
+            const action = noticeActionLink(notice, view.attention, back);
+            // The phone's in-place strips are hidden on the desktop, so the
+            // card's one-tap rows carry the dismiss themselves.
+            const dismiss = isOneTapNotice(notice)
+                ? noticeDismissControl(
+                      notice,
+                      back,
+                      "fd-today-rail-row__dismiss",
+                  )
+                : "";
             return railRow({
                 dotClass: noticeDotClass(notice),
                 title: noticeSentence(notice),
-                trail,
+                trail: `${action}${dismiss}`,
             });
         })
         .join("");

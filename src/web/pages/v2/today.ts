@@ -48,6 +48,7 @@ import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
+import { noticeStrip, stripNotices, todayNoticeBack } from "./notice-strip.js";
 import { renderTodayRail } from "./today-rail.js";
 import {
     renderMissingSheet,
@@ -680,10 +681,39 @@ export function renderTodayBody(data: TodayPageData): Html {
     // The week plan is the household's, not the day's: a peer's day has none.
     const plan = isReadOnlyPeer(data) ? undefined : data.plan;
     const planPhone = plan ? renderWeekPhoneSection(plan) : "";
+    // The desktop Needs attention card carries these; the phone has no card, so
+    // the weigh-in and what the plan is missing show in place. A peer's day is
+    // read-only, and the plan is the household's, not theirs.
+    const phoneNotices = (
+        codes: Parameters<typeof stripNotices>[1],
+        label: string,
+    ) =>
+        isReadOnlyPeer(data)
+            ? ""
+            : String(
+                  noticeStrip(
+                      stripNotices(
+                          view.attention.notices,
+                          codes,
+                          view.attention.viewerUserId,
+                      ),
+                      {
+                          back: todayNoticeBack(view),
+                          viewerUserId: view.attention.viewerUserId,
+                          label,
+                          className: "fd-today-notices",
+                      },
+                  ),
+              );
+    const weighInPhone = phoneNotices(["nutrition.weigh_in_due"], "Weigh-in");
+    const planMissingPhone = phoneNotices(
+        ["plan.missing_ingredient"],
+        "Missing for the plan",
+    );
     const planSheets = plan
         ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
         : "";
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}`;
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}${weighInPhone}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}${planMissingPhone}`;
     const rail = renderTodayRail(data);
     return raw(
         `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,

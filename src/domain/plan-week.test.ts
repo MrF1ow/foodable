@@ -10,6 +10,7 @@ import {
     addMissingToGroceries,
     addPlanDays,
     missingForPlan,
+    planRecipesOf,
     unknownMissingNotice,
     weekPlan,
     type PlanRecipe,
@@ -839,5 +840,55 @@ describe("grocery line source plan", () => {
                 sourceFridgeItemId: "x",
             }),
         ).rejects.toBeInstanceOf(GroceryInputError);
+    });
+});
+
+describe("planRecipesOf", () => {
+    test("keeps only the planned recipes, each with its own ingredients", () => {
+        const recipes = [
+            { id: "r1", name: "Pancakes", yieldPortions: 2 },
+            { id: "r2", name: "Soup", yieldPortions: 4 },
+        ];
+        const ingredients = [
+            {
+                recipeId: "r1",
+                displayName: "Flour",
+                quantity: { amount: 250, unit: "g" },
+                foodId: "f-flour",
+            },
+            {
+                recipeId: "r2",
+                displayName: "Leek",
+                quantity: { amount: 1, unit: "each" },
+                foodId: "f-leek",
+            },
+            {
+                recipeId: "r1",
+                displayName: "Salt",
+                quantity: null,
+                foodId: null,
+            },
+        ];
+        expect(
+            planRecipesOf(
+                [{ recipeId: "r1" }, { recipeId: "r1" }],
+                recipes,
+                ingredients,
+            ),
+        ).toEqual([
+            {
+                id: "r1",
+                name: "Pancakes",
+                yieldPortions: 2,
+                ingredients: [
+                    {
+                        displayName: "Flour",
+                        quantity: { amount: 250, unit: "g" },
+                        foodId: "f-flour",
+                    },
+                    { displayName: "Salt", quantity: null, foodId: null },
+                ],
+            },
+        ]);
     });
 });

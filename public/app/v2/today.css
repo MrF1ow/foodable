@@ -819,6 +819,13 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     cursor: pointer;
 }
 
+/* The dismiss ×, kept small so the row's sentence keeps its room. */
+.fd-today-rail-row__dismiss {
+    min-width: 18px;
+    font-size: 16px;
+    line-height: 17px;
+}
+
 .fd-today-weight__chart {
     display: block;
     width: 100%;
@@ -894,6 +901,11 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
 }
 
 @media (min-width: 1024px) {
+    /* The Needs attention card in the rail carries these on the desktop. */
+    .fd-today-notices {
+        display: none;
+    }
+
     .fd-today-page {
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 360px);

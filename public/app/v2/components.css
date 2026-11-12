@@ -273,6 +273,75 @@
     color: var(--text-tertiary);
 }
 
+/* One-tap notices in place (a usual running low, missing for the plan, a
+ * weigh-in due): the row of the desktop Today "Needs attention" card, on a
+ * panel, with the action as accent text and a dismiss. */
+.fd-notice-strip {
+    margin: var(--space-gap) 0;
+    padding: 0 var(--space-gutter);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel);
+}
+.fd-notice-strip__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.fd-notice-strip__row {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-10);
+    padding: var(--space-row) 0;
+    border-bottom: 1px solid var(--line);
+}
+.fd-notice-strip__row:last-child {
+    border-bottom: none;
+}
+.fd-notice-strip__dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-pill);
+    background: var(--text-tertiary);
+}
+.fd-notice-strip__dot--warn {
+    background: var(--status-warn);
+}
+.fd-notice-strip__text {
+    flex: 1;
+    min-width: 0;
+    font: 400 14px/18px var(--font-body);
+    color: var(--text-primary);
+}
+.fd-notice-strip__action-form,
+.fd-notice-strip__dismiss-form {
+    display: contents;
+}
+.fd-notice-strip__action,
+.fd-notice-strip__dismiss {
+    flex: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    text-decoration: none;
+}
+.fd-notice-strip__action {
+    font: 400 13px/17px var(--font-body);
+    color: var(--accent-text);
+}
+.fd-notice-strip__dismiss {
+    min-width: 24px;
+    font: 400 18px/20px var(--font-body);
+    color: var(--text-tertiary);
+}
+.fd-notice-strip__action:focus-visible,
+.fd-notice-strip__dismiss:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
 /* search result: title row centres the score badge; round add button */
 .fd-row--search .fd-row__line {
     align-items: center;

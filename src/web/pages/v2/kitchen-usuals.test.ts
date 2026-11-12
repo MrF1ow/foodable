@@ -161,6 +161,22 @@ describe("kitchenUsualRowMeta", () => {
         expect(meta.storeName).toBe("Costco");
         expect(meta.amountLabel).toBe("24");
         expect(meta.onList).toBe(true);
+        expect(meta.lowNow).toBe(false);
+    });
+
+    test("a usual with a running-low notice says low now, before on the list", () => {
+        const row = baseRow();
+        const meta = kitchenUsualRowMeta(row, {
+            storesById: new Map([["st-costco", { name: "Costco" }]]),
+            groceryLines: [],
+            foodsById: new Map([["eggs", { id: "eggs", genericFoodId: null }]]),
+            lowFoodIds: new Set([row.food.id]),
+        });
+        expect(meta.lowNow).toBe(true);
+        expect(kitchenUsualRowParts(meta)).toContainEqual({
+            text: "low now",
+            tone: "warn",
+        });
     });
 });
 

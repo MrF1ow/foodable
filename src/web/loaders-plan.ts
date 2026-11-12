@@ -14,6 +14,7 @@ import { listFridge } from "../domain/fridge.js";
 import type { RecipePlan } from "../domain/plan.js";
 import {
     addPlanDays,
+    planRecipesOf,
     WEEK_PLAN_DAYS,
     type PlanRecipe,
 } from "../domain/plan-week.js";
@@ -64,21 +65,8 @@ export async function loadWeekPlanInputs(
         recipesStore.listIngredientsForHousehold(householdId),
         listFridge(liveFridgeStore(), householdId),
     ]);
+    const recipes = planRecipesOf(plans, allRecipes, allIngredients);
     const planned = new Set(plans.map((p) => p.recipeId));
-    const recipes = allRecipes
-        .filter((recipe) => planned.has(recipe.id))
-        .map((recipe): PlanRecipe => ({
-            id: recipe.id,
-            name: recipe.name,
-            yieldPortions: recipe.yieldPortions,
-            ingredients: allIngredients
-                .filter((row) => row.recipeId === recipe.id)
-                .map((row) => ({
-                    displayName: row.displayName,
-                    quantity: row.quantity,
-                    foodId: row.foodId,
-                })),
-        }));
     const foodsById = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
         ...allIngredients
             .filter((row) => planned.has(row.recipeId))

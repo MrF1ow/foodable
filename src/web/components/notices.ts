@@ -11,6 +11,7 @@ import {
 } from "../../copy/notices.js";
 import { normalizePairIds } from "../../domain/notice-dismissals.js";
 import { escapeHtml } from "../shell.js";
+import { FD_LOG_HREF } from "../shell-v2.js";
 import {
     plainFoodIdForUsualPicker,
     usualProductsPickerHref,
@@ -19,7 +20,21 @@ import {
 export type NoticeRouteContext = {
     from: string;
     foods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
+    /**
+     * Set by the new app's pages, the only ones that act on running low,
+     * missing for the plan and weigh-in due. The weigh-in sheet is the
+     * viewer's own, so a reminder about another member has no action.
+     */
+    v2?: { viewerUserId?: string };
 };
+
+/** Where the one-tap action of a notice code posts to. */
+export function noticeActPath(code: string): string {
+    return `/notices/${encodeURIComponent(code)}/act`;
+}
+
+/** Where dismissing a one-tap notice posts to. */
+export const NOTICE_DISMISS_PATH = "/notices/dismiss";
 
 export const NOTICE_ROUTES: Record<
     NoticeRoute,
@@ -41,8 +56,13 @@ export const NOTICE_ROUTES: Record<
     },
     // These notices act from the new app only; the old Needs attention
     // page never produces them, so it has nothing to link.
-    actOnNotice: () => null,
-    weighInSheet: () => null,
+    actOnNotice: (notice, ctx) => (ctx.v2 ? noticeActPath(notice.code) : null),
+    // The sheet is on the page already; the link is what a tap with no script
+    // falls back to.
+    weighInSheet: (notice, ctx) =>
+        ctx.v2 && notice.subject.id === ctx.v2.viewerUserId
+            ? FD_LOG_HREF
+            : null,
     possibleDuplicatePair(notice, _ctx) {
         const foodRel = notice.related.find((r) => r.kind === "food");
         if (notice.subject.kind !== "food" || !foodRel) return null;
@@ -108,6 +128,10 @@ export function noticeAction(notice: Notice, ctx: NoticeRouteContext): string {
     if (!action) return "";
     const href = NOTICE_ROUTES[action.to](notice, ctx);
     if (href == null) return "";
+    if (action.to === "actOnNotice") {
+        // The new app's one-tap action names the food and the page to return to.
+        return `<form class="notice-action" method="post" action="${escapeHtml(href)}"><input type="hidden" name="subject_id" value="${escapeHtml(notice.subject.id)}" /><input type="hidden" name="back" value="${escapeHtml(ctx.from)}" /><button type="submit" class="btn-sm">${escapeHtml(action.label)}</button></form>`;
+    }
     if (action.method === "post") {
         return `<form class="notice-action" method="post" action="${escapeHtml(href)}"><input type="hidden" name="from" value="${escapeHtml(ctx.from)}" /><button type="submit" class="btn-sm">${escapeHtml(action.label)}</button></form>`;
     }
