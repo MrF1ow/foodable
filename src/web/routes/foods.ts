@@ -6,6 +6,8 @@ import {
     findOrCreateManualFood,
     FoodsInputError,
     searchFoodCatalog,
+    setUsualSchedule,
+    type UsualSchedulePatch,
 } from "../../domain/foods.js";
 import {
     lookupBarcode,
@@ -20,6 +22,8 @@ import { liveSettingsStore } from "../../db/settings.js";
 import { addGroceryFoodById, GroceryInputError } from "../../domain/grocery.js";
 import { safeReturnPath } from "../usual-products-path.js";
 import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
+import { renderUsualProductsListPage } from "../loaders.js";
+import { USUALS_V2_RETURN_TO } from "../pages/v2/kitchen-usuals.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import {
     loadProductBarcodeInvalidData,
@@ -270,5 +274,69 @@ foodsRoutes.post(
                 400,
             );
         }
+    },
+);
+
+/**
+ * The patch the Restock sheet posts. It always posts the whole form, so an
+ * unchecked box means off and a blank low level means the default. The "Add
+ * when it runs low" switch is not here: it is a field of the edit sheet and
+ * posts to the edit handler.
+ */
+function usualSchedulePatch(
+    body: Parameters<typeof formText>[0],
+): UsualSchedulePatch {
+    const schedule = formText(body, "restock_schedule").trim();
+    return {
+        restockSchedule: schedule,
+        restockEveryWeeks:
+            schedule === "every_n_weeks"
+                ? formText(body, "restock_every_weeks")
+                : null,
+        restockPaused: formText(body, "restock_paused") === "1",
+        restockLowLevel: formText(body, "restock_low_level"),
+    };
+}
+
+foodsRoutes.post(
+    "/kitchen/usuals/:foodId/schedule",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const foodId = c.req.param("foodId");
+        const body = await c.req.parseBody();
+        const returnTo = safeReturnPath(
+            formText(body, "return_to"),
+            USUALS_V2_RETURN_TO,
+        );
+        try {
+            await setUsualSchedule(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+                usualSchedulePatch(body),
+            );
+        } catch (err) {
+            if (!(err instanceof FoodsInputError)) throw err;
+            const page = await renderUsualProductsListPage(c.get("userId"), {
+                error: err.message,
+                openFoodId: foodId,
+                openRestock: true,
+                storeFilter:
+                    new URL(returnTo, "http://local").searchParams.get(
+                        "store",
+                    ) ?? undefined,
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // Back to the usual's edit sheet, which the Restock sheet sits in.
+        const url = new URL(returnTo, "http://local");
+        url.searchParams.set("food", foodId);
+        return redirectWithToast(
+            c,
+            `${url.pathname}${url.search}`,
+            "usuals.schedule.saved",
+        );
     },
 );

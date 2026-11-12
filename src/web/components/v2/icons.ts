@@ -52,3 +52,15 @@ export function iconCart(): Html {
         '<path d="M3 4h2l2 11h11l2-8H6.5"/><path d="M7.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/><path d="M14.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/>',
     );
 }
+
+/** Restock row icon (FigCraft Icon/refresh 22696): two arrows chasing round. */
+export function iconRefresh(): Html {
+    return icon(
+        '<path d="M19 11a7 7 0 0 0-12.5-3.4L5 9"/><path d="M5 4.5V9h4.5"/><path d="M5 13a7 7 0 0 0 12.5 3.4L19 15"/><path d="M19 19.5V15h-4.5"/>',
+    );
+}
+
+/** "Add when it runs low" icon (FigCraft Icon/bolt 22704): a lightning bolt. */
+export function iconBolt(): Html {
+    return icon('<path d="M13 3L6 13.5h5L10 21l7-10.5h-5L13 3Z"/>');
+}

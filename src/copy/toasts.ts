@@ -38,6 +38,8 @@ export const TOASTS = {
         text: "Put away in the fridge",
     },
 
+    "usuals.schedule.saved": { kind: "success", text: "Restock saved" },
+
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },
     "nutrition.meal.updated": { kind: "success", text: "Meal updated" },
     "nutrition.meal.deleted": { kind: "success", text: "Meal deleted" },

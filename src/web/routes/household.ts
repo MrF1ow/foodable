@@ -6,6 +6,10 @@ import {
 } from "../loaders.js";
 import { formText } from "../form.js";
 import {
+    USUAL_WHEN_LOW_FIELD,
+    USUAL_WHEN_LOW_MARKER,
+} from "../pages/v2/kitchen-usuals.js";
+import {
     requireManager,
     requireMember,
     requireOwner,
@@ -77,6 +81,7 @@ import {
     parseUsualPurchase,
     removeProduct,
     setUsualProduct,
+    setUsualSchedule,
     updateFood,
 } from "../../domain/foods.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
@@ -325,6 +330,20 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
                 stores: liveSettingsStore(),
             },
         );
+        // The new edit sheet posts "Add when it runs low" with the rest. An
+        // unchecked box posts nothing, so only the marker says it was on the
+        // form: a post without it (the old app) leaves the setting alone.
+        if (formText(body, USUAL_WHEN_LOW_MARKER) === "1") {
+            await setUsualSchedule(
+                liveFoodsStore(),
+                member.householdId,
+                foodId,
+                {
+                    restockWhenLow:
+                        formText(body, USUAL_WHEN_LOW_FIELD) === "1",
+                },
+            );
+        }
     } catch (err) {
         const page = await usualPickerFormError(
             userId,
