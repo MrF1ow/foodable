@@ -1,7 +1,7 @@
 ---
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
-updated: "b4bc1d815c0531d741307918dbfefff4048bbe1c"
+updated: "867c00ee4bc1ffe69be308bfd0a67c2223086816"
 watches:
     - package.json#scripts
     - docker-compose.yml
@@ -53,11 +53,11 @@ for i in $(seq 40); do curl -sf "http://127.0.0.1:$APP_PORT/health" >/dev/null &
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:$APP_PORT/"   # 200 = login page
 ```
 
-For row level security, set a throwaway `foodable_app` password via `psql` and add `DATABASE_APP_URL` (that URL as `foodable_app:<pw>`).
+For row level security, set a throwaway `foodable_app` password (`psql`) and add `DATABASE_APP_URL` (as `foodable_app:<pw>`).
 
-The server binds `0.0.0.0` (reachable from the LAN): keep runs short. If the health check never answers, read `$STACK/server.log`. Open the app at `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database becomes the owner (`docs/self-hosting.md`, "First-user flow").
+It binds `0.0.0.0` (LAN): keep runs short. No answer: read `$STACK/server.log`. Open the app at `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database becomes the owner (`docs/self-hosting.md`, "First-user flow").
 
-Not `bun run dev`: it runs `gen:all` (rewrites tracked files) and `--watch`, and its inner `bun` loads `.env`, as does `bun run start`. Run `gen:all` only after changing login copy or tokens.
+Not `bun run dev`: it runs `gen:all` (rewrites tracked files) and `--watch`, and its inner `bun` loads `.env`, as does `bun run start`. Run `gen:all` only in a fresh worktree or after changing login copy or tokens.
 
 Stop everything:
 
@@ -71,8 +71,8 @@ bun run db:dev status                  # prints "stopped" and exits 1 (that is e
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`. Needs nothing.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy, used as `foodable_app` (household owner by default; `src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome (both shells):** `bun run check:nav` (PASS/FAIL lines). Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" means another run holds them; wait for `ss -ltn` to show both free). No database.
-- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow with ui-v2: long `timeout`). Without `--shots` it serves :4787 (or `PREVIEW_PORT`). `FOODABLE_FLAGS=ui-v2:all` adds the new-shell screens (`*-v2-*.png`). Chromium; fixture data.
+- **Web pages, nav, Turbo, theme chrome (both shells):** `bun run check:nav` (PASS/FAIL). Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" means another run holds them; wait for `ss -ltn` to show both free). No database.
+- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow; long `timeout`). Clear tmp/app-preview first. Camera scans need phones. Without `--shots` it serves :4787 (or `PREVIEW_PORT`). `FOODABLE_FLAGS=ui-v2:all` adds the new-shell screens (`*-v2-*.png`). Chromium; fixture data.
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1` shows v2. `bun --no-env-file test src/widgets.test.ts` guards assembly.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`. Only when the user asks; see below.
