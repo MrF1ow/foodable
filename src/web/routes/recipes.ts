@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import {
     loadCookPreview,
+    renderDashboardPage,
     renderRecipeDetailRoute,
     renderRecipesListPage,
 } from "../loaders.js";
 import { gatedRoute } from "../gated.js";
+import { PLAN_UNKNOWN_LINE_NOTE } from "../../copy/toasts.js";
 
 import {
     formAmount,
@@ -113,6 +115,30 @@ import {
     parseV2RecipeListFilter,
     recipesListV2Href,
 } from "../pages/v2/recipes-list.js";
+import {
+    parsePlanBack,
+    PLAN_SHEET_ID,
+    planBackPath,
+    planDayLabel,
+    PLAN_SLOT_LABEL,
+    type PlanEditDraft,
+} from "../pages/v2/recipes-plan.js";
+import {
+    checkPlanDate,
+    checkPlanServings,
+    checkPlanSlot,
+    PlanInputError,
+} from "../../domain/plan.js";
+import {
+    addMissingToGroceries,
+    addPlanDays,
+    missingForPlan,
+    WEEK_PLAN_DAYS,
+} from "../../domain/plan-week.js";
+import { householdToday } from "../../db/restock.js";
+import { GroceryInputError } from "../../domain/grocery.js";
+import { liveRecipePlansStore } from "../../db/plans.js";
+import { loadWeekPlanInputs } from "../loaders-plan.js";
 
 export const recipesRoutes = new Hono();
 
@@ -170,7 +196,12 @@ async function recipeFormError(
     userId: string,
     recipeId: string | null,
     err: unknown,
-    opts: { member?: string; openModalId?: string; servings?: number } = {},
+    opts: {
+        member?: string;
+        openModalId?: string;
+        servings?: number;
+        plan?: { date?: string; slot?: string; servings?: number };
+    } = {},
 ) {
     const message =
         err instanceof RecipeForbiddenError ||
@@ -186,6 +217,7 @@ async function recipeFormError(
             error: message,
             openModalId: opts.openModalId,
             cookServings: opts.servings,
+            plan: opts.plan,
         });
         const status =
             err instanceof RecipeForbiddenError ? 403 : (400 as const);
@@ -206,6 +238,7 @@ recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
         verification: c.req.query("verification") ?? "",
         q: c.req.query("q") ?? "",
         filter: c.req.query("filter") ?? "",
+        planDate: c.req.query("plan_date") ?? "",
     });
     return c.html(page.html, page.status);
 });
@@ -510,6 +543,10 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
             member: c.req.query("member"),
             linkProductId: c.req.query("link_product"),
             openCook: c.req.query("cook") === "1",
+            plan: {
+                open: c.req.query("plan") === "1",
+                date: c.req.query("date"),
+            },
         },
     );
     return c.html(page.html, page.status);
@@ -739,6 +776,292 @@ recipesRoutes.post(
         }
         // toast: none (the star shows the new state)
         return c.redirect(`/recipes/${recipeId}`, 303);
+    },
+);
+
+/**
+ * A plan day must be a real day and not already past, in the household's
+ * calendar: a plan for yesterday would never show, so it is refused up front.
+ */
+async function checkPlanDay(
+    householdId: string,
+    value: string,
+): Promise<string> {
+    const date = checkPlanDate(value);
+    if (date < (await householdToday(householdId))) {
+        throw new PlanInputError("Pick today or a later day.");
+    }
+    return date;
+}
+
+/** "Sat 14 Nov · dinner", the toast's words for where a plan landed. */
+function planWhen(date: string, slot: keyof typeof PLAN_SLOT_LABEL): string {
+    return `${planDayLabel(date)} · ${PLAN_SLOT_LABEL[slot].toLowerCase()}`;
+}
+
+/**
+ * Add to plan, from the recipe page's sheet. Planning the same recipe on the
+ * same day and slot twice is one plan, so a double submit changes nothing more.
+ * A bad day, meal or servings re-renders the recipe page with the sheet open.
+ */
+recipesRoutes.post(
+    "/recipes/:id/plan",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+        const recipe = await liveRecipesStore().getRecipe(
+            member.householdId,
+            recipeId,
+        );
+        if (!recipe) return c.text("Not found", 404);
+        const body = await c.req.parseBody();
+        const date = formText(body, "date").trim();
+        const slot = formText(body, "slot");
+        const servingsInput = formOptionalNumber(body, "servings");
+        try {
+            await checkPlanDay(member.householdId, date);
+            const checkedSlot = checkPlanSlot(slot);
+            const servings = checkPlanServings(
+                servingsInput ?? recipe.yieldPortions,
+            );
+            if (servings > COOK_SERVINGS_MAX) {
+                throw new PlanInputError(
+                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
+                );
+            }
+            const plans = liveRecipePlansStore();
+            const planned = (
+                await plans.listPlans(member.householdId, date, date)
+            ).find((p) => p.recipeId === recipeId && p.slot === checkedSlot);
+            if (planned) {
+                return redirectWithToast(
+                    c,
+                    `/recipes/${recipeId}`,
+                    "plan.already",
+                    { when: planWhen(date, checkedSlot) },
+                );
+            }
+            const added = await plans.addPlan({
+                householdId: member.householdId,
+                recipeId,
+                date,
+                slot: checkedSlot,
+                servings,
+                createdBy: userId,
+            });
+            if (!added) return c.text("Not found", 404);
+            return redirectWithToast(c, `/recipes/${recipeId}`, "plan.added", {
+                when: planWhen(date, checkedSlot),
+            });
+        } catch (err) {
+            if (!(err instanceof PlanInputError)) throw err;
+            const page = await recipeFormError(userId, recipeId, err, {
+                openModalId: PLAN_SHEET_ID,
+                plan: {
+                    date,
+                    slot,
+                    servings: servingsInput,
+                },
+            });
+            return c.html(page.html, page.status);
+        }
+    },
+);
+
+/**
+ * Move a plan to another day or meal (and change its servings), from the edit
+ * sheet on Today or Recipes. Nothing is written until the whole form checks; a
+ * form that does not check re-renders the page it came from with that plan's
+ * sheet open, the typed values kept and the reason shown.
+ */
+recipesRoutes.post(
+    "/recipes/plan/:planId/move",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backKind = parsePlanBack(formText(body, "back"));
+        const back = planBackPath(backKind);
+        const planId = c.req.param("planId");
+        if (!UUID_SHAPE.test(planId)) {
+            return redirectWithToast(c, back, "plan.gone");
+        }
+        const plans = liveRecipePlansStore();
+        const existing = await plans.getPlan(member.householdId, planId);
+        if (!existing) return redirectWithToast(c, back, "plan.gone");
+        const dateInput = formText(body, "date").trim();
+        const slotInput = formText(body, "slot");
+        const servingsInput = formOptionalNumber(body, "servings");
+        try {
+            const date = await checkPlanDay(member.householdId, dateInput);
+            const slot = checkPlanSlot(slotInput);
+            const servings =
+                servingsInput == null
+                    ? existing.servings
+                    : checkPlanServings(servingsInput);
+            if (servings > COOK_SERVINGS_MAX) {
+                throw new PlanInputError(
+                    `Keep it to ${COOK_SERVINGS_MAX} servings or fewer.`,
+                );
+            }
+            let moved = await plans.movePlan(
+                member.householdId,
+                existing.id,
+                date,
+                slot,
+            );
+            if (moved && servings !== existing.servings) {
+                moved = await plans.updatePlanServings(
+                    member.householdId,
+                    existing.id,
+                    servings,
+                );
+            }
+            if (!moved) return redirectWithToast(c, back, "plan.gone");
+            return redirectWithToast(c, back, "plan.moved", {
+                when: planWhen(moved.date, moved.slot),
+            });
+        } catch (err) {
+            if (!(err instanceof PlanInputError)) throw err;
+            const draft: PlanEditDraft = {
+                planId,
+                date: dateInput,
+                slot: slotInput,
+                servings: servingsInput,
+                error: err.message,
+            };
+            // Only a plan in the week has a sheet to re-open; any other (a
+            // past day's, still stored) can only be told about by a toast.
+            const today = await householdToday(member.householdId);
+            const inWeek =
+                existing.date >= today &&
+                existing.date <= addPlanDays(today, WEEK_PLAN_DAYS - 1);
+            if (!inWeek) {
+                return redirectWithToast(c, back, "plan.notice", {
+                    message: err.message,
+                });
+            }
+            const page =
+                backKind === "today"
+                    ? await renderDashboardPage(
+                          userId,
+                          undefined,
+                          undefined,
+                          undefined,
+                          undefined,
+                          undefined,
+                          { planEdit: draft },
+                      )
+                    : await renderRecipesListPage(userId, { planEdit: draft });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+    },
+);
+
+recipesRoutes.post(
+    "/recipes/plan/:planId/remove",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const back = planBackPath(parsePlanBack(formText(body, "back")));
+        const planId = c.req.param("planId");
+        const removed =
+            UUID_SHAPE.test(planId) &&
+            (await liveRecipePlansStore().removePlan(
+                member.householdId,
+                planId,
+            ));
+        return redirectWithToast(
+            c,
+            back,
+            removed ? "plan.removed" : "plan.gone",
+        );
+    },
+);
+
+/**
+ * "Missing for the plan · Add to groceries". What is missing is worked out
+ * here, from the plan and the kitchen as they are now, never from the form.
+ * Lines go on the list with source `plan`; a food the list already covers is
+ * not doubled, so a second tap adds nothing. A line whose stock could not be
+ * counted is added at the recipe's full amount and says so on the list.
+ */
+recipesRoutes.post(
+    "/recipes/plan/add-missing",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const back = planBackPath(parsePlanBack(formText(body, "back")));
+        const inputs = await loadWeekPlanInputs(member.householdId);
+        const lines = missingForPlan(
+            inputs.plans,
+            inputs.recipes,
+            inputs.stock,
+            {
+                from: inputs.today,
+                days: WEEK_PLAN_DAYS,
+                foodsById: inputs.foodsById,
+            },
+        );
+        if (lines.length === 0) {
+            return redirectWithToast(c, back, "plan.missing.none");
+        }
+        const grocery = liveGroceryStore();
+        try {
+            const result = await addMissingToGroceries(
+                grocery,
+                liveSettingsStore(),
+                liveFoodsStore(),
+                { householdId: member.householdId, lines },
+            );
+            for (const entry of result.unknown) {
+                const added = result.added.find(
+                    (line) => line.foodId === entry.line.foodId,
+                );
+                if (added && added.note == null) {
+                    await grocery.updateLine({
+                        ...added,
+                        note: PLAN_UNKNOWN_LINE_NOTE,
+                    });
+                }
+            }
+            if (result.added.length === 0) {
+                return redirectWithToast(c, back, "plan.missing.on-list");
+            }
+            if (result.unknown.length > 0) {
+                return redirectWithToast(
+                    c,
+                    back,
+                    "plan.missing.added.unknown",
+                    {
+                        count: result.added.length,
+                        names: truncateToastParam(
+                            result.unknown
+                                .map((entry) => entry.line.displayName)
+                                .join(", "),
+                        ),
+                    },
+                );
+            }
+            return redirectWithToast(c, back, "plan.missing.added", {
+                count: result.added.length,
+            });
+        } catch (err) {
+            if (!(err instanceof GroceryInputError)) throw err;
+            return redirectWithToast(c, back, "plan.notice", {
+                message: err.message,
+            });
+        }
     },
 );
 

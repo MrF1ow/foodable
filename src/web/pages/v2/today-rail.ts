@@ -27,6 +27,7 @@ import { sparklineSvg } from "../../components/v2/sparkline.js";
 import type { TodayView, TodayWeightPoint } from "../../loaders-today.js";
 import { FD_LOG_HREF } from "../../shell-v2.js";
 import { FD_LOG_WEIGH_IN_SHEET_ID } from "./log-sheet.js";
+import { renderWeekMissingLine, renderWeekRows } from "./recipes-plan.js";
 import type { TodayPageData } from "./today.js";
 
 function isReadOnlyPeer(data: TodayPageData): boolean {
@@ -239,11 +240,13 @@ function attentionMarkup(view: TodayView): string {
     return `<section class="fd-today-card" aria-label="Needs attention">${head}<ul class="fd-today-rail-list">${rows}</ul></section>`;
 }
 
-function thisWeekMarkup(): string {
+function thisWeekMarkup(data: TodayPageData): string {
     const head = cardHeader("This week", {
         action: { href: "/recipes", label: "Recipes" },
     });
-    const body = `<p class="fd-today-week-empty">Nothing planned</p>`;
+    const body = data.plan
+        ? `${renderWeekRows(data.plan)}${renderWeekMissingLine(data.plan)}`
+        : `<p class="fd-today-week-empty">Nothing planned</p>`;
     return `<section class="fd-today-card" aria-label="This week">${head}${body}</section>`;
 }
 
@@ -325,7 +328,7 @@ export function renderTodayRail(data: TodayPageData): Html {
         );
     }
     return raw(
-        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view)}${attentionMarkup(view)}${thisWeekMarkup()}${weightMarkup(view, false)}</aside>`,
+        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view)}${attentionMarkup(view)}${thisWeekMarkup(data)}${weightMarkup(view, false)}</aside>`,
     );
 }
 

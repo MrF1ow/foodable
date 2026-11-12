@@ -12,6 +12,13 @@ import { chipLink, chipNav } from "../../components/v2/chips.js";
 import { esc, srOnly } from "../../components/v2/html.js";
 import { renderAppShell } from "../../shell.js";
 import { favouriteStarForm } from "./recipes-favourite.js";
+import {
+    planDayLabel,
+    renderMissingSheet,
+    renderPlanEditSheets,
+    renderWeekStrip,
+    type WeekPlanView,
+} from "./recipes-plan.js";
 
 export type V2RecipeListFilter =
     "" | "cookable" | "protein" | "quick" | "favourites";
@@ -32,6 +39,10 @@ export type RecipesListV2View = {
     cards: V2RecipeCard[];
     cookableCount?: number;
     totalCount: number;
+    /** This week's plan: the strip, and the sheets its buttons open. */
+    week?: WeekPlanView;
+    /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
+    planDate?: string;
     importError?: string;
     importPasteStep?: boolean;
     importUrl?: string;
@@ -155,11 +166,17 @@ function recipeCard(card: V2RecipeCard, view: RecipesListV2View): string {
         back: { kind: "list", query: view.query.trim(), filter: view.filter },
         className: "fd-recipes-card__star",
     });
+    const planDay = view.planDate
+        ? `&date=${encodeURIComponent(view.planDate)}`
+        : "";
+    const plan = view.week
+        ? `<a class="fd-recipes-card__plan" href="/recipes/${esc(recipe.id)}?plan=1${esc(planDay)}" aria-label="Plan ${esc(recipe.name)}">Plan</a>`
+        : "";
     return `<li class="fd-row fd-row--recipe" id="recipe-${esc(recipe.id)}"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${kcal}${
         stock
             ? `<span class="fd-recipes-card__stock ${stockClass}">${dot}<span class="fd-recipes-card__stock-text">${esc(stock)}</span></span>`
             : ""
-    }</a>${star}</li>`;
+    }</a>${star}${plan}</li>`;
 }
 
 function importPasteBlock(view: RecipesListV2View): string {
@@ -265,7 +282,7 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
         view.cards.length > 0
             ? `<section class="fd-recipes-all" aria-labelledby="fd-recipes-all-heading">
 <div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-all-heading">All recipes</h2></div>
-<ul class="fd-list fd-recipes-list">${view.cards.map((card) => recipeCard(card, view)).join("")}</ul>
+<ul class="fd-list fd-recipes-list${view.planDate ? " fd-recipes-list--planning" : ""}">${view.cards.map((card) => recipeCard(card, view)).join("")}</ul>
 </section>`
             : "";
     const importLinkBlock = `<details class="fd-recipes-import-link">
@@ -275,6 +292,13 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 <button type="submit" class="fd-recipes-import-submit">Import</button>
 </form>
 </details>`;
+    const planPick = view.planDate
+        ? `<p class="fd-plan-pick" role="status">Pick a recipe for ${esc(planDayLabel(view.planDate))}. <a href="/recipes">Cancel</a></p>`
+        : "";
+    const weekStrip = view.week ? renderWeekStrip(view.week) : "";
+    const weekSheets = view.week
+        ? `${renderPlanEditSheets(view.week, "recipes")}\n${renderMissingSheet(view.week, "recipes")}`
+        : "";
     const savedLabel =
         view.totalCount === 1 ? "1 saved" : `${view.totalCount} saved`;
     const cookableSuffix =
@@ -308,10 +332,11 @@ ${filterHidden}
 </form>
 ${chipsHtml}
 </div>
-${importLinkBlock}
+${planPick}${weekStrip}${importLinkBlock}
 ${emptyAll}
 ${emptyFilter}
 ${grid}
+${weekSheets}
 </div>`;
 }
 

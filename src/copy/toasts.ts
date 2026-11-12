@@ -2,6 +2,13 @@
  *  still render as banners; `error` is for actions that run in the browser. */
 export type ToastKind = "success" | "info" | "warning" | "error";
 
+/**
+ * The note on a grocery line the plan added at the recipe's full amount
+ * because what the kitchen holds could not be counted. The domain's own notice
+ * names the food and the amount, which the line already shows.
+ */
+export const PLAN_UNKNOWN_LINE_NOTE = "Check what you have";
+
 export const TOASTS = {
     "fridge.location.added": { kind: "success", text: "Location added" },
     "fridge.location.removed": { kind: "success", text: "Location removed" },
@@ -132,6 +139,28 @@ export const TOASTS = {
     "recipes.added-to-grocery": {
         kind: "success",
         text: "Added to the grocery list ({count})",
+    },
+    "plan.added": { kind: "success", text: "Planned for {when}" },
+    "plan.already": { kind: "info", text: "Already planned for {when}" },
+    "plan.moved": { kind: "success", text: "Moved to {when}" },
+    "plan.removed": { kind: "success", text: "Removed from the plan" },
+    "plan.gone": { kind: "info", text: "That plan is already gone" },
+    "plan.notice": { kind: "warning", text: "{message}" },
+    "plan.missing.added": {
+        kind: "success",
+        text: "Added to the grocery list ({count})",
+    },
+    "plan.missing.added.unknown": {
+        kind: "warning",
+        text: "Added to the grocery list ({count}). Check what you have of: {names}",
+    },
+    "plan.missing.on-list": {
+        kind: "info",
+        text: "Already on the grocery list",
+    },
+    "plan.missing.none": {
+        kind: "info",
+        text: "Nothing is missing for the plan",
     },
     "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
     "recipes.unresolved.cleared": {

@@ -21,6 +21,7 @@ import {
     renderTodayV2Page,
     todayHref,
 } from "./today.js";
+import { buildWeekPlanView } from "./recipes-plan.js";
 import {
     formatExpiryWhen,
     renderTodayRail,
@@ -613,5 +614,99 @@ describe("today edit sheet Again", () => {
         expect(html).toContain('action="/meals/m3/again"');
         expect(html).toContain("fd-btn--accent");
         expect(html).toMatch(/Again<\/span><\/button>/);
+    });
+});
+
+describe("This week on Today", () => {
+    const today = "2026-11-10";
+    const chrome = {
+        theme: "light" as const,
+        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        attention: { count: 0, tabs: {} },
+    };
+    const week = buildWeekPlanView({
+        today,
+        plans: [
+            {
+                id: "p1",
+                householdId: "hh",
+                recipeId: "r1",
+                date: "2026-11-11",
+                slot: "dinner",
+                servings: 2,
+                createdBy: null,
+                createdAt: "2026-11-09T10:00:00+00:00",
+            },
+        ],
+        recipes: [
+            {
+                id: "r1",
+                name: "Beef chili",
+                yieldPortions: 2,
+                ingredients: [
+                    {
+                        displayName: "Kidney beans",
+                        foodId: "f1",
+                        quantity: { amount: 400, unit: "g" },
+                    },
+                ],
+            },
+        ],
+        stock: [],
+        foodsById: new Map(),
+    });
+
+    test("the rail card and the phone section list the seven days with the plan", () => {
+        const data = {
+            ...buildPreviewTodayPageData(chrome, today),
+            plan: week,
+        };
+        const body = String(renderTodayBody(data));
+        const rail = String(renderTodayRail(data));
+        for (const html of [body, rail]) {
+            expect(html).toContain("Beef chili");
+            expect(html).toContain("Nothing planned");
+            expect(html).toContain("1 ingredient missing");
+        }
+        // Once on the phone, once in the rail.
+        expect(body.match(/<li class="fd-plan-day/g)).toHaveLength(14);
+        expect(body).toContain('class="fd-today-section fd-plan-phone"');
+        // The sheets its buttons and links open are on the page once.
+        expect(body.match(/id="fd-plan-edit-p1"/g)).toHaveLength(1);
+        expect(body.match(/id="fd-plan-missing-sheet"/g)).toHaveLength(1);
+        expect(body).toContain('name="back" value="today"');
+    });
+
+    test("an empty week says nothing is planned", () => {
+        const empty = buildWeekPlanView({
+            today,
+            plans: [],
+            recipes: [],
+            stock: [],
+            foodsById: new Map(),
+        });
+        const data = {
+            ...buildPreviewTodayPageData(chrome, today),
+            plan: empty,
+        };
+        const body = String(renderTodayBody(data));
+        expect(body.match(/Nothing planned/g)!.length).toBeGreaterThanOrEqual(
+            14,
+        );
+        expect(body).not.toContain("fd-plan-missing-sheet");
+        expect(body).not.toContain("fd-plan-edit-");
+    });
+
+    test("a peer's read-only day has no plan", () => {
+        const data = {
+            ...buildPreviewTodayPageData(
+                { ...chrome, subjectLabel: "Sam" },
+                today,
+            ),
+            plan: week,
+        };
+        const body = String(renderTodayBody(data));
+        expect(body).not.toContain("fd-plan-");
+        expect(body).not.toContain("This week");
     });
 });

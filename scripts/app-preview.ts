@@ -34,6 +34,12 @@ import {
 } from "../src/web/pages/recipes.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import {
+    buildWeekPlanView,
+    PLAN_MISSING_SHEET_ID,
+    planEditSheetId,
+    withPlanEditDraft,
+} from "../src/web/pages/v2/recipes-plan.js";
+import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
 } from "../src/web/pages/v2/recipes-page.js";
@@ -591,6 +597,131 @@ function groceryView(chrome: unknown) {
     };
 }
 
+/** This week for the new app's Today and Recipes: three dinners, some of it missing. */
+/** A move to a day already past: the edit sheet of "pl2" re-opened with the reason. */
+function previewMoveError() {
+    const view = previewWeekPlan();
+    return (
+        withPlanEditDraft(view, {
+            planId: "pl2",
+            date: "2026-11-01",
+            slot: "dinner",
+            servings: 4,
+            error: "Pick today or a later day.",
+        }) ?? view
+    );
+}
+
+function previewWeekPlan(openSheet?: "missing" | "plan") {
+    const today = "2026-11-10";
+    const plan = (
+        id: string,
+        recipeId: string,
+        date: string,
+        servings: number,
+    ) => ({
+        id,
+        householdId: H,
+        recipeId,
+        date,
+        slot: "dinner" as const,
+        servings,
+        createdBy: null,
+        createdAt: "2026-11-09T10:00:00.000Z",
+    });
+    const grams = (amount: number) => ({ amount, unit: "g" });
+    const view = buildWeekPlanView({
+        today,
+        plans: [
+            plan("pl1", "pr-salmon", "2026-11-10", 2),
+            plan("pl2", "pr-chili", "2026-11-11", 6),
+            plan("pl3", "pr-bowl", "2026-11-12", 4),
+        ],
+        recipes: [
+            {
+                id: "pr-salmon",
+                name: "Salmon, rice & spinach",
+                yieldPortions: 2,
+                ingredients: [
+                    {
+                        displayName: "Salmon",
+                        foodId: "pf-salmon",
+                        quantity: grams(400),
+                    },
+                    {
+                        displayName: "Rice",
+                        foodId: "pf-rice",
+                        quantity: grams(300),
+                    },
+                    {
+                        displayName: "Baby spinach",
+                        foodId: "pf-spinach",
+                        quantity: grams(200),
+                    },
+                ],
+            },
+            {
+                id: "pr-chili",
+                name: "Beef chili",
+                yieldPortions: 6,
+                ingredients: [
+                    {
+                        displayName: "Kidney beans",
+                        foodId: "pf-beans",
+                        quantity: grams(400),
+                    },
+                    {
+                        displayName: "Beef mince",
+                        foodId: "pf-beef",
+                        quantity: grams(500),
+                    },
+                    {
+                        displayName: "Cumin",
+                        foodId: "pf-cumin",
+                        quantity: null,
+                    },
+                ],
+            },
+            {
+                id: "pr-bowl",
+                name: "Chicken rice bowl",
+                yieldPortions: 4,
+                ingredients: [
+                    {
+                        displayName: "Chicken breast",
+                        foodId: "pf-chicken",
+                        quantity: grams(600),
+                    },
+                    {
+                        displayName: "Avocado",
+                        foodId: "pf-avocado",
+                        quantity: { amount: 2, unit: "each" },
+                    },
+                ],
+            },
+        ],
+        stock: [
+            { foodId: "pf-salmon", quantity: grams(450) },
+            { foodId: "pf-rice", quantity: grams(1000) },
+            { foodId: "pf-spinach", quantity: grams(100) },
+            { foodId: "pf-beef", quantity: grams(500) },
+            { foodId: "pf-chicken", quantity: grams(300) },
+            // Held by weight, and the avocado has no weight per piece: unknown.
+            { foodId: "pf-avocado", quantity: grams(150) },
+        ],
+        foodsById: new Map(),
+    });
+    return {
+        ...view,
+        openSheet:
+            openSheet === "missing"
+                ? PLAN_MISSING_SHEET_ID
+                : openSheet === "plan"
+                  ? planEditSheetId("pl2")
+                  : undefined,
+    };
+}
+
 const RECIPE = {
     id: "r1",
     householdId: H,
@@ -943,6 +1074,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ? renderTodayV2Page({
               ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
               view: buildPreviewTodayViewWithRail("2026-11-10"),
+              plan: previewWeekPlan(),
           })
         : await renderNutritionPage({
               access: { ok: true, mode: "self", viewer: ME, subject: ME },
@@ -1120,7 +1252,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         macrosPerPortion: MACROS as never,
         submitKey: "preview",
     };
-    const recipeV2 = (cook: CookSheetView) =>
+    const recipeV2 = (cook: CookSheetView, planOpen = false) =>
         renderRecipeDetailV2Page({
             chrome,
             recipe: recipeView.recipe,
@@ -1187,6 +1319,54 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             portionCount: recipeView.portionCount,
             favourite: true,
             cook,
+            plan: {
+                recipeId: recipeView.recipe.id,
+                recipeName: recipeView.recipe.name,
+                yieldPortions: recipeView.recipe.yieldPortions,
+                today: "2026-11-10",
+                date: "2026-11-11",
+                slot: "dinner",
+                servings: recipeView.recipe.yieldPortions,
+                open: planOpen,
+            },
+        });
+    const recipesListV2 = (
+        extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
+    ) =>
+        renderRecipesListV2Page({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 2,
+            cookableCount: 1,
+            cards: [
+                {
+                    recipe: RECIPE,
+                    flags: {
+                        cookable: true,
+                        highProtein: false,
+                        quick: true,
+                        missingCount: 0,
+                        hasIngredients: true,
+                    },
+                    macrosPerPortion: RECIPE_LIST_MACROS,
+                    missingNames: [],
+                    favourite: true,
+                },
+                {
+                    recipe: RECIPE_TWO,
+                    flags: {
+                        cookable: false,
+                        highProtein: false,
+                        quick: true,
+                        missingCount: 2,
+                        hasIngredients: true,
+                    },
+                    macrosPerPortion: RECIPE_LIST_MACROS,
+                    missingNames: ["Avocado", "Lime"],
+                },
+            ],
+            ...extra,
         });
     return {
         nutrition,
@@ -1423,40 +1603,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ),
         } as never),
         recipes: V2
-            ? renderRecipesListV2Page({
-                  chrome,
-                  query: "",
-                  filter: "",
-                  totalCount: 2,
-                  cookableCount: 1,
-                  cards: [
-                      {
-                          recipe: RECIPE,
-                          flags: {
-                              cookable: true,
-                              highProtein: false,
-                              quick: true,
-                              missingCount: 0,
-                              hasIngredients: true,
-                          },
-                          macrosPerPortion: RECIPE_LIST_MACROS,
-                          missingNames: [],
-                          favourite: true,
-                      },
-                      {
-                          recipe: RECIPE_TWO,
-                          flags: {
-                              cookable: false,
-                              highProtein: false,
-                              quick: true,
-                              missingCount: 2,
-                              hasIngredients: true,
-                          },
-                          macrosPerPortion: RECIPE_LIST_MACROS,
-                          missingNames: ["Avocado", "Lime"],
-                      },
-                  ],
-              })
+            ? recipesListV2({ week: previewWeekPlan() })
             : renderRecipesPage({
                   chrome,
                   recipes: [RECIPE, RECIPE_TWO],
@@ -1513,7 +1660,47 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? recipeV2(cookSheet)
             : renderRecipeDetailPage(recipeView as never),
         ...(V2
-            ? { "recipe-cook": recipeV2({ ...cookSheet, open: true }) }
+            ? {
+                  "recipe-cook": recipeV2({ ...cookSheet, open: true }),
+                  "recipe-plan": recipeV2(cookSheet, true),
+                  "recipes-plan-pick": recipesListV2({
+                      week: previewWeekPlan(),
+                      planDate: "2026-11-14",
+                  }),
+                  "recipes-plan-missing": recipesListV2({
+                      week: previewWeekPlan("missing"),
+                  }),
+                  "recipes-plan-edit": recipesListV2({
+                      week: previewWeekPlan("plan"),
+                  }),
+                  "recipes-plan-move-error": recipesListV2({
+                      week: previewMoveError(),
+                  }),
+                  "nutrition-plan-move-error": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewMoveError(),
+                  }),
+                  "nutrition-plan-missing": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewWeekPlan("missing"),
+                  }),
+                  "nutrition-plan-edit": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithRail("2026-11-10"),
+                      plan: previewWeekPlan("plan"),
+                  }),
+              }
             : {}),
         "recipe-did-you-mean": renderRecipeDetailPage({
             ...recipeView,
