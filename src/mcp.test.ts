@@ -9634,6 +9634,7 @@ describe("list_usuals over HTTP", () => {
                 expect(scheduled.due?.trigger).toBe("schedule");
                 expect(scheduled.due?.reason).toContain("weekly");
                 expect(scheduled).toMatchObject({
+                    kind: "food",
                     schedule: "weekly",
                     every_weeks: null,
                     store_id: "store-1",
@@ -9668,6 +9669,151 @@ describe("list_usuals over HTTP", () => {
                 expect(text).toContain("add when below 3 each");
                 expect(text).toContain("every 4 weeks");
                 expect(text).not.toContain("Automatic restock is off");
+            });
+        },
+    );
+
+    // The arguments the restock card sends to add_grocery_line for a usual.
+    function cardAddArgs(u: UsualsOut["usuals"][number]) {
+        const args: Record<string, unknown> = {
+            kind: u.kind,
+            food_id: u.food_id,
+        };
+        if (u.store_id) args.store_id = u.store_id;
+        if (u.amount != null) args.amount = u.amount;
+        if (u.unit) args.unit = u.unit;
+        return args;
+    }
+
+    test.each(ERAS)(
+        "the card's arguments add every shape of due usual through add_grocery_line (%p)",
+        async (era) => {
+            const today = utcTodayFromDate();
+            setRestockWeekday(weekdayOf(today));
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Corner",
+            );
+            const mk = (name: string, extra: Partial<Food>) =>
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name,
+                    defaultUnit: "each",
+                    restockSchedule: "weekly",
+                    ...extra,
+                });
+            const foods = [
+                mk("Milk", {
+                    usualStoreId: store.id,
+                    usualAmount: { amount: 1, unit: "gal" },
+                }),
+                mk("Rice", { defaultUnit: "g" }),
+                mk("Eggs", { usualAmount: { amount: 12, unit: "each" } }),
+                mk("Towels", {
+                    kind: "supply",
+                    defaultUnit: "roll",
+                    usualStoreId: store.id,
+                    usualAmount: { amount: 6, unit: "roll" },
+                }),
+                mk("Soap", { kind: "supply", defaultUnit: "bottle" }),
+            ];
+            for (const food of foods) await db.foodsStore.insertFood(food);
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-list-usuals": true,
+                    "widget-restock-nudge": true,
+                }),
+            );
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const due = out.usuals.filter((u) => u.due);
+                expect(due.map((u) => u.name).sort()).toEqual([
+                    "Eggs",
+                    "Milk",
+                    "Rice",
+                    "Soap",
+                    "Towels",
+                ]);
+                expect(due.every((u) => !u.on_list)).toBe(true);
+                for (const u of due) {
+                    const added = (await client.callTool({
+                        name: "add_grocery_line",
+                        arguments: cardAddArgs(u),
+                    })) as ToolResult;
+                    expect(added.isError).toBeFalsy();
+                    expect(
+                        (added.structuredContent as { status?: string }).status,
+                    ).toBe("ok");
+                }
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(
+                    due.length,
+                );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a due usual already on the grocery list says on_list, and a checked line does not count (%p)",
+        async (era) => {
+            const { today, milk } = await seedUsuals();
+            setRestockWeekday(weekdayOf(today));
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Market",
+            );
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const list = async () =>
+                    LIST_USUALS_OUTPUT_SCHEMA.parse(
+                        (
+                            (await client.callTool({
+                                name: "list_usuals",
+                                arguments: {},
+                            })) as ToolResult
+                        ).structuredContent,
+                    );
+                const onList = (out: UsualsOut) =>
+                    Object.fromEntries(
+                        out.usuals.map((u) => [u.name, u.on_list]),
+                    );
+                expect(onList(await list())).toMatchObject({
+                    "Oat milk": false,
+                    Eggs: false,
+                });
+                const added = (await client.callTool({
+                    name: "add_grocery_line",
+                    arguments: {
+                        kind: "food",
+                        food_id: milk.id,
+                        store_id: store.id,
+                        amount: 2,
+                        unit: "each",
+                    },
+                })) as ToolResult;
+                expect(
+                    (added.structuredContent as { status?: string }).status,
+                ).toBe("ok");
+                const out = await list();
+                expect(onList(out)).toMatchObject({
+                    "Oat milk": true,
+                    Eggs: false,
+                });
+                expect(
+                    out.usuals.find((u) => u.food_id === milk.id)?.due,
+                ).not.toBeNull();
+                // Checked off means bought: the usual no longer counts as listed.
+                const [line] = await db.groceryStore.listLines("hh-1");
+                await db.groceryStore.updateLine({ ...line!, checked: true });
+                expect(onList(await list())["Oat milk"]).toBe(false);
             });
         },
     );
@@ -10626,6 +10772,95 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     const { resources } = await client.listResources();
                     expect(resources.map((r) => r.uri)).not.toContain(
                         PRODUCT_SCORE_V2_URI,
+                    );
+                });
+            },
+        );
+    });
+
+    describe("widget-restock-nudge flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const RESTOCK_V2_URI = widgetUri("restock-nudge.html", true);
+
+        test.each(ERAS)(
+            "list_usuals on and the widget flag off: no ui meta and no restock-nudge resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": true,
+                        "widget-restock-nudge": false,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const usuals = tools.find((t) => t.name === "list_usuals");
+                    expect(usuals).toBeDefined();
+                    expect(usuals?._meta?.ui).toBeUndefined();
+                    expect(
+                        usuals?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RESTOCK_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: list_usuals links the v2 restock-nudge uri, which lists and reads (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": true,
+                        "widget-restock-nudge": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("restock-nudge", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const usuals = tools.find((t) => t.name === "list_usuals");
+                    expect(
+                        (usuals?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(RESTOCK_V2_URI);
+                    expect(usuals?._meta?.["openai/outputTemplate"]).toBe(
+                        RESTOCK_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        RESTOCK_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: RESTOCK_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_usuals off: the widget flag alone adds neither the tool nor the resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": false,
+                        "widget-restock-nudge": true,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "list_usuals",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RESTOCK_V2_URI,
                     );
                 });
             },

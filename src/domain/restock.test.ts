@@ -1053,11 +1053,16 @@ const LIST_STORES = [{ id: "store-1", name: "Corner" }];
 
 function listUsuals(
     listed: ReturnType<typeof newFood>[],
-    opts: { weekday?: number; stores?: { id: string; name: string }[] } = {},
+    opts: {
+        weekday?: number;
+        stores?: { id: string; name: string }[];
+        lines?: Pick<GroceryLine, "foodId" | "checked">[];
+    } = {},
 ) {
     return usualsList({
         listed,
         stock: [],
+        lines: opts.lines ?? [],
         stores: opts.stores ?? LIST_STORES,
         today: TODAY,
         householdRestockDay: opts.weekday ?? 1,
@@ -1092,6 +1097,26 @@ test("usualsList takes the product name, amount and store from the usual product
         amount: 2,
         unit: "l",
         schedule: "weekly",
+    });
+});
+
+test("usualsList says whether a usual is a food or a supply, so it can be added back to the list", () => {
+    const towels = newFood({
+        householdId: HH,
+        kind: "supply",
+        name: "Paper towels",
+        restockSchedule: "weekly",
+    });
+    const rice = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Rice",
+        restockSchedule: "weekly",
+    });
+    const { rows } = listUsuals([towels, rice]);
+    expect(Object.fromEntries(rows.map((r) => [r.name, r.kind]))).toEqual({
+        "Paper towels": "supply",
+        Rice: "food",
     });
 });
 
@@ -1177,6 +1202,55 @@ test("usualsList puts due usuals first, then sorts by name", () => {
         null,
         null,
     ]);
+});
+
+test("usualsList marks a usual on_list when an unchecked line names its food or family", () => {
+    const eggs = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Eggs",
+        restockSchedule: "weekly",
+    });
+    const rice = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Rice",
+        restockSchedule: "weekly",
+    });
+    const tea = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Tea",
+        restockSchedule: "weekly",
+    });
+    const { rows } = listUsuals([eggs, rice, tea], {
+        lines: [
+            { foodId: eggs.id, checked: false },
+            { foodId: rice.id, checked: true },
+            { foodId: null, checked: false },
+        ],
+    });
+    const byName = Object.fromEntries(rows.map((r) => [r.name, r.onList]));
+    expect(byName).toEqual({ Eggs: true, Rice: false, Tea: false });
+});
+
+test("usualsList counts a line for the usual's product as on the list", () => {
+    const milk = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Milk",
+        restockSchedule: "weekly",
+    });
+    const brand = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Kirkland 2%",
+        genericFoodId: milk.id,
+    });
+    const { rows } = listUsuals([milk, brand], {
+        lines: [{ foodId: brand.id, checked: false }],
+    });
+    expect(rows.find((r) => r.name === "Milk")!.onList).toBe(true);
 });
 
 test("usualsList says whether today is the household restock day", () => {

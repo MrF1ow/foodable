@@ -20,6 +20,9 @@
 //   ?theme=dark         host theme at initialize (default: light)
 //   ?state=partial      product-score sample: full (default), partial (scored
 //                       on 2 of 4) or none (not enough data to score)
+//   ?state=stores       restock-nudge sample: costco (default), stores (due
+//                       usuals at two stores and one with none), onlist (Eggs
+//                       already on the list) or empty
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
@@ -52,6 +55,95 @@ async function fakeInsert(input: MealInput): Promise<MealInsertResult> {
     store.set(key, meal);
     byId.set(meal.id, meal);
     return { meal: meal as never, deduplicated: false };
+}
+
+// list_usuals payload for the restock-nudge card: the design's three Costco
+// usuals, or the same at two stores plus one without a store, or none due.
+function restockUsuals(state: string) {
+    const usual = (
+        food_id: string,
+        name: string,
+        product_name: string | null,
+        store: [string, string] | null,
+        amount: number | null,
+        unit: string,
+        due: { reason: string; trigger: "schedule" | "low" } | null,
+    ) => ({
+        food_id,
+        name,
+        kind: "food",
+        product_name,
+        store_id: store ? store[0] : null,
+        store_name: store ? store[1] : null,
+        amount,
+        unit,
+        schedule: due?.trigger === "schedule" ? "weekly" : null,
+        every_weeks: null,
+        last_restocked_on: null,
+        restock_when_low: due?.trigger === "low",
+        low_level: due?.trigger === "low" ? 6 : null,
+        paused: false,
+        due,
+        on_list: false,
+    });
+    const costco: [string, string] = ["st-costco", "Costco"];
+    const tj: [string, string] = ["st-tj", "Trader Joe's"];
+    const eggs = usual(
+        "food-eggs",
+        "Eggs",
+        "Vital Farms large",
+        costco,
+        24,
+        "each",
+        {
+            reason: "2 left, below 6",
+            trigger: "low",
+        },
+    );
+    const milk = usual("food-milk", "Milk", "Kirkland 2%", costco, 1, "gal", {
+        reason: "weekly, last bought 7 days ago",
+        trigger: "schedule",
+    });
+    const chicken = usual(
+        "food-chicken",
+        "Chicken thighs",
+        "Kirkland boneless",
+        costco,
+        4,
+        "lb",
+        {
+            reason: "every 2 weeks, last bought 14 days ago",
+            trigger: "schedule",
+        },
+    );
+    const rice = usual("food-rice", "Rice", null, costco, 5, "lb", null);
+    let usuals = [eggs, milk, chicken, rice];
+    if (state === "stores") {
+        usuals = [
+            eggs,
+            usual("food-salmon", "Salmon", null, tj, 1, "lb", {
+                reason: "weekly, last bought 7 days ago",
+                trigger: "schedule",
+            }),
+            usual("food-towels", "Paper towels", null, null, null, "roll", {
+                reason: "weekly, last bought 7 days ago",
+                trigger: "schedule",
+            }),
+            rice,
+        ];
+    } else if (state === "onlist") {
+        usuals = [{ ...eggs, on_list: true }, milk, chicken, rice];
+    } else if (state === "empty") {
+        usuals = [rice];
+    }
+    return {
+        restock_weekday: 0,
+        restock_weekday_name: "Sunday",
+        today: "2026-11-15",
+        is_restock_day: true,
+        restock_enabled: true,
+        usuals,
+    };
 }
 
 const PORT = Number(process.env.HARNESS_PORT ?? 8787);
@@ -705,6 +797,9 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 fat_g: 22,
             },
         },
+        // list_usuals: two due at Costco (one low, one on a schedule), one
+        // not due (never a row). Replaced below for ?state=stores|empty.
+        "restock-nudge": restockUsuals("costco"),
         // get_recipe: one ingredient the fridge cannot cover, so Cook has a
         // shortfall to show.
         "recipe-card": {
@@ -946,6 +1041,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
     };
     RESULTS["product-score"] =
         SCORE_STATES[params.get("state") ?? "full"] ?? SCORE_STATES.full;
+    RESULTS["restock-nudge"] = restockUsuals(params.get("state") ?? "costco");
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };
 
@@ -1102,6 +1198,20 @@ window.addEventListener("message", (e) => {
           structuredContent: Object.assign({}, MEAL_LOGGED, { status: "ok", similar_foods: [] }),
         }});
         log("-> log_recipe_portion portions=" + a.portions + " meal_type=" + a.meal_type + " for id " + d.id);
+        return;
+      }
+      if (name === "add_grocery_line") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Added " + a.food_id + "." }],
+          structuredContent: {
+            status: "ok", similar_foods: [], id: "ln-" + a.food_id,
+            display_name: a.food_id, already_have: null,
+            store_id: a.store_id || "st-costco", amount: a.amount == null ? 1 : a.amount,
+            unit: a.unit || "each", notices: [],
+          },
+        }});
+        log("-> add_grocery_line food_id=" + a.food_id + " for id " + d.id);
         return;
       }
       if (name === "check_grocery_line") {

@@ -4413,3 +4413,411 @@ test("widget harness: the host frame adds its own border to the height a widget 
     expect(src).toContain("(capped + border)");
     expect(src).not.toContain("frame.style.height = capped");
 });
+
+// ---- restock-nudge v2 -------------------------------------------------------
+
+function usual(over: Record<string, unknown> = {}) {
+    return {
+        food_id: "food-eggs",
+        name: "Eggs",
+        kind: "food",
+        product_name: "Vital Farms large",
+        store_id: "st-costco",
+        store_name: "Costco",
+        amount: 24,
+        unit: "each",
+        schedule: null,
+        every_weeks: null,
+        last_restocked_on: null,
+        restock_when_low: true,
+        low_level: 6,
+        paused: false,
+        on_list: false,
+        due: { reason: "2 left, below 6", trigger: "low" },
+        ...over,
+    };
+}
+
+function usualsData(
+    usuals: Record<string, unknown>[],
+    over: Record<string, unknown> = {},
+) {
+    return {
+        restock_weekday: 0,
+        restock_weekday_name: "Sunday",
+        today: "2026-11-15",
+        is_restock_day: true,
+        restock_enabled: true,
+        usuals,
+        ...over,
+    };
+}
+
+const COSTCO_THREE = () =>
+    usualsData([
+        usual(),
+        usual({
+            food_id: "food-milk",
+            name: "Milk",
+            product_name: "Kirkland 2%",
+            amount: 1,
+            unit: "gal",
+            schedule: "weekly",
+            restock_when_low: false,
+            low_level: null,
+            due: {
+                reason: "weekly, last bought 7 days ago",
+                trigger: "schedule",
+            },
+        }),
+        usual({
+            food_id: "food-chicken",
+            name: "Chicken thighs",
+            product_name: null,
+            amount: 4,
+            unit: "lb",
+            schedule: "every_n_weeks",
+            every_weeks: 2,
+            restock_when_low: false,
+            low_level: null,
+            due: {
+                reason: "every 2 weeks, last bought 14 days ago",
+                trigger: "schedule",
+            },
+        }),
+    ]);
+
+const addReply = (call: RecipeCall) =>
+    call.name === "add_grocery_line" ? { status: "ok", id: "ln-1" } : {};
+
+test("restock-nudge v2 sample is the design's card: header, three rows by trigger, one Add button", async () => {
+    const html = await v2Widget("restock-nudge");
+    const body = renderWidget(html, undefined);
+    expect(body).toContain('class="hd-title">Restock<');
+    expect(body).toContain('class="hd-meta">Sunday · Costco<');
+    expect(body).toContain(">Eggs<");
+    expect(body).toContain(">Milk<");
+    expect(body).toContain(">Chicken thighs<");
+    expect(body).toContain('class="dot lg s-warn"');
+    expect(body).toContain('class="dot lg s-dim"');
+    // No host here, so no Add.
+    expect(body).not.toContain('data-act="add:');
+});
+
+test("restock-nudge v2: only due usuals are rows, each with product and reason, the low one amber", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual(),
+            usual({
+                food_id: "food-rice",
+                name: "Rice",
+                schedule: "weekly",
+                due: null,
+            }),
+            usual({
+                food_id: "food-milk",
+                name: "Milk",
+                product_name: null,
+                amount: null,
+                unit: "gal",
+                restock_when_low: false,
+                due: {
+                    reason: "weekly, last bought 7 days ago",
+                    trigger: "schedule",
+                },
+            }),
+        ]),
+    });
+    const body = w.html();
+    expect(body).toContain(">Eggs<");
+    expect(body).toContain(">Milk<");
+    expect(body).not.toContain("Rice");
+    expect(body).toContain("Vital Farms large · 2 left, below 6");
+    expect(body).toContain('class="ur-s is-warn"');
+    // No usual amount means one of the unit; "each" is not spelled out.
+    expect(body).toContain(">24<");
+    expect(body).toContain(">1 gal<");
+    expect(body).toContain("weekly, last bought 7 days ago");
+    expect(body).toContain('class="hd-meta">Sunday · Costco<');
+    expect(body).toContain("Add 2 to the Costco list");
+});
+
+test("restock-nudge v2: Add sends add_grocery_line for each shown usual in turn, with its food, store and amount", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        reply: addReply,
+    });
+    expect(w.html()).toContain("Add 3 to the Costco list");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "add_grocery_line",
+            args: {
+                kind: "food",
+                food_id: "food-eggs",
+                store_id: "st-costco",
+                amount: 24,
+                unit: "each",
+            },
+        },
+        {
+            name: "add_grocery_line",
+            args: {
+                kind: "food",
+                food_id: "food-milk",
+                store_id: "st-costco",
+                amount: 1,
+                unit: "gal",
+            },
+        },
+        {
+            name: "add_grocery_line",
+            args: {
+                kind: "food",
+                food_id: "food-chicken",
+                store_id: "st-costco",
+                amount: 4,
+                unit: "lb",
+            },
+        },
+    ]);
+    const body = w.html();
+    expect((body.match(/>Added</g) ?? []).length).toBe(3);
+    expect(body).not.toContain('data-act="add:');
+});
+
+test("restock-nudge v2: a usual with no amount or store sends neither, a supply is added as a supply and its unit always goes", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({
+                food_id: "food-towels",
+                name: "Paper towels",
+                kind: "supply",
+                store_id: null,
+                store_name: null,
+                amount: null,
+                unit: "roll",
+            }),
+        ]),
+        reply: addReply,
+    });
+    expect(w.html()).toContain("Add 1 to the list");
+    w.tap("add:");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "add_grocery_line",
+            args: { kind: "supply", food_id: "food-towels", unit: "roll" },
+        },
+    ]);
+});
+
+test("restock-nudge v2: a usual already on the list is shown On the list, left out of Add and its count, and never sent", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({ on_list: true }),
+            usual({
+                food_id: "food-milk",
+                name: "Milk",
+                product_name: null,
+                amount: 1,
+                unit: "gal",
+                due: { reason: "weekly", trigger: "schedule" },
+            }),
+        ]),
+        reply: addReply,
+    });
+    const body = w.html();
+    expect(body).toContain(">Eggs<");
+    expect(body).toContain(">On the list<");
+    expect(body).toContain("Add 1 to the Costco list");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.food_id)).toEqual(["food-milk"]);
+    const after = w.html();
+    expect(after).toContain(">On the list<");
+    expect(after).toContain(">Added<");
+    expect(after).not.toContain('data-act="add:');
+});
+
+test("restock-nudge v2: when every due usual is already on the list there is no Add", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({ on_list: true }),
+            usual({ food_id: "f2", name: "Milk", on_list: true }),
+        ]),
+        reply: addReply,
+    });
+    const body = w.html();
+    expect(body).toContain(">Eggs<");
+    expect((body.match(/>On the list</g) ?? []).length).toBe(2);
+    expect(body).not.toContain("data-act=");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+});
+
+test("restock-nudge v2: due usuals at several stores are grouped, each group with its own Add that adds only its own", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual(),
+            usual({
+                food_id: "food-salmon",
+                name: "Salmon",
+                product_name: null,
+                store_id: "st-tj",
+                store_name: "Trader Joe's",
+                amount: 1,
+                unit: "lb",
+            }),
+        ]),
+        reply: addReply,
+    });
+    const body = w.html();
+    expect(body).toContain('class="hd-meta">Sunday<');
+    expect(body).toContain(">Costco<");
+    expect(body).toContain(">Trader Joe&#39;s<");
+    expect(body).toContain("Add 1 to the Costco list");
+    expect(body).toContain("Add 1 to the Trader Joe&#39;s list");
+    w.tap("add:st-tj");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.food_id)).toEqual(["food-salmon"]);
+    expect(w.html()).toContain("Add 1 to the Costco list");
+    expect(w.html()).not.toContain("Trader Joe&#39;s list");
+});
+
+test("restock-nudge v2: while an Add is out its button is disabled and a second tap sends nothing", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        reply: async (call) => {
+            await gate;
+            return addReply(call);
+        },
+    });
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toMatch(
+        /<button[^>]*data-act="add:st-costco"[^>]*disabled/,
+    );
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    release();
+    await w.settle();
+    expect(w.calls.length).toBe(3);
+});
+
+test("restock-nudge v2: the first failure stops the run, says which usual, keeps the rest unadded and Add retries them", async () => {
+    let fail = true;
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        reply: (call) => {
+            if (call.args.food_id === "food-milk" && fail) {
+                throw new ToolRefusal("That catalog item is a supply.");
+            }
+            return addReply(call);
+        },
+    });
+    w.tap("add:st-costco");
+    await w.settle();
+    // Eggs went through, Milk failed, Chicken was never tried.
+    expect(w.calls.map((c) => c.args.food_id)).toEqual([
+        "food-eggs",
+        "food-milk",
+    ]);
+    const body = w.html();
+    expect(body).toContain("Could not add Milk. Nothing after it was added.");
+    expect((body.match(/>Added</g) ?? []).length).toBe(1);
+    expect(body).toContain("Add 2 to the Costco list");
+    // Retrying skips what is already added.
+    fail = false;
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.food_id)).toEqual([
+        "food-eggs",
+        "food-milk",
+        "food-milk",
+        "food-chicken",
+    ]);
+    expect(w.html()).not.toContain("Could not add");
+    expect((w.html().match(/>Added</g) ?? []).length).toBe(3);
+});
+
+test("restock-nudge v2: without canCallTools there is no Add and a tap does nothing", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        canCallTools: false,
+    });
+    expect(w.html()).toContain(">Eggs<");
+    expect(w.html()).not.toContain("data-act=");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+});
+
+test("restock-nudge v2: nothing due says so and shows no rows or Add", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({ due: null }),
+            usual({ food_id: "f2", due: null }),
+        ]),
+    });
+    const body = w.html();
+    expect(body).toContain('class="hd-title">Restock<');
+    expect(body).toContain("Nothing to restock today.");
+    expect(body).not.toContain(">Eggs<");
+    expect(body).not.toContain("data-act=");
+    const none = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([]),
+    });
+    expect(none.html()).toContain("Nothing to restock today.");
+});
+
+test("restock-nudge v2: names, products, reasons and stores reach the markup escaped", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({
+                name: "<img src=x onerror=alert(1)>",
+                product_name: '"Q" & <b>Co</b>',
+                store_name: "<script>alert(2)</script>",
+                due: { reason: "<i>low</i>", trigger: "low" },
+            }),
+        ]),
+    });
+    const body = w.html();
+    expect(body).not.toContain("<img");
+    expect(body).not.toContain("<script>alert");
+    expect(body).not.toContain("<b>Co");
+    expect(body).not.toContain("<i>low");
+    expect(body).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(body).toContain("&lt;script&gt;alert(2)&lt;/script&gt;");
+});
+
+test("restock-nudge v2: a result re-sent after an Add keeps what was added", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: COSTCO_THREE(),
+        reply: addReply,
+    });
+    w.tap("add:st-costco");
+    await w.settle();
+    w.resend(COSTCO_THREE());
+    await w.settle();
+    expect((w.html().match(/>Added</g) ?? []).length).toBe(3);
+});
+
+test("restock-nudge v2: focus stays on the Add button through its repaints", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([usual(), usual({ food_id: "f2", name: "Milk" })]),
+        reply: addReply,
+    });
+    w.focusOn('[data-act="add:st-costco"]');
+    w.tap("add:st-costco");
+    await w.settle();
+    // Every repaint of the busy and failed/retry states put focus back.
+    expect(w.focus.every((s) => s === '[data-act="add:st-costco"]')).toBe(true);
+    expect(w.focus.length).toBeGreaterThan(0);
+});

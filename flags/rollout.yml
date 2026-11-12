@@ -49,6 +49,9 @@ flags:
     widget-product-score:
         default: false
         rules: []
+    widget-restock-nudge:
+        default: false
+        rules: []
     flags-epoch:
         default: 1
         rules: []

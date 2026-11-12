@@ -65,8 +65,11 @@ import {
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
     registerWidgetResource,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { isViewerFlagOn } from "../../viewer-flags.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 import { GroceryInputError } from "../../domain/grocery.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
@@ -140,6 +143,8 @@ export const LIST_USUALS_OUTPUT_SCHEMA = z.object({
         z.object({
             food_id: z.string(),
             name: z.string(),
+            /** What add_grocery_line needs as `kind` to restock it. */
+            kind: z.enum(["food", "supply"]),
             /** The usual product's display name; null when the food has none. */
             product_name: z.string().nullable(),
             store_id: z.string().nullable(),
@@ -162,6 +167,8 @@ export const LIST_USUALS_OUTPUT_SCHEMA = z.object({
                     trigger: z.enum(["schedule", "low"]),
                 })
                 .nullable(),
+            /** An unchecked grocery line already names this food (or its family), so adding it again would duplicate the line. */
+            on_list: z.boolean(),
         }),
     ),
 });
@@ -170,6 +177,7 @@ function usualWire(row: UsualListRow) {
     return {
         food_id: row.foodId,
         name: row.name,
+        kind: row.kind,
         product_name: row.productName,
         store_id: row.storeId,
         store_name: row.storeName,
@@ -182,6 +190,7 @@ function usualWire(row: UsualListRow) {
         low_level: row.lowLevel,
         paused: row.paused,
         due: row.due,
+        on_list: row.onList,
     };
 }
 
@@ -204,7 +213,9 @@ function usualLine(row: UsualListRow): string {
     const what = row.productName
         ? `${row.name} → ${row.productName}`
         : row.name;
-    const status = row.due ? `DUE (${row.due.reason})` : "not due";
+    const status = row.due
+        ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : ""}`
+        : "not due";
     return `- ${what}: ${how.join(", ")}; ${status}`;
 }
 
@@ -883,6 +894,19 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
+    // Only when list_usuals is on: a widget for a tool that is hidden would be
+    // a resource nothing links.
+    if (isViewerFlagOn(ctx.flags, "mcp-list-usuals")) {
+        registerV2OnlyWidgetResource(server, ctx, {
+            key: "restock-nudge",
+            resourceName: "restock-nudge",
+            title: "Restock",
+            description:
+                "The usuals that are due or running low, with Add to list, for list_usuals.",
+            flag: "widget-restock-nudge",
+        });
+    }
+
     gatedTool(
         server,
         ctx,
@@ -899,19 +923,24 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 openWorldHint: false,
             },
             outputSchema: LIST_USUALS_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "restock-nudge", {
+                v2: true,
+                flag: "widget-restock-nudge",
+            }),
         },
         async () =>
             withAnalytics(
                 "list_usuals",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const [config, owner, listed, stock, stores] =
+                    const [config, owner, listed, stock, stores, lines] =
                         await Promise.all([
                             getHouseholdConfig(householdId),
                             getHouseholdOwnerProfile(householdId),
                             liveFoodsStore().listFoods(householdId),
                             liveFridgeStore().listItems(householdId),
                             liveSettingsStore().listStores(householdId),
+                            liveGroceryStore().listLines(householdId),
                         ]);
                     const weekday = config.preferences.restock.weekday;
                     const today = householdTodayAt(config.preferences, owner);
@@ -919,6 +948,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         listed,
                         stock,
                         stores,
+                        lines,
                         today,
                         householdRestockDay: weekday,
                     });

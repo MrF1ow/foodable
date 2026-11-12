@@ -76,6 +76,15 @@ export const FLAGS = {
         removeWhen:
             "the product-score widget is on for everyone and the flag is removed.",
     },
+    "widget-restock-nudge": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Restock card for list_usuals: what is due or low, with Add to list.",
+        removeWhen:
+            "the restock-nudge widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

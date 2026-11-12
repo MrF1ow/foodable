@@ -341,6 +341,7 @@ export function isUsualFood(food: Food): boolean {
 export type UsualListRow = {
     foodId: string;
     name: string;
+    kind: "food" | "supply";
     /** The usual product's display name, or null when the food has none. */
     productName: string | null;
     storeId: string | null;
@@ -356,6 +357,8 @@ export type UsualListRow = {
     lowLevel: number | null;
     paused: boolean;
     due: { reason: string; trigger: "schedule" | "low" } | null;
+    /** An unchecked grocery line already names this food or its family. */
+    onList: boolean;
 };
 
 /**
@@ -369,6 +372,8 @@ export function usualsList(input: {
     listed: readonly Food[];
     stock: readonly FridgeItem[];
     stores: readonly Pick<GroceryStore, "id" | "name">[];
+    /** The household's grocery lines, for `onList`. */
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[];
     today: string;
     householdRestockDay: number;
 }): { rows: UsualListRow[]; isRestockDay: boolean } {
@@ -392,6 +397,7 @@ export function usualsList(input: {
         return {
             foodId: food.id,
             name: food.name,
+            kind: food.kind === "supply" ? "supply" : "food",
             productName: food.product ? foodDisplayName(food.product) : null,
             storeId: food.usualStoreId,
             storeName:
@@ -407,6 +413,7 @@ export function usualsList(input: {
             lowLevel: food.restockWhenLow ? usualLowLevel(food) : null,
             paused: food.restockPaused,
             due: hit ? { reason: hit.reason, trigger: hit.trigger } : null,
+            onList: onGroceryList({ foodId: food.id }, input.lines, foodsById),
         };
     });
     rows.sort(

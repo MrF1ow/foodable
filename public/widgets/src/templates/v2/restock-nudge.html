@@ -1,0 +1,428 @@
+<!doctype html>
+<!--
+  Restock card (MCP Apps), v2 look. Served for list_usuals when the
+  widget-restock-nudge flag is on. No v1 twin.
+
+  One card: a header with the restock day and store, then the usuals that are
+  due or running low as two-line rows (a dot by trigger, the name, the usual
+  product and the reason the server gave, the amount at the right), and one
+  "Add N to the <store> list" button. The button calls add_grocery_line once
+  per row, in order, with the usual's food, store and amount, and stops at the
+  first failure. Usuals that are not due are not shown. When the due usuals
+  sit at several stores they are grouped by store, one button each. The
+  button is not drawn when the host cannot call tools.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Restock</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .secs {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .ur {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 6px 0;
+                border-bottom: 1px solid var(--line);
+                min-width: 0;
+            }
+            .ur:last-child {
+                border-bottom: 0;
+            }
+            .ur .dot {
+                margin-top: 6px;
+            }
+            .ur-main {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                min-width: 0;
+                flex: 1;
+            }
+            .ur-t {
+                font-size: 15px;
+                line-height: 18px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .ur-s {
+                font-size: 13px;
+                line-height: 16px;
+                color: var(--text-tertiary);
+            }
+            /* After .ur-s, which sets the colour the tone must override. */
+            .ur-s.is-warn {
+                color: var(--status-warn);
+            }
+            .ur .row-end {
+                align-self: center;
+                font-size: 14px;
+                line-height: 18px;
+            }
+            .btn:disabled {
+                opacity: 0.55;
+                cursor: default;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Restock",
+                loading: "Loading what to restock…",
+                empty: "Nothing to restock today.",
+                noStore: "No store",
+                add: "Add {n} to the {store} list",
+                addPlain: "Add {n} to the list",
+                adding: "Adding…",
+                added: "Added",
+                onList: "On the list",
+                failed: "Could not add {name}. Nothing after it was added.",
+            };
+
+            // Design sample (FigCraft Widget/Restock): one low, two on a
+            // schedule, all at Costco. Reasons are worded as the server does.
+            const SAMPLE = {
+                restock_weekday: 0,
+                restock_weekday_name: "Sunday",
+                today: "2026-11-15",
+                is_restock_day: true,
+                restock_enabled: true,
+                usuals: [
+                    {
+                        food_id: "food-eggs",
+                        name: "Eggs",
+                        kind: "food",
+                        product_name: "Vital Farms large",
+                        store_id: "st-costco",
+                        store_name: "Costco",
+                        amount: 24,
+                        unit: "each",
+                        schedule: null,
+                        every_weeks: null,
+                        last_restocked_on: null,
+                        restock_when_low: true,
+                        low_level: 6,
+                        paused: false,
+                        on_list: false,
+                        due: { reason: "2 left, below 6", trigger: "low" },
+                    },
+                    {
+                        food_id: "food-milk",
+                        name: "Milk",
+                        kind: "food",
+                        product_name: "Kirkland 2%",
+                        store_id: "st-costco",
+                        store_name: "Costco",
+                        amount: 1,
+                        unit: "gal",
+                        schedule: "weekly",
+                        every_weeks: null,
+                        last_restocked_on: null,
+                        restock_when_low: false,
+                        low_level: null,
+                        paused: false,
+                        on_list: false,
+                        due: {
+                            reason: "weekly, last bought 7 days ago",
+                            trigger: "schedule",
+                        },
+                    },
+                    {
+                        food_id: "food-chicken",
+                        name: "Chicken thighs",
+                        kind: "food",
+                        product_name: "Kirkland boneless",
+                        store_id: "st-costco",
+                        store_name: "Costco",
+                        amount: 4,
+                        unit: "lb",
+                        schedule: "every_n_weeks",
+                        every_weeks: 2,
+                        last_restocked_on: null,
+                        restock_when_low: false,
+                        low_level: null,
+                        paused: false,
+                        on_list: false,
+                        due: {
+                            reason: "every 2 weeks, last bought 14 days ago",
+                            trigger: "schedule",
+                        },
+                    },
+                ],
+            };
+
+            let MODEL = null;
+            let API = null;
+            // food ids added from this card, groups with an Add in flight,
+            // and a failure line per group.
+            const added = new Set();
+            const busy = new Set();
+            const errors = {};
+
+            function amountText(u) {
+                const n =
+                    u.amount == null
+                        ? 1
+                        : Math.round(Number(u.amount) * 100) / 100;
+                const num = Number.isFinite(n) ? String(n) : "";
+                const unit = u.unit && u.unit !== "each" ? u.unit : "";
+                return [num, unit].filter(Boolean).join(" ");
+            }
+
+            // A usual already on the grocery list is shown but never re-added:
+            // add_grocery_line always inserts a line.
+            function needsAdd(u) {
+                return !u.on_list && !added.has(u.food_id);
+            }
+
+            // The rows the card shows: due usuals only, in the server's order.
+            function dueUsuals(data) {
+                return data.usuals.filter((u) => u.due && u.due.reason != null);
+            }
+
+            // Due usuals by store, in order of first appearance. A usual with
+            // no store has key "" (the server then picks one).
+            function groupsOf(data) {
+                const groups = [];
+                for (const u of dueUsuals(data)) {
+                    const key = u.store_id || "";
+                    let g = groups.find((x) => x.key === key);
+                    if (!g) {
+                        g = {
+                            key,
+                            name: key ? u.store_name || "" : "",
+                            rows: [],
+                        };
+                        groups.push(g);
+                    }
+                    if (!g.name && u.store_name) g.name = u.store_name;
+                    g.rows.push(u);
+                }
+                return groups;
+            }
+
+            function usualRow(u) {
+                const low = u.due.trigger === "low";
+                const sub = [u.product_name, u.due.reason]
+                    .filter(Boolean)
+                    .join(" · ");
+                const done = added.has(u.food_id);
+                const listed = !done && !!u.on_list;
+                return `<div class="ur" data-food-id="${esc(u.food_id)}">${v2Dot(
+                    undefined,
+                    low ? "warn" : "dim",
+                    true,
+                )}<div class="ur-main"><span class="ur-t">${esc(u.name)}</span><span class="ur-s${
+                    low ? " is-warn" : ""
+                }">${esc(sub)}</span></div><span class="row-end${
+                    done ? " is-ok" : listed ? " is-dim" : ""
+                }">${esc(
+                    done ? T.added : listed ? T.onList : amountText(u),
+                )}</span></div>`;
+            }
+
+            function addLabel(g, n) {
+                return g.name
+                    ? tpl(T.add, { n, store: g.name })
+                    : tpl(T.addPlain, { n });
+            }
+
+            function groupBlock(g, canAdd, labelled) {
+                const left = g.rows.filter(needsAdd);
+                const isBusy = busy.has(g.key);
+                const err = errors[g.key]
+                    ? `<p class="note is-warn" role="alert">${esc(errors[g.key])}</p>`
+                    : "";
+                const button =
+                    canAdd && (left.length > 0 || isBusy)
+                        ? `<div class="btns"><button type="button" class="btn primary" data-act="${esc(
+                              `add:${g.key}`,
+                          )}"${
+                              isBusy ? ' disabled aria-busy="true"' : ""
+                          }>${esc(
+                              isBusy ? T.adding : addLabel(g, left.length),
+                          )}</button></div>`
+                        : "";
+                return `<div class="grp">${
+                    labelled ? v2Label(g.name || T.noStore) : ""
+                }<div class="rows">${g.rows.map(usualRow).join("")}</div>${err}${button}</div>`;
+            }
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function renderBody(data) {
+                const canAdd = !!(API && API.canCallTools);
+                const groups = groupsOf(data);
+                const day = data.restock_weekday_name || "";
+                if (groups.length === 0) {
+                    return card(
+                        v2Header(T.title, day) +
+                            `<p class="note">${esc(T.empty)}</p>`,
+                    );
+                }
+                const meta =
+                    groups.length === 1 && groups[0].name
+                        ? [day, groups[0].name].filter(Boolean).join(" · ")
+                        : day;
+                return card(
+                    v2Header(T.title, meta) +
+                        `<div class="secs">${groups
+                            .map((g) =>
+                                groupBlock(g, canAdd, groups.length > 1),
+                            )
+                            .join("")}</div>`,
+                );
+            }
+
+            // Painting replaces the card's markup, which drops keyboard focus
+            // with it; the Add button that had it gets it back.
+            function focusedAct() {
+                const a = document.activeElement;
+                const el = a && a.closest ? a.closest("[data-act]") : null;
+                return el ? el.getAttribute("data-act") : null;
+            }
+
+            function focusAct(act) {
+                const mount = document.getElementById("widget-mount");
+                if (!act || !mount || typeof mount.querySelector !== "function")
+                    return;
+                const el = mount.querySelector(`[data-act="${act}"]`);
+                if (el && !el.disabled) el.focus();
+            }
+
+            function paint() {
+                if (!MODEL) return;
+                const act = focusedAct();
+                v2Paint(renderBody(MODEL));
+                focusAct(act);
+            }
+
+            function render(data) {
+                const present = new Set(dueUsuals(data).map((u) => u.food_id));
+                for (const id of [...added]) {
+                    if (!present.has(id)) added.delete(id);
+                }
+                for (const key of Object.keys(errors)) delete errors[key];
+                MODEL = data;
+                paint();
+            }
+
+            // add_grocery_line arguments for a usual: the store and amount
+            // only when it has them, so the server picks otherwise. The unit
+            // always goes when there is one: a supply with no usual amount
+            // still needs it.
+            function addArgs(u) {
+                const args = {
+                    kind: u.kind === "supply" ? "supply" : "food",
+                    food_id: u.food_id,
+                };
+                if (u.store_id) args.store_id = u.store_id;
+                if (u.amount != null) args.amount = Number(u.amount);
+                if (u.unit) args.unit = u.unit;
+                return args;
+            }
+
+            async function onAdd(key) {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (busy.has(key)) return;
+                const g = groupsOf(MODEL).find((x) => x.key === key);
+                if (!g) return;
+                const todo = g.rows.filter(needsAdd);
+                if (todo.length === 0) return;
+                delete errors[key];
+                busy.add(key);
+                paint();
+                try {
+                    for (const u of todo) {
+                        try {
+                            const res = await API.callTool(
+                                "add_grocery_line",
+                                addArgs(u),
+                            );
+                            const sc = res && res.structuredContent;
+                            if (sc && sc.status && sc.status !== "ok") {
+                                throw new Error(sc.status);
+                            }
+                            added.add(u.food_id);
+                            paint();
+                        } catch (e) {
+                            errors[key] = tpl(T.failed, { name: u.name });
+                            break;
+                        }
+                    }
+                } finally {
+                    busy.delete(key);
+                    paint();
+                    focusAct(`add:${key}`);
+                }
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.usuals)) {
+                    return {
+                        ...payload,
+                        usuals: payload.usuals.filter(
+                            (u) =>
+                                u &&
+                                typeof u === "object" &&
+                                typeof u.food_id === "string" &&
+                                typeof u.name === "string",
+                        ),
+                    };
+                }
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "restock-nudge-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+                onReady(api) {
+                    API = api;
+                    paint();
+                    document
+                        .getElementById("root")
+                        .addEventListener("click", (e) => {
+                            const t = e.target;
+                            const el =
+                                t && t.closest ? t.closest("[data-act]") : null;
+                            const act = el && el.getAttribute("data-act");
+                            if (!act || !act.startsWith("add:")) return;
+                            e.preventDefault();
+                            onAdd(act.slice(4));
+                        });
+                },
+            });
+        </script>
+    </body>
+</html>
